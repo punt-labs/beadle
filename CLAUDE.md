@@ -182,8 +182,8 @@ gh pr checks <number> --watch          # BLOCKING: polls until all checks resolv
 gh pr view <number> --comments         # Read Copilot feedback — address before merging
 ```
 
-4. Address Copilot feedback if any
-5. **Merge via MCP, not `gh`.** Use `mcp__github__merge_pull_request` (API-only, no local git side effects). `gh pr merge` tries to checkout main locally, which fails inside a worktree.
+1. Address Copilot feedback if any
+2. **Merge via MCP, not `gh`.** Use `mcp__github__merge_pull_request` (API-only, no local git side effects). `gh pr merge` tries to checkout main locally, which fails inside a worktree.
 
 ```bash
 # After merging via MCP:

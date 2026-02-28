@@ -47,7 +47,7 @@ Beadle's answer: the agent has zero authority of its own. Trust is earned throug
 
 ## Project Structure
 
-```
+```text
 prfaq.tex           # Working Backwards PR/FAQ document (LaTeX)
 prfaq.bib           # Bibliography (16 entries)
 prfaq.pdf           # Compiled document
