@@ -1,0 +1,19 @@
+research/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.log
+*.out
+*.run.xml
+
+# TTS ephemeral audio
+.tts/
+
+# Claude local settings
+.claude/settings.local.json
+
+# direnv
+.envrc

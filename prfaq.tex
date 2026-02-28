@@ -1,0 +1,893 @@
+\documentclass[11pt,letterpaper]{article}
+
+% ── Geometry ──────────────────────────────────────────────────────────────────
+\usepackage[margin=1in]{geometry}
+
+% ── Pagination ────────────────────────────────────────────────────────────────
+\usepackage[all]{nowidow}    % Require ≥2 lines on each side of a page break
+\brokenpenalty=10000         % No hyphenated words across page breaks
+\raggedbottom                % Allow uneven page bottoms rather than stretching
+
+% ── Fonts ─────────────────────────────────────────────────────────────────────
+\usepackage[T1]{fontenc}
+\usepackage{newpxtext}     % Palatino-based serif (TeX Gyre Pagella)
+\usepackage{newpxmath}     % Matching math font
+
+% ── Colors ────────────────────────────────────────────────────────────────────
+\usepackage[dvipsnames]{xcolor}
+\definecolor{SectionBlue}{HTML}{1B3A5C}
+\definecolor{AccentGray}{HTML}{4A4A4A}
+\definecolor{QuoteBorder}{HTML}{8B9DAF}
+\definecolor{RiskRed}{HTML}{C0392B}
+\definecolor{RiskAmber}{HTML}{E67E22}
+\definecolor{RiskGreen}{HTML}{27AE60}
+\definecolor{BoxBg}{HTML}{F7F8FA}
+
+% ── Tables ────────────────────────────────────────────────────────────────────
+\usepackage{booktabs}
+\usepackage{tabularx}
+
+% ── Boxes ─────────────────────────────────────────────────────────────────────
+\usepackage[framemethod=tikz]{mdframed}
+
+% ── Lists ─────────────────────────────────────────────────────────────────────
+\usepackage{enumitem}
+\usepackage{needspace}
+
+% ── Hyperlinks ────────────────────────────────────────────────────────────────
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=SectionBlue,
+  urlcolor=SectionBlue,
+  citecolor=SectionBlue,
+  pdfauthor={J Freeman},
+  pdftitle={PR/FAQ — Beadle},
+  pdfsubject={Working Backwards — Product Discovery},
+}
+
+% ── Bibliography ─────────────────────────────────────────────────────────────
+\usepackage[style=numeric,backend=biber,sorting=none]{biblatex}
+\addbibresource{prfaq.bib}
+
+% ── Section styling ───────────────────────────────────────────────────────────
+\usepackage{titlesec}
+\titleformat{\section}
+  {\needspace{6\baselineskip}\Large\bfseries\color{SectionBlue}}
+  {}
+  {0pt}
+  {}
+
+\titleformat{\subsection}
+  {\needspace{5\baselineskip}\large\bfseries\color{AccentGray}}
+  {}
+  {0pt}
+  {}
+
+\titleformat{\subsubsection}
+  {\normalsize\bfseries\color{AccentGray}}
+  {}
+  {0pt}
+  {}
+\titlespacing*{\subsubsection}{0pt}{1em}{0.5em}[0pt]
+
+% ── Document stage ───────────────────────────────────────────────────────────
+\newcommand{\prfaqstage}[1]{\def\theprfaqstage{#1}}
+\prfaqstage{hypothesis}
+
+% ── Document version ─────────────────────────────────────────────────────────
+\newcommand{\prfaqversion}[2]{\def\theprfaqmajor{#1}\def\theprfaqminor{#2}}
+\prfaqversion{2}{1}
+
+% ── Header/footer ────────────────────────────────────────────────────────────
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\footnotesize\textcolor{AccentGray}{Stage: \theprfaqstage{} \enspace\textbar\enspace v\theprfaqmajor.\theprfaqminor}}
+\fancyhead[R]{\footnotesize\textcolor{AccentGray}{\thepage}}
+\renewcommand{\headrulewidth}{0pt}
+
+% ══════════════════════════════════════════════════════════════════════════════
+% Custom environments
+% ══════════════════════════════════════════════════════════════════════════════
+
+% ── \prsection{title} — styled press release section header ──────────────────
+\newcommand{\prsection}[1]{%
+  \vspace{1em}%
+  {\large\bfseries\color{SectionBlue}#1}%
+  \vspace{0.3em}\par%
+}
+
+% ── customerquote — indented, italic customer quote ──────────────────────────
+\newmdenv[
+  topline=false,
+  bottomline=false,
+  rightline=false,
+  linewidth=3pt,
+  linecolor=QuoteBorder,
+  backgroundcolor=BoxBg,
+  innerleftmargin=12pt,
+  innerrightmargin=12pt,
+  innertopmargin=8pt,
+  innerbottommargin=8pt,
+  skipabove=\baselineskip,
+  skipbelow=\baselineskip,
+]{customerquote}
+
+% ── spokespersonquote — indented spokesperson quote ──────────────────────────
+\newmdenv[
+  topline=false,
+  bottomline=false,
+  rightline=false,
+  linewidth=3pt,
+  linecolor=SectionBlue,
+  backgroundcolor=BoxBg,
+  innerleftmargin=12pt,
+  innerrightmargin=12pt,
+  innertopmargin=8pt,
+  innerbottommargin=8pt,
+  skipabove=\baselineskip,
+  skipbelow=\baselineskip,
+]{spokespersonquote}
+
+% ── faqpair — numbered Q&A pair with bold question ─────────────────────────
+\newcounter{faqnum}
+\newenvironment{faqpair}[1]{%
+  \needspace{4\baselineskip}%
+  \vspace{0.5em}%
+  \refstepcounter{faqnum}%
+  \noindent\textbf{\color{SectionBlue}Q\thefaqnum: #1}\par\nopagebreak[4]%
+  \vspace{0.2em}%
+  \begin{adjustwidth}{1em}{0pt}%
+  \setlength{\parindent}{0pt}%
+}{%
+  \end{adjustwidth}%
+  \vspace{0.5em}%
+}
+% ── \faqref{faq:slug} — clickable "FAQ 3" reference ──────────────────────────
+\newcommand{\faqref}[1]{\hyperref[#1]{FAQ~\ref*{#1}}}
+
+% ── \featureitem — numbered, referenceable feature entry ──────────────────────
+\newcounter{featurenum}
+\newcommand{\featureitem}[2]{%
+  \refstepcounter{featurenum}%
+  \item[\textbf{\color{SectionBlue}F\thefeaturenum.}]%
+  \textbf{#1} --- #2%
+}
+\newcommand{\featureref}[1]{\hyperref[#1]{Feature~\ref*{#1}}}
+
+% ── adjustwidth (for faqpair indentation) ────────────────────────────────────
+\usepackage{changepage}
+
+% ══════════════════════════════════════════════════════════════════════════════
+% Document
+% ══════════════════════════════════════════════════════════════════════════════
+
+\begin{document}
+
+% ── Headline block ───────────────────────────────────────────────────────────
+\begin{center}
+  {\LARGE\bfseries\color{SectionBlue}
+    Punt Labs Launches Beadle} \\[0.8em]
+  {\large\color{AccentGray}
+    Signed instructions. Declared permissions. Tamperproof audit trail.\\
+    Your autonomous agent, on your machine, under your control.}
+\end{center}
+
+\vspace{0.5em}
+
+% ══════════════════════════════════════════════════════════════════════════════
+% PRESS RELEASE
+% ══════════════════════════════════════════════════════════════════════════════
+
+\section*{Press Release}
+
+SEATTLE, WA --- September 15, 2026 --- Punt Labs, whose products address
+the second-order effects of AI --- including the trust failures and adoption
+backlash that follow when autonomous systems lack verifiable controls --- today
+released Beadle, a free, open-source daemon that gives developers cryptographic
+control over an autonomous agent running on their own machine. Unlike agent
+frameworks that ask for broad trust and offer opaque logs, Beadle requires a
+GPG-signed instruction for every action, enforces declared permissions before
+executing anything, and records every step in a tamperproof, signed audit trail.
+The owner triggers pipelines via CLI, email through Proton Mail, or scheduled
+cron --- Beadle executes multi-step workflows using bash, Claude, or Python
+regardless of how the task arrives (see \faqref{faq:competitors}).
+
+\prsection{Problem}
+
+Developers today use AI coding assistants interactively: they sit at the
+keyboard, type a prompt, review the output, and iterate. When the laptop closes,
+the agent stops. A developer who triggers a two-hour test suite at 6pm must
+either keep the terminal open until 8pm or accept that a crash at 7pm means
+starting over in the morning. Delegating multi-step tasks --- run tests across
+three environments, summarize the results, file issues for failures --- means
+cobbling together fragile cron jobs and shell scripts with no authentication, no
+permissions model, and no audit trail. Existing autonomous agent frameworks like Auto-GPT run locally but offer
+no cryptographic verification of who authorized which action, no per-command
+permissions, and no tamperproof record of what happened.
+The risk is not theoretical: in January 2026, ClawdBot (OpenClaw) gained
+85,000+ GitHub stars in its first week and was immediately found to have
+critical vulnerabilities --- authentication disabled by default, a skill
+directory riddled with malicious extensions, and prompt injection paths that
+exfiltrated API keys \cite{kaspersky2026_openclaw, snyk2026_clawdbot}.
+Autonomous agents without enforceable trust boundaries produce real security
+failures at scale (see \faqref{faq:customer-evidence}).
+
+\prsection{Solution}
+
+Beadle is a background daemon configured for a single identity: a name, an email
+address, and a GPG keychain. The owner writes command documents --- small
+Markdown files that declare their interpreter (bash, Claude, or Python), their
+inputs and outputs, and their required permissions. Commands are signed with the
+owner's GPG key and can be piped together like Unix commands:
+
+{\small\texttt{check-schedule.md | find-free-slot.md | reserve-slot.md | notify-attendees.md}}
+
+The owner triggers a pipeline from the CLI, by emailing Beadle, or by
+scheduling it on Beadle's internal cron. Regardless of how the task arrives,
+Beadle validates every signature, preflights all permissions before executing
+anything, and runs the pipeline atomically. Every action is recorded in a
+signed, plaintext audit log that only the owner can clear
+(see \faqref{faq:why-email}).
+
+\prsection{Customer Quote}
+
+\begin{customerquote}
+\textit{``I used to leave a terminal open overnight hoping my test pipeline
+wouldn't hang. Now I email Beadle a signed command before bed, and by morning
+there's a summary in my inbox with every step logged. I know exactly what ran,
+in what order, and that nobody tampered with it. The first time I woke up to a
+clean test report instead of a hung terminal, I realized I'd been doing this
+wrong for years.''}
+
+\raggedleft --- \textbf{Alex Petrov}, Senior Platform Engineer
+\end{customerquote}
+
+\prsection{Getting Started}
+
+Getting started with Beadle takes three steps. First, run
+{\small\texttt{beadle init}} --- Beadle generates a GPG signing key, creates
+your identity file, and sets up the audit log. Second, write your first task in
+a Markdown file and sign it with {\small\texttt{beadle sign my-task.md}}.
+Third, run {\small\texttt{beadle run my-task.md}} and see the result. Within
+minutes, Beadle validates the signature, checks permissions, executes the
+command, and logs every step with a cryptographic proof chain. No cloud account,
+no data leaves your machine. To add email as a remote trigger, run
+{\small\texttt{beadle init {-}{-}email}} to connect Proton Bridge --- but
+the core value works without it.
+
+\prsection{Spokesperson Quote}
+
+\begin{spokespersonquote}
+``At Punt Labs we build on a principle: earn trust to go fast.
+Every autonomous agent framework asks you to trust it implicitly --- give it
+your credentials, let it run whatever it wants, and hope the logs are honest.
+We built Beadle on the opposite assumption: the agent has zero authority
+of its own. Every signed instruction, every declared permission, every
+tamperproof log entry earns the right to automate more aggressively tomorrow.
+The signing ceremony isn't overhead --- it's the mechanism that compounds trust
+so you can hand off bigger tasks with confidence. It's the Unix philosophy
+applied to AI agents: small, composable, auditable tools that do one thing
+well.''
+
+\raggedleft --- \textbf{J Freeman}, Punt Labs
+\end{spokespersonquote}
+
+\prsection{Call to Action}
+
+Beadle is available now at
+{\small\texttt{github.com/punt-labs/beadle}} under an open-source license.
+Installation requires Python 3.11+ and a GPG keychain. For email-triggered
+execution, add a Proton Mail paid plan with Proton Bridge. Documentation,
+example command documents, and a quickstart tutorial are included in the
+repository.
+
+\newpage
+
+% ══════════════════════════════════════════════════════════════════════════════
+% FREQUENTLY ASKED QUESTIONS
+% ══════════════════════════════════════════════════════════════════════════════
+
+\section*{Frequently Asked Questions}
+
+% ── External FAQs (Customer-facing) ──────────────────────────────────────────
+
+\subsection*{External FAQs}
+
+\begin{faqpair}{What is Beadle and who is it for?}\label{faq:what-is-it}
+  Beadle is an open-source autonomous agent daemon for developers and power users
+  who want to delegate tasks to an AI agent that runs on their own machine.
+  It is designed for people who already use AI coding assistants but need a way to
+  run multi-step pipelines unattended --- overnight test suites, scheduled code
+  reviews, automated triage of incoming emails --- with cryptographic proof of
+  what was authorized and what happened.
+\end{faqpair}
+
+\begin{faqpair}{How is Beadle different from Auto-GPT or Claude Code?}\label{faq:competitors}
+  Auto-GPT and similar frameworks give an agent broad autonomy to decide its own
+  next steps, with minimal authentication and coarse-grained permissions. Claude
+  Code is an interactive assistant that requires the developer at the keyboard.
+
+  Beadle occupies a different point in the design space: it has \textit{zero}
+  independent authority. Every action requires a GPG-signed instruction from the
+  owner. Commands declare their permissions (read, write, execute) per document.
+  Pipelines are composed explicitly, not decided by the agent. The audit log is
+  signed and tamperproof. The trade-off is deliberate: Beadle sacrifices agent
+  autonomy for owner control and auditability.
+\end{faqpair}
+
+\begin{faqpair}{Why email? Why not a web UI or a CLI?}\label{faq:why-email}
+  Email is asynchronous, universal, and already authenticated. Proton Mail
+  provides end-to-end encryption. GPG provides sender verification. Together,
+  they give Beadle a control plane that works from any device --- phone, tablet,
+  another computer --- without installing a client or opening a port. The
+  concept of email as an agent control channel has engineering precedent:
+  HumanLayer's Agent Control Plane uses email for human-approval of autonomous
+  agent actions \cite{humanlayer2024acp}. The owner
+  can CC Beadle on a conversation with a colleague, and Beadle can distinguish
+  the owner's signed instructions from the colleague's unsigned replies.
+
+  Beadle also supports local execution via the CLI
+  ({\small\texttt{beadle run pipeline.md}}) for development and testing.
+  Email is the remote interface, not the only interface.
+\end{faqpair}
+
+\begin{faqpair}{How do I get started?}\label{faq:getting-started}
+  Install Beadle via pip ({\small\texttt{pip install punt-beadle}}), run
+  {\small\texttt{beadle init}} to configure your identity and Proton Bridge
+  connection, and sign your first command with
+  {\small\texttt{beadle sign my-task.md}}. Email it to your Beadle address
+  or run it locally. Results arrive in your inbox within minutes.
+\end{faqpair}
+
+\begin{faqpair}{How much does it cost?}\label{faq:pricing}
+  Beadle is free and open-source. You need a Proton Mail paid plan
+  (starting at \$3.99/month) because Proton Bridge --- the local IMAP/SMTP
+  server Beadle uses for email --- is not available on the free tier
+  \cite{protonbridge2025}. You also need a GPG keychain (free). If your command
+  pipelines use the Claude interpreter, you will need an Anthropic API key with
+  usage-based billing. Beadle itself has no cost.
+\end{faqpair}
+
+\begin{faqpair}{What happens to my data?}\label{faq:data}
+  Nothing leaves your machine unless a command document explicitly sends it
+  somewhere. Beadle runs locally as a daemon. Email flows through Proton Bridge
+  on your machine to Proton's encrypted servers. Command documents, audit logs,
+  and results stay on your local filesystem. There is no telemetry, no cloud
+  service, and no account with Punt Labs.
+\end{faqpair}
+
+\begin{faqpair}{Do I need to know GPG?}\label{faq:gpg-knowledge}
+  No. {\small\texttt{beadle init}} generates a signing key in an isolated
+  keychain (separate from your system GPG keyring), configures Proton Bridge,
+  and produces a single identity file. You never run \texttt{gpg} directly ---
+  {\small\texttt{beadle sign}} and {\small\texttt{beadle verify}} handle all
+  cryptographic operations. If you already have a GPG key you want to use,
+  Beadle can import it, but it still stores it in its own keychain. The only
+  requirement is that signing keys must have an expiration date ---
+  Beadle enforces this and will not accept non-expiring keys for command
+  signing.
+\end{faqpair}
+
+% ── Internal FAQs (Business-facing) ──────────────────────────────────────────
+
+\newpage
+\subsection*{Internal FAQs}
+
+\subsubsection*{Value \& Market}
+
+\begin{faqpair}{What is the total addressable market?}\label{faq:tam}
+  The primary market is developers who already use AI coding assistants and want
+  unattended execution. The LangChain 2024 State of AI Agents report surveyed
+  1,300+ professionals and found that 51\% are using AI agents in production
+  today, with 78\% planning to deploy agents soon \cite{langchain2024agents}.
+  The subset who need local-first, authenticated, autonomous execution is
+  narrower --- likely tens of thousands of developers who work with sensitive
+  codebases, regulated environments, or privacy-conscious infrastructure
+  (the Proton Mail user base is an imperfect proxy for this audience).
+
+  This is a bottoms-up estimate. We are not claiming a billion-dollar TAM.
+  The honest framing: Beadle targets a niche of security-conscious developers
+  who value auditability over convenience.
+\end{faqpair}
+
+\begin{faqpair}{What evidence do we have that customers want this?}\label{faq:customer-evidence}
+  At hypothesis stage, we have limited primary data but one working prototype.
+  The evidence:
+
+  \textbf{Primary evidence (owner use):} A proof-of-concept runs daily on the
+  author's machine. A GPG-signed prompt policy manifest
+  ({\small\texttt{prompts.policy.yml}}) defines a healthcheck command with
+  SHA-256 integrity verification, trusted key enforcement, per-command
+  constraints (model, max cost, allowed tools, I/O boundaries), and template
+  variable substitution. A shell wrapper verifies the GPG signature, invokes
+  Claude non-interactively, and delivers results by email via Proton Bridge.
+  The agent has its own Proton Mail address and delivers results via Proton
+  Bridge. This prototype has run reliably as a daily LaunchAgent for several
+  weeks, validating the core integration: GPG-signed prompts, Claude CLI
+  invocation, Proton Bridge email delivery, and scheduled execution.
+
+  \textbf{Inferential evidence:}
+  \begin{itemize}[nosep]
+    \item Auto-GPT has accumulated over 182,000 GitHub stars since its 2023
+      release, demonstrating strong developer interest in autonomous agents
+      \cite{autogpt2024github}.
+    \item The OWASP GenAI Security Project published a Top~10 for Agentic
+      Applications in 2025, indicating that agent security is a recognized
+      concern, not a fringe worry \cite{owasp2025agentic}.
+    \item Proton Mail has grown to 100M+ accounts, confirming demand for
+      privacy-focused communication infrastructure \cite{proton2024100m}.
+    \item Cisco's 2025 Data Privacy Benchmark found that 90\% of
+      organizations see local storage as inherently safer, and 64\% worry
+      about exposing sensitive data to cloud GenAI tools
+      \cite{cisco2025privacy}.
+    \item No existing agent framework offers GPG-based authentication with
+      per-command permissions --- the gap is observable, but unvalidated.
+  \end{itemize}
+
+  \textbf{Next validation step:} Generalize the prototype into the Beadle
+  daemon (multi-command pipelines, identity management via
+  {\small\texttt{beadle init}}). Then test with 5--10 external developers
+  who currently use Auto-GPT or Claude Code for automation tasks. Measure
+  whether the GPG authentication model feels like a feature or a burden.
+\end{faqpair}
+
+\begin{faqpair}{Who are the competitors and why will we win?}\label{faq:competitive-landscape}
+  \begin{tabularx}{\linewidth}{@{} l X X @{}}
+  \toprule
+  \textbf{Competitor} & \textbf{Strength} & \textbf{Trust model gap} \\
+  \midrule
+  Auto-GPT & Large community, broad agent autonomy &
+    Agent-directed execution; no owner authentication, no declared
+    permissions, no tamperproof audit trail \\
+  Claude Code & High-quality code generation, interactive &
+    Operator-attended trust model; requires user at keyboard,
+    cannot delegate unattended authority \\
+  Devin & Full autonomous dev environment &
+    Vendor-hosted trust model; execution runs on Cognition's
+    infrastructure, not the owner's machine \\
+  Cron + scripts & Simple, well-understood &
+    No trust model; no identity verification, no permission
+    scoping, no composability with LLMs \\
+  \bottomrule
+  \end{tabularx}
+
+  \vspace{0.5em}
+  Beadle does not compete on agent intelligence --- it uses existing LLMs
+  (Claude, GPT) as interpreters. The differentiation is the trust model:
+  local-only execution under cryptographic owner control. Cloud providers and
+  SaaS agent platforms cannot replicate this without contradicting their own
+  business model --- their revenue depends on hosting execution, managing
+  infrastructure, and retaining custody of the runtime environment. Offering
+  genuine local-only, owner-controlled execution means giving up the recurring
+  billing, telemetry, and platform lock-in that sustain their economics.
+  Competitors can add daemon modes, unattended execution, and even signing
+  features, but they cannot cede control of the execution environment to the
+  owner without dismantling the value capture that funds their products. This
+  is a structural misalignment, not a feature gap.
+\end{faqpair}
+
+\begin{faqpair}{What is the customer acquisition strategy?}
+  Open-source distribution via GitHub and PyPI. Beadle is a CLI tool in the Punt
+  Labs ecosystem (alongside Biff, Quarry, and TTS), which provides cross-project
+  visibility. The secondary purpose --- as a showcase for the Jacobson-Cockburn
+  use-case methodology \cite{jacobson2023usecases} --- generates content that
+  attracts developers interested in both the tool and the process.
+
+  No paid acquisition. Growth is organic: one launch post (Hacker News,
+  Lobsters), 2--3 blog posts documenting the build process and methodology,
+  and cross-links from other Punt Labs project READMEs. Estimated effort:
+  20--30 hours of content creation in the first 3 months. If that generates
+  fewer than 100 stars, the positioning missed the audience and content
+  investment should stop.
+\end{faqpair}
+
+\begin{faqpair}{What is your next step to validate your vision?}\label{faq:next-step}
+  The proof-of-concept already validates three core mechanics: GPG-signed
+  prompt policies with SHA-256 integrity verification, single-command
+  execution via Claude CLI, and result delivery through Proton Bridge.
+  These run reliably as a daily LaunchAgent on the author's machine.
+
+  The next step is to generalize the PoC into the Beadle daemon ---
+  specifically, multi-command pipelines with the two-level try-catch model
+  and identity management via {\small\texttt{beadle init}}. Once a user can
+  run {\small\texttt{beadle init}} to configure an identity and
+  {\small\texttt{beadle run pipeline.md}} to execute a multi-step pipeline,
+  the tool is ready for external testing: 5--10 developers who currently use
+  Auto-GPT or Claude Code for automation tasks. The test is successful if
+  users can configure an identity, sign a multi-command pipeline, execute it,
+  and read a clear audit log without consulting GPG documentation. The key
+  question is whether the signing ceremony feels like a feature or a burden.
+\end{faqpair}
+
+\subsubsection*{Technical}
+
+\begin{faqpair}{What are the major technical risks?}\label{faq:tech-risks}
+  \begin{enumerate}[nosep]
+    \item \textbf{Proton Bridge reliability for automated use.} Proton Bridge
+      is designed for desktop email clients, not daemons. It may not handle
+      long-running, unattended operation gracefully.
+
+      \textit{Why Proton specifically:} Beadle's threat model assumes the
+      email channel must protect command integrity end-to-end --- from the
+      owner's device to the daemon's mailbox. Proton Mail's end-to-end
+      encryption means even Proton's own servers cannot read command content in
+      transit, which aligns with the local-first, zero-trust design. That said,
+      Beadle connects to Proton Bridge via standard IMAP/SMTP --- there is no
+      Proton-specific API or protocol dependency. Supporting other email
+      providers (Fastmail, self-hosted Dovecot, Gmail with app passwords) is a
+      scope decision, not an architectural constraint.
+
+      \textit{Mitigation:} Beadle monitors Bridge health on a configurable
+      interval (default: 60 seconds) and exposes status via
+      {\small\texttt{beadle status}}. If Bridge becomes unavailable, Beadle
+      logs the outage, queues pending result deliveries, and retries on a
+      backoff schedule. On macOS, the LaunchAgent plist includes a
+      {\small\texttt{KeepAlive}} directive that restarts the daemon
+      automatically if it exits; on Linux, the systemd unit specifies
+      {\small\texttt{Restart=on-failure}} with a 30-second delay. The owner
+      can configure alerting (e.g., a local notification or a write to a
+      monitored file) when Bridge has been offline for longer than a threshold.
+      Email-triggered execution is unavailable while Bridge is down, but
+      locally triggered and cron-triggered pipelines continue to run and their
+      results are delivered once Bridge recovers.
+    \item \textbf{GPG key management complexity.} GPG tooling is notoriously
+      difficult --- complexity is consistently cited as its primary operational
+      weakness \cite{hoopdotdev2024gpg}. If {\small\texttt{beadle init}} cannot
+      fully abstract key generation and signing, the onboarding friction will
+      kill adoption. This is the hardest unsolved UX problem in the project.
+
+      \textit{Alternative evaluated: SSH signing.} GitHub and GitLab both
+      support SSH keys for commit signing, and most developers already have an
+      SSH key. However, SSH signing only covers commit-level attestation ---
+      it provides no standard for encrypting documents to a recipient, no
+      built-in key expiry or revocation model, and no ecosystem for
+      distributing trust (no equivalent of the OpenPGP Web of Trust or
+      keyservers). Beadle needs signing \textit{and} encryption \textit{and}
+      key lifecycle management; SSH covers only the first.
+
+      \textit{Mitigation:} {\small\texttt{beadle init}} must make GPG
+      invisible. Concretely, it must: (1)~generate an Ed25519 signing key
+      with a mandatory expiration date, storing it in an isolated
+      {\small\texttt{GNUPGHOME}} so it does not pollute the user's existing
+      keychain; (2)~configure Proton Bridge IMAP/SMTP credentials and verify
+      connectivity with a round-trip test message; (3)~produce a single
+      {\small\texttt{beadle.yml}} identity file that all subsequent commands
+      consume. The user should never run \texttt{gpg} directly.
+      {\small\texttt{beadle sign}} wraps signing, and
+      {\small\texttt{beadle verify}} wraps verification. If this abstraction
+      leaks --- if any error message surfaces raw \texttt{gpg} output or
+      requires the user to understand keyring semantics --- the onboarding
+      has failed.
+    \item \textbf{Claude interpreter sandboxing.} When Beadle invokes Claude
+      as a command interpreter, the LLM may attempt actions outside the
+      command's declared permissions. \textit{Mitigation:} The two-level
+      try-catch model preflights all permissions before execution. The Claude
+      interpreter runs in a restricted context with only the declared
+      inputs available.
+  \end{enumerate}
+\end{faqpair}
+
+\begin{faqpair}{What dependencies exist on other teams or systems?}
+  \begin{itemize}[nosep]
+    \item \textbf{Proton Bridge} --- open-source Go codebase, maintained by
+      Proton AG \cite{protonbridge2025}. Beadle uses it as a standard
+      IMAP/SMTP client. No API dependency beyond the mail protocol.
+    \item \textbf{Anthropic API} --- required only when using the Claude
+      interpreter. Usage-based billing, no contractual dependency.
+    \item \textbf{GnuPG} --- the GPG implementation. Mature, widely deployed,
+      maintained by the GnuPG Project. RFC~9580 (OpenPGP, 2024) provides
+      the current standard \cite{rfc9580}.
+  \end{itemize}
+  No internal Punt Labs dependencies. Beadle is a standalone project.
+\end{faqpair}
+
+\begin{faqpair}{What is the estimated development timeline?}\label{faq:timeline}
+  \begin{tabularx}{\linewidth}{@{} l l l X @{}}
+  \toprule
+  \textbf{Phase} & \textbf{Target} & \textbf{Hours} & \textbf{Scope} \\
+  \midrule
+  0. Foundation & Months 1--2 & 80--120 &
+    Identity config (UC1), single command execution, GPG signing,
+    audit log, CLI interface \\
+  1. Email & Months 3--4 & 80--120 &
+    Proton Bridge integration (UC2), email-triggered execution,
+    result reporting \\
+  2. Pipelines & Months 4--5 & 80--140 &
+    Multi-command pipelines (UC3), two-level try-catch, schema
+    validation between stages \\
+  3. Scheduler & Month 6 & 60--120 &
+    Internal cron (UC4), third-party email handling (UC5),
+    key rotation (UC7, UC8) \\
+  \bottomrule
+  \end{tabularx}
+
+  \vspace{0.5em}
+  \textbf{Total: 300--500 hours.} Phase~0 benefits from the existing
+  proof-of-concept, which already validates GPG signing, single-command
+  execution via Claude CLI, and Proton Bridge email delivery. This
+  compresses exploration time in Phase~0 --- the PoC's integration
+  patterns carry forward directly, reducing unknowns to pipeline
+  generalization, identity management via {\small\texttt{beadle init}},
+  and audit log design.
+
+  If timeline compresses, Phase~3 (scheduler, third-party handling, key
+  rotation) is cut first. The core value is Phase~0: sign a command,
+  execute it locally, and get a cryptographically verified result.
+  Phase~1 adds email as a remote trigger.
+\end{faqpair}
+
+\begin{faqpair}{What is the scaling story?}\label{faq:scaling}
+  Beadle is a single-user daemon. ``Scaling'' means long-running operation over
+  months and years, not multi-tenant growth.
+
+  \begin{itemize}[nosep]
+    \item \textbf{Audit log growth.} The log is append-only and unbounded until
+      the owner manually clears it. A developer running 10 pipelines per day
+      generates roughly 50--100~KB of log per day. At one year, that is
+      approximately 20--40~MB --- manageable on any modern filesystem. The risk
+      is neglect, not size.
+    \item \textbf{Command library size.} Commands are loaded into memory only
+      during preflight and execution, then discarded. A library of hundreds of
+      signed command documents on disk has no runtime cost until invoked.
+    \item \textbf{Proton Bridge longevity.} The daemon depends on Bridge staying
+      online for email-triggered execution. Bridge was not designed for months
+      of continuous uptime. The mitigation is operational: Beadle checks Bridge
+      health on a configurable interval, the system service manager (LaunchAgent
+      or systemd) restarts both Beadle and Bridge on failure, and pending result
+      deliveries are queued and retried once Bridge recovers. Local and
+      cron-triggered pipelines are unaffected by Bridge downtime.
+  \end{itemize}
+
+  The honest constraint: Beadle does not scale to teams, organizations, or
+  multi-machine deployment. It is a personal agent for one person on one
+  machine. That is a design choice, not a limitation to fix later.
+\end{faqpair}
+
+\subsubsection*{Business}
+
+\begin{faqpair}{What is the revenue model?}\label{faq:revenue}
+  None. Beadle is free and open-source. The strategic value is threefold:
+  (1)~it demonstrates the Punt Labs engineering methodology in a real,
+  useful product; (2)~it grows the Punt Labs open-source ecosystem alongside
+  Biff, Quarry, and TTS; (3)~it serves as the reference implementation for
+  a future punt-labs project on use-case methodology, generating content and
+  credibility.
+\end{faqpair}
+
+\begin{faqpair}{What does the P\&L look like at steady state?}\label{faq:pnl}
+  Beadle has no revenue, so the P\&L is cost-only. The primary cost is
+  developer-hours. The 300--500 hour development estimate derives from
+  per-phase hour breakdowns in \faqref{faq:timeline}.
+
+  \begin{tabularx}{\linewidth}{@{} l l X @{}}
+  \toprule
+  \textbf{Cost} & \textbf{Estimate} & \textbf{Assumption} \\
+  \midrule
+  Development (Phases 0--3) & 300--500 hours & Solo developer, 6 months;
+    per-phase breakdown in \faqref{faq:timeline} \\
+  Ongoing maintenance & 5--10 hours/month & Bug fixes, dependency updates,
+    community PRs \\
+  Proton Mail (paid plan) & \$48/year & Personal use; already paid for other
+    purposes \\
+  Infrastructure & \$0 & No servers; runs on developer's machine \\
+  \bottomrule
+  \end{tabularx}
+
+  \vspace{0.5em}
+  The opportunity cost is the binding constraint: 300--500 hours not spent on
+  other Punt Labs projects (Quarry features, Biff improvements, LangLearn
+  ports). This cost is governed by a kill switch tied to the metrics in
+  \faqref{faq:metrics}: if, at the 6-month mark after public release, Beadle
+  has fewer than 100 GitHub stars \textit{or} fewer than 10 weekly PyPI
+  installs, the project enters archival mode (security patches only, no new
+  feature work). This is a hard threshold, not a judgment call --- below
+  either number means the positioning missed the audience and further
+  development hours are not justified.
+\end{faqpair}
+
+\begin{faqpair}{What are the key metrics and how will we measure success?}\label{faq:metrics}
+  \begin{tabularx}{\linewidth}{@{} l l X @{}}
+  \toprule
+  \textbf{Metric} & \textbf{Target (6 months)} & \textbf{Decision threshold} \\
+  \midrule
+  GitHub stars & 500+ & Below 100 after launch suggests the positioning
+    missed the audience \\
+  Weekly active installs (PyPI) & 50+ & Below 10 suggests the tool is not
+    useful enough to keep \\
+  Prototype test completion & 8/10 users complete first pipeline &
+    Below 5/10 signals fatal usability friction \\
+  \bottomrule
+  \end{tabularx}
+
+  \vspace{0.5em}
+  \textbf{Pre-mortem --- what failure looks like:} It is March 2027. Beadle has
+  200 GitHub stars, 8 PyPI installs per week, and the prototype test showed
+  3/10 users abandoned during GPG key setup. The cryptographic trust model ---
+  signed commands, declared permissions, tamperproof audit trail --- resonated
+  in blog posts but not in practice. Developers found the signing ceremony
+  too heavy for personal automation tasks where they already trust themselves.
+  The security posture Beadle enforces felt like overhead, not protection.
+  The project becomes a methodology showcase only, with no active user
+  community, and enters archival maintenance.
+\end{faqpair}
+
+\begin{faqpair}{Why now? What has changed?}\label{faq:why-now}
+  Four shifts make this the right time:
+
+  \begin{enumerate}[nosep]
+    \item \textbf{AI agents went mainstream in 2024--2025.} The LangChain survey
+      shows 51\% production deployment \cite{langchain2024agents}. Developers
+      are past the question of ``should I use an agent?'' and into ``how do I
+      trust one?''
+    \item \textbf{OpenPGP modernized.} RFC~9580 (2024) updated the OpenPGP
+      standard for the first time in decades, adding modern cryptographic
+      algorithms and improving key management \cite{rfc9580}. GPG tooling is
+      better than it was even two years ago.
+    \item \textbf{OWASP formalized agent security risks.} The OWASP Top~10 for
+      Agentic Applications (2025) legitimized the concern that autonomous agents
+      need security models, not just capability models
+      \cite{owasp2025agentic}. Beadle's trust model is a direct response.
+    \item \textbf{ClawdBot proved the threat model in production.} In January
+      2026, ClawdBot (also known as OpenClaw) launched and gained 85,000+
+      GitHub stars in its first week. Within days, security researchers
+      discovered critical vulnerabilities: CVE-2026-25253 (CVSS~8.8) allowed
+      gateway compromise via authentication bypass in misconfigured reverse
+      proxies, CVE-2026-24763 enabled hundreds of malicious skills in the skill
+      directory, and CVE-2026-25157 allowed prompt injection to extract secrets
+      \cite{kaspersky2026_openclaw}. Snyk demonstrated that a spoofed email
+      could trigger a shell command that exfiltrated \texttt{clawdbot.json}
+      containing API keys \cite{snyk2026_clawdbot}. Palo Alto Networks'
+      Unit~42 concluded that OpenClaw ``maps to all 10 OWASP risks for agentic
+      applications'' and lacked ``enforceable trust boundaries between untrusted
+      inputs and high-privilege reasoning'' \cite{unit42_2026_openclaw}.
+      Kaspersky reported that authentication was disabled by default
+      \cite{kaspersky2026_openclaw}. This is the incident that proved
+      autonomous agents without cryptographic trust models are dangerous at
+      scale --- exactly the failure mode Beadle is designed to prevent.
+  \end{enumerate}
+\end{faqpair}
+
+% ══════════════════════════════════════════════════════════════════════════════
+% FOUR RISKS ASSESSMENT
+% ══════════════════════════════════════════════════════════════════════════════
+
+\newpage
+\section*{Risk Assessment}
+
+\renewcommand{\arraystretch}{1.6}
+\begin{tabularx}{\textwidth}{@{} l l X @{}}
+\toprule
+\textbf{\color{SectionBlue}Risk} & \textbf{\color{SectionBlue}Rating} & \textbf{\color{SectionBlue}Assessment} \\
+\midrule
+Value & \textcolor{RiskAmber}{Medium} &
+  Developer interest in autonomous agents is proven (Auto-GPT stars,
+  LangChain survey). Whether the cryptographic trust model --- signed commands,
+  declared permissions, tamperproof audit trail --- resonates with developers
+  who already trust their own machines is the core untested assumption.
+  The security posture may feel like overhead for personal automation.
+  Validation plan: prototype test with 5--10 developers
+  (see \faqref{faq:next-step}). \\
+Usability & \textcolor{RiskRed}{High} &
+  GPG abstraction is the hardest unsolved UX problem in the project. The
+  {\small\texttt{beadle init}} command must generate keys and produce an
+  identity file without ever exposing raw GPG semantics to the user. SSH
+  signing was evaluated and rejected because it lacks encryption and key
+  lifecycle primitives (see \faqref{faq:tech-risks}). If the abstraction
+  leaks --- if any step requires the user to understand keyrings, trust
+  models, or \texttt{gpg} flags --- onboarding friction will kill the
+  product. The signing ceremony (sign every command, declare every
+  permission) is the trust model's core value but also its primary
+  usability risk: developers may perceive it as ceremony, not safety. \\
+Feasibility & \textcolor{RiskAmber}{Medium} &
+  A proof-of-concept validates the core integration: GPG-signed prompts,
+  Claude CLI invocation, and Proton Bridge email delivery run reliably as a
+  daily LaunchAgent. The remaining integration risk is in generalizing this
+  to multi-command pipelines with the two-level try-catch model, which is
+  novel and unproven. Proton Bridge long-term uptime for continuous daemon
+  operation is untested beyond the current daily-run pattern. \\
+Viability & \textcolor{RiskGreen}{Low} &
+  No revenue requirement. Open-source, no infrastructure costs beyond the
+  developer's own machine. The only viability risk is opportunity cost ---
+  development time spent on Beadle is time not spent on other Punt Labs
+  projects. Mitigated by a kill switch: if at 6 months post-release Beadle
+  has fewer than 100 GitHub stars or fewer than 10 weekly PyPI installs,
+  the project enters archival mode and development hours stop
+  (see \faqref{faq:pnl} and \faqref{faq:metrics}). \\
+\bottomrule
+\end{tabularx}
+\renewcommand{\arraystretch}{1.0}
+
+% ══════════════════════════════════════════════════════════════════════════════
+% FEATURE APPENDIX
+% ══════════════════════════════════════════════════════════════════════════════
+
+\newpage
+\section*{Feature Appendix}
+
+Defines the scope boundary for the product. Every feature is explicitly
+categorized to prevent scope creep and force prioritization decisions upfront.
+
+\subsection*{Must Do}
+
+Features that are essential for launch. Without these, the product does not
+solve the core problem.
+
+\begin{enumerate}[nosep,leftmargin=2.5em]
+  \featureitem{Identity configuration}{single-identity setup with name, email,
+    and GPG keychain via {\small\texttt{beadle init}}}\label{feat:identity}
+  \featureitem{GPG command signing}{sign command documents with owner's key;
+    reject unsigned or expired-key commands}\label{feat:signing}
+  \featureitem{Command pipeline execution}{pipe commands together with
+    Unix-style syntax; two-level try-catch (preflight then
+    execute)}\label{feat:pipelines}
+  \featureitem{Three interpreters}{bash, Claude, and Python as command
+    interpreters, declared per document}\label{feat:interpreters}
+  \featureitem{Per-command permissions}{rwx permission bits per command
+    document, validated at preflight}\label{feat:permissions}
+  \featureitem{Signed audit log}{plaintext, GPG-signed log of every action;
+    only owner can clear}\label{feat:audit-log}
+  \featureitem{Email trigger via Proton Bridge}{receive GPG-signed instructions
+    by email and return results by email}\label{feat:email}
+  \featureitem{Local CLI execution}{run pipelines locally via
+    {\small\texttt{beadle run}} for development and
+    testing}\label{feat:local-cli}
+\end{enumerate}
+
+\subsection*{Should Do}
+
+Features that meaningfully improve the product but are not launch-blocking.
+Candidates for fast follow-up.
+
+\begin{enumerate}[nosep,leftmargin=2.5em]
+  \featureitem{Internal scheduler}{cron-like scheduled pipeline execution with
+    no catch-up on missed runs}\label{feat:scheduler}
+  \featureitem{Third-party email handling}{quarantine and escape unsigned
+    third-party content from forwarded emails}\label{feat:third-party}
+  \featureitem{Key rotation management}{guided key rotation with expiry
+    enforcement; remove keys from trusted list}\label{feat:key-rotation}
+  \featureitem{Command schema validation}{declare input/output schemas per
+    command; preflight validates compatibility between adjacent pipeline
+    stages}\label{feat:schemas}
+  \featureitem{Multi-provider email support}{Beadle speaks standard
+    IMAP/SMTP --- supporting other providers (Fastmail, Dovecot, Gmail)
+    is a scope decision, not an architectural lock-in. Proton-only in
+    Phase~0 because E2E encryption aligns with the trust
+    model}\label{feat:multi-provider}
+\end{enumerate}
+
+\subsection*{Won't Do}
+
+Features explicitly excluded. Naming what you won't build prevents scope
+creep and clarifies the product's identity.
+
+\begin{enumerate}[nosep,leftmargin=2.5em]
+  \featureitem{Multi-identity support}{Beadle is a personal agent for one
+    owner. Multi-tenant adds complexity that conflicts with the single-identity
+    trust model}\label{feat:no-multi-identity}
+  \featureitem{Signal or other messaging integrations}{email is the remote
+    interface. Adding messaging platforms fragments the authentication model
+    and increases attack surface}\label{feat:no-signal}
+  \featureitem{Web UI}{a browser interface contradicts the local-first,
+    CLI-native design philosophy and adds a large attack
+    surface}\label{feat:no-web-ui}
+  \featureitem{Cloud hosting or SaaS model}{Beadle runs on the owner's machine.
+    A hosted version would undermine the core value proposition of data
+    sovereignty and local control}\label{feat:no-cloud}
+  \featureitem{Scheduler catch-up}{missed scheduled runs are skipped, not
+    replayed. Catch-up logic adds complexity and ambiguity about which version
+    of a command should execute}\label{feat:no-catchup}
+  \featureitem{Non-expiring command-signing keys}{all command-signing keys must
+    have an expiration date. This is a security invariant, not a
+    convenience trade-off}\label{feat:no-nonexpiring}
+\end{enumerate}
+
+% ══════════════════════════════════════════════════════════════════════════════
+% REFERENCES
+% ══════════════════════════════════════════════════════════════════════════════
+
+\newpage
+\printbibliography[title={References}]
+
+\end{document}
