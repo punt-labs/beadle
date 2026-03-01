@@ -77,7 +77,7 @@
 
 % ── Document version ─────────────────────────────────────────────────────────
 \newcommand{\prfaqversion}[2]{\def\theprfaqmajor{#1}\def\theprfaqminor{#2}}
-\prfaqversion{2}{1}
+\prfaqversion{2}{2}
 
 % ── Header/footer ────────────────────────────────────────────────────────────
 \usepackage{fancyhdr}
@@ -584,38 +584,37 @@ repository.
 \end{faqpair}
 
 \begin{faqpair}{What is the estimated development timeline?}\label{faq:timeline}
-  \begin{tabularx}{\linewidth}{@{} l l l X @{}}
-  \toprule
-  \textbf{Phase} & \textbf{Target} & \textbf{Hours} & \textbf{Scope} \\
-  \midrule
-  0. Foundation & Months 1--2 & 80--120 &
-    Identity config (UC1), single command execution, GPG signing,
-    audit log, CLI interface \\
-  1. Email & Months 3--4 & 80--120 &
-    Proton Bridge integration (UC2), email-triggered execution,
-    result reporting \\
-  2. Pipelines & Months 4--5 & 80--140 &
-    Multi-command pipelines (UC3), two-level try-catch, schema
-    validation between stages \\
-  3. Scheduler & Month 6 & 60--120 &
-    Internal cron (UC4), third-party email handling (UC5),
-    key rotation (UC7, UC8) \\
-  \bottomrule
-  \end{tabularx}
+  This is a hypothesis-stage document. The purpose of Working Backwards is
+  to validate \textit{whether} to build, not to plan the schedule. Detailed
+  hour estimates and calendar targets are premature --- and doubly so when
+  AI-augmented development makes historical velocity assumptions unreliable.
+  What matters at this stage is delivery order and cut discipline.
 
-  \vspace{0.5em}
-  \textbf{Total: 300--500 hours.} Phase~0 benefits from the existing
-  proof-of-concept, which already validates GPG signing, single-command
-  execution via Claude CLI, and Proton Bridge email delivery. This
-  compresses exploration time in Phase~0 --- the PoC's integration
-  patterns carry forward directly, reducing unknowns to pipeline
-  generalization, identity management via {\small\texttt{beadle init}},
-  and audit log design.
+  \textbf{Phased delivery order:}
 
-  If timeline compresses, Phase~3 (scheduler, third-party handling, key
-  rotation) is cut first. The core value is Phase~0: sign a command,
-  execute it locally, and get a cryptographically verified result.
-  Phase~1 adds email as a remote trigger.
+  \begin{enumerate}[nosep]
+    \item \textbf{Foundation} --- Identity config (UC1), single command
+      execution, GPG signing, audit log, CLI interface. This is the minimum
+      viable trust loop: sign a command, execute it locally, get a
+      cryptographically verified result. A proof-of-concept already validates
+      GPG signing, single-command execution via Claude CLI, and Proton Bridge
+      email delivery, so this phase starts with reduced unknowns.
+    \item \textbf{Email} --- Proton Bridge integration (UC2),
+      email-triggered execution, result reporting. Adds remote triggering
+      without giving up the local trust model.
+    \item \textbf{Pipelines} --- Multi-command pipelines (UC3), two-level
+      try-catch, schema validation between stages. Generalizes the
+      single-command model into composable workflows.
+    \item \textbf{Scheduler} --- Internal cron (UC4), third-party email
+      handling (UC5), key rotation (UC7, UC8). Convenience and operational
+      hygiene; not part of the core value proposition.
+  \end{enumerate}
+
+  \textbf{Cut order:} If scope compresses, Scheduler is cut first ---
+  it is operational convenience, not core value. Pipelines can be
+  deferred to a fast follow-up if Foundation and Email prove the trust
+  model. The kill switch is not timeline-based but adoption-based:
+  see \faqref{faq:metrics}.
 \end{faqpair}
 
 \begin{faqpair}{What is the scaling story?}\label{faq:scaling}
@@ -658,33 +657,35 @@ repository.
 
 \begin{faqpair}{What does the P\&L look like at steady state?}\label{faq:pnl}
   Beadle has no revenue, so the P\&L is cost-only. The primary cost is
-  developer-hours. The 300--500 hour development estimate derives from
-  per-phase hour breakdowns in \faqref{faq:timeline}.
+  developer-hours. Specific hour estimates are not attempted at hypothesis
+  stage --- the purpose of this document is to validate whether to build,
+  not to plan the schedule --- but the cost categories are known.
 
-  \begin{tabularx}{\linewidth}{@{} l l X @{}}
+  \begin{tabularx}{\linewidth}{@{} l X @{}}
   \toprule
-  \textbf{Cost} & \textbf{Estimate} & \textbf{Assumption} \\
+  \textbf{Cost} & \textbf{Notes} \\
   \midrule
-  Development (Phases 0--3) & 300--500 hours & Solo developer, 6 months;
-    per-phase breakdown in \faqref{faq:timeline} \\
-  Ongoing maintenance & 5--10 hours/month & Bug fixes, dependency updates,
-    community PRs \\
-  Proton Mail (paid plan) & \$48/year & Personal use; already paid for other
-    purposes \\
-  Infrastructure & \$0 & No servers; runs on developer's machine \\
+  Development (primary) & Solo developer. Four phases described in
+    \faqref{faq:timeline}. The dominant cost and the binding constraint
+    on opportunity cost. \\
+  Ongoing maintenance & Bug fixes, dependency updates, community PRs.
+    Modest but nonzero indefinitely. \\
+  Proton Mail (paid plan) & \$48/year. Personal use; already paid for
+    other purposes. \\
+  Infrastructure & \$0. No servers; runs on developer's machine. \\
   \bottomrule
   \end{tabularx}
 
   \vspace{0.5em}
-  The opportunity cost is the binding constraint: 300--500 hours not spent on
-  other Punt Labs projects (Quarry features, Biff improvements, LangLearn
-  ports). This cost is governed by a kill switch tied to the metrics in
-  \faqref{faq:metrics}: if, at the 6-month mark after public release, Beadle
-  has fewer than 100 GitHub stars \textit{or} fewer than 10 weekly PyPI
-  installs, the project enters archival mode (security patches only, no new
-  feature work). This is a hard threshold, not a judgment call --- below
-  either number means the positioning missed the audience and further
-  development hours are not justified.
+  The opportunity cost is the binding constraint: development time spent on
+  Beadle is time not spent on other Punt Labs projects (Quarry features, Biff
+  improvements, LangLearn ports). This cost is governed by a kill switch tied
+  to the metrics in \faqref{faq:metrics}: if, at the 6-month mark after
+  public release, Beadle has fewer than 100 GitHub stars \textit{or} fewer
+  than 10 weekly PyPI installs, the project enters archival mode (security
+  patches only, no new feature work). This is a hard threshold, not a
+  judgment call --- below either number means the positioning missed the
+  audience and further development hours are not justified.
 \end{faqpair}
 
 \begin{faqpair}{What are the key metrics and how will we measure success?}\label{faq:metrics}
