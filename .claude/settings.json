@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(bd:*)",
+      "Bash(punt:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf ~:*)",
+      "Bash(dd:*)",
+      "Bash(sudo:*)",
+      "Bash(su:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
+      "Bash(ftp:*)",
+      "Bash(tftp:*)",
+      "Bash(nc:*)",
+      "Bash(netcat:*)",
+      "Bash(ncat:*)",
+      "Bash(telnet:*)",
+      "Bash(socat:*)",
+      "Edit(.env)",
+      "Write(.env)",
+      "Edit(.envrc)",
+      "Write(.envrc)",
+      "Bash(direnv allow:*)"
+    ]
+  }
+}
