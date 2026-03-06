@@ -17,3 +17,6 @@
 .envrc
 !.claude/settings.json
 !.claude/hooks/
+
+# Scratch/temp directory (TMPDIR set via .envrc)
+.tmp/
