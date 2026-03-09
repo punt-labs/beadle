@@ -179,7 +179,7 @@ git checkout -b feat/short-description main
 
 1. Create branch, make changes, commit
 2. Push and create PR. Prefer `mcp__github__create_pull_request` over `gh pr create` where possible.
-3. **Watch CI and reviews in the background** — do not stop waiting. Run `gh pr checks <number> --watch` to block until all checks resolve.
+3. **Watch CI and reviews without blocking your main shell** — do not stop waiting. Run `gh pr checks <number> --watch` in a background task or separate session to block until all checks resolve.
 4. **Expect 2-6 review cycles before merging.** Copilot and Bugbot may take 1-3 minutes to post after CI completes. Read feedback using MCP GitHub tools: `mcp__github__pull_request_read` with `get_reviews` and `get_review_comments`.
 5. **Take every comment seriously.** Do not dismiss feedback as "unrelated to the change" or "pre-existing." Fix the issue, re-push, and wait for the next review cycle.
 6. **Repeat until the last review cycle is uneventful** — zero new comments, all checks green.
