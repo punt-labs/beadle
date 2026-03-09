@@ -178,22 +178,26 @@ git checkout -b feat/short-description main
 ### PR Workflow
 
 1. Create branch, make changes, commit
-2. Push and create PR: `gh pr create --title "type: description" --body "..."`
-3. **Block until CI and Copilot finish** — do not proceed until these complete:
-
-```bash
-gh pr checks <number> --watch          # BLOCKING: polls until all checks resolve
-gh pr view <number> --comments         # Read Copilot feedback — address before merging
-```
-
-1. Address Copilot feedback if any
-2. **Merge via MCP, not `gh`.** Use `mcp__github__merge_pull_request` (API-only, no local git side effects). `gh pr merge` tries to checkout main locally, which fails inside a worktree.
+2. Push and create PR. Prefer `mcp__github__create_pull_request` over `gh pr create` where possible.
+3. **Watch CI and reviews in the background** — do not stop waiting. Run `gh pr checks <number> --watch` to block until all checks resolve.
+4. **Expect 2-6 review cycles before merging.** Copilot and Bugbot may take 1-3 minutes to post after CI completes. Read feedback using MCP GitHub tools: `mcp__github__pull_request_read` with `get_reviews` and `get_review_comments`.
+5. **Take every comment seriously.** Do not dismiss feedback as "unrelated to the change" or "pre-existing." Fix the issue, re-push, and wait for the next review cycle.
+6. **Repeat until the last review cycle is uneventful** — zero new comments, all checks green.
+7. **Merge via MCP, not `gh`.** Use `mcp__github__merge_pull_request` (API-only, no local git side effects). `gh pr merge` tries to checkout main locally, which fails inside a worktree.
 
 ```bash
 # After merging via MCP:
 git fetch origin main && git checkout origin/main  # Detached HEAD in worktree
 git checkout -b feat/next-thing                     # New branch from latest main
 ```
+
+### Documentation Discipline
+
+Every PR must update the docs it affects. If a PR changes user-facing behavior and the diff is missing any of these updates, the PR is not ready to merge.
+
+- **CHANGELOG**: Entries are written in the PR branch, before merge — not retroactively on main. Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. Add entries under `## [Unreleased]`. Categories: Added, Changed, Deprecated, Removed, Fixed, Security.
+- **README**: Update `README.md` when user-facing behavior changes — new flags, commands, defaults, or config.
+- **PR/FAQ**: Update `prfaq.tex` when the change shifts product direction or validates/invalidates a risk assumption. Use `/prfaq:feedback` to apply revisions and `/prfaq:meeting-hive` to run autonomous review meetings.
 
 ### Micro-Commits
 
@@ -240,10 +244,6 @@ git status                  # Must show "up to date with origin"
 ```
 
 Work is NOT complete until `git push` succeeds.
-
-## PR/FAQ Document
-
-The `prfaq.tex` and `prfaq.bib` files contain the Working Backwards PR/FAQ document for Beadle at hypothesis stage. Use `/prfaq:feedback` to apply revisions and `/prfaq:meeting-hive` to run autonomous review meetings.
 
 ## Standards References
 
