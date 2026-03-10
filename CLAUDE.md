@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+## No "Pre-existing" Excuse
+
+There is no such thing as a "pre-existing" issue. If you see a problem — in code you wrote, code a reviewer flagged, or code you happen to be reading — you fix it. Do not classify issues as "pre-existing" to justify ignoring them. Do not suggest that something is "outside the scope of this change." If it is broken and you can see it, it is your problem now.
+
 ## Project Overview
 
 Autonomous agent daemon with cryptographic owner control. GPG-signed instructions, declared permissions, tamperproof audit trail. Runs on the owner's machine as a background daemon.
@@ -120,7 +124,7 @@ Module structure under `src/punt_beadle/`:
 
 ## Testing
 
-- **All tests must pass.** No exceptions for "pre-existing failures."
+- **All tests must pass.** If a test is failing, fix it.
 - If a test fails, fix it. Do not skip, ignore, or work around it.
 - GPG operations in tests use a temporary `GNUPGHOME` (ephemeral keyring per test session).
 - Integration tests requiring Proton Bridge or Anthropic API are marked `@pytest.mark.integration`.
@@ -181,7 +185,7 @@ git checkout -b feat/short-description main
 2. Push and create PR. Prefer `mcp__github__create_pull_request` over `gh pr create` where possible.
 3. **Watch CI and reviews without blocking your main shell** — do not stop waiting. Run `gh pr checks <number> --watch` in a background task or separate session to block until all checks resolve.
 4. **Expect 2-6 review cycles before merging.** Copilot and Bugbot may take 1-3 minutes to post after CI completes. Read feedback using MCP GitHub tools: `mcp__github__pull_request_read` with `get_reviews` and `get_review_comments`.
-5. **Take every comment seriously.** Do not dismiss feedback as "unrelated to the change" or "pre-existing." Fix the issue, re-push, and wait for the next review cycle.
+5. **Take every comment seriously.** There is no such thing as "pre-existing" or "unrelated to this change" — if you can see it, you own it. Fix the issue, re-push, and wait for the next review cycle.
 6. **Repeat until the last review cycle is uneventful** — zero new comments, all checks green.
 7. **Merge via MCP, not `gh`.** Use `mcp__github__merge_pull_request` (API-only, no local git side effects). `gh pr merge` tries to checkout main locally, which fails inside a worktree.
 
