@@ -19,7 +19,7 @@ format: ## Format code
 	gofmt -w .
 
 build: ## Build binary
-	go build -o beadle-email ./cmd/beadle-email/
+	CGO_ENABLED=0 go build -o beadle-email ./cmd/beadle-email/
 
 clean: ## Remove build artifacts
 	rm -f beadle-email coverage.out
@@ -27,10 +27,10 @@ clean: ## Remove build artifacts
 
 dist: clean ## Cross-compile for all platforms
 	mkdir -p dist
-	GOOS=darwin  GOARCH=arm64 go build -o dist/beadle-email-darwin-arm64 ./cmd/beadle-email/
-	GOOS=darwin  GOARCH=amd64 go build -o dist/beadle-email-darwin-amd64 ./cmd/beadle-email/
-	GOOS=linux   GOARCH=arm64 go build -o dist/beadle-email-linux-arm64  ./cmd/beadle-email/
-	GOOS=linux   GOARCH=amd64 go build -o dist/beadle-email-linux-amd64  ./cmd/beadle-email/
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o dist/beadle-email-darwin-arm64 ./cmd/beadle-email/
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o dist/beadle-email-darwin-amd64 ./cmd/beadle-email/
+	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -ldflags="-s -w" -o dist/beadle-email-linux-arm64  ./cmd/beadle-email/
+	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -ldflags="-s -w" -o dist/beadle-email-linux-amd64  ./cmd/beadle-email/
 
 cover: ## Test with coverage report
 	go test -cover -coverprofile=coverage.out ./...

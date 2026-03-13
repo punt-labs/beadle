@@ -16,8 +16,6 @@ import (
 	"strings"
 )
 
-const service = "beadle"
-
 // Get resolves a named credential through the priority chain.
 // Name must not contain path separators to prevent path traversal.
 func Get(name string) (string, error) {
