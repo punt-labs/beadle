@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
@@ -26,13 +27,13 @@ type Client struct {
 func Dial(cfg *Config, logger *slog.Logger) (*Client, error) {
 	addr := net.JoinHostPort(cfg.IMAPHost, strconv.Itoa(cfg.IMAPPort))
 
-	conn, err := net.Dial("tcp", addr)
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
 
 	c, err := imapclient.NewStartTLS(conn, &imapclient.Options{
-		TLSConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // Proton Bridge uses self-signed certs on localhost
+		TLSConfig: &tls.Config{InsecureSkipVerify: isLoopback(cfg.IMAPHost)}, //nolint:gosec // Proton Bridge uses self-signed certs on localhost
 	})
 	if err != nil {
 		conn.Close()
@@ -292,6 +293,15 @@ func classifyFromHeaders(headerBlock string) HeaderTrust {
 		return HeaderTrust{Level: channel.Unverified, HasSig: true}
 	}
 	return HeaderTrust{Level: channel.Unverified}
+}
+
+// isLoopback returns true if host is a loopback address.
+func isLoopback(host string) bool {
+	ip := net.ParseIP(host)
+	if ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost"
 }
 
 // Ensure Client satisfies io.Closer.

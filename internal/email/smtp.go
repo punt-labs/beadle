@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/smtp"
 	"strconv"
+	"time"
 )
 
 // SMTPSend delivers a raw RFC 822 message through Proton Bridge's SMTP server.
@@ -20,8 +21,7 @@ func SMTPSend(cfg *Config, from, to string, raw []byte) error {
 		return fmt.Errorf("read smtp password: %w", err)
 	}
 
-	// Connect to Proton Bridge SMTP
-	conn, err := net.Dial("tcp", addr)
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("dial smtp %s: %w", addr, err)
 	}
@@ -33,20 +33,17 @@ func SMTPSend(cfg *Config, from, to string, raw []byte) error {
 	}
 	defer c.Close()
 
-	// STARTTLS with self-signed cert (same as IMAP)
 	if err := c.StartTLS(&tls.Config{
-		InsecureSkipVerify: true, //nolint:gosec // Proton Bridge uses self-signed certs on localhost
+		InsecureSkipVerify: isLoopback(cfg.IMAPHost), //nolint:gosec // Proton Bridge uses self-signed certs on localhost
 	}); err != nil {
 		return fmt.Errorf("smtp starttls: %w", err)
 	}
 
-	// Authenticate with the same credentials as IMAP
 	auth := smtp.PlainAuth("", cfg.IMAPUser, password, cfg.IMAPHost)
 	if err := c.Auth(auth); err != nil {
 		return fmt.Errorf("smtp auth: %w", err)
 	}
 
-	// Send
 	if err := c.Mail(from); err != nil {
 		return fmt.Errorf("smtp MAIL FROM: %w", err)
 	}
@@ -71,7 +68,7 @@ func SMTPSend(cfg *Config, from, to string, raw []byte) error {
 // SMTPAvailable checks if Proton Bridge SMTP is reachable.
 func SMTPAvailable(cfg *Config) bool {
 	addr := net.JoinHostPort(cfg.IMAPHost, strconv.Itoa(cfg.SMTPPort))
-	conn, err := net.DialTimeout("tcp", addr, 2*1e9) // 2 seconds
+	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		return false
 	}

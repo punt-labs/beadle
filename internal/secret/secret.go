@@ -19,7 +19,11 @@ import (
 const service = "beadle"
 
 // Get resolves a named credential through the priority chain.
+// Name must not contain path separators to prevent path traversal.
 func Get(name string) (string, error) {
+	if strings.ContainsAny(name, "/\\") {
+		return "", fmt.Errorf("credential name %q contains path separator", name)
+	}
 	// 1. OS keychain
 	if val, err := keychainGet(name); err == nil && val != "" {
 		return val, nil
@@ -78,6 +82,7 @@ func configDir() (string, error) {
 }
 
 // fileGet reads a credential from ~/.config/beadle/<name>.
+// Rejects files that are group/world readable.
 func fileGet(name string) (string, error) {
 	dir, err := configDir()
 	if err != nil {
@@ -85,6 +90,14 @@ func fileGet(name string) (string, error) {
 	}
 
 	path := filepath.Join(dir, name)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode().Perm()&0077 != 0 {
+		return "", fmt.Errorf("credential file %s has unsafe permissions %o (must be 600)", path, info.Mode().Perm())
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
