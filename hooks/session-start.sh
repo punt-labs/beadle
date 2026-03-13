@@ -9,8 +9,8 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$REPO_ROOT}"
 # Deploy top-level commands (diff-and-copy)
 COMMANDS_DIR="$HOME/.claude/commands"
 DEPLOYED=()
-for cmd_file in "$PLUGIN_ROOT/commands/"*.md 2>/dev/null; do
-  [[ -f "$cmd_file" ]] || continue
+shopt -s nullglob
+for cmd_file in "$PLUGIN_ROOT/commands/"*.md; do
   name="$(basename "$cmd_file")"
   [[ "$name" == *-dev.md ]] && continue
   dest="$COMMANDS_DIR/$name"
