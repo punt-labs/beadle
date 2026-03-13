@@ -54,7 +54,7 @@ Expands to `make lint docs test`:
 | `internal/channel/` | Channel interface — `Message`, `TrustLevel`, shared types |
 | `internal/email/` | IMAP client (Proton Bridge), MIME parser, trust classifier, SMTP/Resend senders |
 | `internal/pgp/` | GPG signature verification and signing via `gpg` CLI in isolated GNUPGHOME |
-| `internal/mcp/` | MCP tool definitions and handlers (7 tools) |
+| `internal/mcp/` | MCP tool definitions and handlers (8 tools) |
 | `internal/secret/` | Credential resolution: OS keychain → file → env var |
 
 ### Trust Model

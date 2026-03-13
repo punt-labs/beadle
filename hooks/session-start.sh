@@ -19,14 +19,24 @@ for cmd_file in "$PLUGIN_ROOT/commands/"*.md 2>/dev/null; do
   fi
 done
 
-# Auto-allow MCP tool permissions
+# Auto-allow MCP tool permissions (prod and dev namespaces)
 SETTINGS="$HOME/.claude/settings.json"
-PATTERN="mcp__plugin_beadle_email__*"
+PATTERNS=("mcp__plugin_beadle_email__*" "mcp__plugin_beadle-dev_email__*")
 if [[ -f "$SETTINGS" ]]; then
-  if ! jq -e ".permissions.allow | index(\"$PATTERN\")" "$SETTINGS" >/dev/null 2>&1; then
-    jq --arg p "$PATTERN" '.permissions.allow += [$p]' "$SETTINGS" > "$SETTINGS.tmp" \
-      && mv "$SETTINGS.tmp" "$SETTINGS"
-  fi
+  for PATTERN in "${PATTERNS[@]}"; do
+    if ! jq -e ".permissions.allow | index(\"$PATTERN\")" "$SETTINGS" >/dev/null 2>&1; then
+      TMP=$(mktemp "$SETTINGS.XXXXXX")
+      if jq --arg p "$PATTERN" '
+        .permissions //= {} |
+        .permissions.allow //= [] |
+        .permissions.allow += [$p]
+      ' "$SETTINGS" > "$TMP"; then
+        mv "$TMP" "$SETTINGS"
+      else
+        rm -f "$TMP"
+      fi
+    fi
+  done
 fi
 
 # Report

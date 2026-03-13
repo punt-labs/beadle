@@ -16,6 +16,12 @@ RESULT=$(echo "$INPUT" | jq -r '
 # Bail on empty result (but not "null" — that's a valid empty-list response).
 [[ -z "$RESULT" ]] && exit 0
 
+# If RESULT is not valid JSON, treat it as an opaque string.
+if ! echo "$RESULT" | jq -e 'type' >/dev/null 2>&1; then
+  emit "$RESULT"
+  exit 0
+fi
+
 emit() {
   local summary="$1" ctx="$2"
   if [[ -n "$ctx" ]]; then
