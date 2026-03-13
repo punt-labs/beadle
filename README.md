@@ -13,12 +13,19 @@ The first shipping component is `beadle-email` — an MCP server providing email
 
 ## Quick Start
 
-### Email channel
+```bash
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/86827d3/install.sh | sh
+```
+
+<details>
+<summary>Build from source</summary>
 
 ```bash
 cd beadle && make build
 ./beadle-email doctor
 ```
+
+</details>
 
 Register with Claude Code by adding to `.mcp.json`:
 
