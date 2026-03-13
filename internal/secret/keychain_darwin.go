@@ -1,0 +1,48 @@
+package secret
+
+import (
+	"bytes"
+	"os/exec"
+	"strings"
+)
+
+// keychainAvailable checks if macOS Keychain is usable.
+func keychainAvailable() bool {
+	_, err := exec.LookPath("security")
+	return err == nil
+}
+
+// keychainGet reads a credential from macOS Keychain.
+func keychainGet(name string) (string, error) {
+	cmd := exec.Command("security", "find-generic-password",
+		"-s", service,
+		"-a", name,
+		"-w", // output password only
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// keychainSet stores a credential in macOS Keychain.
+func keychainSet(name, value string) error {
+	// Delete existing entry (ignore error if not found)
+	del := exec.Command("security", "delete-generic-password",
+		"-s", service,
+		"-a", name,
+	)
+	del.Run() //nolint:errcheck // OK if not found
+
+	cmd := exec.Command("security", "add-generic-password",
+		"-s", service,
+		"-a", name,
+		"-w", value,
+		"-U", // update if exists
+	)
+	return cmd.Run()
+}

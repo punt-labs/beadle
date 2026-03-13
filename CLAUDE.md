@@ -8,10 +8,10 @@ There is no such thing as a "pre-existing" issue. If you see a problem — in co
 
 Autonomous agent daemon with cryptographic owner control. GPG-signed instructions, declared permissions, tamperproof audit trail. Runs on the owner's machine as a background daemon.
 
-- **Package**: `punt-beadle`
-- **CLI**: `beadle`
-- **MCP server**: `beadle-server`
-- **Python**: 3.13+, managed with `uv`
+Two codebases:
+
+- **Python core** — daemon, pipeline execution, signing, audit log (`punt-beadle`, managed with `uv`)
+- **Go email channel** — MCP server for email communication (`beadle-email`, standalone binary)
 
 ## Standards
 
@@ -19,17 +19,22 @@ This project follows [Punt Labs standards](https://github.com/punt-labs/punt-kit
 
 ## Build & Run
 
+### Go email channel
+
 ```bash
-# Install with dev dependencies
+make build                              # Build beadle-email binary
+make check                              # All quality gates (vet, staticcheck, markdownlint, tests)
+./beadle-email serve                    # Start MCP server (stdio transport)
+./beadle-email version                  # Print version
+./beadle-email doctor                   # Check installation health
+./beadle-email status                   # Current config summary
+```
+
+### Python core (future)
+
+```bash
 uv sync --all-extras
-
-# CLI
 uv run beadle --help
-uv run beadle init
-uv run beadle run my-task.md
-
-# MCP server (stdio transport)
-uv run beadle-server
 ```
 
 ## Scratch Files
@@ -38,26 +43,55 @@ Use `.tmp/` at the project root for scratch and temporary files — never `/tmp`
 
 ## Quality Gates
 
-Run after every code change. All must pass with zero violations.
+Run before every commit. The Makefile is the source of truth (`make help`).
 
 ```bash
-uv run ruff check src/ tests/         # Lint
-uv run ruff format --check src/ tests/ # Format check
-uv run mypy src/ tests/                # Type check (strict)
-uv run pyright src/ tests/             # Type check (strict)
-uv run pytest tests/ -v                # All tests pass
+make check                             # All gates: lint + docs + test
 ```
 
-Build validation:
+Expands to `make lint docs test`:
 
-```bash
-uv build
-uvx twine check dist/*
-```
+- `go vet ./...`
+- `staticcheck ./...`
+- `npx markdownlint-cli2 "**/*.md"`
+- `go test -race -count=1 ./...`
 
 ## Architecture
 
-Module structure under `src/punt_beadle/`:
+### Go email channel (`cmd/beadle-email/`)
+
+| Package | Responsibility |
+|---------|---------------|
+| `cmd/beadle-email/` | CLI entry point: `serve`, `version`, `doctor`, `status` |
+| `internal/channel/` | Channel interface — `Message`, `TrustLevel`, shared types |
+| `internal/email/` | IMAP client (Proton Bridge), MIME parser, trust classifier, Resend sender, config |
+| `internal/pgp/` | GPG signature verification via `gpg` CLI in isolated GNUPGHOME |
+| `internal/mcp/` | MCP tool definitions and handlers (7 tools) |
+| `internal/secret/` | Credential resolution: OS keychain → file → env var |
+
+### Trust model
+
+Four levels based on sender identity and encryption:
+
+| Level | Sender | Signature | Detection |
+|-------|--------|-----------|-----------|
+| `trusted` | Proton→Proton | E2E (Proton) | `X-Pm-Content-Encryption: end-to-end` + `X-Pm-Origin: internal` |
+| `verified` | External | Valid PGP | `gpg --verify` returns 0 |
+| `untrusted` | External | Invalid PGP | `gpg --verify` returns non-zero |
+| `unverified` | External | None | No `multipart/signed` |
+
+### Credentials
+
+Resolved at runtime by name through a priority chain:
+
+1. **macOS Keychain** (`security` CLI) — v0.1.0
+2. **Linux libsecret** (`secret-tool` CLI) — v0.1.1
+3. **Secret file** (`~/.config/beadle/<name>`, mode 600)
+4. **Environment variable** (`BEADLE_IMAP_PASSWORD`, `BEADLE_RESEND_API_KEY`)
+
+Config file (`~/.config/beadle/email.json`) stores only connection parameters, never secrets.
+
+### Python core (`src/punt_beadle/`)
 
 | Module | Responsibility |
 |--------|---------------|
@@ -68,7 +102,6 @@ Module structure under `src/punt_beadle/`:
 | `pipeline.py` | Pipeline execution: preflight permission checks, two-level try-catch, stage composition |
 | `interpreters/` | Command interpreters: `bash.py`, `claude.py`, `python.py` |
 | `daemon.py` | Background daemon: IMAP polling, cron scheduling, health monitoring |
-| `email.py` | Proton Bridge integration: IMAP/SMTP client, GPG envelope handling |
 | `cli.py` | Typer CLI: `init`, `sign`, `verify`, `run`, `status`, `log`, `version` |
 | `server.py` | FastMCP server: MCP tools mirroring CLI commands |
 
@@ -79,6 +112,19 @@ Module structure under `src/punt_beadle/`:
 - **Isolated keychain.** Beadle stores keys in its own `GNUPGHOME`, never touching the user's system GPG keyring.
 - **Non-expiring keys rejected.** All command-signing keys must have an expiration date. This is a security invariant.
 - **Audit log is tamperproof.** Append-only, GPG-signed entries. Only the owner can clear the log.
+
+## Go Coding Standards
+
+- **Go 1.26+**. Module path: `github.com/punt-labs/beadle`.
+- **`internal/` for everything.** Nothing is exported outside the module.
+- **No `interface{}` or `any`** unless unavoidable.
+- **Errors are values, not strings.** Wrap with `fmt.Errorf("context: %w", err)`.
+- **No panics in library code.** Panics are for programmer bugs only.
+- **Table-driven tests** with `testify/assert` and `testify/require`.
+- **`-race` mandatory** for all test runs.
+- **MCP server logs to stderr** (stdout reserved for stdio transport).
+- **Never log secrets** — GPG key material, passwords, API keys, raw email content.
+- **No `exec.Command` with shell=true** — always pass argument lists.
 
 ## Python Coding Standards
 
@@ -218,21 +264,16 @@ Every PR must update the docs it affects. If a PR changes user-facing behavior a
 | `docs:` | Documentation |
 | `chore:` | Build, dependencies, CI |
 
-### Release Workflow
+### Release Workflow (Go email channel)
 
-1. **Bump version** in `pyproject.toml` and `src/punt_beadle/__init__.py`
-2. **Move `[Unreleased]`** entries in `CHANGELOG.md` to new version section with date
-3. **Run all quality gates** — ruff, mypy, pyright, pytest
-4. **Commit**: `chore: release vX.Y.Z`
-5. **Build locally**: `rm -rf dist/ && uv build && uvx twine check dist/*` (validation only — do NOT upload)
+1. **Bump version** in `cmd/beadle-email/main.go`
+2. **Move `[Unreleased]`** entries in `CHANGELOG.md` to new version section
+3. **Run all quality gates**: `make check`
+4. **Build locally**: `make dist`
+5. **Commit**: `chore: release vX.Y.Z`
 6. **Tag**: `git tag vX.Y.Z`
-7. **Push**: `git push origin main vX.Y.Z` (triggers GH Actions release workflow)
-8. **Wait for GH Actions**: `gh run watch` — workflow builds, publishes to TestPyPI, verifies install, then publishes to PyPI
-9. **GitHub release**: `gh release create vX.Y.Z --title "vX.Y.Z" --notes-file -` (use CHANGELOG entry)
-10. **Verify**: `uv tool install --force --refresh punt-beadle==X.Y.Z && beadle version`
-11. **Restore editable**: `uv tool install --force --editable .`
-
-A release is not complete until all steps are done. PyPI publishing is owned by GH Actions — never upload manually.
+7. **Push**: `git push origin main vX.Y.Z`
+8. **GitHub release**: `gh release create vX.Y.Z --title "vX.Y.Z" --notes-file -`
 
 ### Session Close Protocol
 
