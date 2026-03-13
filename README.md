@@ -13,6 +13,8 @@ The first shipping component is `beadle-email` — an MCP server providing email
 
 ## Install
 
+Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/INSTALL_SHA/install.sh | sh
 ```

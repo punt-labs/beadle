@@ -85,7 +85,7 @@ ok "downloaded"
 
 info "Verifying checksum..."
 
-MATCH_COUNT="$(grep -cF "  $ASSET" "$TMPDIR_DL/checksums.txt")"
+MATCH_COUNT="$(grep -cF "  $ASSET" "$TMPDIR_DL/checksums.txt" || true)"
 if [ "$MATCH_COUNT" -ne 1 ]; then
   fail "Expected exactly 1 checksum for $ASSET, found $MATCH_COUNT"
 fi
@@ -108,9 +108,9 @@ ok "SHA256 verified"
 
 info "Installing to $INSTALL_DIR..."
 
-mkdir -p "$INSTALL_DIR"
-mv "$TMPDIR_DL/$ASSET" "$INSTALL_DIR/$BINARY"
-chmod +x "$INSTALL_DIR/$BINARY"
+mkdir -p "$INSTALL_DIR" || fail "Failed to create $INSTALL_DIR"
+mv "$TMPDIR_DL/$ASSET" "$INSTALL_DIR/$BINARY" || fail "Failed to move binary to $INSTALL_DIR"
+chmod +x "$INSTALL_DIR/$BINARY" || fail "Failed to make $BINARY executable"
 ok "$INSTALL_DIR/$BINARY"
 
 if ! command -v "$BINARY" >/dev/null 2>&1; then
