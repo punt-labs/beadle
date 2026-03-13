@@ -29,7 +29,7 @@ func Sign(gpgBinary, signer, passphrase, to, subject, textBody string) (*SignedM
 
 	// The signed body part — CRLF line endings are mandatory (RFC 3156).
 	bodyPart := "Content-Type: text/plain; charset=utf-8\r\n" +
-		"Content-Transfer-Encoding: quoted-printable\r\n" +
+		"Content-Transfer-Encoding: 7bit\r\n" +
 		"\r\n" +
 		textBody + "\r\n"
 

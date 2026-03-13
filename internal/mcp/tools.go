@@ -205,6 +205,22 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("read message: %v", err)), nil
 		}
+
+		// Verify PGP signature if present, same as list_messages
+		if msg.TrustLevel == channel.Unverified {
+			raw, fetchErr := c.FetchRaw(folder, uint32(uid))
+			if fetchErr == nil {
+				result, verifyErr := pgp.Verify(h.cfg.GPGBinary, raw)
+				if verifyErr == nil {
+					if result.Valid {
+						msg.TrustLevel = channel.Verified
+					} else {
+						msg.TrustLevel = channel.Untrusted
+					}
+				}
+			}
+		}
+
 		return jsonResult(msg)
 	})
 }

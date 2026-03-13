@@ -154,14 +154,6 @@ func extractSignedParts(raw []byte) (signedData, signature, pubkey []byte, err e
 		signedData = signedData[:len(signedData)-2]
 	}
 
-	// Extract signature from the parsed message (reliable extraction)
-	// Re-parse to walk MIME parts
-	entity, parseErr := mail.ReadMessage(bytes.NewReader(raw))
-	if parseErr != nil {
-		return nil, nil, nil, fmt.Errorf("re-parse for sig extraction: %w", parseErr)
-	}
-	_ = entity // We already have the raw, use boundary splitting for sig too
-
 	// The signature is in parts[2] — parse it as a mini MIME part
 	sigPart := parts[2]
 	// Find the blank line separating headers from body
