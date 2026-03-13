@@ -139,6 +139,9 @@ func extractSignedParts(raw []byte) (signedData, signature, pubkey []byte, err e
 	// Split raw bytes on boundary to get verbatim signed part.
 	// We must use raw bytes (not re-serialized) to preserve the exact
 	// bytes that were signed, including CRLF line endings.
+	// Note: RFC 2046 boundary delimiters are always preceded by CRLF
+	// (except possibly the first one). The boundary value itself is
+	// chosen by the sender and should not appear in message content.
 	boundaryBytes := []byte("--" + boundary)
 	parts := bytes.Split(raw, boundaryBytes)
 	// parts[0] = preamble, [1] = first part (signed data), [2] = second part (signature), ...

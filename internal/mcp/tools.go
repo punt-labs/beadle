@@ -34,6 +34,27 @@ type handler struct {
 	logger *slog.Logger
 }
 
+// sendResult is the typed response for the send_email tool.
+type sendResult struct {
+	Status  string `json:"status"`
+	Method  string `json:"method"`
+	Signed  bool   `json:"signed"`
+	ID      string `json:"id,omitempty"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Subject string `json:"subject"`
+}
+
+// verifyResult is the typed response for the verify_signature tool.
+type verifyResult struct {
+	TrustLevel  channel.TrustLevel `json:"trust_level"`
+	Valid       bool               `json:"valid"`
+	KeyID       string             `json:"key_id,omitempty"`
+	Signer      string             `json:"signer,omitempty"`
+	KeyImported bool               `json:"key_imported"`
+	GPGOutput   string             `json:"gpg_output"`
+}
+
 // --- Tool Definitions ---
 
 func listMessagesTool() mcplib.Tool {
@@ -264,20 +285,19 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 }
 
 // trySendChain attempts to send via the best available method.
-func (h *handler) trySendChain(to, subject, body, html string) (map[string]any, error) {
+func (h *handler) trySendChain(to, subject, body, html string) (*sendResult, error) {
 	// 1. Proton Bridge SMTP — passes SPF/DKIM/DMARC for punt-labs.com
 	if email.SMTPAvailable(h.cfg) {
 		raw := email.ComposeRaw(h.cfg.FromAddress, to, subject, body)
 		if err := email.SMTPSend(h.cfg, h.cfg.FromAddress, to, raw); err != nil {
 			h.logger.Warn("smtp send failed, falling back to resend", "err", err)
 		} else {
-			return map[string]any{
-				"status":  "sent",
-				"method":  "proton-bridge-smtp",
-				"signed":  false,
-				"from":    h.cfg.FromAddress,
-				"to":      to,
-				"subject": subject,
+			return &sendResult{
+				Status:  "sent",
+				Method:  "proton-bridge-smtp",
+				From:    h.cfg.FromAddress,
+				To:      to,
+				Subject: subject,
 			}, nil
 		}
 	}
@@ -293,14 +313,13 @@ func (h *handler) trySendChain(to, subject, body, html string) (map[string]any, 
 		return nil, err
 	}
 
-	return map[string]any{
-		"status":  "sent",
-		"method":  "resend",
-		"signed":  false,
-		"id":      resp.ID,
-		"from":    h.cfg.FromAddress,
-		"to":      to,
-		"subject": subject,
+	return &sendResult{
+		Status:  "sent",
+		Method:  "resend",
+		ID:      resp.ID,
+		From:    h.cfg.FromAddress,
+		To:      to,
+		Subject: subject,
 	}, nil
 }
 
@@ -333,13 +352,13 @@ func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolReques
 			trustLevel = channel.Verified
 		}
 
-		return jsonResult(map[string]any{
-			"trust_level":  trustLevel,
-			"valid":        result.Valid,
-			"key_id":       result.KeyID,
-			"signer":       result.Signer,
-			"key_imported": result.KeyImported,
-			"gpg_output":   result.Output,
+		return jsonResult(&verifyResult{
+			TrustLevel:  trustLevel,
+			Valid:       result.Valid,
+			KeyID:       result.KeyID,
+			Signer:      result.Signer,
+			KeyImported: result.KeyImported,
+			GPGOutput:   result.Output,
 		})
 	})
 }
