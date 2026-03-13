@@ -268,6 +268,22 @@ func (c *Client) parseMessage(buf *imapclient.FetchMessageBuffer, raw []byte) (*
 	}, nil
 }
 
+// MoveMessage moves a message by UID from one folder to another.
+// The go-imap/v2 Move command handles the MOVE extension (RFC 6851) with
+// automatic fallback to COPY+STORE+EXPUNGE for older servers.
+func (c *Client) MoveMessage(srcFolder string, uid uint32, dstFolder string) error {
+	_, err := c.imap.Select(srcFolder, &imap.SelectOptions{ReadOnly: false}).Wait()
+	if err != nil {
+		return fmt.Errorf("select %q: %w", srcFolder, err)
+	}
+
+	_, err = c.imap.Move(imap.UIDSetNum(imap.UID(uid)), dstFolder).Wait()
+	if err != nil {
+		return fmt.Errorf("move uid %d to %q: %w", uid, dstFolder, err)
+	}
+	return nil
+}
+
 func formatAddress(addr imap.Address) string {
 	if addr.Name != "" {
 		return fmt.Sprintf("%s <%s@%s>", addr.Name, addr.Mailbox, addr.Host)

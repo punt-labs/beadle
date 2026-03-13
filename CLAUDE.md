@@ -54,7 +54,7 @@ Expands to `make lint docs test`:
 | `internal/channel/` | Channel interface — `Message`, `TrustLevel`, shared types |
 | `internal/email/` | IMAP client (Proton Bridge), MIME parser, trust classifier, SMTP/Resend senders |
 | `internal/pgp/` | GPG signature verification and signing via `gpg` CLI in isolated GNUPGHOME |
-| `internal/mcp/` | MCP tool definitions and handlers (7 tools) |
+| `internal/mcp/` | MCP tool definitions and handlers (8 tools) |
 | `internal/secret/` | Credential resolution: OS keychain → file → env var |
 
 ### Trust Model
@@ -146,7 +146,9 @@ bd sync                     # Sync with git remote
 
 ### Branch Discipline
 
-All code changes go on feature branches. Never commit directly to main.
+All code changes go on feature branches. Never commit directly to main. **Pushing to main is blocked** by branch protection rules and will fail.
+
+**Pre-PR review.** Before creating a GitHub PR, run the `code-reviewer` and `silent-failure-hunter` agents in parallel on the diff. Address any issues they find before opening the PR. This catches problems before they reach Copilot/Bugbot, reducing review cycles.
 
 **Use worktrees by default.** Before creating a branch, check `/who` for other active sessions. If other sessions are active, use a worktree to avoid interfering with their working tree. If no other sessions are active, a regular branch is fine.
 
