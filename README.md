@@ -11,18 +11,33 @@ The first shipping component is `beadle-email` — an MCP server providing email
 
 **Platforms:** macOS, Linux
 
-## Quick Start
+## Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/86827d3/install.sh | sh
 ```
 
 <details>
-<summary>Build from source</summary>
+<summary>Manual install</summary>
 
 ```bash
-cd beadle && make build
-./beadle-email doctor
+mkdir -p ~/.local/bin
+curl -fsSL https://github.com/punt-labs/beadle/releases/latest/download/beadle-email-darwin-arm64 -o ~/.local/bin/beadle-email
+chmod +x ~/.local/bin/beadle-email
+```
+
+Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
+Ensure `~/.local/bin` is on your `PATH`.
+
+</details>
+
+<details>
+<summary>Inspect before running</summary>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/86827d3/install.sh -o install.sh
+cat install.sh
+sh install.sh
 ```
 
 </details>
@@ -33,7 +48,7 @@ Register with Claude Code by adding to `.mcp.json`:
 {
   "mcpServers": {
     "beadle-email": {
-      "command": "/path/to/beadle-email",
+      "command": "~/.local/bin/beadle-email",
       "args": ["serve"]
     }
   }
