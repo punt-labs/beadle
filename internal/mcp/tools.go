@@ -227,9 +227,10 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 			return mcplib.NewToolResultError(fmt.Sprintf("read message: %v", err)), nil
 		}
 
-		// Verify PGP signature if the message has one.
-		// Uses the same detection logic as ClassifyTrustDetailed to avoid
-		// unnecessary IMAP round-trips for unsigned messages.
+		// Verify PGP signature if the Content-Type indicates multipart/signed.
+		// We pass nil for raw bytes — this checks the header only, not body
+		// scanning. Messages with PGP markers only in the body (no header)
+		// will not be auto-verified; use verify_signature explicitly for those.
 		if msg.TrustLevel == channel.Unverified && email.HasPGPSignature(msg.RawHeaders["Content-Type"], nil) {
 			raw, fetchErr := c.FetchRaw(folder, uint32(uid))
 			if fetchErr == nil {
@@ -292,7 +293,10 @@ func (h *handler) trySendChain(to, subject, body, html string) (*sendResult, err
 	// Note: SMTP path sends plain text only. The html parameter is only
 	// used by the Resend fallback which supports structured HTML fields.
 	if email.SMTPAvailable(h.cfg) {
-		raw := email.ComposeRaw(h.cfg.FromAddress, to, subject, body)
+		raw, composeErr := email.ComposeRaw(h.cfg.FromAddress, to, subject, body)
+		if composeErr != nil {
+			return nil, composeErr
+		}
 		if err := email.SMTPSend(h.cfg, h.cfg.FromAddress, to, raw); err != nil {
 			h.logger.Warn("smtp send failed, falling back to resend", "err", err)
 		} else {

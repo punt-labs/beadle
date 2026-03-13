@@ -14,11 +14,11 @@ const resendAPIURL = "https://api.resend.com/emails"
 
 // ComposeRaw builds a simple RFC 822 message (no signing, no HTML).
 // Used for Proton Bridge SMTP where Proton handles its own encryption.
-// Rejects CR/LF in header fields to prevent header injection.
-func ComposeRaw(from, to, subject, textBody string) []byte {
+// Returns an error if header fields contain CR/LF (header injection).
+func ComposeRaw(from, to, subject, textBody string) ([]byte, error) {
 	for _, field := range []string{from, to, subject} {
 		if strings.ContainsAny(field, "\r\n") {
-			return nil // caller gets empty message, SMTP send will fail
+			return nil, fmt.Errorf("header field contains CR/LF")
 		}
 	}
 	var msg bytes.Buffer
@@ -29,7 +29,7 @@ func ComposeRaw(from, to, subject, textBody string) []byte {
 	fmt.Fprintf(&msg, "Content-Type: text/plain; charset=utf-8\r\n")
 	fmt.Fprintf(&msg, "\r\n")
 	fmt.Fprintf(&msg, "%s\r\n", textBody)
-	return msg.Bytes()
+	return msg.Bytes(), nil
 }
 
 // SendRequest is the payload for sending an email.
