@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -13,7 +14,13 @@ const resendAPIURL = "https://api.resend.com/emails"
 
 // ComposeRaw builds a simple RFC 822 message (no signing, no HTML).
 // Used for Proton Bridge SMTP where Proton handles its own encryption.
+// Rejects CR/LF in header fields to prevent header injection.
 func ComposeRaw(from, to, subject, textBody string) []byte {
+	for _, field := range []string{from, to, subject} {
+		if strings.ContainsAny(field, "\r\n") {
+			return nil // caller gets empty message, SMTP send will fail
+		}
+	}
 	var msg bytes.Buffer
 	fmt.Fprintf(&msg, "From: %s\r\n", from)
 	fmt.Fprintf(&msg, "To: %s\r\n", to)
