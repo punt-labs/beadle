@@ -121,3 +121,61 @@ server via `claude mcp add -s user`.
 
 **No manual steps after install.** The installer completes all registration.
 User just restarts Claude Code.
+
+## DES-010: Command naming — /mail, /inbox, /send
+
+**Decision:** Three top-level slash commands for beadle-email, designed as verbs:
+
+| Command | Meaning | Scope |
+|---------|---------|-------|
+| `/mail` | "Mail this to me/someone" | Email-specific outbound. Always means email. |
+| `/inbox` | "Process your inbox" | Beadle checks its own inbox for owner instructions. |
+| `/send` | "Send via any channel" | Multi-channel outbound. Email today, Signal later. |
+
+**Examples:**
+
+- `/mail me a summary` — email a summary to the owner
+- `/mail this to kai@example.com` — email to a specific recipient
+- `/inbox` — beadle checks its inbox for new messages
+- `/inbox check for anything from me` — filtered inbox check
+- `/send me an email` — same as `/mail` today
+- `/send me a link on Signal` — future: routes to Signal channel
+
+**Why three verbs, not one:** `/mail` and `/send` overlap today (both send email)
+but diverge when new channels arrive. `/send` routes by channel; `/mail` always
+means email. `/inbox` is the inbound verb — beadle processing its own inbox, not
+the user checking their email. The beadle checks for orders from the authority.
+
+**Namespace conflicts avoided:** `/read` (biff), `/write` (biff), `/recap` (vox),
+`/check` (z-spec) are all taken. `/mail`, `/inbox`, `/send` are clean.
+
+**Future:** `/read` may evolve from biff-only to multi-channel inbox (biff +
+email + Signal), but that's a cross-plugin design decision for later.
+
+**Plugin namespace:** `beadle:mail`, `beadle:inbox`, `beadle:send` as
+plugin-scoped commands. `/mail`, `/inbox`, `/send` deployed to
+`~/.claude/commands/` by the SessionStart hook.
+
+## DES-011: Dual install — Claude Plugin or MCP-only
+
+**Decision:** Two mutually exclusive installation paths:
+
+| Path | What you get | How | Use case |
+|------|-------------|-----|----------|
+| **Claude Plugin** | MCP server + hooks + commands + output suppression | `claude plugin install punt-labs/beadle` | Claude Code users |
+| **MCP-only** | MCP server only | `install.sh` → `claude mcp add` (or manual) | GitHub Copilot, other MCP clients |
+
+**Why mutually exclusive:** `plugin.json` registers the MCP server via `mcpServers`.
+The installer registers it via `claude mcp add`. Running both creates a
+double-registration. The installer should detect plugin installation and skip MCP
+registration (or vice versa).
+
+**Scope:** This pattern applies to all Punt Labs projects that ship both a plugin
+and a standalone MCP server. The plugin path is the full experience; the MCP-only
+path is for non-Claude-Code clients that speak MCP but have no plugin system.
+
+**MCP-only path:** The binary is the complete product (CLI standards: "the CLI is
+the complete product"). Any MCP client that can spawn `beadle-email serve` gets
+the full MCP tool set. What they miss: output suppression (two-channel display),
+slash commands, and lifecycle hooks. These are Claude Code affordances, not
+capabilities.
