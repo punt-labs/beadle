@@ -29,11 +29,12 @@ else
   fail "'curl' not found. Install curl first."
 fi
 
-# Optional: check for gpg (needed for PGP verification features)
+# Optional: gpg is needed by beadle-email for PGP signature verification
+# of inbound emails. The installer itself does not use gpg.
 if command -v gpg >/dev/null 2>&1; then
-  ok "gpg found (PGP verification available)"
+  ok "gpg found (needed for email PGP verification)"
 else
-  warn "gpg not found — PGP signature verification will be unavailable"
+  warn "gpg not found — email PGP signature verification will be unavailable"
 fi
 
 # --- Step 2: Detect platform ---
@@ -66,7 +67,7 @@ info "Downloading $BINARY..."
 DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ASSET"
 CHECKSUMS_URL="https://github.com/$REPO/releases/latest/download/checksums.txt"
 
-TMPDIR_DL="$(mktemp -d)"
+TMPDIR_DL="$(mktemp -d -t beadle-email.XXXXXX)"
 cleanup_tmpdir() { rm -rf "$TMPDIR_DL"; }
 trap cleanup_tmpdir EXIT INT TERM
 
@@ -78,11 +79,11 @@ ok "downloaded"
 
 info "Verifying checksum..."
 
-MATCH_COUNT="$(grep -cF "  $ASSET" "$TMPDIR_DL/checksums.txt")"
-if [ "$MATCH_COUNT" -ne 1 ]; then
-  fail "Expected exactly 1 checksum for $ASSET, found $MATCH_COUNT"
+# Use awk for exact filename match (grep -F can substring-match .sig files)
+EXPECTED="$(awk -v asset="$ASSET" '$2 == asset {print $1}' "$TMPDIR_DL/checksums.txt")"
+if [ -z "$EXPECTED" ]; then
+  fail "No checksum found for $ASSET in checksums.txt"
 fi
-EXPECTED="$(grep -F "  $ASSET" "$TMPDIR_DL/checksums.txt" | awk '{print $1}')"
 
 if command -v sha256sum >/dev/null 2>&1; then
   ACTUAL="$(sha256sum "$TMPDIR_DL/$ASSET" | awk '{print $1}')"
@@ -101,9 +102,9 @@ ok "SHA256 verified"
 
 info "Installing to $INSTALL_DIR..."
 
-mkdir -p "$INSTALL_DIR"
-mv "$TMPDIR_DL/$ASSET" "$INSTALL_DIR/$BINARY"
-chmod +x "$INSTALL_DIR/$BINARY"
+mkdir -p "$INSTALL_DIR" || fail "Failed to create $INSTALL_DIR"
+mv "$TMPDIR_DL/$ASSET" "$INSTALL_DIR/$BINARY" || fail "Failed to move binary to $INSTALL_DIR"
+chmod +x "$INSTALL_DIR/$BINARY" || fail "Failed to make $BINARY executable"
 ok "$INSTALL_DIR/$BINARY"
 
 if ! command -v "$BINARY" >/dev/null 2>&1; then
@@ -115,11 +116,14 @@ fi
 
 info "Verifying installation..."
 
-if command -v "$BINARY" >/dev/null 2>&1; then
-  VERSION="$("$BINARY" version 2>/dev/null || echo "unknown")"
-  ok "$BINARY $VERSION ($(command -v "$BINARY"))"
-elif [ -x "$INSTALL_DIR/$BINARY" ]; then
-  ok "$INSTALL_DIR/$BINARY (not yet on PATH)"
+if [ -x "$INSTALL_DIR/$BINARY" ]; then
+  VERSION="$("$INSTALL_DIR/$BINARY" version 2>/dev/null || echo "unknown")"
+  ok "$BINARY $VERSION ($INSTALL_DIR/$BINARY)"
+  # Warn if a different binary is earlier on PATH
+  WHICH_PATH="$(command -v "$BINARY" 2>/dev/null || true)"
+  if [ -n "$WHICH_PATH" ] && [ "$WHICH_PATH" != "$INSTALL_DIR/$BINARY" ]; then
+    warn "Another $BINARY exists at $WHICH_PATH (may shadow the new install)"
+  fi
 else
   fail "$BINARY not found after installation"
 fi
