@@ -87,7 +87,7 @@ func fileGet(name string) (string, error) {
 		return "", err
 	}
 	if info.Mode().Perm()&0077 != 0 {
-		return "", fmt.Errorf("credential file %s has unsafe permissions %o (must be 600)", path, info.Mode().Perm())
+		return "", fmt.Errorf("credential file %s has unsafe permissions %o (must not be group/world readable)", path, info.Mode().Perm())
 	}
 
 	data, err := os.ReadFile(path)

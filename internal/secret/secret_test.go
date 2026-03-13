@@ -9,19 +9,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFileRoundtrip(t *testing.T) {
+func TestFileGet(t *testing.T) {
+	// Override HOME so fileGet resolves to our temp dir
 	dir := t.TempDir()
-	name := "test-cred"
-	path := filepath.Join(dir, name)
+	t.Setenv("HOME", dir)
 
-	err := os.WriteFile(path, []byte("s3cret\n"), 0600)
-	require.NoError(t, err)
+	cfgDir := filepath.Join(dir, ".config", "beadle")
+	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "test-cred"), []byte("s3cret\n"), 0600))
 
-	// Read back the file directly (fileGet uses ~/.config/beadle/ which
-	// won't have this test file)
-	data, err := os.ReadFile(path)
+	val, err := fileGet("test-cred")
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "s3cret")
+	assert.Equal(t, "s3cret", val)
+}
+
+func TestFileGet_UnsafePerms(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	cfgDir := filepath.Join(dir, ".config", "beadle")
+	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "world-readable"), []byte("s3cret\n"), 0644))
+
+	_, err := fileGet("world-readable")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsafe permissions")
 }
 
 func TestGet_EnvFallback(t *testing.T) {

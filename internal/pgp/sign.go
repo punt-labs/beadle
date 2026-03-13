@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // SignedMessage holds the raw RFC 3156 multipart/signed message bytes
@@ -22,6 +23,13 @@ type SignedMessage struct {
 // both in a multipart/signed envelope. The passphrase is passed to gpg via
 // a temp file descriptor to avoid exposing it in process arguments.
 func Sign(gpgBinary, signer, passphrase, to, subject, textBody string) (*SignedMessage, error) {
+	// Reject CR/LF in header fields to prevent header injection.
+	for _, field := range []string{signer, to, subject} {
+		if strings.ContainsAny(field, "\r\n") {
+			return nil, fmt.Errorf("header field contains CR/LF")
+		}
+	}
+
 	boundary, err := randomBoundary()
 	if err != nil {
 		return nil, fmt.Errorf("generate boundary: %w", err)

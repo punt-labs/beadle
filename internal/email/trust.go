@@ -50,7 +50,7 @@ func ClassifyTrustDetailed(headers map[string]string, raw []byte) TrustResult {
 
 	// Check for PGP signature in Content-Type or MIME parts
 	ct := headers["Content-Type"]
-	hasSig := hasPGPSignature(ct, raw)
+	hasSig := HasPGPSignature(ct, raw)
 
 	if hasSig {
 		// Signature present but not yet verified — caller must run PGP verification
@@ -74,7 +74,9 @@ func ClassifyTrustDetailed(headers map[string]string, raw []byte) TrustResult {
 	}
 }
 
-func hasPGPSignature(contentType string, raw []byte) bool {
+// HasPGPSignature checks if a message contains a PGP signature by
+// inspecting the Content-Type header and scanning raw bytes for markers.
+func HasPGPSignature(contentType string, raw []byte) bool {
 	if contentType != "" {
 		mediaType, _, _ := mime.ParseMediaType(contentType)
 		if mediaType == "multipart/signed" {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -229,9 +228,9 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		}
 
 		// Verify PGP signature if the message has one.
-		// Only attempt verification when Content-Type indicates multipart/signed
-		// to avoid unnecessary IMAP round-trips for unsigned messages.
-		if msg.TrustLevel == channel.Unverified && strings.Contains(strings.ToLower(msg.RawHeaders["Content-Type"]), "multipart/signed") {
+		// Uses the same detection logic as ClassifyTrustDetailed to avoid
+		// unnecessary IMAP round-trips for unsigned messages.
+		if msg.TrustLevel == channel.Unverified && email.HasPGPSignature(msg.RawHeaders["Content-Type"], nil) {
 			raw, fetchErr := c.FetchRaw(folder, uint32(uid))
 			if fetchErr == nil {
 				result, verifyErr := pgp.Verify(h.cfg.GPGBinary, raw)
@@ -290,6 +289,8 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 // trySendChain attempts to send via the best available method.
 func (h *handler) trySendChain(to, subject, body, html string) (*sendResult, error) {
 	// 1. Proton Bridge SMTP — passes SPF/DKIM/DMARC for punt-labs.com
+	// Note: SMTP path sends plain text only. The html parameter is only
+	// used by the Resend fallback which supports structured HTML fields.
 	if email.SMTPAvailable(h.cfg) {
 		raw := email.ComposeRaw(h.cfg.FromAddress, to, subject, body)
 		if err := email.SMTPSend(h.cfg, h.cfg.FromAddress, to, raw); err != nil {
