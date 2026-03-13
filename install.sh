@@ -130,7 +130,18 @@ else
   ok "marketplace registered"
 fi
 
-# --- Step 7: Verify ---
+# --- Step 7: Register MCP server ---
+
+info "Registering MCP server..."
+
+if claude mcp get "$BINARY" < /dev/null 2>/dev/null | grep -q "$BINARY"; then
+  ok "MCP server already registered"
+else
+  claude mcp add -s user "$BINARY" -- "$INSTALL_DIR/$BINARY" serve < /dev/null || fail "Failed to register MCP server"
+  ok "MCP server registered (user scope)"
+fi
+
+# --- Step 8: Verify ---
 
 info "Verifying installation..."
 
@@ -145,7 +156,4 @@ fi
 # --- Done ---
 
 printf '\n%b%b%s is ready!%b\n\n' "$GREEN" "$BOLD" "$BINARY" "$NC"
-printf 'Next steps:\n'
-printf '  1. Configure credentials: beadle-email doctor\n'
-printf '  2. Register MCP server in .mcp.json:\n'
-printf '     {"mcpServers":{"beadle-email":{"command":"%s/%s","args":["serve"]}}}\n\n' "$INSTALL_DIR" "$BINARY"
+printf 'Restart Claude Code to activate. Run beadle-email doctor to check credentials.\n\n'
