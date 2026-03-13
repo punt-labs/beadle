@@ -52,6 +52,19 @@ sh install.sh
 
 </details>
 
+Register with Claude Code by adding to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "beadle-email": {
+      "command": "~/.local/bin/beadle-email",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
 <details>
 <summary>Credential setup</summary>
 
