@@ -3,6 +3,7 @@
 > Autonomous agent daemon with cryptographic owner control.
 
 [![License](https://img.shields.io/github/license/punt-labs/beadle)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/beadle/test.yml?label=CI)](https://github.com/punt-labs/beadle/actions/workflows/test.yml)
 [![Working Backwards](https://img.shields.io/badge/Working_Backwards-hypothesis-lightgrey)](./prfaq.pdf)
 
 Beadle runs on your machine as a background daemon. Every action requires a GPG-signed instruction from the owner, every command declares its permissions upfront, and the audit log is tamperproof. The agent has zero authority of its own — trust is earned through cryptographic proof, not granted by default.
@@ -19,6 +20,8 @@ Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/537a97d/install.sh | sh
 ```
 
+Restart Claude Code. The installer downloads the binary, verifies its SHA256 checksum, registers the Punt Labs marketplace, and registers the MCP server — no manual steps.
+
 <details>
 <summary>Manual install</summary>
 
@@ -26,6 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/537a97d/install.sh
 mkdir -p ~/.local/bin
 curl -fsSL https://github.com/punt-labs/beadle/releases/latest/download/beadle-email-darwin-arm64 -o ~/.local/bin/beadle-email
 chmod +x ~/.local/bin/beadle-email
+claude mcp add -s user beadle-email -- ~/.local/bin/beadle-email serve
 ```
 
 Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
@@ -53,19 +57,6 @@ sh install.sh
 - (Optional) [Resend](https://resend.com) API key for fallback sending
 
 </details>
-
-Register with Claude Code by adding to `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "beadle-email": {
-      "command": "~/.local/bin/beadle-email",
-      "args": ["serve"]
-    }
-  }
-}
-```
 
 <details>
 <summary>Credential setup</summary>
@@ -154,7 +145,7 @@ Messages from Proton-to-Proton senders show `trusted`. External messages with va
 ### Check installation health
 
 ```text
-$ ./beadle-email doctor
+$ beadle-email doctor
 
 [+] secret_backends  macOS Keychain, file (~/.config/beadle/), environment variable
 [+] config           /Users/you/.config/beadle/email.json
@@ -244,6 +235,9 @@ beadle/
 - MIME parsing and structure inspection
 - GPG signature verification with system keyring bridging
 - `doctor` and `status` CLI diagnostics
+- Installer with SHA256 verification and automatic MCP registration
+- CI: vet + staticcheck + race tests on push/PR
+- Release workflow: 4 platform binaries + checksums on tag push
 
 ### Next
 
@@ -255,6 +249,7 @@ beadle/
 
 ## Documentation
 
+[Design Log](DESIGN.md) |
 [Email Channel Plan](docs/email-channel-plan.md) |
 [Changelog](CHANGELOG.md)
 
