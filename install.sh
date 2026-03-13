@@ -81,8 +81,12 @@ info "Verifying checksum..."
 
 # Use awk for exact filename match (grep -F can substring-match .sig files)
 EXPECTED="$(awk -v asset="$ASSET" '$2 == asset {print $1}' "$TMPDIR_DL/checksums.txt")"
-if [ -z "$EXPECTED" ]; then
+MATCH_COUNT="$(printf '%s\n' "$EXPECTED" | grep -c . || true)"
+if [ "$MATCH_COUNT" -eq 0 ] || [ -z "$EXPECTED" ]; then
   fail "No checksum found for $ASSET in checksums.txt"
+fi
+if [ "$MATCH_COUNT" -gt 1 ]; then
+  fail "Multiple checksums found for $ASSET in checksums.txt (corrupted release?)"
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
