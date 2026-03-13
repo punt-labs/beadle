@@ -117,7 +117,8 @@ case "$TOOL_NAME" in
     ;;
 
   check_trust)
-    TRUST=$(echo "$RESULT" | jq -r '.trust_level // "unknown"')
+    # TrustResult serializes trust level as "level", not "trust_level".
+    TRUST=$(echo "$RESULT" | jq -r '.level // "unknown"')
     ENCRYPTION=$(echo "$RESULT" | jq -r '.encryption // empty')
     SUMMARY="$TRUST"
     [[ -n "$ENCRYPTION" ]] && SUMMARY="${TRUST} · ${ENCRYPTION}"

@@ -25,7 +25,7 @@ done
 # Auto-allow MCP tool permissions (prod and dev namespaces)
 SETTINGS="$HOME/.claude/settings.json"
 if ! command -v jq >/dev/null 2>&1; then
-  echo '{"hookSpecificOutput":{"additionalContext":"Beadle SessionStart: jq not found, skipping permission setup"}}' >&2
+  echo '{"hookSpecificOutput":{"additionalContext":"Beadle SessionStart: jq not found, skipping permission setup"}}'
   exit 0
 fi
 PATTERNS=("mcp__plugin_beadle_email__*" "mcp__plugin_beadle-dev_email__*")
