@@ -27,6 +27,7 @@ func RegisterTools(s *server.MCPServer, cfg *email.Config, logger *slog.Logger) 
 	s.AddTool(verifySignatureTool(), h.verifySignature)
 	s.AddTool(showMIMETool(), h.showMIME)
 	s.AddTool(checkTrustTool(), h.checkTrust)
+	s.AddTool(moveMessageTool(), h.moveMessage)
 }
 
 type handler struct {
@@ -153,6 +154,24 @@ func checkTrustTool() mcplib.Tool {
 		mcplib.WithString("message_id",
 			mcplib.Required(),
 			mcplib.Description("Message UID"),
+		),
+	)
+}
+
+func moveMessageTool() mcplib.Tool {
+	return mcplib.NewTool("move_message",
+		mcplib.WithDescription("Move a message to another folder. Defaults to Archive. Use for archiving, trashing, or reorganizing messages."),
+		mcplib.WithString("folder",
+			mcplib.Description("Source IMAP folder name"),
+			mcplib.DefaultString("INBOX"),
+		),
+		mcplib.WithString("message_id",
+			mcplib.Required(),
+			mcplib.Description("Message UID to move"),
+		),
+		mcplib.WithString("destination",
+			mcplib.Description("Destination folder name"),
+			mcplib.DefaultString("Archive"),
 		),
 	)
 }
@@ -419,6 +438,40 @@ func (h *handler) checkTrust(ctx context.Context, req mcplib.CallToolRequest) (*
 		result := email.ClassifyTrustDetailed(headers, raw)
 
 		return jsonResult(result)
+	})
+}
+
+// moveResult is the typed response for the move_message tool.
+type moveResult struct {
+	Status      string `json:"status"`
+	MessageID   string `json:"message_id"`
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+}
+
+func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	folder := stringParam(req, "folder", "INBOX")
+	msgID, err := req.RequireString("message_id")
+	if err != nil {
+		return mcplib.NewToolResultError("message_id is required"), nil
+	}
+	destination := stringParam(req, "destination", "Archive")
+
+	uid, err := strconv.ParseUint(msgID, 10, 32)
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
+	}
+
+	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
+		if err := c.MoveMessage(folder, uint32(uid), destination); err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("move message: %v", err)), nil
+		}
+		return jsonResult(&moveResult{
+			Status:      "moved",
+			MessageID:   msgID,
+			Source:      folder,
+			Destination: destination,
+		})
 	})
 }
 
