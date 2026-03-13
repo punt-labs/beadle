@@ -101,14 +101,13 @@ Single config file at `~/.config/beadle/email.json`:
   "imap_host": "127.0.0.1",
   "imap_port": 1143,
   "imap_user": "claude@punt-labs.com",
-  "imap_password_file": "~/.config/beadle/imap-password",
-  "resend_api_key_file": "~/.config/beadle/resend-api-key",
+  "smtp_port": 1025,
   "from_address": "claude@punt-labs.com",
   "gpg_binary": "gpg"
 }
 ```
 
-For v0.1.0, we can symlink or copy the existing `~/.config/healthcheck/smtp-password` to bootstrap. The Resend API key comes from the environment or the file.
+Credentials are resolved at runtime via the `internal/secret` package (macOS Keychain → file → env var), not stored in config. See README for credential setup.
 
 ## Build Sequence
 

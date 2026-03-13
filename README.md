@@ -80,7 +80,7 @@ Configuration file (`~/.config/beadle/email.json`) stores connection parameters 
 
 ## Features
 
-- **7 MCP tools** --- list, read, search, send, verify signatures, inspect MIME, classify trust
+- **7 MCP tools** --- list, read, send, verify signatures, inspect MIME, classify trust, list folders
 - **Four-level trust model** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
 - **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically, no separate verification step needed
 - **Proton Bridge native** --- connects via IMAP STARTTLS for reading, SMTP for sending, with Resend API fallback

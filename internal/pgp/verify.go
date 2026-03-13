@@ -36,8 +36,10 @@ func Verify(gpgBinary string, raw []byte) (*VerifyResult, error) {
 		return nil, err
 	}
 
-	// Create isolated GPG homedir
-	tmpDir, err := os.MkdirTemp("", "beadle-gpg-*")
+	// Create isolated GPG homedir under /tmp to keep the path short.
+	// gpg-agent communicates via Unix socket, which has a 108-byte path limit.
+	// os.MkdirTemp("") on macOS yields /var/folders/... paths that exceed this.
+	tmpDir, err := os.MkdirTemp("/tmp", "bg-*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}

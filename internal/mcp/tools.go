@@ -75,7 +75,7 @@ func listFoldersTool() mcplib.Tool {
 
 func sendEmailTool() mcplib.Tool {
 	return mcplib.NewTool("send_email",
-		mcplib.WithDescription("Send an email via Resend API. Always sends from the configured address (claude@punt-labs.com)."),
+		mcplib.WithDescription("Send an email via Proton Bridge SMTP (primary) or Resend API (fallback). Sends from the configured address."),
 		mcplib.WithString("to",
 			mcplib.Required(),
 			mcplib.Description("Recipient email address"),
