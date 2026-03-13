@@ -6,20 +6,15 @@ There is no such thing as a "pre-existing" issue. If you see a problem — in co
 
 ## Project Overview
 
-Autonomous agent daemon with cryptographic owner control. GPG-signed instructions, declared permissions, tamperproof audit trail. Runs on the owner's machine as a background daemon.
+Autonomous agent daemon with cryptographic owner control. GPG-signed instructions, declared permissions, tamperproof audit trail. Runs on the owner's machine as a background daemon. Written in Go.
 
-Two codebases:
-
-- **Python core** — daemon, pipeline execution, signing, audit log (`punt-beadle`, managed with `uv`)
-- **Go email channel** — MCP server for email communication (`beadle-email`, standalone binary)
+The first shipping component is `beadle-email` — an MCP server for email communication via Proton Bridge with a four-level PGP trust model.
 
 ## Standards
 
 This project follows [Punt Labs standards](https://github.com/punt-labs/punt-kit). When this CLAUDE.md conflicts with punt-kit standards, this file wins (most specific wins).
 
 ## Build & Run
-
-### Go email channel
 
 ```bash
 make build                              # Build beadle-email binary
@@ -28,13 +23,6 @@ make check                              # All quality gates (vet, staticcheck, m
 ./beadle-email version                  # Print version
 ./beadle-email doctor                   # Check installation health
 ./beadle-email status                   # Current config summary
-```
-
-### Python core (future)
-
-```bash
-uv sync --all-extras
-uv run beadle --help
 ```
 
 ## Scratch Files
@@ -58,18 +46,18 @@ Expands to `make lint docs test`:
 
 ## Architecture
 
-### Go email channel (`cmd/beadle-email/`)
+### Package Map
 
 | Package | Responsibility |
 |---------|---------------|
 | `cmd/beadle-email/` | CLI entry point: `serve`, `version`, `doctor`, `status` |
 | `internal/channel/` | Channel interface — `Message`, `TrustLevel`, shared types |
-| `internal/email/` | IMAP client (Proton Bridge), MIME parser, trust classifier, Resend sender, config |
-| `internal/pgp/` | GPG signature verification via `gpg` CLI in isolated GNUPGHOME |
+| `internal/email/` | IMAP client (Proton Bridge), MIME parser, trust classifier, SMTP/Resend senders |
+| `internal/pgp/` | GPG signature verification and signing via `gpg` CLI in isolated GNUPGHOME |
 | `internal/mcp/` | MCP tool definitions and handlers (7 tools) |
 | `internal/secret/` | Credential resolution: OS keychain → file → env var |
 
-### Trust model
+### Trust Model
 
 Four levels based on sender identity and encryption:
 
@@ -91,25 +79,11 @@ Resolved at runtime by name through a priority chain:
 
 Config file (`~/.config/beadle/email.json`) stores only connection parameters, never secrets.
 
-### Python core (`src/punt_beadle/`)
-
-| Module | Responsibility |
-|--------|---------------|
-| `types.py` | Domain types: `CommandDocument`, `Pipeline`, `Permission`, `AuditEntry`, `Identity`, `SignedPayload` |
-| `identity.py` | Identity management: GPG key generation, isolated `GNUPGHOME`, `beadle.yml` production |
-| `signing.py` | GPG signing and verification: `sign()`, `verify()`, wraps `gpg` CLI |
-| `audit.py` | Append-only signed audit log: write entries, verify chain integrity |
-| `pipeline.py` | Pipeline execution: preflight permission checks, two-level try-catch, stage composition |
-| `interpreters/` | Command interpreters: `bash.py`, `claude.py`, `python.py` |
-| `daemon.py` | Background daemon: IMAP polling, cron scheduling, health monitoring |
-| `cli.py` | Typer CLI: `init`, `sign`, `verify`, `run`, `status`, `log`, `version` |
-| `server.py` | FastMCP server: MCP tools mirroring CLI commands |
-
 ### Design Invariants
 
 - **Zero agent authority.** Every action requires a GPG-signed instruction from the owner. The daemon has no independent decision-making.
 - **Preflight before execute.** All permissions are validated before any command runs. No partial execution.
-- **Isolated keychain.** Beadle stores keys in its own `GNUPGHOME`, never touching the user's system GPG keyring.
+- **Isolated keychain.** PGP operations use temporary GNUPGHOME directories, never touching the user's system GPG keyring.
 - **Non-expiring keys rejected.** All command-signing keys must have an expiration date. This is a security invariant.
 - **Audit log is tamperproof.** Append-only, GPG-signed entries. Only the owner can clear the log.
 
@@ -126,55 +100,23 @@ Config file (`~/.config/beadle/email.json`) stores only connection parameters, n
 - **Never log secrets** — GPG key material, passwords, API keys, raw email content.
 - **No `exec.Command` with shell=true** — always pass argument lists.
 
-## Python Coding Standards
-
-### Types
-
-- `from __future__ import annotations` in every file.
-- Full type annotations on every function signature and return type.
-- mypy strict mode and pyright strict mode. Zero errors.
-- Never `Any` unless interfacing with untyped libraries. Document why with inline ignores.
-- `@dataclass(frozen=True)` for immutable value types.
-- Use Protocol classes for abstractions. Never `hasattr()` or duck typing.
-- `cast()` in string form for ruff TC006: `cast("list[str]", x)`.
-
-### Exceptions and Error Handling
-
-- Fail fast. Raise exceptions on invalid input. No defensive fallbacks.
-- `ValueError` for domain violations. `typer.BadParameter` for CLI user errors.
-- Never catch broad `Exception` unless re-raising or at a boundary (CLI entry point, MCP tool handler).
-- Security-sensitive operations (signing, verification, key management) must never silently fall back. A failed signature check is a hard stop, not a warning.
-
-### Logging
-
-- `logger = logging.getLogger(__name__)` per module.
-- `logging.basicConfig()` configured once in CLI and server entry points.
-- `logger.debug()` for pipeline execution details. `logger.info()` for audit log writes.
-- MCP server logs to stderr only (stdout reserved for stdio transport).
-- Never log GPG key material, passphrases, or raw email content at any level.
-
-### Imports and Style
-
-- All imports at top of file, grouped per PEP 8 (stdlib, third-party, local).
-- Double quotes. 88-character line limit. Enforced by ruff.
-- No inline imports. No backwards-compatibility shims.
-
-### Prohibited Patterns
-
-- No `hasattr()` — use protocols.
-- No mock objects in production code.
-- No defensive coding or fallback logic unless explicitly requested.
-- No `Any` without a documented reason and inline type-ignore comment.
-- No `subprocess.run(shell=True)` — always pass argument lists. Beadle runs user-authored commands through interpreters, never through shell expansion.
-- No hardcoded paths to `gpg` — resolve via `shutil.which()` at init time.
-
 ## Testing
 
-- **All tests must pass.** If a test is failing, fix it.
-- If a test fails, fix it. Do not skip, ignore, or work around it.
-- GPG operations in tests use a temporary `GNUPGHOME` (ephemeral keyring per test session).
-- Integration tests requiring Proton Bridge or Anthropic API are marked `@pytest.mark.integration`.
-- Use `side_effect=lambda` instead of `return_value` for fresh mocks per call.
+### Test Pyramid
+
+| Layer | What | Speed |
+|-------|------|-------|
+| Unit | Pure functions, table-driven, no I/O | < 5s |
+| PGP integration | Ephemeral GPG keypair, sign/verify round-trip | < 5s |
+| MCP smoke | Binary handshake, tool registration | < 2s |
+| Live (manual) | Real Proton Bridge, iCloud, GPG Mail | Manual |
+
+### Key Rules
+
+- **All tests must pass.** If a test is failing, fix it. Do not skip, ignore, or work around it.
+- GPG operations in tests use a temporary GNUPGHOME (ephemeral keyring per test).
+- GPG test home directories must use short paths (`/tmp/bg-*`) to avoid the 108-byte Unix socket path limit.
+- `-race` is mandatory for all test runs.
 
 ## Issue Tracking with Beads
 
@@ -225,15 +167,22 @@ git checkout -b feat/short-description main
 | `refactor/` | Code improvements |
 | `docs/` | Documentation only |
 
-### PR Workflow
+### Code Review
 
-1. Create branch, make changes, commit
-2. Push and create PR. Prefer `mcp__github__create_pull_request` over `gh pr create` where possible.
-3. **Watch CI and reviews without blocking your main shell** — do not stop waiting. Run `gh pr checks <number> --watch` in a background task or separate session to block until all checks resolve.
-4. **Expect 2-6 review cycles before merging.** Copilot and Bugbot may take 1-3 minutes to post after CI completes. Read feedback using MCP GitHub tools: `mcp__github__pull_request_read` with `get_reviews` and `get_review_comments`.
-5. **Take every comment seriously.** There is no such thing as "pre-existing" or "unrelated to this change" — if you can see it, you own it. Fix the issue, re-push, and wait for the next review cycle.
-6. **Repeat until the last review cycle is uneventful** — zero new comments, all checks green.
-7. **Merge via MCP, not `gh`.** Use `mcp__github__merge_pull_request` (API-only, no local git side effects). `gh pr merge` tries to checkout main locally, which fails inside a worktree.
+Copilot auto-reviews every push via branch ruleset. No manual review request needed.
+
+1. **Create PR** via `mcp__github__create_pull_request`. Include summary and test plan.
+2. **Background watch** — immediately run `sleep 5 && gh pr checks <number> --watch --fail-fast` in background. Do not block the main shell. Copilot and Bugbot may take 1–3 minutes after CI completes.
+3. **Read all feedback** when background watch completes:
+   - `mcp__github__pull_request_read` with `get_reviews` — check review verdicts
+   - `mcp__github__pull_request_read` with `get_review_comments` — read inline comments
+   - `gh api repos/punt-labs/beadle/pulls/<number>/comments` — read inline comments (alternative)
+   - `gh pr checks <number>` — verify all checks green
+4. **Take every comment seriously.** If a reviewer flags it, fix it. No "pre-existing" or "out of scope" excuses.
+5. **Fix, re-push, repeat.** Each push triggers a new review cycle. Expect **2–6 review cycles** before merging. Run `make check` before each push.
+6. **Merge only when the last cycle is uneventful** — zero new comments, all checks green. Use `mcp__github__merge_pull_request` (API-only, no local git side effects). Do not use `gh pr merge` — it has local side effects that break worktrees.
+
+The entire PR cycle (create → review → fix → merge) should be autonomous. Do not require user intervention to land a clean PR.
 
 ```bash
 # After merging via MCP:
@@ -247,7 +196,7 @@ Every PR must update the docs it affects. If a PR changes user-facing behavior a
 
 - **CHANGELOG**: Entries are written in the PR branch, before merge — not retroactively on main. Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. Add entries under `## [Unreleased]`. Categories: Added, Changed, Deprecated, Removed, Fixed, Security.
 - **README**: Update `README.md` when user-facing behavior changes — new flags, commands, defaults, or config.
-- **PR/FAQ**: Update `prfaq.tex` when the change shifts product direction or validates/invalidates a risk assumption. Use `/prfaq:feedback` to apply revisions and `/prfaq:meeting-hive` to run autonomous review meetings.
+- **PR/FAQ**: Update `prfaq.tex` when the change shifts product direction or validates/invalidates a risk assumption.
 
 ### Micro-Commits
 
@@ -264,7 +213,7 @@ Every PR must update the docs it affects. If a PR changes user-facing behavior a
 | `docs:` | Documentation |
 | `chore:` | Build, dependencies, CI |
 
-### Release Workflow (Go email channel)
+### Release Workflow
 
 1. **Bump version** in `cmd/beadle-email/main.go`
 2. **Move `[Unreleased]`** entries in `CHANGELOG.md` to new version section
@@ -274,6 +223,14 @@ Every PR must update the docs it affects. If a PR changes user-facing behavior a
 6. **Tag**: `git tag vX.Y.Z`
 7. **Push**: `git push origin main vX.Y.Z`
 8. **GitHub release**: `gh release create vX.Y.Z --title "vX.Y.Z" --notes-file -`
+
+### Distribution
+
+Static binaries via GitHub Releases. Four platforms: darwin/arm64, darwin/amd64, linux/arm64, linux/amd64.
+
+```bash
+make dist    # Cross-compile all four targets into dist/
+```
 
 ### Session Close Protocol
 
@@ -292,7 +249,6 @@ Work is NOT complete until `git push` succeeds.
 
 ## Standards References
 
-- [Python](https://github.com/punt-labs/punt-kit/blob/main/standards/python.md)
 - [GitHub](https://github.com/punt-labs/punt-kit/blob/main/standards/github.md)
 - [Workflow](https://github.com/punt-labs/punt-kit/blob/main/standards/workflow.md)
 - [CLI](https://github.com/punt-labs/punt-kit/blob/main/standards/cli.md)
