@@ -171,16 +171,18 @@ git checkout -b feat/short-description main
 
 Copilot auto-reviews every push via branch ruleset. No manual review request needed.
 
+**Every PR takes 2–6 review cycles.** Do not assume a clean CI run means the PR is ready. Reviewers (Copilot, Bugbot) post comments minutes after CI completes. You must read and address every comment before merging.
+
 1. **Create PR** via `mcp__github__create_pull_request`. Include summary and test plan.
-2. **Background watch** — immediately run `sleep 5 && gh pr checks <number> --watch --fail-fast` in background. Do not block the main shell. Copilot and Bugbot may take 1–3 minutes after CI completes.
-3. **Read all feedback** when background watch completes:
+2. **Wait for CI + reviews** — run `sleep 5 && gh pr checks <number> --watch --fail-fast` in background. When CI completes, **keep waiting for reviewer comments**. Copilot and Bugbot can take 5–10 minutes after CI. Do not proceed until comments have arrived or you have confirmed the review cycle is complete.
+3. **Read all feedback** using MCP tools:
+   - `mcp__github__pull_request_read` with `get_review_comments` — read inline comments (primary)
    - `mcp__github__pull_request_read` with `get_reviews` — check review verdicts
-   - `mcp__github__pull_request_read` with `get_review_comments` — read inline comments
-   - `gh api repos/punt-labs/beadle/pulls/<number>/comments` — read inline comments (alternative)
    - `gh pr checks <number>` — verify all checks green
 4. **Take every comment seriously.** If a reviewer flags it, fix it. No "pre-existing" or "out of scope" excuses.
-5. **Fix, re-push, repeat.** Each push triggers a new review cycle. Expect **2–6 review cycles** before merging. Run `make check` before each push.
-6. **Merge only when the last cycle is uneventful** — zero new comments, all checks green. Use `mcp__github__merge_pull_request` (API-only, no local git side effects). Do not use `gh pr merge` — it has local side effects that break worktrees.
+5. **Fix, re-push, repeat.** Each push triggers a new review cycle. Run `make check` before each push. After pushing, go back to step 2.
+6. **Merge only when the last cycle produces no actionable comments** — all checks green, and the remaining comments (if any) are suggestions you've already addressed or are genuinely not applicable. Use `mcp__github__merge_pull_request` (API-only, no local git side effects). Do not use `gh pr merge` — it has local side effects that break worktrees.
+7. **Post-merge: check for late comments.** Read review comments one final time after merging. If new issues were raised, fix them in a follow-up PR immediately.
 
 The entire PR cycle (create → review → fix → merge) should be autonomous. Do not require user intervention to land a clean PR.
 
