@@ -20,3 +20,8 @@
 
 # Scratch/temp directory (TMPDIR set via .envrc)
 .tmp/
+
+# Go build artifacts
+/beadle-email
+dist/
+coverage.out
