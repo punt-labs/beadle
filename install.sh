@@ -18,23 +18,29 @@ fail() { printf '  %b✗%b %s\n' "$YELLOW" "$NC" "$1"; exit 1; }
 REPO="punt-labs/beadle"
 BINARY="beadle-email"
 INSTALL_DIR="$HOME/.local/bin"
+MARKETPLACE_REPO="punt-labs/claude-plugins"
+MARKETPLACE_NAME="punt-labs"
 
 # --- Step 1: Prerequisites ---
 
 info "Checking prerequisites..."
 
+if command -v claude >/dev/null 2>&1; then
+  ok "claude CLI found"
+else
+  fail "'claude' CLI not found. Install Claude Code first: https://docs.anthropic.com/en/docs/claude-code"
+fi
+
+if command -v git >/dev/null 2>&1; then
+  ok "git found"
+else
+  fail "'git' not found. Install git first: https://git-scm.com/downloads"
+fi
+
 if command -v curl >/dev/null 2>&1; then
   ok "curl found"
 else
   fail "'curl' not found. Install curl first."
-fi
-
-# Optional: gpg is needed by beadle-email for PGP signature verification
-# of inbound emails. The installer itself does not use gpg.
-if command -v gpg >/dev/null 2>&1; then
-  ok "gpg found (needed for email PGP verification)"
-else
-  warn "gpg not found — email PGP signature verification will be unavailable"
 fi
 
 # --- Step 2: Detect platform ---
@@ -67,7 +73,7 @@ info "Downloading $BINARY..."
 DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ASSET"
 CHECKSUMS_URL="https://github.com/$REPO/releases/latest/download/checksums.txt"
 
-TMPDIR_DL="$(mktemp -d -t beadle-email.XXXXXX)"
+TMPDIR_DL="$(mktemp -d)"
 cleanup_tmpdir() { rm -rf "$TMPDIR_DL"; }
 trap cleanup_tmpdir EXIT INT TERM
 
@@ -79,15 +85,11 @@ ok "downloaded"
 
 info "Verifying checksum..."
 
-# Use awk for exact filename match (grep -F can substring-match .sig files)
-EXPECTED="$(awk -v asset="$ASSET" '$2 == asset {print $1}' "$TMPDIR_DL/checksums.txt")"
-MATCH_COUNT="$(printf '%s\n' "$EXPECTED" | grep -c . || true)"
-if [ "$MATCH_COUNT" -eq 0 ] || [ -z "$EXPECTED" ]; then
-  fail "No checksum found for $ASSET in checksums.txt"
+MATCH_COUNT="$(grep -cF "  $ASSET" "$TMPDIR_DL/checksums.txt" || true)"
+if [ "$MATCH_COUNT" -ne 1 ]; then
+  fail "Expected exactly 1 checksum for $ASSET, found $MATCH_COUNT"
 fi
-if [ "$MATCH_COUNT" -gt 1 ]; then
-  fail "Multiple checksums found for $ASSET in checksums.txt (corrupted release?)"
-fi
+EXPECTED="$(grep -F "  $ASSET" "$TMPDIR_DL/checksums.txt" | awk '{print $1}')"
 
 if command -v sha256sum >/dev/null 2>&1; then
   ACTUAL="$(sha256sum "$TMPDIR_DL/$ASSET" | awk '{print $1}')"
@@ -116,18 +118,26 @@ if ! command -v "$BINARY" >/dev/null 2>&1; then
   warn "Add this to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
-# --- Step 6: Verify ---
+# --- Step 6: Register marketplace ---
+
+info "Registering Punt Labs marketplace..."
+
+if claude plugin marketplace list < /dev/null 2>/dev/null | grep -q "$MARKETPLACE_NAME"; then
+  ok "marketplace already registered"
+  claude plugin marketplace update "$MARKETPLACE_NAME" < /dev/null 2>/dev/null || true
+else
+  claude plugin marketplace add "$MARKETPLACE_REPO" < /dev/null || fail "Failed to register marketplace"
+  ok "marketplace registered"
+fi
+
+# --- Step 7: Verify ---
 
 info "Verifying installation..."
 
-if [ -x "$INSTALL_DIR/$BINARY" ]; then
-  VERSION="$("$INSTALL_DIR/$BINARY" version 2>/dev/null || echo "unknown")"
-  ok "$BINARY $VERSION ($INSTALL_DIR/$BINARY)"
-  # Warn if a different binary is earlier on PATH
-  WHICH_PATH="$(command -v "$BINARY" 2>/dev/null || true)"
-  if [ -n "$WHICH_PATH" ] && [ "$WHICH_PATH" != "$INSTALL_DIR/$BINARY" ]; then
-    warn "Another $BINARY exists at $WHICH_PATH (may shadow the new install)"
-  fi
+if command -v "$BINARY" >/dev/null 2>&1; then
+  ok "$BINARY $(command -v "$BINARY")"
+elif [ -x "$INSTALL_DIR/$BINARY" ]; then
+  ok "$INSTALL_DIR/$BINARY (not yet on PATH)"
 else
   fail "$BINARY not found after installation"
 fi
@@ -136,7 +146,6 @@ fi
 
 printf '\n%b%b%s is ready!%b\n\n' "$GREEN" "$BOLD" "$BINARY" "$NC"
 printf 'Next steps:\n'
-printf '  1. Configure credentials (see README for setup)\n'
+printf '  1. Configure credentials: beadle-email doctor\n'
 printf '  2. Register MCP server in .mcp.json:\n'
-printf '     {"mcpServers":{"beadle-email":{"command":"%s/%s","args":["serve"]}}}\n' "$INSTALL_DIR" "$BINARY"
-printf '  3. Run doctor to verify: %s doctor\n\n' "$BINARY"
+printf '     {"mcpServers":{"beadle-email":{"command":"%s/%s","args":["serve"]}}}\n\n' "$INSTALL_DIR" "$BINARY"
