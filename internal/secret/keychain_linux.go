@@ -10,7 +10,3 @@ func keychainAvailable() bool {
 func keychainGet(name string) (string, error) {
 	return "", nil
 }
-
-func keychainSet(name, value string) error {
-	return fileSet(name, value)
-}

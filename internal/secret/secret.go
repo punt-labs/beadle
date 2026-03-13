@@ -43,14 +43,6 @@ func Get(name string) (string, error) {
 	return "", fmt.Errorf("credential %q not found (checked: keychain, file, env %s)", name, envKey)
 }
 
-// Set stores a credential. Prefers OS keychain, falls back to file.
-func Set(name, value string) error {
-	if keychainAvailable() {
-		return keychainSet(name, value)
-	}
-	return fileSet(name, value)
-}
-
 // Available reports which credential backends are available.
 func Available() []string {
 	var backends []string
@@ -103,32 +95,4 @@ func fileGet(name string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
-}
-
-// fileSet writes a credential to ~/.config/beadle/<name> with 600 perms.
-func fileSet(name, value string) error {
-	dir, err := configDir()
-	if err != nil {
-		return err
-	}
-
-	path := filepath.Join(dir, name)
-	return os.WriteFile(path, []byte(value+"\n"), 0600)
-}
-
-// FilePermsOK checks that a secret file has restrictive permissions (owner-only).
-func FilePermsOK(name string) (bool, error) {
-	dir, err := configDir()
-	if err != nil {
-		return false, err
-	}
-
-	info, err := os.Stat(filepath.Join(dir, name))
-	if err != nil {
-		return false, err
-	}
-
-	// Only owner should have access
-	mode := info.Mode().Perm()
-	return mode&0077 == 0, nil
 }

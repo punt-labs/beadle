@@ -46,9 +46,8 @@ func TestAvailable(t *testing.T) {
 	assert.Contains(t, backends, "environment variable")
 }
 
-func TestFilePermsOK(t *testing.T) {
-	// Will fail because the test credential doesn't exist in the real config dir,
-	// but tests the error path
-	_, err := FilePermsOK("nonexistent-file")
+func TestGet_PathTraversal(t *testing.T) {
+	_, err := Get("../../etc/passwd")
 	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "path separator")
 }

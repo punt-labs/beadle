@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -227,8 +228,10 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 			return mcplib.NewToolResultError(fmt.Sprintf("read message: %v", err)), nil
 		}
 
-		// Verify PGP signature if present, same as list_messages
-		if msg.TrustLevel == channel.Unverified {
+		// Verify PGP signature if the message has one.
+		// Only attempt verification when Content-Type indicates multipart/signed
+		// to avoid unnecessary IMAP round-trips for unsigned messages.
+		if msg.TrustLevel == channel.Unverified && strings.Contains(strings.ToLower(msg.RawHeaders["Content-Type"]), "multipart/signed") {
 			raw, fetchErr := c.FetchRaw(folder, uint32(uid))
 			if fetchErr == nil {
 				result, verifyErr := pgp.Verify(h.cfg.GPGBinary, raw)

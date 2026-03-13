@@ -29,20 +29,3 @@ func keychainGet(name string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// keychainSet stores a credential in macOS Keychain.
-func keychainSet(name, value string) error {
-	// Delete existing entry (ignore error if not found)
-	del := exec.Command("security", "delete-generic-password",
-		"-s", service,
-		"-a", name,
-	)
-	del.Run() //nolint:errcheck // OK if not found
-
-	cmd := exec.Command("security", "add-generic-password",
-		"-s", service,
-		"-a", name,
-		"-w", value,
-		"-U", // update if exists
-	)
-	return cmd.Run()
-}
