@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const service = "beadle"
+
 // keychainAvailable checks if macOS Keychain is usable.
 func keychainAvailable() bool {
 	_, err := exec.LookPath("security")
