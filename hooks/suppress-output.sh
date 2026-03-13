@@ -1,9 +1,23 @@
 #!/usr/bin/env bash
 # PostToolUse — two-channel display for beadle-email MCP tools.
 # See punt-kit/patterns/two-channel-display.md for the pattern.
+
+# Require jq — without it, let raw output through.
+command -v jq >/dev/null 2>&1 || exit 0
+
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name')
 TOOL_NAME="${TOOL##*__}"
+
+# Check if the tool result is an error. MCP tool errors from mcp-go arrive
+# as isError:true with the error message as plain text in .tool_response[0].text.
+IS_ERROR=$(echo "$INPUT" | jq -r '
+  if (.tool_response | type) == "array" then
+    (.tool_response[0].isError // false)
+  else
+    false
+  end
+')
 
 RESULT=$(echo "$INPUT" | jq -r '
   if (.tool_response | type) == "array" then
@@ -15,12 +29,6 @@ RESULT=$(echo "$INPUT" | jq -r '
 
 # Bail on empty result (but not "null" — that's a valid empty-list response).
 [[ -z "$RESULT" ]] && exit 0
-
-# If RESULT is not valid JSON, treat it as an opaque string.
-if ! echo "$RESULT" | jq -e 'type' >/dev/null 2>&1; then
-  emit "$RESULT"
-  exit 0
-fi
 
 emit() {
   local summary="$1" ctx="$2"
@@ -42,10 +50,15 @@ emit() {
   fi
 }
 
-# Error handling — surface errors in the panel.
-ERROR_MSG=$(echo "$RESULT" | jq -r 'if type == "string" then empty else .error // empty end' 2>/dev/null)
-if [[ -n "$ERROR_MSG" ]]; then
-  emit "error: ${ERROR_MSG}"
+# Surface errors directly — MCP tool errors are plain strings, not JSON objects.
+if [[ "$IS_ERROR" == "true" ]]; then
+  emit "error: ${RESULT}"
+  exit 0
+fi
+
+# If RESULT is not valid JSON, treat it as an opaque string.
+if ! echo "$RESULT" | jq -e 'type' >/dev/null 2>&1; then
+  emit "$RESULT"
   exit 0
 fi
 

@@ -252,14 +252,16 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		// will not be auto-verified; use verify_signature explicitly for those.
 		if msg.TrustLevel == channel.Unverified && email.HasPGPSignature(msg.RawHeaders["Content-Type"], nil) {
 			raw, fetchErr := c.FetchRaw(folder, uint32(uid))
-			if fetchErr == nil {
+			if fetchErr != nil {
+				h.logger.Warn("pgp: fetch raw failed", "uid", msgID, "err", fetchErr)
+			} else {
 				result, verifyErr := pgp.Verify(h.cfg.GPGBinary, raw)
-				if verifyErr == nil {
-					if result.Valid {
-						msg.TrustLevel = channel.Verified
-					} else {
-						msg.TrustLevel = channel.Untrusted
-					}
+				if verifyErr != nil {
+					h.logger.Warn("pgp: verify failed", "uid", msgID, "err", verifyErr)
+				} else if result.Valid {
+					msg.TrustLevel = channel.Verified
+				} else {
+					msg.TrustLevel = channel.Untrusted
 				}
 			}
 		}
