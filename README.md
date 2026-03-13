@@ -14,7 +14,7 @@ The first shipping component is `beadle-email` — an MCP server providing email
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/86827d3/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/d1e927f/install.sh | sh
 ```
 
 <details>
@@ -35,7 +35,7 @@ Ensure `~/.local/bin` is on your `PATH`.
 <summary>Inspect before running</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/86827d3/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/d1e927f/install.sh -o install.sh
 cat install.sh
 sh install.sh
 ```
