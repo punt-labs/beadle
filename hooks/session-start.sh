@@ -63,6 +63,7 @@ else
       ACTIONS+=("Auto-allowed beadle MCP tools in permissions")
     else
       rm -f "$TMP"
+      ACTIONS+=("Failed to update permissions in settings.json")
     fi
   fi
 fi
