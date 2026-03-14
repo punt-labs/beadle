@@ -9,6 +9,7 @@
 
 # TTS ephemeral audio
 .tts/
+.vox/
 
 # Claude local settings
 .claude/settings.local.json
