@@ -11,6 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `send_email`: file attachment support via `attachments` parameter (list of
   absolute file paths). Builds `multipart/mixed` MIME for SMTP and structured
   attachments for Resend API. Per-file 25 MB limit, auto-detected MIME types.
+- `download_attachment`: extract attachment content by MIME part index (from
+  `show_mime`). Saves to `.beadle/<mailbox>/attachments/` and returns the path.
+
+### Fixed
+
+- Trailing CRLF missing from text body in multipart MIME messages
+- `io.ReadAll` errors silently discarded in `ParseMIMEStructure`
 
 ### Fixed
 
