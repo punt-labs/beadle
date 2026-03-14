@@ -132,7 +132,10 @@ func ParseMIMEStructure(raw []byte) ([]MIMEPart, error) {
 	mr := entity.MultipartReader()
 	if mr == nil {
 		// Single-part message
-		data, _ := io.ReadAll(entity.Body)
+		data, err := io.ReadAll(entity.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read single-part body: %w", err)
+		}
 		ct, _, _ := mime.ParseMediaType(entity.Header.Get("Content-Type"))
 		if ct == "" {
 			ct = "text/plain"
@@ -167,7 +170,10 @@ func ParseMIMEStructure(raw []byte) ([]MIMEPart, error) {
 		}
 		disp, params, _ := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
 
-		data, _ := io.ReadAll(part.Body)
+		data, readErr := io.ReadAll(part.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("read part %d body: %w", idx, readErr)
+		}
 
 		content := ""
 		if strings.HasPrefix(ct, "text/") || strings.Contains(ct, "pgp") {

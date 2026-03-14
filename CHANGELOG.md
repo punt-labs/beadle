@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `send_email`: file attachment support via `attachments` parameter (list of
+  absolute file paths). Builds `multipart/mixed` MIME for SMTP and structured
+  attachments for Resend API. Per-file 25 MB limit, auto-detected MIME types.
+
 ## [0.2.0] - 2026-03-13
 
 ### Added
