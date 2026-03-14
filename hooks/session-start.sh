@@ -78,13 +78,17 @@ if [[ ${#ACTIONS[@]} -gt 0 ]]; then
   for action in "${ACTIONS[@]}"; do
     MSG="$MSG $action."
   done
-  # Use jq for safe JSON output (no injection from special chars in MSG).
-  jq -n --arg ctx "$MSG" '{
-    hookSpecificOutput: {
-      hookEventName: "SessionStart",
-      additionalContext: $ctx
-    }
-  }'
+  # Use jq for safe JSON output when available, fall back to echo.
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg ctx "$MSG" '{
+      hookSpecificOutput: {
+        hookEventName: "SessionStart",
+        additionalContext: $ctx
+      }
+    }'
+  else
+    echo "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"${MSG//\"/\\\"}\"}}"
+  fi
 fi
 
 exit 0
