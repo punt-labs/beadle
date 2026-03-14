@@ -3,7 +3,7 @@
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 if [[ -z "$PLUGIN_ROOT" ]]; then
-  echo '{"hookSpecificOutput":{"additionalContext":"Beadle SessionStart: skipped (not in a git repo)"}}'
+  echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Beadle SessionStart: skipped (not in a git repo)"}}'
   exit 0
 fi
 
@@ -18,10 +18,8 @@ if grep -q '"beadle-dev"' "$PLUGIN_JSON" 2>/dev/null; then
 fi
 
 if [[ "$DEV_MODE" == "true" ]]; then
-  TOOL_PATTERN="mcp__plugin_beadle-dev_email__"
   TOOL_GLOB="mcp__plugin_beadle-dev_email__*"
 else
-  TOOL_PATTERN="mcp__plugin_beadle_email__"
   TOOL_GLOB="mcp__plugin_beadle_email__*"
 fi
 
@@ -49,8 +47,12 @@ if [[ "$DEV_MODE" == "false" ]]; then
 fi
 
 # ── Auto-allow MCP tool permissions ───────────────────────────────────
-if command -v jq >/dev/null 2>&1 && [[ -f "$SETTINGS" ]]; then
-  if ! jq -e ".permissions.allow // [] | map(select(contains(\"$TOOL_PATTERN\"))) | length > 0" "$SETTINGS" >/dev/null 2>&1; then
+if ! command -v jq >/dev/null 2>&1; then
+  ACTIONS+=("jq not found, skipping permission setup")
+elif [[ ! -f "$SETTINGS" ]]; then
+  ACTIONS+=("~/.claude/settings.json not found, skipping permission setup")
+else
+  if ! jq -e --arg glob "$TOOL_GLOB" '.permissions.allow // [] | index($glob)' "$SETTINGS" >/dev/null 2>&1; then
     TMP=$(mktemp "$SETTINGS.XXXXXX")
     if jq --arg glob "$TOOL_GLOB" '
       .permissions //= {} |
@@ -63,8 +65,6 @@ if command -v jq >/dev/null 2>&1 && [[ -f "$SETTINGS" ]]; then
       rm -f "$TMP"
     fi
   fi
-elif ! command -v jq >/dev/null 2>&1; then
-  ACTIONS+=("jq not found, skipping permission setup")
 fi
 
 # ── First-run check: verify beadle-email binary is available ──────────
@@ -78,14 +78,13 @@ if [[ ${#ACTIONS[@]} -gt 0 ]]; then
   for action in "${ACTIONS[@]}"; do
     MSG="$MSG $action."
   done
-  cat <<ENDJSON
-{
-  "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
-    "additionalContext": "$MSG"
-  }
-}
-ENDJSON
+  # Use jq for safe JSON output (no injection from special chars in MSG).
+  jq -n --arg ctx "$MSG" '{
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      additionalContext: $ctx
+    }
+  }'
 fi
 
 exit 0
