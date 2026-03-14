@@ -1,7 +1,7 @@
 ---
 description: "Send something via any channel (email today, more later)"
 argument-hint: "<what to send> [via <channel>]"
-allowed-tools: ["mcp__plugin_beadle_email__send_email"]
+allowed-tools: ["mcp__plugin_beadle_email__send_email", "mcp__plugin_beadle-dev_email__send_email"]
 ---
 <!-- markdownlint-disable MD041 -->
 
@@ -23,7 +23,7 @@ The arguments describe what to send and optionally the channel. Examples:
 
 ### Default behavior
 
-- Default recipient: the owner (<jim@punt-labs.com>)
+- Default recipient: the owner (ask if unclear)
 - Default channel: email (the only channel currently available)
 
 ### Compose and send

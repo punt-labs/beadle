@@ -1,7 +1,7 @@
 ---
 description: "Mail something to me or someone else"
 argument-hint: "<what to mail> [to <recipient>]"
-allowed-tools: ["mcp__plugin_beadle_email__send_email"]
+allowed-tools: ["mcp__plugin_beadle_email__send_email", "mcp__plugin_beadle-dev_email__send_email"]
 ---
 <!-- markdownlint-disable MD041 -->
 
@@ -17,13 +17,13 @@ Send an email. This is the email-specific outbound verb — it always means emai
 
 The arguments describe what to mail and optionally to whom. Examples:
 
-- `/mail me a summary` — email a summary of the current conversation to the owner (<jim@punt-labs.com>)
+- `/mail me a summary` — email a summary of the current conversation to the owner
 - `/mail this to kai@example.com` — email the current context to a specific recipient
 - `/mail me the test results` — compose and send relevant content to the owner
 
 ### Default recipient
 
-If no recipient is specified, the default is the owner: <jim@punt-labs.com>.
+If no recipient is specified, send to the owner. The `send_email` tool sends from beadle's configured address — ask the user for the recipient if it cannot be inferred from context.
 
 ### Compose and send
 
