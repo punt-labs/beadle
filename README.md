@@ -6,7 +6,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/beadle/test.yml?label=CI)](https://github.com/punt-labs/beadle/actions/workflows/test.yml)
 [![Working Backwards](https://img.shields.io/badge/Working_Backwards-hypothesis-lightgrey)](./prfaq.pdf)
 
-Beadle runs on your machine as a background daemon. Every action requires a GPG-signed instruction from the owner, every command declares its permissions upfront, and the audit log is tamperproof. The agent has zero authority of its own — trust is earned through cryptographic proof, not granted by default.
+Beadle runs on your machine as a background daemon. Every action requires a GPG-signed instruction from the owner, every command declares its permissions upfront, and the audit log is tamperproof. The daemon executes no action without a GPG-signed instruction from the owner; no authority is implicit.
 
 The first shipping component is `beadle-email` — an MCP server providing email communication tools over Proton Bridge with a four-level PGP trust model. Written in Go.
 
@@ -73,8 +73,8 @@ sh install.sh
 - **8 MCP tools** --- list, read, send, move/archive, verify signatures, inspect MIME, classify trust, list folders
 - **Four-level trust model** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
 - **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically
-- **Slash commands** --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound)
-- **Two-channel display** --- compact panel summaries with full data in context, no raw JSON in conversation
+- **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound)
+- **Two-channel display** (plugin only) --- compact panel summaries with full data in context, no raw JSON in conversation
 - **Proton Bridge native** --- IMAP STARTTLS for reading, SMTP for sending, Resend API fallback
 - **Credential isolation** --- secrets resolved at runtime from OS keychain, never stored in config files
 - **Health checks** --- `doctor` validates all dependencies; `status` shows current configuration
@@ -107,7 +107,7 @@ Available when installed as a Claude Code plugin.
 <details>
 <summary>Credential setup</summary>
 
-Beadle resolves credentials at runtime through a priority chain: macOS Keychain → secret file → environment variable.
+Beadle resolves credentials at runtime through a priority chain: macOS Keychain (macOS) or libsecret (Linux) → secret file → environment variable.
 
 ```bash
 # macOS Keychain (recommended)
@@ -155,7 +155,7 @@ PGP verification uses an isolated GNUPGHOME per operation. When no key is attach
 beadle-email serve [--config PATH]    # Start MCP server (stdio transport)
 beadle-email version                  # Print version
 beadle-email doctor [--config PATH]   # Check installation health
-beadle-email status [--config PATH]   # Current configuration summary
+beadle-email status [--config PATH]   # Current state summary
 ```
 
 ## Documentation
