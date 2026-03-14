@@ -59,7 +59,7 @@ func ComposeRaw(from, to, subject, textBody string, attachments []OutboundAttach
 	if err != nil {
 		return nil, fmt.Errorf("create text part: %w", err)
 	}
-	fmt.Fprintf(tw, "%s", textBody)
+	fmt.Fprintf(tw, "%s\r\n", textBody)
 
 	// Attachment parts
 	for _, att := range attachments {
