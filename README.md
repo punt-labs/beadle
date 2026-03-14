@@ -22,7 +22,7 @@ Two install paths (mutually exclusive per [DES-011](DESIGN.md)). Do not install 
 claude plugin install punt-labs/beadle
 ```
 
-Provides MCP tools, slash commands (`/inbox`, `/mail`, `/send`), output suppression, and lifecycle hooks.
+Provides MCP tools, slash commands (`/inbox`, `/mail`, `/send`), output suppression, and lifecycle hooks. Marketplace releases use the prod plugin name (`beadle`) which enables command deployment.
 
 ### MCP-only (standalone)
 
@@ -30,7 +30,7 @@ Provides MCP tools, slash commands (`/inbox`, `/mail`, `/send`), output suppress
 curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/537a97d/install.sh | sh
 ```
 
-Provides the MCP server only. Works with any MCP client (Claude Code, GitHub Copilot, Cursor).
+Registers the MCP server with Claude Code. For other MCP clients, use the manual install below and configure your client to run `beadle-email serve`.
 
 <details>
 <summary>Manual install</summary>
