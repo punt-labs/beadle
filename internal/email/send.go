@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -62,9 +63,14 @@ func ComposeRaw(from, to, subject, textBody string, attachments []OutboundAttach
 
 	// Attachment parts
 	for _, att := range attachments {
+		for _, field := range []string{att.ContentType, att.Filename} {
+			if strings.ContainsAny(field, "\r\n") {
+				return nil, fmt.Errorf("attachment header field contains CR/LF")
+			}
+		}
 		attHeader := make(textproto.MIMEHeader)
 		attHeader.Set("Content-Type", att.ContentType)
-		attHeader.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", att.Filename))
+		attHeader.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": att.Filename}))
 		attHeader.Set("Content-Transfer-Encoding", "base64")
 
 		aw, createErr := mw.CreatePart(attHeader)

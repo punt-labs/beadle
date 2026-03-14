@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"mime"
 	"os"
@@ -508,7 +509,7 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 
 // readAttachments extracts the attachments parameter, reads each file, and
 // validates paths and sizes. Returns nil (not an error) when no attachments
-// are provided.
+// are provided. Enforces a 25 MB per-file and aggregate limit.
 func readAttachments(req mcplib.CallToolRequest) ([]email.OutboundAttachment, error) {
 	paths, err := stringSliceParam(req, "attachments")
 	if err != nil {
@@ -518,23 +519,40 @@ func readAttachments(req mcplib.CallToolRequest) ([]email.OutboundAttachment, er
 		return nil, nil
 	}
 
+	var totalSize int64
 	attachments := make([]email.OutboundAttachment, 0, len(paths))
 	for _, path := range paths {
 		if !filepath.IsAbs(path) {
 			return nil, fmt.Errorf("attachment path must be absolute: %q", path)
 		}
 
-		info, err := os.Stat(path)
+		f, err := os.Open(path)
 		if err != nil {
 			return nil, fmt.Errorf("attachment %q: %w", filepath.Base(path), err)
 		}
+
+		info, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return nil, fmt.Errorf("attachment %q: %w", filepath.Base(path), err)
+		}
 		if info.Size() > maxAttachmentSize {
+			f.Close()
 			return nil, fmt.Errorf("attachment %q exceeds 25 MB limit (%d bytes)", filepath.Base(path), info.Size())
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := io.ReadAll(io.LimitReader(f, maxAttachmentSize+1))
+		f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read attachment %q: %w", filepath.Base(path), err)
+		}
+		if int64(len(data)) > maxAttachmentSize {
+			return nil, fmt.Errorf("attachment %q exceeds 25 MB limit", filepath.Base(path))
+		}
+
+		totalSize += int64(len(data))
+		if totalSize > maxAttachmentSize {
+			return nil, fmt.Errorf("total attachment size exceeds 25 MB limit (%d bytes)", totalSize)
 		}
 
 		ct := mime.TypeByExtension(filepath.Ext(path))

@@ -142,3 +142,56 @@ func TestComposeRaw_HeaderInjectionWithAttachments(t *testing.T) {
 		})
 	}
 }
+
+func TestComposeRaw_AttachmentHeaderInjection(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		filename    string
+	}{
+		{"content-type CR", "text/plain\r\nBcc: evil@evil.com", "ok.txt"},
+		{"filename LF", "text/plain", "evil\n.txt"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			atts := []OutboundAttachment{{
+				Filename:    tc.filename,
+				ContentType: tc.contentType,
+				Data:        []byte("data"),
+			}}
+			_, err := ComposeRaw("a@b.com", "c@d.com", "Hi", "body", atts)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "CR/LF")
+		})
+	}
+}
+
+func TestComposeRaw_NonASCIIFilename(t *testing.T) {
+	atts := []OutboundAttachment{{
+		Filename:    "rapport_été.pdf",
+		ContentType: "application/pdf",
+		Data:        []byte("pdf-data"),
+	}}
+
+	raw, err := ComposeRaw("a@b.com", "c@d.com", "Report", "See attached.", atts)
+	require.NoError(t, err)
+
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+
+	_, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	require.NoError(t, err)
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+
+	// Skip text part
+	_, err = mr.NextPart()
+	require.NoError(t, err)
+
+	// Attachment part — verify filename round-trips correctly
+	part, err := mr.NextPart()
+	require.NoError(t, err)
+	_, dispParams, err := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+	require.NoError(t, err)
+	assert.Equal(t, "rapport_été.pdf", dispParams["filename"])
+}
