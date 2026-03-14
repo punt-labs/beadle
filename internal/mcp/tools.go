@@ -122,7 +122,7 @@ func sendEmailTool() mcplib.Tool {
 			mcplib.Description("Optional HTML body"),
 		),
 		mcplib.WithArray("attachments",
-			mcplib.Description("Absolute file paths to attach (max 25 MB each)"),
+			mcplib.Description("Absolute file paths to attach (max 25 MB total)"),
 			mcplib.WithStringItems(),
 		),
 	)
@@ -570,8 +570,9 @@ func readAttachments(req mcplib.CallToolRequest) ([]email.OutboundAttachment, er
 }
 
 // stringSliceParam extracts a []string from the MCP request arguments.
-// Returns nil, nil if the key is missing or not an array.
-// Returns an error if any element is not a string.
+// Returns nil, nil if the key is missing.
+// Returns an error if the value is present but not an array, or if any
+// element is not a string.
 func stringSliceParam(req mcplib.CallToolRequest, key string) ([]string, error) {
 	args := req.GetArguments()
 	v, ok := args[key]
@@ -580,7 +581,7 @@ func stringSliceParam(req mcplib.CallToolRequest, key string) ([]string, error) 
 	}
 	arr, ok := v.([]any)
 	if !ok {
-		return nil, nil
+		return nil, fmt.Errorf("%s: expected array, got %T", key, v)
 	}
 	result := make([]string, 0, len(arr))
 	for i, item := range arr {
