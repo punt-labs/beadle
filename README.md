@@ -12,15 +12,25 @@ The first shipping component is `beadle-email` — an MCP server providing email
 
 **Platforms:** macOS, Linux
 
-## Install
+## Quick Start
 
-Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+Two install paths (mutually exclusive per [DES-011](DESIGN.md)):
+
+### Claude Code Plugin (full experience)
+
+```bash
+claude plugin install punt-labs/beadle
+```
+
+Provides MCP tools, slash commands (`/inbox`, `/mail`, `/send`), output suppression, and lifecycle hooks.
+
+### MCP-only (standalone)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/537a97d/install.sh | sh
 ```
 
-Restart Claude Code. The installer downloads the binary, verifies its SHA256 checksum, registers the Punt Labs marketplace, and registers the MCP server — no manual steps.
+Provides the MCP server only. Works with any MCP client (Claude Code, GitHub Copilot, Cursor).
 
 <details>
 <summary>Manual install</summary>
@@ -58,6 +68,42 @@ sh install.sh
 
 </details>
 
+## Features
+
+- **8 MCP tools** --- list, read, send, move/archive, verify signatures, inspect MIME, classify trust, list folders
+- **Four-level trust model** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
+- **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically
+- **Slash commands** --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound)
+- **Two-channel display** --- compact panel summaries with full data in context, no raw JSON in conversation
+- **Proton Bridge native** --- IMAP STARTTLS for reading, SMTP for sending, Resend API fallback
+- **Credential isolation** --- secrets resolved at runtime from OS keychain, never stored in config files
+- **Health checks** --- `doctor` validates all dependencies; `status` shows current configuration
+
+## MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `list_messages` | List messages with trust levels. PGP signatures verified inline. |
+| `read_message` | Read full message body, headers, attachments, and trust classification. |
+| `send_email` | Send via Proton Bridge SMTP (primary) or Resend API (fallback). |
+| `move_message` | Move a message to another folder. Defaults to Archive. |
+| `list_folders` | List all IMAP mailbox folders. |
+| `show_mime` | Inspect multipart MIME structure, PGP parts, and attachments. |
+| `verify_signature` | Verify PGP signature on a message. Returns signer info and key ID. |
+| `check_trust` | Detailed trust classification with encryption type and origin analysis. |
+
+## Commands
+
+Available when installed as a Claude Code plugin.
+
+| Command | What it does |
+|---------|-------------|
+| `/inbox` | Check beadle's email inbox. Optional natural language filter. |
+| `/mail` | Mail something to the owner or a specific recipient. |
+| `/send` | Send via any channel (email today, Signal later). |
+
+## Setup
+
 <details>
 <summary>Credential setup</summary>
 
@@ -92,95 +138,7 @@ Configuration file (`~/.config/beadle/email.json`) stores connection parameters 
 
 </details>
 
-## Features
-
-- **7 MCP tools** --- list, read, send, verify signatures, inspect MIME, classify trust, list folders
-- **Four-level trust model** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
-- **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically, no separate verification step needed
-- **Proton Bridge native** --- connects via IMAP STARTTLS for reading, SMTP for sending, with Resend API fallback
-- **Credential isolation** --- secrets resolved at runtime from OS keychain, never stored in config files
-- **MIME inspection** --- full multipart structure, attachment enumeration, PGP part detection
-- **Health checks** --- `doctor` validates all dependencies; `status` shows current configuration
-
-## What It Looks Like
-
-### List messages with trust levels
-
-```text
-> list_messages
-
-[
-  {"id": "1", "from": "jim@luminating.us", "subject": "Hello",       "trust_level": "trusted"},
-  {"id": "4", "from": "user@icloud.com",   "subject": "External",    "trust_level": "unverified"},
-  {"id": "5", "from": "user@icloud.com",   "subject": "Signed Test", "trust_level": "verified", "has_sig": true}
-]
-```
-
-Messages from Proton-to-Proton senders show `trusted`. External messages with valid PGP signatures show `verified`. Unsigned external messages show `unverified`.
-
-### Verify a PGP signature
-
-```text
-> verify_signature message_id="5"
-
-{
-  "valid": true,
-  "signer": "Jim Freeman (Personal iCloud Key) <user@icloud.com>",
-  "key_id": "2ACCA3DB52E5C2606E6F0883FFB3F64592BB7C3A",
-  "trust_level": "verified"
-}
-```
-
-### Inspect MIME structure
-
-```text
-> show_mime message_id="5"
-
-[
-  {"index": 0, "content_type": "text/plain", "size": 42},
-  {"index": 1, "content_type": "application/pgp-signature", "filename": "signature.asc", "size": 917}
-]
-```
-
-### Check installation health
-
-```text
-$ beadle-email doctor
-
-[+] secret_backends  macOS Keychain, file (~/.config/beadle/), environment variable
-[+] config           /Users/you/.config/beadle/email.json
-[+] imap_password
-[+] resend_api_key
-[+] gpg              /opt/homebrew/bin/gpg
-[+] gpg_signing_key  you@example.com
-[+] gpg_passphrase
-[+] smtp             127.0.0.1:1025
-```
-
-## MCP Tools
-
-| Tool | Purpose |
-|------|---------|
-| `list_messages` | List messages with trust levels. PGP signatures verified inline. |
-| `read_message` | Read full message body, headers, attachments, and trust classification. |
-| `list_folders` | List all IMAP mailbox folders. |
-| `send_email` | Send via Proton Bridge SMTP (primary) or Resend API (fallback). |
-| `verify_signature` | Verify PGP signature on a message. Returns signer info and key ID. |
-| `show_mime` | Inspect multipart MIME structure, PGP parts, and attachments. |
-| `check_trust` | Detailed trust classification with encryption type and origin analysis. |
-
-## CLI
-
-```bash
-beadle-email serve [--config PATH]    # Start MCP server (stdio transport, default)
-beadle-email version                  # Print version
-beadle-email doctor [--config PATH]   # Check installation health
-beadle-email status [--config PATH]   # Current configuration summary
-```
-
 ## Trust Model
-
-Trust classification happens at two layers: header inspection during listing, and full PGP verification for signed messages.
 
 | Level | Sender | Detection | What It Means |
 |-------|--------|-----------|---------------|
@@ -191,61 +149,14 @@ Trust classification happens at two layers: header inspection during listing, an
 
 PGP verification uses an isolated GNUPGHOME per operation. When no key is attached to the message, keys are bridged from the system keyring (`~/.gnupg/`) into the isolated environment.
 
-## Sending
+## CLI
 
-Outbound email uses a two-tier sender chain:
-
-1. **Proton Bridge SMTP** (primary) --- passes SPF/DKIM/DMARC for the configured domain. Proton handles its own encryption for Proton-to-Proton recipients.
-2. **Resend API** (fallback) --- used when Proton Bridge is unavailable.
-
-PGP signing of outbound messages is tracked as future work ([beadle-atz](https://github.com/punt-labs/beadle)). The blocker: Proton Bridge strips `multipart/signed` MIME envelopes from outbound messages, and Resend does not support raw MIME. Amazon SES (`SendRawEmail`) is the planned transport for PGP-signed outbound delivery.
-
-## Architecture
-
-```text
-beadle/
-├── cmd/beadle-email/       CLI entry point: serve, version, doctor, status
-├── internal/
-│   ├── channel/            Channel interface: Message, TrustLevel, shared types
-│   ├── email/              IMAP client, MIME parser, trust classifier, SMTP/Resend senders
-│   ├── mcp/                MCP tool definitions and handlers (7 tools)
-│   ├── pgp/                GPG signature verification and signing via gpg CLI
-│   └── secret/             Credential resolution: OS keychain → file → env var
-├── Makefile                Quality gates (make check = vet + staticcheck + markdownlint + tests)
-└── docs/
-    └── email-channel-plan.md
+```bash
+beadle-email serve [--config PATH]    # Start MCP server (stdio transport)
+beadle-email version                  # Print version
+beadle-email doctor [--config PATH]   # Check installation health
+beadle-email status [--config PATH]   # Current configuration summary
 ```
-
-## Design Principles
-
-- **Zero agent authority.** Every action requires a GPG-signed instruction from the owner. The daemon has no independent decision-making.
-- **Preflight before execute.** All permissions are validated before any command runs.
-- **Isolated keychain.** PGP operations use temporary GNUPGHOME directories, never touching the user's system keyring.
-- **Credentials never in config.** Connection parameters in JSON, secrets resolved at runtime from OS keychain or environment.
-- **Non-expiring keys rejected.** All command-signing keys must have an expiration date.
-
-## Roadmap
-
-### Shipped
-
-- Email channel MCP server (Go) with 7 tools
-- Four-level trust model with inline PGP verification
-- IMAP via Proton Bridge, sending via SMTP + Resend fallback
-- Credential resolution chain (Keychain → file → env)
-- MIME parsing and structure inspection
-- GPG signature verification with system keyring bridging
-- `doctor` and `status` CLI diagnostics
-- Installer with SHA256 verification and automatic MCP registration
-- CI: vet + staticcheck + race tests on push/PR
-- Release workflow: 4 platform binaries + checksums on tag push
-
-### Next
-
-| Phase | What Ships |
-|-------|-----------|
-| **PGP outbound signing** | Amazon SES transport for `multipart/signed` delivery ([beadle-atz](https://github.com/punt-labs/beadle)) |
-| **Linux keychain** | `libsecret` / `secret-tool` credential backend |
-| **Daemon** | Pipeline execution, GPG-signed command documents, tamperproof audit log |
 
 ## Documentation
 
