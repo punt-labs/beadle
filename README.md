@@ -14,7 +14,7 @@ The first shipping component is `beadle-email` — an MCP server providing email
 
 ## Quick Start
 
-Two install paths (mutually exclusive per [DES-011](DESIGN.md)):
+Two install paths (mutually exclusive per [DES-011](DESIGN.md)). Do not install both — this creates duplicate MCP server registrations.
 
 ### Claude Code Plugin (full experience)
 
@@ -124,9 +124,11 @@ export BEADLE_IMAP_PASSWORD='your-bridge-password'
 export BEADLE_RESEND_API_KEY='your-resend-key'
 ```
 
-Configuration file (`~/.config/beadle/email.json`) stores connection parameters only:
+Create the configuration file (`~/.config/beadle/email.json`) with your connection parameters:
 
-```json
+```bash
+mkdir -p ~/.config/beadle
+cat > ~/.config/beadle/email.json << 'EOF'
 {
   "imap_host": "127.0.0.1",
   "imap_port": 1143,
@@ -134,6 +136,7 @@ Configuration file (`~/.config/beadle/email.json`) stores connection parameters 
   "smtp_port": 1025,
   "from_address": "you@example.com"
 }
+EOF
 ```
 
 </details>
