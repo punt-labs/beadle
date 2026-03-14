@@ -3,9 +3,13 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"mime"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -15,6 +19,8 @@ import (
 	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/pgp"
 )
+
+const maxAttachmentSize = 25 * 1024 * 1024 // 25 MB
 
 // RegisterTools adds all email channel tools to the MCP server.
 func RegisterTools(s *server.MCPServer, cfg *email.Config, logger *slog.Logger) {
@@ -37,13 +43,14 @@ type handler struct {
 
 // sendResult is the typed response for the send_email tool.
 type sendResult struct {
-	Status  string `json:"status"`
-	Method  string `json:"method"`
-	Signed  bool   `json:"signed"`
-	ID      string `json:"id,omitempty"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Subject string `json:"subject"`
+	Status      string `json:"status"`
+	Method      string `json:"method"`
+	Signed      bool   `json:"signed"`
+	ID          string `json:"id,omitempty"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Subject     string `json:"subject"`
+	Attachments int    `json:"attachments"`
 }
 
 // verifyResult is the typed response for the verify_signature tool.
@@ -97,7 +104,7 @@ func listFoldersTool() mcplib.Tool {
 
 func sendEmailTool() mcplib.Tool {
 	return mcplib.NewTool("send_email",
-		mcplib.WithDescription("Send an email via Proton Bridge SMTP (primary) or Resend API (fallback). Sends from the configured address."),
+		mcplib.WithDescription("Send an email via Proton Bridge SMTP (primary) or Resend API (fallback). Sends from the configured address. Supports file attachments."),
 		mcplib.WithString("to",
 			mcplib.Required(),
 			mcplib.Description("Recipient email address"),
@@ -112,6 +119,10 @@ func sendEmailTool() mcplib.Tool {
 		),
 		mcplib.WithString("html",
 			mcplib.Description("Optional HTML body"),
+		),
+		mcplib.WithArray("attachments",
+			mcplib.Description("Absolute file paths to attach (max 25 MB each)"),
+			mcplib.WithStringItems(),
 		),
 	)
 }
@@ -295,13 +306,18 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	}
 	html := stringParam(req, "html", "")
 
+	attachments, err := readAttachments(req)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	// Sender chain: Proton Bridge SMTP → Resend plain
 	//
 	// PGP signing of outbound mail requires a transport that preserves raw MIME
 	// (multipart/signed envelopes). Neither Proton Bridge (strips MIME) nor
 	// Resend (no raw MIME API) supports this. Tracked in beadle-atz: Amazon SES
 	// will be added as the PGP-signing transport in a future release.
-	result, sendErr := h.trySendChain(to, subject, body, html)
+	result, sendErr := h.trySendChain(to, subject, body, html, attachments)
 	if sendErr != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("send email: %v", sendErr)), nil
 	}
@@ -309,12 +325,12 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 }
 
 // trySendChain attempts to send via the best available method.
-func (h *handler) trySendChain(to, subject, body, html string) (*sendResult, error) {
+func (h *handler) trySendChain(to, subject, body, html string, attachments []email.OutboundAttachment) (*sendResult, error) {
 	// 1. Proton Bridge SMTP — passes SPF/DKIM/DMARC for punt-labs.com
-	// Note: SMTP path sends plain text only. The html parameter is only
-	// used by the Resend fallback which supports structured HTML fields.
+	// Note: SMTP path sends plain text only (no HTML). The html parameter
+	// is only used by the Resend fallback which supports structured HTML fields.
 	if email.SMTPAvailable(h.cfg) {
-		raw, composeErr := email.ComposeRaw(h.cfg.FromAddress, to, subject, body)
+		raw, composeErr := email.ComposeRaw(h.cfg.FromAddress, to, subject, body, attachments)
 		if composeErr != nil {
 			return nil, composeErr
 		}
@@ -322,33 +338,44 @@ func (h *handler) trySendChain(to, subject, body, html string) (*sendResult, err
 			h.logger.Warn("smtp send failed, falling back to resend", "err", err)
 		} else {
 			return &sendResult{
-				Status:  "sent",
-				Method:  "proton-bridge-smtp",
-				From:    h.cfg.FromAddress,
-				To:      to,
-				Subject: subject,
+				Status:      "sent",
+				Method:      "proton-bridge-smtp",
+				From:        h.cfg.FromAddress,
+				To:          to,
+				Subject:     subject,
+				Attachments: len(attachments),
 			}, nil
 		}
 	}
 
 	// 2. Resend API — fallback when Bridge is unavailable
+	var resendAtts []email.ResendAttachment
+	for _, att := range attachments {
+		resendAtts = append(resendAtts, email.ResendAttachment{
+			Filename: att.Filename,
+			Content:  base64.StdEncoding.EncodeToString(att.Data),
+		})
+	}
+
 	resp, err := email.Send(h.cfg, email.SendRequest{
-		To:      to,
-		Subject: subject,
-		Text:    body,
-		HTML:    html,
+		To:          to,
+		Subject:     subject,
+		Text:        body,
+		HTML:        html,
+		Attachments: resendAtts,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &sendResult{
-		Status:  "sent",
-		Method:  "resend",
-		ID:      resp.ID,
-		From:    h.cfg.FromAddress,
-		To:      to,
-		Subject: subject,
+		Status:      "sent",
+		Method:      "resend",
+		ID:          resp.ID,
+		From:        h.cfg.FromAddress,
+		To:          to,
+		Subject:     subject,
+		Attachments: len(attachments),
 	}, nil
 }
 
@@ -478,6 +505,69 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 }
 
 // --- Helpers ---
+
+// readAttachments extracts the attachments parameter, reads each file, and
+// validates paths and sizes. Returns nil (not an error) when no attachments
+// are provided.
+func readAttachments(req mcplib.CallToolRequest) ([]email.OutboundAttachment, error) {
+	paths := stringSliceParam(req, "attachments")
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	attachments := make([]email.OutboundAttachment, 0, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			return nil, fmt.Errorf("attachment path must be absolute: %q", path)
+		}
+
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("attachment %q: %w", filepath.Base(path), err)
+		}
+		if info.Size() > maxAttachmentSize {
+			return nil, fmt.Errorf("attachment %q exceeds 25 MB limit (%d bytes)", filepath.Base(path), info.Size())
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read attachment %q: %w", filepath.Base(path), err)
+		}
+
+		ct := mime.TypeByExtension(filepath.Ext(path))
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+
+		attachments = append(attachments, email.OutboundAttachment{
+			Filename:    filepath.Base(path),
+			ContentType: ct,
+			Data:        data,
+		})
+	}
+	return attachments, nil
+}
+
+// stringSliceParam extracts a []string from the MCP request arguments.
+// Returns nil if the key is missing or not an array.
+func stringSliceParam(req mcplib.CallToolRequest, key string) []string {
+	args := req.GetArguments()
+	v, ok := args[key]
+	if !ok {
+		return nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			result = append(result, s)
+		}
+	}
+	return result
+}
 
 func stringParam(req mcplib.CallToolRequest, key, fallback string) string {
 	args := req.GetArguments()

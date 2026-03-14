@@ -2,42 +2,105 @@ package email
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 )
 
+// OutboundAttachment represents a file to attach to an outgoing email.
+// Data is already read from disk — the email package never touches the filesystem.
+type OutboundAttachment struct {
+	Filename    string // Base filename (used in Content-Disposition)
+	ContentType string // MIME type (e.g., "application/pdf")
+	Data        []byte // Raw file contents
+}
+
 const resendAPIURL = "https://api.resend.com/emails"
 
-// ComposeRaw builds a simple RFC 822 message (no signing, no HTML).
-// Used for Proton Bridge SMTP where Proton handles its own encryption.
+// ComposeRaw builds an RFC 822 message for SMTP delivery.
+// When attachments is empty, produces a simple text/plain message.
+// When attachments is non-empty, produces a multipart/mixed message.
 // Returns an error if header fields contain CR/LF (header injection).
-func ComposeRaw(from, to, subject, textBody string) ([]byte, error) {
+func ComposeRaw(from, to, subject, textBody string, attachments []OutboundAttachment) ([]byte, error) {
 	for _, field := range []string{from, to, subject} {
 		if strings.ContainsAny(field, "\r\n") {
 			return nil, fmt.Errorf("header field contains CR/LF")
 		}
 	}
+
 	var msg bytes.Buffer
 	fmt.Fprintf(&msg, "From: %s\r\n", from)
 	fmt.Fprintf(&msg, "To: %s\r\n", to)
 	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
 	fmt.Fprintf(&msg, "MIME-Version: 1.0\r\n")
-	fmt.Fprintf(&msg, "Content-Type: text/plain; charset=utf-8\r\n")
+
+	if len(attachments) == 0 {
+		fmt.Fprintf(&msg, "Content-Type: text/plain; charset=utf-8\r\n")
+		fmt.Fprintf(&msg, "\r\n")
+		fmt.Fprintf(&msg, "%s\r\n", textBody)
+		return msg.Bytes(), nil
+	}
+
+	mw := multipart.NewWriter(&msg)
+	fmt.Fprintf(&msg, "Content-Type: multipart/mixed; boundary=%s\r\n", mw.Boundary())
 	fmt.Fprintf(&msg, "\r\n")
-	fmt.Fprintf(&msg, "%s\r\n", textBody)
+
+	// Text body part
+	textHeader := make(textproto.MIMEHeader)
+	textHeader.Set("Content-Type", "text/plain; charset=utf-8")
+	tw, err := mw.CreatePart(textHeader)
+	if err != nil {
+		return nil, fmt.Errorf("create text part: %w", err)
+	}
+	fmt.Fprintf(tw, "%s", textBody)
+
+	// Attachment parts
+	for _, att := range attachments {
+		attHeader := make(textproto.MIMEHeader)
+		attHeader.Set("Content-Type", att.ContentType)
+		attHeader.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", att.Filename))
+		attHeader.Set("Content-Transfer-Encoding", "base64")
+
+		aw, createErr := mw.CreatePart(attHeader)
+		if createErr != nil {
+			return nil, fmt.Errorf("create attachment part %q: %w", att.Filename, createErr)
+		}
+		encoded := base64.StdEncoding.EncodeToString(att.Data)
+		for i := 0; i < len(encoded); i += 76 {
+			end := i + 76
+			if end > len(encoded) {
+				end = len(encoded)
+			}
+			fmt.Fprintf(aw, "%s\r\n", encoded[i:end])
+		}
+	}
+
+	if err := mw.Close(); err != nil {
+		return nil, fmt.Errorf("close multipart writer: %w", err)
+	}
+
 	return msg.Bytes(), nil
+}
+
+// ResendAttachment is a file attachment in the Resend API format.
+type ResendAttachment struct {
+	Filename string `json:"filename"`
+	Content  string `json:"content"` // base64-encoded
 }
 
 // SendRequest is the payload for sending an email.
 type SendRequest struct {
-	To      string `json:"to"`
-	Subject string `json:"subject"`
-	Text    string `json:"text,omitempty"`
-	HTML    string `json:"html,omitempty"`
+	To          string             `json:"to"`
+	Subject     string             `json:"subject"`
+	Text        string             `json:"text,omitempty"`
+	HTML        string             `json:"html,omitempty"`
+	Attachments []ResendAttachment `json:"attachments,omitempty"`
 }
 
 // SendResponse is the Resend API response.
@@ -52,16 +115,12 @@ func Send(cfg *Config, req SendRequest) (*SendResponse, error) {
 		return nil, fmt.Errorf("read api key: %w", err)
 	}
 
-	payload := map[string]string{
-		"from":    cfg.FromAddress,
-		"to":      req.To,
-		"subject": req.Subject,
-	}
-	if req.Text != "" {
-		payload["text"] = req.Text
-	}
-	if req.HTML != "" {
-		payload["html"] = req.HTML
+	payload := struct {
+		From string `json:"from"`
+		SendRequest
+	}{
+		From:        cfg.FromAddress,
+		SendRequest: req,
 	}
 
 	body, err := json.Marshal(payload)
