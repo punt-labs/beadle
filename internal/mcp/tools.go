@@ -510,7 +510,10 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 // validates paths and sizes. Returns nil (not an error) when no attachments
 // are provided.
 func readAttachments(req mcplib.CallToolRequest) ([]email.OutboundAttachment, error) {
-	paths := stringSliceParam(req, "attachments")
+	paths, err := stringSliceParam(req, "attachments")
+	if err != nil {
+		return nil, err
+	}
 	if len(paths) == 0 {
 		return nil, nil
 	}
@@ -549,24 +552,27 @@ func readAttachments(req mcplib.CallToolRequest) ([]email.OutboundAttachment, er
 }
 
 // stringSliceParam extracts a []string from the MCP request arguments.
-// Returns nil if the key is missing or not an array.
-func stringSliceParam(req mcplib.CallToolRequest, key string) []string {
+// Returns nil, nil if the key is missing or not an array.
+// Returns an error if any element is not a string.
+func stringSliceParam(req mcplib.CallToolRequest, key string) ([]string, error) {
 	args := req.GetArguments()
 	v, ok := args[key]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	arr, ok := v.([]any)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	result := make([]string, 0, len(arr))
-	for _, item := range arr {
-		if s, ok := item.(string); ok {
-			result = append(result, s)
+	for i, item := range arr {
+		s, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s[%d]: expected string, got %T", key, i, item)
 		}
+		result = append(result, s)
 	}
-	return result
+	return result, nil
 }
 
 func stringParam(req mcplib.CallToolRequest, key, fallback string) string {
