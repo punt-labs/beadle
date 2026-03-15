@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 # PostToolUse — two-channel display for beadle-email MCP tools.
 # See punt-kit/patterns/two-channel-display.md for the pattern.
 

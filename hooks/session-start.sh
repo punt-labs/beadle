@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 # SessionStart — deploy commands, auto-allow MCP permissions, first-run setup.
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
@@ -26,18 +27,34 @@ fi
 ACTIONS=()
 
 # ── Deploy top-level commands (diff-and-copy) ─────────────────────────
-# In dev mode, skip — prod plugin handles top-level commands.
-if [[ "$DEV_MODE" == "false" ]]; then
-  DEPLOYED=()
-  shopt -s nullglob
+# In dev mode, the prod plugin normally handles top-level commands.
+# But if no prod plugin is installed, the dev plugin must deploy them.
+SKIP_DEPLOY=false
+if [[ "$DEV_MODE" == "true" ]]; then
+  INSTALLED="$HOME/.claude/plugins/installed_plugins.json"
+  if command -v jq >/dev/null 2>&1 && [[ -f "$INSTALLED" ]]; then
+    if jq -e '.plugins["beadle@punt-labs"]' "$INSTALLED" >/dev/null 2>&1; then
+      SKIP_DEPLOY=true
+    fi
+  fi
+fi
+
+DEPLOYED=()
+shopt -s nullglob
+if [[ "$SKIP_DEPLOY" == "true" ]]; then
+  : # prod plugin handles deployment
+elif ! mkdir -p "$COMMANDS_DIR" 2>/dev/null; then
+  ACTIONS+=("Failed to create $COMMANDS_DIR — skipping command deployment")
+else
   for cmd_file in "$PLUGIN_ROOT/commands/"*.md; do
     name="$(basename "$cmd_file")"
     [[ "$name" == *-dev.md ]] && continue
     dest="$COMMANDS_DIR/$name"
-    mkdir -p "$COMMANDS_DIR"
     if [[ ! -f "$dest" ]] || ! diff -q "$cmd_file" "$dest" >/dev/null 2>&1; then
       if cp "$cmd_file" "$dest"; then
         DEPLOYED+=("/${name%.md}")
+      else
+        ACTIONS+=("Failed to deploy /${name%.md}")
       fi
     fi
   done
