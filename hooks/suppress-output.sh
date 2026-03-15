@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 # PostToolUse — two-channel display for beadle-email MCP tools.
 # See punt-kit/patterns/two-channel-display.md for the pattern.
 
@@ -31,7 +32,7 @@ RESULT=$(echo "$INPUT" | jq -r '
 [[ -z "$RESULT" ]] && exit 0
 
 emit() {
-  local summary="$1" ctx="$2"
+  local summary="$1" ctx="${2:-}"
   if [[ -n "$ctx" ]]; then
     jq -n --arg s "$summary" --arg c "$ctx" '{
       hookSpecificOutput: {
