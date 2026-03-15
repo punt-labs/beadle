@@ -88,6 +88,11 @@ func ParseMIME(raw []byte) (body string, attachments []channel.Attachment, heade
 
 		partData, err := io.ReadAll(part.Body)
 		if err != nil {
+			attachments = append(attachments, channel.Attachment{
+				Filename:    filename,
+				ContentType: partCT + " (read error)",
+				Size:        0,
+			})
 			continue
 		}
 

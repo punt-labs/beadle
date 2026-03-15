@@ -552,11 +552,13 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		raw, err := c.FetchRaw(folder, uint32(uid))
 		if err != nil {
+			h.logger.Warn("download_attachment: fetch failed", "uid", msgID, "folder", folder, "err", err)
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
 		}
 
 		part, data, err := email.ExtractPart(raw, partIndex)
 		if err != nil {
+			h.logger.Warn("download_attachment: extract failed", "uid", msgID, "part", partIndex, "err", err)
 			return mcplib.NewToolResultError(fmt.Sprintf("extract part: %v", err)), nil
 		}
 
