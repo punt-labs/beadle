@@ -32,7 +32,7 @@ RESULT=$(echo "$INPUT" | jq -r '
 [[ -z "$RESULT" ]] && exit 0
 
 emit() {
-  local summary="$1" ctx="$2"
+  local summary="$1" ctx="${2:-}"
   if [[ -n "$ctx" ]]; then
     jq -n --arg s "$summary" --arg c "$ctx" '{
       hookSpecificOutput: {

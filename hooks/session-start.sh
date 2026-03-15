@@ -2,7 +2,7 @@
 set -euo pipefail
 # SessionStart — deploy commands, auto-allow MCP permissions, first-run setup.
 
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || true)}"
 if [[ -z "$PLUGIN_ROOT" ]]; then
   echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Beadle SessionStart: skipped (not in a git repo)"}}'
   exit 0
@@ -43,7 +43,7 @@ DEPLOYED=()
 shopt -s nullglob
 if [[ "$SKIP_DEPLOY" == "true" ]]; then
   : # prod plugin handles deployment
-elif ! mkdir -p "$COMMANDS_DIR" 2>/dev/null; then
+elif ! mkdir -p "$COMMANDS_DIR"; then
   ACTIONS+=("Failed to create $COMMANDS_DIR — skipping command deployment")
 else
   for cmd_file in "$PLUGIN_ROOT/commands/"*.md; do
