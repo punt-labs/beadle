@@ -18,9 +18,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Trailing CRLF missing from text body in multipart MIME messages
 - `io.ReadAll` errors silently discarded in `ParseMIMEStructure`
-
-### Fixed
-
 - PostToolUse suppress-output hook: add `download_attachment` handler to prevent
   raw JSON from leaking into the conversation panel.
 - SessionStart hook: deploy top-level commands in dev mode when no prod plugin
