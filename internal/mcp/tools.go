@@ -191,7 +191,7 @@ func moveMessageTool() mcplib.Tool {
 
 func downloadAttachmentTool() mcplib.Tool {
 	return mcplib.NewTool("download_attachment",
-		mcplib.WithDescription("Extract an attachment from a message by MIME part index (from show_mime). Saves the file to .beadle/<mailbox>/attachments/ and returns the path."),
+		mcplib.WithDescription("Extract an attachment from a message by MIME part index (from show_mime). Saves the file to ~/.beadle/<mailbox>/attachments/ and returns the path."),
 		mcplib.WithString("folder",
 			mcplib.Description("IMAP folder name"),
 			mcplib.DefaultString("INBOX"),
@@ -560,12 +560,17 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 			return mcplib.NewToolResultError(fmt.Sprintf("extract part: %v", err)), nil
 		}
 
-		// Build output path: .beadle/<mailbox>/attachments/<uid>_<filename>
-		filename := part.Filename
-		if filename == "" {
+		// Build output path: ~/.beadle/<mailbox>/attachments/<uid>_<filename>
+		// Use filepath.Base to prevent path traversal via attacker-controlled filenames.
+		filename := filepath.Base(part.Filename)
+		if filename == "" || filename == "." {
 			filename = fmt.Sprintf("part_%d", partIndex)
 		}
-		attachDir := filepath.Join(".beadle", h.cfg.IMAPUser, "attachments")
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("resolve home directory: %v", err)), nil
+		}
+		attachDir := filepath.Join(homeDir, ".beadle", filepath.Base(h.cfg.IMAPUser), "attachments")
 		if err := os.MkdirAll(attachDir, 0o750); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("create attachment dir: %v", err)), nil
 		}
@@ -576,7 +581,10 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 			return mcplib.NewToolResultError(fmt.Sprintf("write attachment: %v", err)), nil
 		}
 
-		absPath, _ := filepath.Abs(outPath)
+		absPath, err := filepath.Abs(outPath)
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("resolve output path: %v", err)), nil
+		}
 		return jsonResult(&downloadResult{
 			Status:      "saved",
 			Path:        absPath,

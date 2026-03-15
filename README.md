@@ -91,7 +91,7 @@ sh install.sh
 | `show_mime` | Inspect multipart MIME structure, PGP parts, and attachments. |
 | `verify_signature` | Verify PGP signature on a message. Returns signer info and key ID. |
 | `check_trust` | Detailed trust classification with encryption type and origin analysis. |
-| `download_attachment` | Extract an attachment by MIME part index (from `show_mime`). Saves to `.beadle/<mailbox>/attachments/` and returns the path. |
+| `download_attachment` | Extract an attachment by MIME part index (from `show_mime`). Saves to `~/.beadle/<mailbox>/attachments/` and returns the path. |
 
 ## Commands
 
