@@ -12,6 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   absolute file paths). Builds `multipart/mixed` MIME for SMTP and structured
   attachments for Resend API. Per-file 25 MB limit, auto-detected MIME types.
 
+### Fixed
+
+- PostToolUse suppress-output hook: add `download_attachment` handler to prevent
+  raw JSON from leaking into the conversation panel.
+
 ## [0.2.0] - 2026-03-13
 
 ### Added

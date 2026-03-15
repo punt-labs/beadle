@@ -125,6 +125,13 @@ case "$TOOL_NAME" in
     emit "$SUMMARY" "$RESULT"
     ;;
 
+  download_attachment)
+    STATUS=$(echo "$RESULT" | jq -r '.status // "saved"')
+    FILENAME=$(echo "$RESULT" | jq -r '.filename // "unknown"')
+    SIZE=$(echo "$RESULT" | jq -r '.size // 0')
+    emit "${STATUS}: ${FILENAME} (${SIZE} bytes)" "$RESULT"
+    ;;
+
   *)
     emit "done" "$RESULT"
     ;;
