@@ -35,6 +35,7 @@ func RegisterTools(s *server.MCPServer, cfg *email.Config, logger *slog.Logger) 
 	s.AddTool(showMIMETool(), h.showMIME)
 	s.AddTool(checkTrustTool(), h.checkTrust)
 	s.AddTool(moveMessageTool(), h.moveMessage)
+	s.AddTool(downloadAttachmentTool(), h.downloadAttachment)
 }
 
 type handler struct {
@@ -186,6 +187,33 @@ func moveMessageTool() mcplib.Tool {
 			mcplib.DefaultString("Archive"),
 		),
 	)
+}
+
+func downloadAttachmentTool() mcplib.Tool {
+	return mcplib.NewTool("download_attachment",
+		mcplib.WithDescription("Extract an attachment from a message by MIME part index (from show_mime). Saves the file to ~/.beadle/<mailbox>/attachments/ and returns the path."),
+		mcplib.WithString("folder",
+			mcplib.Description("IMAP folder name"),
+			mcplib.DefaultString("INBOX"),
+		),
+		mcplib.WithString("message_id",
+			mcplib.Required(),
+			mcplib.Description("Message UID"),
+		),
+		mcplib.WithNumber("part_index",
+			mcplib.Required(),
+			mcplib.Description("MIME part index (from show_mime)"),
+		),
+	)
+}
+
+// downloadResult is the typed response for the download_attachment tool.
+type downloadResult struct {
+	Status      string `json:"status"`
+	Path        string `json:"path"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int    `json:"size"`
 }
 
 // --- Tool Handlers ---
@@ -501,6 +529,70 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 			MessageID:   msgID,
 			Source:      folder,
 			Destination: destination,
+		})
+	})
+}
+
+func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	folder := stringParam(req, "folder", "INBOX")
+	msgID, err := req.RequireString("message_id")
+	if err != nil {
+		return mcplib.NewToolResultError("message_id is required"), nil
+	}
+	partIndex := intParam(req, "part_index", -1)
+	if partIndex < 0 {
+		return mcplib.NewToolResultError("part_index is required"), nil
+	}
+
+	uid, err := strconv.ParseUint(msgID, 10, 32)
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
+	}
+
+	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
+		raw, err := c.FetchRaw(folder, uint32(uid))
+		if err != nil {
+			h.logger.Warn("download_attachment: fetch failed", "uid", msgID, "folder", folder, "err", err)
+			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
+		}
+
+		part, data, err := email.ExtractPart(raw, partIndex)
+		if err != nil {
+			h.logger.Warn("download_attachment: extract failed", "uid", msgID, "part", partIndex, "err", err)
+			return mcplib.NewToolResultError(fmt.Sprintf("extract part: %v", err)), nil
+		}
+
+		// Build output path: ~/.beadle/<mailbox>/attachments/<uid>_<filename>
+		// Use filepath.Base to prevent path traversal via attacker-controlled filenames.
+		filename := filepath.Base(part.Filename)
+		if filename == "" || filename == "." {
+			filename = fmt.Sprintf("part_%d", partIndex)
+		}
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("resolve home directory: %v", err)), nil
+		}
+		attachDir := filepath.Join(homeDir, ".beadle", filepath.Base(h.cfg.IMAPUser), "attachments")
+		if err := os.MkdirAll(attachDir, 0o750); err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("create attachment dir: %v", err)), nil
+		}
+
+		outName := fmt.Sprintf("%s_%s", msgID, filename)
+		outPath := filepath.Join(attachDir, outName)
+		if err := os.WriteFile(outPath, data, 0o640); err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("write attachment: %v", err)), nil
+		}
+
+		absPath, err := filepath.Abs(outPath)
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("resolve output path: %v", err)), nil
+		}
+		return jsonResult(&downloadResult{
+			Status:      "saved",
+			Path:        absPath,
+			Filename:    filename,
+			ContentType: part.ContentType,
+			Size:        part.Size,
 		})
 	})
 }

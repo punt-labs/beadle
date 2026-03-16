@@ -88,6 +88,11 @@ func ParseMIME(raw []byte) (body string, attachments []channel.Attachment, heade
 
 		partData, err := io.ReadAll(part.Body)
 		if err != nil {
+			attachments = append(attachments, channel.Attachment{
+				Filename:    filename,
+				ContentType: partCT + " (read error)",
+				Size:        0,
+			})
 			continue
 		}
 
@@ -192,6 +197,67 @@ func ParseMIMEStructure(raw []byte) ([]MIMEPart, error) {
 	}
 
 	return parts, nil
+}
+
+// ExtractPart extracts a single MIME part by index, returning its metadata
+// and raw bytes. For single-part messages, index 0 returns the body.
+func ExtractPart(raw []byte, partIndex int) (*MIMEPart, []byte, error) {
+	entity, err := message.Read(bytes.NewReader(raw))
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse mime: %w", err)
+	}
+
+	mr := entity.MultipartReader()
+	if mr == nil {
+		// Single-part message — only index 0 is valid
+		if partIndex != 0 {
+			return nil, nil, fmt.Errorf("part index %d out of range (single-part message)", partIndex)
+		}
+		data, err := io.ReadAll(entity.Body)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read body: %w", err)
+		}
+		ct, _, _ := mime.ParseMediaType(entity.Header.Get("Content-Type"))
+		if ct == "" {
+			ct = "text/plain"
+		}
+		return &MIMEPart{
+			Index:       0,
+			ContentType: ct,
+			Size:        len(data),
+		}, data, nil
+	}
+
+	idx := 0
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			return nil, nil, fmt.Errorf("part index %d out of range (message has %d parts)", partIndex, idx)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("read part %d: %w", idx, err)
+		}
+
+		if idx == partIndex {
+			data, err := io.ReadAll(part.Body)
+			if err != nil {
+				return nil, nil, fmt.Errorf("read part %d body: %w", idx, err)
+			}
+			ct, _, _ := mime.ParseMediaType(part.Header.Get("Content-Type"))
+			if ct == "" {
+				ct = "application/octet-stream"
+			}
+			disp, params, _ := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+			return &MIMEPart{
+				Index:       idx,
+				ContentType: ct,
+				Filename:    params["filename"],
+				Disposition: disp,
+				Size:        len(data),
+			}, data, nil
+		}
+		idx++
+	}
 }
 
 func truncate(s string, max int) string {
