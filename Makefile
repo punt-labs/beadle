@@ -1,4 +1,4 @@
-VERSION := $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
+VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
 
 .PHONY: help lint docs test check format build clean dist cover tools doctor
