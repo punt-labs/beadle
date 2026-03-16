@@ -74,8 +74,8 @@ DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ASSET"
 CHECKSUMS_URL="https://github.com/$REPO/releases/latest/download/checksums.txt"
 
 TMPDIR_DL="$(mktemp -d)"
-cleanup_tmpdir() { rm -rf "$TMPDIR_DL"; }
-trap cleanup_tmpdir EXIT INT TERM
+cleanup() { rm -rf "$TMPDIR_DL"; }
+trap cleanup EXIT INT TERM
 
 curl -fsSL "$DOWNLOAD_URL" -o "$TMPDIR_DL/$ASSET" || fail "Failed to download $DOWNLOAD_URL"
 curl -fsSL "$CHECKSUMS_URL" -o "$TMPDIR_DL/checksums.txt" || fail "Failed to download checksums"
@@ -135,13 +135,13 @@ fi
 info "Installing beadle plugin..."
 
 NEED_HTTPS_REWRITE=0
-cleanup_https_rewrite() {
+cleanup() {
+  rm -rf "$TMPDIR_DL"
   if [ "$NEED_HTTPS_REWRITE" = "1" ]; then
     git config --global --unset url."https://github.com/".insteadOf 2>/dev/null || true
     NEED_HTTPS_REWRITE=0
   fi
 }
-trap cleanup_https_rewrite EXIT INT TERM
 
 if ! ssh -n -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
   if ! git config --global --get url."https://github.com/".insteadOf >/dev/null 2>&1; then
@@ -157,8 +157,6 @@ if claude plugin install "beadle@$MARKETPLACE_NAME" --scope user < /dev/null 2>/
 else
   warn "Failed to install plugin (install manually: claude plugin install beadle@punt-labs)"
 fi
-
-cleanup_https_rewrite
 
 # --- Step 8: Register MCP server ---
 
