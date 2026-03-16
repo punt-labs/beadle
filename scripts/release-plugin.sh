@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN_JSON="${REPO_ROOT}/.claude-plugin/plugin.json"
 
 # Swap plugin name from *-dev to prod
-current_name="$(python3 -c "import json; print(json.load(open('${PLUGIN_JSON}'))['name'])")"
+current_name="$(PLUGIN_JSON="$PLUGIN_JSON" python3 -c "import json, os; print(json.load(open(os.environ['PLUGIN_JSON']))['name'])")"
 prod_name="${current_name%-dev}"
 
 if [[ "$current_name" == "$prod_name" ]]; then
