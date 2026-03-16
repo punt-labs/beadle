@@ -20,11 +20,11 @@ if [[ "$current_name" == "$prod_name" ]]; then
 fi
 
 echo "Swapping plugin name: ${current_name} → ${prod_name}"
-python3 -c "
-import json, pathlib
-p = pathlib.Path('${PLUGIN_JSON}')
+PLUGIN_JSON="$PLUGIN_JSON" PROD_NAME="$prod_name" python3 -c "
+import json, pathlib, os
+p = pathlib.Path(os.environ['PLUGIN_JSON'])
 d = json.loads(p.read_text())
-d['name'] = '${prod_name}'
+d['name'] = os.environ['PROD_NAME']
 p.write_text(json.dumps(d, indent=2) + '\n')
 "
 

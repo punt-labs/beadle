@@ -135,27 +135,30 @@ fi
 info "Installing beadle plugin..."
 
 HTTPS_ENV=""
-if ! ssh -n -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+if ! ssh -n -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
   warn "SSH auth to GitHub unavailable, using HTTPS fallback"
   HTTPS_ENV="GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com:"
 fi
 
-claude plugin uninstall "beadle@$MARKETPLACE_NAME" < /dev/null 2>/dev/null || true
+PLUGIN_INSTALLED=0
 if env $HTTPS_ENV claude plugin install "beadle@$MARKETPLACE_NAME" --scope user < /dev/null 2>/dev/null; then
   ok "beadle plugin installed"
+  PLUGIN_INSTALLED=1
 else
-  warn "Failed to install plugin (install manually: claude plugin install beadle@punt-labs)"
+  warn "Failed to install plugin (install manually: claude plugin install beadle@$MARKETPLACE_NAME)"
 fi
 
 # --- Step 8: Register MCP server ---
+# Only register standalone MCP server if plugin install failed (plugin.json declares mcpServers)
 
-info "Registering MCP server..."
-
-if claude mcp get "$BINARY" < /dev/null 2>/dev/null | grep -q "$BINARY"; then
-  ok "MCP server already registered"
-else
-  claude mcp add -s user "$BINARY" -- "$INSTALL_DIR/$BINARY" serve < /dev/null || fail "Failed to register MCP server"
-  ok "MCP server registered (user scope)"
+if [ "$PLUGIN_INSTALLED" = "0" ]; then
+  info "Registering MCP server (fallback)..."
+  if claude mcp get "$BINARY" < /dev/null 2>/dev/null | grep -q "$BINARY"; then
+    ok "MCP server already registered"
+  else
+    claude mcp add -s user "$BINARY" -- "$INSTALL_DIR/$BINARY" serve < /dev/null || fail "Failed to register MCP server"
+    ok "MCP server registered (user scope)"
+  fi
 fi
 
 # --- Step 9: Verify ---
