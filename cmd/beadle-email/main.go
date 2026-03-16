@@ -24,7 +24,9 @@ import (
 	"github.com/punt-labs/beadle/internal/secret"
 )
 
-const version = "0.1.0"
+// version is set at build time via -ldflags="-X main.version=..."
+// Defaults to "dev" for local builds without ldflags.
+var version = "dev"
 
 const usage = `beadle-email: Beadle email channel MCP server
 
