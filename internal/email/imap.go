@@ -83,13 +83,13 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool) ([]chan
 	}
 
 	if mbox.NumMessages == 0 {
-		return nil, nil
+		return []channel.MessageSummary{}, nil
 	}
 
 	// Determine which messages to fetch
 	var numSet imap.NumSet
 	if unreadOnly {
-		searchData, err := c.imap.Search(&imap.SearchCriteria{
+		searchData, err := c.imap.UIDSearch(&imap.SearchCriteria{
 			NotFlag: []imap.Flag{imap.FlagSeen},
 		}, nil).Wait()
 		if err != nil {
@@ -97,7 +97,7 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool) ([]chan
 		}
 		uids := searchData.AllUIDs()
 		if len(uids) == 0 {
-			return nil, nil
+			return []channel.MessageSummary{}, nil
 		}
 		// Take the last `count` UIDs
 		if len(uids) > count {
