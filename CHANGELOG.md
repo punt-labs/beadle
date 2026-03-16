@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-15
+
 ### Added
 
 - `send_email`: file attachment support via `attachments` parameter (list of
