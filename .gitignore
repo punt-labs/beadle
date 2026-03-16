@@ -22,6 +22,9 @@
 # Scratch/temp directory (TMPDIR set via .envrc)
 .tmp/
 
+# Beadle runtime data (downloaded attachments, etc.)
+.beadle/
+
 # Go build artifacts
 /beadle-email
 dist/

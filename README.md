@@ -70,7 +70,7 @@ sh install.sh
 
 ## Features
 
-- **8 MCP tools** --- list, read, send, move/archive, verify signatures, inspect MIME, classify trust, list folders
+- **9 MCP tools** --- list, read, send, move/archive, download attachments, verify signatures, inspect MIME, classify trust, list folders
 - **Four-level trust model** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
 - **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically
 - **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound)
@@ -91,6 +91,7 @@ sh install.sh
 | `show_mime` | Inspect multipart MIME structure, PGP parts, and attachments. |
 | `verify_signature` | Verify PGP signature on a message. Returns signer info and key ID. |
 | `check_trust` | Detailed trust classification with encryption type and origin analysis. |
+| `download_attachment` | Extract an attachment by MIME part index (from `show_mime`). Saves to `~/.beadle/<mailbox>/attachments/` and returns the path. |
 
 ## Commands
 

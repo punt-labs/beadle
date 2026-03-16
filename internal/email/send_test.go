@@ -66,7 +66,7 @@ func TestComposeRaw_OneAttachment(t *testing.T) {
 	assert.Equal(t, "text/plain; charset=utf-8", part.Header.Get("Content-Type"))
 	body, err := io.ReadAll(part)
 	require.NoError(t, err)
-	assert.Equal(t, "See attached.", string(body))
+	assert.Equal(t, "See attached.\r\n", string(body))
 
 	// Part 2: attachment
 	part, err = mr.NextPart()
