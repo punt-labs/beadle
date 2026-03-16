@@ -134,25 +134,14 @@ fi
 
 info "Installing beadle plugin..."
 
-NEED_HTTPS_REWRITE=0
-cleanup() {
-  rm -rf "$TMPDIR_DL"
-  if [ "$NEED_HTTPS_REWRITE" = "1" ]; then
-    git config --global --unset url."https://github.com/".insteadOf 2>/dev/null || true
-    NEED_HTTPS_REWRITE=0
-  fi
-}
-
+HTTPS_ENV=""
 if ! ssh -n -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
-  if ! git config --global --get url."https://github.com/".insteadOf >/dev/null 2>&1; then
-    warn "SSH auth to GitHub unavailable, using HTTPS fallback"
-    git config --global url."https://github.com/".insteadOf "git@github.com:"
-    NEED_HTTPS_REWRITE=1
-  fi
+  warn "SSH auth to GitHub unavailable, using HTTPS fallback"
+  HTTPS_ENV="GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com:"
 fi
 
 claude plugin uninstall "beadle@$MARKETPLACE_NAME" < /dev/null 2>/dev/null || true
-if claude plugin install "beadle@$MARKETPLACE_NAME" --scope user < /dev/null 2>/dev/null; then
+if env $HTTPS_ENV claude plugin install "beadle@$MARKETPLACE_NAME" --scope user < /dev/null 2>/dev/null; then
   ok "beadle plugin installed"
 else
   warn "Failed to install plugin (install manually: claude plugin install beadle@punt-labs)"

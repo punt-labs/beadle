@@ -28,5 +28,5 @@ d['name'] = '${prod_name}'
 p.write_text(json.dumps(d, indent=2) + '\n')
 "
 
-git -C "$REPO_ROOT" add "$PLUGIN_JSON"
+git -C "$REPO_ROOT" add .claude-plugin/plugin.json
 git -C "$REPO_ROOT" commit --no-verify -m "chore: prepare plugin for release"
