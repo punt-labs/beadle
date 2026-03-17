@@ -372,6 +372,15 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 
 // trySendChain attempts to send via the best available method.
 func (h *handler) trySendChain(to, cc, bcc []string, subject, body, html string, attachments []email.OutboundAttachment) (*sendResult, error) {
+	// Validate BCC addresses for CR/LF injection. ComposeRaw validates to/cc
+	// but never receives bcc (by design — BCC must not appear in headers).
+	// Without this check, malicious bcc values could inject SMTP commands.
+	for _, addr := range bcc {
+		if strings.ContainsAny(addr, "\r\n") {
+			return nil, fmt.Errorf("bcc address contains CR/LF")
+		}
+	}
+
 	// All envelope recipients (SMTP RCPT TO + Resend arrays).
 	allRecipients := make([]string, 0, len(to)+len(cc)+len(bcc))
 	allRecipients = append(allRecipients, to...)
@@ -632,7 +641,8 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 // --- Helpers ---
 
 // splitAddresses splits a comma-separated string of email addresses,
-// trimming whitespace around each. Returns nil for empty input.
+// trimming whitespace around each. Returns nil for empty input,
+// whitespace-only input, or input that yields no non-empty addresses.
 func splitAddresses(s string) []string {
 	if s == "" {
 		return nil

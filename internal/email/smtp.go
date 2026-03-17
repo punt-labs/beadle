@@ -50,7 +50,10 @@ func SMTPSend(cfg *Config, from string, recipients []string, raw []byte) error {
 	}
 	for i, rcpt := range recipients {
 		if err := c.Rcpt(rcpt); err != nil {
-			return fmt.Errorf("smtp RCPT TO %s (%d/%d): %w", rcpt, i+1, len(recipients), err)
+			// Omit the address from the error to avoid leaking BCC recipients
+			// in logs or tool output. The SMTP server's error text (in %w)
+			// may still contain the address, but we don't add it ourselves.
+			return fmt.Errorf("smtp RCPT TO recipient %d/%d: %w", i+1, len(recipients), err)
 		}
 	}
 
