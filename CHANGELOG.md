@@ -24,6 +24,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.3.1] - 2026-03-15
 
+### Added
+
+- Version injection from git tags via ldflags at build time
+
+### Fixed
+
+- `list_messages`: use `UIDSearch` for unread filter instead of `Search`, return
+  empty slice instead of nil when no messages match
+
 ## [0.3.0] - 2026-03-15
 
 ### Added
