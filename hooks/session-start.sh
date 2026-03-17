@@ -67,33 +67,45 @@ fi
 # Every MCP tool and every skill must be auto-approved so users never see
 # a permission prompt after enabling the plugin. Uses the PLUGIN_RULES
 # array pattern from punt-kit/standards/permissions.md § 6.
-PLUGIN_RULES="[\"$TOOL_GLOB\", \"Skill(inbox)\", \"Skill(mail)\", \"Skill(send)\"]"
-
+#
+# Skill names must match deployed commands: inbox.md, mail.md, send.md.
+# If a command is added/renamed, update this list — stale entries cause
+# unexplained permission prompts (see punt-kit/standards/plugins.md § 2).
 if ! command -v jq >/dev/null 2>&1; then
   ACTIONS+=("jq not found, skipping permission setup")
-elif [[ ! -f "$SETTINGS" ]]; then
-  mkdir -p "$(dirname "$SETTINGS")"
-  printf '{}' > "$SETTINGS"
-  ACTIONS+=("Created ~/.claude/settings.json")
-fi
+else
+  # Build PLUGIN_RULES via jq to avoid JSON injection from $TOOL_GLOB
+  PLUGIN_RULES=$(jq -n --arg glob "$TOOL_GLOB" \
+    '[$glob, "Skill(inbox)", "Skill(mail)", "Skill(send)"]')
 
-if command -v jq >/dev/null 2>&1 && [[ -f "$SETTINGS" ]]; then
-  ADDED=$(jq -r --argjson new "$PLUGIN_RULES" '
-    (.permissions.allow // []) as $orig
-    | [$new[] | select(. as $r | $orig | index($r) | not)] | length
-  ' "$SETTINGS")
-
-  if [[ "$ADDED" -gt 0 ]]; then
-    TMP=$(mktemp "$SETTINGS.XXXXXX")
-    if jq --argjson new "$PLUGIN_RULES" '
-      (.permissions.allow // []) as $orig
-      | .permissions.allow = $orig + [$new[] | select(. as $r | $orig | index($r) | not)]
-    ' "$SETTINGS" > "$TMP"; then
-      mv "$TMP" "$SETTINGS"
-      ACTIONS+=("Auto-allowed $ADDED permission rule(s) in settings.json")
+  if [[ ! -f "$SETTINGS" ]]; then
+    if mkdir -p "$(dirname "$SETTINGS")" && printf '{}' > "$SETTINGS"; then
+      ACTIONS+=("Created ~/.claude/settings.json")
     else
-      rm -f "$TMP"
-      ACTIONS+=("Failed to update permissions in settings.json")
+      ACTIONS+=("Failed to create ~/.claude/settings.json — skipping permission setup")
+    fi
+  fi
+
+  if [[ -f "$SETTINGS" ]]; then
+    ADDED=$(jq -r --argjson new "$PLUGIN_RULES" '
+      (.permissions.allow // []) as $orig
+      | [$new[] | select(. as $r | $orig | index($r) | not)] | length
+    ' "$SETTINGS" 2>/dev/null) || ADDED=""
+
+    if [[ -z "$ADDED" ]]; then
+      ACTIONS+=("Failed to read permissions from settings.json (file may be corrupt)")
+    elif [[ "$ADDED" -gt 0 ]]; then
+      TMP=$(mktemp "$SETTINGS.XXXXXX")
+      if jq --argjson new "$PLUGIN_RULES" '
+        (.permissions.allow // []) as $orig
+        | .permissions.allow = $orig + [$new[] | select(. as $r | $orig | index($r) | not)]
+      ' "$SETTINGS" > "$TMP"; then
+        mv "$TMP" "$SETTINGS"
+        ACTIONS+=("Auto-allowed $ADDED permission rule(s) in settings.json")
+      else
+        rm -f "$TMP"
+        ACTIONS+=("Failed to update permissions in settings.json")
+      fi
     fi
   fi
 fi
