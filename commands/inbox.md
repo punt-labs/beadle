@@ -25,7 +25,8 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### Polling interval (`5m`, `10m`, `15m`, `30m`, `1h`, `2h`)
 
-1. Write `.claude/beadle.local.md` with the new interval:
+1. Ensure `.claude/` directory exists, then write `.claude/beadle.local.md` with
+   the new interval:
 
    ```markdown
    ---
@@ -51,7 +52,8 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### Disable polling (`n`)
 
-1. Write `.claude/beadle.local.md` with the disabled config:
+1. Ensure `.claude/` directory exists, then write `.claude/beadle.local.md` with
+   the disabled config:
 
    ```markdown
    ---
@@ -65,7 +67,8 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### Show status (`status`)
 
-1. Read `.claude/beadle.local.md`. If it doesn't exist, report "30m (default)".
+1. Read `.claude/beadle.local.md`. If it doesn't exist or has no parseable
+   `inbox_poll` value, report "30m (default)".
 2. Call `CronList` to check if a polling cron is active.
 3. Report: current config value, whether a cron is active.
 
