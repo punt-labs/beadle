@@ -131,7 +131,7 @@ INBOX_POLL="30m"  # default
 
 if [[ -n "$BEADLE_CONFIG" ]] && [[ -f "$BEADLE_CONFIG" ]]; then
   POLL_VALUE=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$BEADLE_CONFIG" \
-    | grep '^inbox_poll:' | head -1 | sed 's/inbox_poll: *//' | sed 's/^"\(.*\)"$/\1/' || true)
+    | grep '^inbox_poll:' | head -1 | sed 's/inbox_poll: *//' | sed 's/^"\(.*\)"$/\1/' | sed 's/[[:space:]]*$//' || true)
   if [[ -n "$POLL_VALUE" ]]; then
     INBOX_POLL="$POLL_VALUE"
   else
@@ -139,7 +139,9 @@ if [[ -n "$BEADLE_CONFIG" ]] && [[ -f "$BEADLE_CONFIG" ]]; then
   fi
 fi
 
-if [[ "$INBOX_POLL" != "n" ]]; then
+if [[ "$INBOX_POLL" == "n" ]]; then
+  ACTIONS+=("Inbox polling disabled. Call CronList and CronDelete any job whose prompt is exactly '/inbox'.")
+else
   case "$INBOX_POLL" in
     5m)  CRON_EXPR="*/5 * * * *" ;;
     10m) CRON_EXPR="*/10 * * * *" ;;
@@ -150,7 +152,7 @@ if [[ "$INBOX_POLL" != "n" ]]; then
     *)   CRON_EXPR="*/30 * * * *"
          ACTIONS+=("Unknown inbox_poll value '$INBOX_POLL' in $BEADLE_CONFIG — falling back to 30m") ;;
   esac
-  ACTIONS+=("Schedule inbox polling: call CronCreate with cron '$CRON_EXPR' and prompt '/inbox' (recurring: true). First call CronList and CronDelete any existing job with prompt '/inbox' to avoid duplicates.")
+  ACTIONS+=("Schedule inbox polling: call CronCreate with cron '$CRON_EXPR' and prompt '/inbox' (recurring: true). First call CronList and CronDelete any job whose prompt is exactly '/inbox' to avoid duplicates.")
 fi
 
 # ── First-run check: verify beadle-email binary is available ──────────

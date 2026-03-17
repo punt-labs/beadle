@@ -34,7 +34,7 @@ If none of the above match, treat the argument as a **filter** (existing behavio
    ```
 
 2. Cancel any existing beadle inbox cron by calling `CronList`, finding jobs with
-   prompt containing `/inbox`, and calling `CronDelete` on them.
+   prompt exactly equal to `/inbox`, and calling `CronDelete` on them.
 3. Create a new CronCreate job with the corresponding cron expression and `/inbox`
    as the prompt (`recurring: true`):
 
@@ -59,7 +59,8 @@ If none of the above match, treat the argument as a **filter** (existing behavio
    ---
    ```
 
-2. Cancel any existing beadle inbox cron (CronList + CronDelete).
+2. Cancel any existing beadle inbox cron: call `CronList`, find jobs whose prompt
+   is exactly `/inbox`, and call `CronDelete` on them.
 3. Confirm: "Inbox polling disabled."
 
 ### Show status (`status`)
