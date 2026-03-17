@@ -100,6 +100,9 @@ Available when installed as a Claude Code plugin.
 | Command | What it does |
 |---------|-------------|
 | `/inbox` | Check beadle's email inbox. Optional natural language filter. |
+| `/inbox 5m` | Set inbox polling interval (5m, 10m, 15m, 30m, 1h, 2h). |
+| `/inbox n` | Disable automatic inbox polling. |
+| `/inbox status` | Show current polling configuration. |
 | `/mail` | Mail something to the owner or a specific recipient. |
 | `/send` | Send via any channel (email today, Signal later). |
 

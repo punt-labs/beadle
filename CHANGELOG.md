@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Configurable inbox polling. SessionStart hook auto-schedules `/inbox` via
+  CronCreate at a configurable interval (default 30m). Configure with
+  `/inbox 5m`, `/inbox 1h`, or `/inbox n` to disable. Settings persist in
+  `.claude/beadle.local.md`. Run `/inbox status` to check current config.
 - `send_email`: cc and bcc support. `to` now accepts comma-separated addresses
   for multiple recipients. New optional `cc` and `bcc` string parameters
   (comma-separated). BCC addresses are envelope-only (never in headers or tool
@@ -19,6 +23,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `mime.FormatMediaType` per RFC 2046 §5.1.1.
 
 ## [0.3.1] - 2026-03-15
+
+### Added
+
+- Version injection from git tags via ldflags at build time
+
+### Fixed
+
+- `list_messages`: use `UIDSearch` for unread filter instead of `Search`, return
+  empty slice instead of nil when no messages match
 
 ## [0.3.0] - 2026-03-15
 
