@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `send_email`: cc and bcc support. `to` now accepts comma-separated addresses
+  for multiple recipients. New optional `cc` and `bcc` string parameters
+  (comma-separated). BCC addresses are envelope-only (never in headers or tool
+  output). Resend API path passes cc/bcc as native array fields.
+
+### Fixed
+
+- `ComposeRaw`: multipart boundary value now properly quoted via
+  `mime.FormatMediaType` per RFC 2046 §5.1.1.
+
 ## [0.3.1] - 2026-03-15
 
 ## [0.3.0] - 2026-03-15

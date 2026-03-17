@@ -66,10 +66,14 @@ fi
 case "$TOOL_NAME" in
   send_email)
     TO=$(echo "$RESULT" | jq -r '.to // "unknown"')
+    CC=$(echo "$RESULT" | jq -r '.cc // empty')
     METHOD=$(echo "$RESULT" | jq -r '.method // "unknown"')
     # Strip method prefix for brevity: proton-bridge-smtp → smtp
     METHOD="${METHOD##*-}"
-    emit "sent to ${TO} via ${METHOD}"
+    SUMMARY="sent to ${TO} via ${METHOD}"
+    [[ -n "$CC" ]] && SUMMARY="${SUMMARY} cc:${CC}"
+    # BCC intentionally omitted from display output
+    emit "$SUMMARY"
     ;;
 
   list_messages)
