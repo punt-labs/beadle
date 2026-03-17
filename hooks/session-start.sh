@@ -122,12 +122,16 @@ else
 fi
 
 # ── Inbox polling configuration ──────────────────────────────────────
-BEADLE_CONFIG="${PLUGIN_ROOT}/.claude/beadle.local.md"
+# Config lives in the project working tree, not the plugin install dir.
+# /inbox writes .claude/beadle.local.md relative to the project root,
+# so the hook must read from the same location.
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+BEADLE_CONFIG="${PROJECT_ROOT:+${PROJECT_ROOT}/.claude/beadle.local.md}"
 INBOX_POLL="30m"  # default
 
-if [[ -f "$BEADLE_CONFIG" ]]; then
+if [[ -n "$BEADLE_CONFIG" ]] && [[ -f "$BEADLE_CONFIG" ]]; then
   POLL_VALUE=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$BEADLE_CONFIG" \
-    | grep '^inbox_poll:' | head -1 | sed 's/inbox_poll: *//' | sed 's/^"\(.*\)"$/\1/')
+    | grep '^inbox_poll:' | head -1 | sed 's/inbox_poll: *//' | sed 's/^"\(.*\)"$/\1/' || true)
   if [[ -n "$POLL_VALUE" ]]; then
     INBOX_POLL="$POLL_VALUE"
   else
@@ -146,7 +150,7 @@ if [[ "$INBOX_POLL" != "n" ]]; then
     *)   CRON_EXPR="*/30 * * * *"
          ACTIONS+=("Unknown inbox_poll value '$INBOX_POLL' in $BEADLE_CONFIG — falling back to 30m") ;;
   esac
-  ACTIONS+=("Schedule inbox polling: call CronCreate with cron '$CRON_EXPR' and prompt '/inbox' (recurring: true)")
+  ACTIONS+=("Schedule inbox polling: call CronCreate with cron '$CRON_EXPR' and prompt '/inbox' (recurring: true). First call CronList and CronDelete any existing job with prompt '/inbox' to avoid duplicates.")
 fi
 
 # ── First-run check: verify beadle-email binary is available ──────────

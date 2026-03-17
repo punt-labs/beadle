@@ -17,7 +17,7 @@ Check beadle's email inbox. You are the beadle — this is your inbox, not the u
 
 First, check if the argument matches a **polling config** command:
 
-- Matches `^\d+[mh]$` (e.g., `5m`, `10m`, `15m`, `30m`, `1h`, `2h`) → set polling interval
+- Exactly one of `5m`, `10m`, `15m`, `30m`, `1h`, `2h` → set polling interval
 - Exactly `n` → disable polling
 - Exactly `status` → show polling config
 
