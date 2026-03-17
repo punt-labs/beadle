@@ -76,7 +76,10 @@ if ! command -v jq >/dev/null 2>&1; then
 else
   # Build PLUGIN_RULES via jq to avoid JSON injection from $TOOL_GLOB
   PLUGIN_RULES=$(jq -n --arg glob "$TOOL_GLOB" \
-    '[$glob, "Skill(inbox)", "Skill(mail)", "Skill(send)"]')
+    '[$glob, "Skill(inbox)", "Skill(mail)", "Skill(send)"]' 2>/dev/null) || {
+    ACTIONS+=("jq failed to build permission rules — skipping permission setup")
+    PLUGIN_RULES=""
+  }
 
   if [[ ! -f "$SETTINGS" ]]; then
     if mkdir -p "$(dirname "$SETTINGS")" && printf '{}' > "$SETTINGS"; then
@@ -86,7 +89,9 @@ else
     fi
   fi
 
-  if [[ -f "$SETTINGS" ]]; then
+  if [[ -z "$PLUGIN_RULES" ]]; then
+    : # jq failed above, already logged
+  elif [[ -f "$SETTINGS" ]]; then
     ADDED=$(jq -r --argjson new "$PLUGIN_RULES" '
       (.permissions.allow // []) as $orig
       | [$new[] | select(. as $r | $orig | index($r) | not)] | length
@@ -102,8 +107,7 @@ else
       if [[ -n "$TMP" ]] && jq --argjson new "$PLUGIN_RULES" '
         (.permissions.allow // []) as $orig
         | .permissions.allow = $orig + [$new[] | select(. as $r | $orig | index($r) | not)]
-      ' "$SETTINGS" > "$TMP"; then
-        mv "$TMP" "$SETTINGS"
+      ' "$SETTINGS" > "$TMP" && mv "$TMP" "$SETTINGS"; then
         ACTIONS+=("Auto-allowed $ADDED permission rule(s) in settings.json")
       else
         [[ -n "$TMP" ]] && rm -f "$TMP"
