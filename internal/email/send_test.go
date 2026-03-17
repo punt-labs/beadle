@@ -15,7 +15,7 @@ import (
 )
 
 func TestComposeRaw_NoAttachments(t *testing.T) {
-	raw, err := ComposeRaw("a@b.com", "c@d.com", "Hi", "Hello", nil)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil)
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -25,6 +25,7 @@ func TestComposeRaw_NoAttachments(t *testing.T) {
 	assert.Equal(t, "c@d.com", msg.Header.Get("To"))
 	assert.Equal(t, "Hi", msg.Header.Get("Subject"))
 	assert.Equal(t, "text/plain; charset=utf-8", msg.Header.Get("Content-Type"))
+	assert.Empty(t, msg.Header.Get("Cc"))
 
 	body, err := io.ReadAll(msg.Body)
 	require.NoError(t, err)
@@ -32,12 +33,47 @@ func TestComposeRaw_NoAttachments(t *testing.T) {
 }
 
 func TestComposeRaw_EmptyAttachments(t *testing.T) {
-	raw, err := ComposeRaw("a@b.com", "c@d.com", "Hi", "Hello", []OutboundAttachment{})
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", []OutboundAttachment{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
 	require.NoError(t, err)
 	assert.Equal(t, "text/plain; charset=utf-8", msg.Header.Get("Content-Type"))
+}
+
+func TestComposeRaw_MultipleToRecipients(t *testing.T) {
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com", "e@f.com"}, nil, "Hi", "Hello", nil)
+	require.NoError(t, err)
+
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+
+	assert.Equal(t, "c@d.com, e@f.com", msg.Header.Get("To"))
+	assert.Empty(t, msg.Header.Get("Cc"))
+}
+
+func TestComposeRaw_WithCc(t *testing.T) {
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"x@y.com", "z@w.com"}, "Hi", "Hello", nil)
+	require.NoError(t, err)
+
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+
+	assert.Equal(t, "c@d.com", msg.Header.Get("To"))
+	assert.Equal(t, "x@y.com, z@w.com", msg.Header.Get("Cc"))
+}
+
+func TestComposeRaw_BccNotInHeaders(t *testing.T) {
+	// Bcc recipients should never appear in the message headers.
+	// ComposeRaw does not accept bcc — they are envelope-only (handled by SMTPSend).
+	// This test verifies that even with Cc, no Bcc header is written.
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"cc@example.com"}, "Hi", "Hello", nil)
+	require.NoError(t, err)
+
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+
+	assert.Empty(t, msg.Header.Get("Bcc"), "Bcc header must not appear in composed message")
 }
 
 func TestComposeRaw_OneAttachment(t *testing.T) {
@@ -47,7 +83,7 @@ func TestComposeRaw_OneAttachment(t *testing.T) {
 		Data:        []byte("fake-pdf-content"),
 	}}
 
-	raw, err := ComposeRaw("a@b.com", "c@d.com", "Report", "See attached.", atts)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Report", "See attached.", atts)
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -93,7 +129,7 @@ func TestComposeRaw_MultipleAttachments(t *testing.T) {
 		{Filename: "c.bin", ContentType: "application/octet-stream", Data: []byte("binary")},
 	}
 
-	raw, err := ComposeRaw("a@b.com", "c@d.com", "Files", "Here are files.", atts)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Files", "Here are files.", atts)
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -126,21 +162,27 @@ func TestComposeRaw_HeaderInjectionWithAttachments(t *testing.T) {
 	tests := []struct {
 		name    string
 		from    string
-		to      string
+		to      []string
 		subject string
 	}{
-		{"from CR", "a\r@b.com", "c@d.com", "Hi"},
-		{"to LF", "a@b.com", "c\n@d.com", "Hi"},
-		{"subject CRLF", "a@b.com", "c@d.com", "Hi\r\nBcc: evil@evil.com"},
+		{"from CR", "a\r@b.com", []string{"c@d.com"}, "Hi"},
+		{"to LF", "a@b.com", []string{"c\n@d.com"}, "Hi"},
+		{"subject CRLF", "a@b.com", []string{"c@d.com"}, "Hi\r\nBcc: evil@evil.com"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ComposeRaw(tc.from, tc.to, tc.subject, "body", atts)
+			_, err := ComposeRaw(tc.from, tc.to, nil, tc.subject, "body", atts)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "CR/LF")
 		})
 	}
+}
+
+func TestComposeRaw_HeaderInjectionInCc(t *testing.T) {
+	_, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"evil\r\n@hack.com"}, "Hi", "body", nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "CR/LF")
 }
 
 func TestComposeRaw_AttachmentHeaderInjection(t *testing.T) {
@@ -160,7 +202,7 @@ func TestComposeRaw_AttachmentHeaderInjection(t *testing.T) {
 				ContentType: tc.contentType,
 				Data:        []byte("data"),
 			}}
-			_, err := ComposeRaw("a@b.com", "c@d.com", "Hi", "body", atts)
+			_, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "body", atts)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "CR/LF")
 		})
@@ -174,7 +216,7 @@ func TestComposeRaw_NonASCIIFilename(t *testing.T) {
 		Data:        []byte("pdf-data"),
 	}}
 
-	raw, err := ComposeRaw("a@b.com", "c@d.com", "Report", "See attached.", atts)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Report", "See attached.", atts)
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))

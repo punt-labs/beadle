@@ -28,8 +28,12 @@ const resendAPIURL = "https://api.resend.com/emails"
 // When attachments is empty, produces a simple text/plain message.
 // When attachments is non-empty, produces a multipart/mixed message.
 // Returns an error if header fields contain CR/LF (header injection).
-func ComposeRaw(from, to, subject, textBody string, attachments []OutboundAttachment) ([]byte, error) {
-	for _, field := range []string{from, to, subject} {
+// Bcc recipients are intentionally excluded from headers per RFC 822.
+func ComposeRaw(from string, to, cc []string, subject, textBody string, attachments []OutboundAttachment) ([]byte, error) {
+	allAddrs := make([]string, 0, len(to)+len(cc))
+	allAddrs = append(allAddrs, to...)
+	allAddrs = append(allAddrs, cc...)
+	for _, field := range append([]string{from, subject}, allAddrs...) {
 		if strings.ContainsAny(field, "\r\n") {
 			return nil, fmt.Errorf("header field contains CR/LF")
 		}
@@ -37,7 +41,10 @@ func ComposeRaw(from, to, subject, textBody string, attachments []OutboundAttach
 
 	var msg bytes.Buffer
 	fmt.Fprintf(&msg, "From: %s\r\n", from)
-	fmt.Fprintf(&msg, "To: %s\r\n", to)
+	fmt.Fprintf(&msg, "To: %s\r\n", strings.Join(to, ", "))
+	if len(cc) > 0 {
+		fmt.Fprintf(&msg, "Cc: %s\r\n", strings.Join(cc, ", "))
+	}
 	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
 	fmt.Fprintf(&msg, "MIME-Version: 1.0\r\n")
 
@@ -49,7 +56,8 @@ func ComposeRaw(from, to, subject, textBody string, attachments []OutboundAttach
 	}
 
 	mw := multipart.NewWriter(&msg)
-	fmt.Fprintf(&msg, "Content-Type: multipart/mixed; boundary=%s\r\n", mw.Boundary())
+	ct := mime.FormatMediaType("multipart/mixed", map[string]string{"boundary": mw.Boundary()})
+	fmt.Fprintf(&msg, "Content-Type: %s\r\n", ct)
 	fmt.Fprintf(&msg, "\r\n")
 
 	// Text body part
@@ -101,8 +109,11 @@ type ResendAttachment struct {
 }
 
 // SendRequest is the payload for sending an email.
+// To, Cc, and Bcc are string arrays matching the Resend API format.
 type SendRequest struct {
-	To          string             `json:"to"`
+	To          []string           `json:"to"`
+	Cc          []string           `json:"cc,omitempty"`
+	Bcc         []string           `json:"bcc,omitempty"`
 	Subject     string             `json:"subject"`
 	Text        string             `json:"text,omitempty"`
 	HTML        string             `json:"html,omitempty"`

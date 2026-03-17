@@ -13,7 +13,8 @@ import (
 //
 // Proton Bridge SMTP uses STARTTLS with a self-signed certificate on localhost.
 // The same credentials used for IMAP work for SMTP.
-func SMTPSend(cfg *Config, from, to string, raw []byte) error {
+// Recipients includes all envelope recipients (to + cc + bcc).
+func SMTPSend(cfg *Config, from string, recipients []string, raw []byte) error {
 	addr := net.JoinHostPort(cfg.IMAPHost, strconv.Itoa(cfg.SMTPPort))
 
 	password, err := cfg.IMAPPassword()
@@ -47,8 +48,13 @@ func SMTPSend(cfg *Config, from, to string, raw []byte) error {
 	if err := c.Mail(from); err != nil {
 		return fmt.Errorf("smtp MAIL FROM: %w", err)
 	}
-	if err := c.Rcpt(to); err != nil {
-		return fmt.Errorf("smtp RCPT TO: %w", err)
+	for i, rcpt := range recipients {
+		if err := c.Rcpt(rcpt); err != nil {
+			// Omit the address from the error to avoid leaking BCC recipients
+			// in logs or tool output. The SMTP server's error text (in %w)
+			// may still contain the address, but we don't add it ourselves.
+			return fmt.Errorf("smtp RCPT TO recipient %d/%d: %w", i+1, len(recipients), err)
+		}
 	}
 
 	w, err := c.Data()
