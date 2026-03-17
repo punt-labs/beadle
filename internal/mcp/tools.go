@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -44,6 +45,7 @@ type handler struct {
 }
 
 // sendResult is the typed response for the send_email tool.
+// Bcc is intentionally omitted — BCC addresses are confidential by design.
 type sendResult struct {
 	Status      string `json:"status"`
 	Method      string `json:"method"`
@@ -51,6 +53,8 @@ type sendResult struct {
 	ID          string `json:"id,omitempty"`
 	From        string `json:"from"`
 	To          string `json:"to"`
+	Cc          string `json:"cc,omitempty"`
+	BccCount    int    `json:"bcc_count,omitempty"`
 	Subject     string `json:"subject"`
 	Attachments int    `json:"attachments"`
 }
@@ -109,7 +113,13 @@ func sendEmailTool() mcplib.Tool {
 		mcplib.WithDescription("Send an email via Proton Bridge SMTP (primary) or Resend API (fallback). Sends from the configured address. Supports file attachments."),
 		mcplib.WithString("to",
 			mcplib.Required(),
-			mcplib.Description("Recipient email address"),
+			mcplib.Description("Recipient email address(es), comma-separated for multiple"),
+		),
+		mcplib.WithString("cc",
+			mcplib.Description("CC recipient(s), comma-separated"),
+		),
+		mcplib.WithString("bcc",
+			mcplib.Description("BCC recipient(s), comma-separated"),
 		),
 		mcplib.WithString("subject",
 			mcplib.Required(),
@@ -321,7 +331,7 @@ func (h *handler) listFolders(ctx context.Context, req mcplib.CallToolRequest) (
 }
 
 func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	to, err := req.RequireString("to")
+	toRaw, err := req.RequireString("to")
 	if err != nil {
 		return mcplib.NewToolResultError("to is required"), nil
 	}
@@ -335,6 +345,13 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	}
 	html := stringParam(req, "html", "")
 
+	to := splitAddresses(toRaw)
+	if len(to) == 0 {
+		return mcplib.NewToolResultError("to: at least one valid email address is required"), nil
+	}
+	cc := splitAddresses(stringParam(req, "cc", ""))
+	bcc := splitAddresses(stringParam(req, "bcc", ""))
+
 	attachments, err := readAttachments(req)
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -346,7 +363,7 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	// (multipart/signed envelopes). Neither Proton Bridge (strips MIME) nor
 	// Resend (no raw MIME API) supports this. Tracked in beadle-atz: Amazon SES
 	// will be added as the PGP-signing transport in a future release.
-	result, sendErr := h.trySendChain(to, subject, body, html, attachments)
+	result, sendErr := h.trySendChain(to, cc, bcc, subject, body, html, attachments)
 	if sendErr != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("send email: %v", sendErr)), nil
 	}
@@ -354,23 +371,34 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 }
 
 // trySendChain attempts to send via the best available method.
-func (h *handler) trySendChain(to, subject, body, html string, attachments []email.OutboundAttachment) (*sendResult, error) {
+func (h *handler) trySendChain(to, cc, bcc []string, subject, body, html string, attachments []email.OutboundAttachment) (*sendResult, error) {
+	// All envelope recipients (SMTP RCPT TO + Resend arrays).
+	allRecipients := make([]string, 0, len(to)+len(cc)+len(bcc))
+	allRecipients = append(allRecipients, to...)
+	allRecipients = append(allRecipients, cc...)
+	allRecipients = append(allRecipients, bcc...)
+
+	toStr := strings.Join(to, ", ")
+	ccStr := strings.Join(cc, ", ")
+
 	// 1. Proton Bridge SMTP — passes SPF/DKIM/DMARC for punt-labs.com
 	// Note: SMTP path sends plain text only (no HTML). The html parameter
 	// is only used by the Resend fallback which supports structured HTML fields.
 	if email.SMTPAvailable(h.cfg) {
-		raw, composeErr := email.ComposeRaw(h.cfg.FromAddress, to, subject, body, attachments)
+		raw, composeErr := email.ComposeRaw(h.cfg.FromAddress, to, cc, subject, body, attachments)
 		if composeErr != nil {
 			return nil, composeErr
 		}
-		if err := email.SMTPSend(h.cfg, h.cfg.FromAddress, to, raw); err != nil {
+		if err := email.SMTPSend(h.cfg, h.cfg.FromAddress, allRecipients, raw); err != nil {
 			h.logger.Warn("smtp send failed, falling back to resend", "err", err)
 		} else {
 			return &sendResult{
 				Status:      "sent",
 				Method:      "proton-bridge-smtp",
 				From:        h.cfg.FromAddress,
-				To:          to,
+				To:          toStr,
+				Cc:          ccStr,
+				BccCount:    len(bcc),
 				Subject:     subject,
 				Attachments: len(attachments),
 			}, nil
@@ -388,6 +416,8 @@ func (h *handler) trySendChain(to, subject, body, html string, attachments []ema
 
 	resp, err := email.Send(h.cfg, email.SendRequest{
 		To:          to,
+		Cc:          cc,
+		Bcc:         bcc,
 		Subject:     subject,
 		Text:        body,
 		HTML:        html,
@@ -402,7 +432,9 @@ func (h *handler) trySendChain(to, subject, body, html string, attachments []ema
 		Method:      "resend",
 		ID:          resp.ID,
 		From:        h.cfg.FromAddress,
-		To:          to,
+		To:          toStr,
+		Cc:          ccStr,
+		BccCount:    len(bcc),
 		Subject:     subject,
 		Attachments: len(attachments),
 	}, nil
@@ -598,6 +630,26 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 }
 
 // --- Helpers ---
+
+// splitAddresses splits a comma-separated string of email addresses,
+// trimming whitespace around each. Returns nil for empty input.
+func splitAddresses(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
 
 // readAttachments extracts the attachments parameter, reads each file, and
 // validates paths and sizes. Returns nil (not an error) when no attachments
