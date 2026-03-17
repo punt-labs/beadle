@@ -81,17 +81,19 @@ else
     PLUGIN_RULES=""
   }
 
-  if [[ ! -f "$SETTINGS" ]]; then
-    if mkdir -p "$(dirname "$SETTINGS")" && printf '{}' > "$SETTINGS"; then
-      ACTIONS+=("Created ~/.claude/settings.json")
-    else
-      ACTIONS+=("Failed to create ~/.claude/settings.json — skipping permission setup")
+  if [[ -z "$PLUGIN_RULES" ]]; then
+    : # jq failed above, already logged
+  else
+    if [[ ! -f "$SETTINGS" ]]; then
+      if mkdir -p "$(dirname "$SETTINGS")" && printf '{}' > "$SETTINGS"; then
+        ACTIONS+=("Created ~/.claude/settings.json")
+      else
+        ACTIONS+=("Failed to create ~/.claude/settings.json — skipping permission setup")
+      fi
     fi
   fi
 
-  if [[ -z "$PLUGIN_RULES" ]]; then
-    : # jq failed above, already logged
-  elif [[ -f "$SETTINGS" ]]; then
+  if [[ -n "$PLUGIN_RULES" ]] && [[ -f "$SETTINGS" ]]; then
     ADDED=$(jq -r --argjson new "$PLUGIN_RULES" '
       (.permissions.allow // []) as $orig
       | [$new[] | select(. as $r | $orig | index($r) | not)] | length
