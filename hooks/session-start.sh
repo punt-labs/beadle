@@ -95,8 +95,11 @@ else
     if [[ -z "$ADDED" ]]; then
       ACTIONS+=("Failed to read permissions from settings.json (file may be corrupt)")
     elif [[ "$ADDED" -gt 0 ]]; then
-      TMP=$(mktemp "$SETTINGS.XXXXXX")
-      if jq --argjson new "$PLUGIN_RULES" '
+      TMP=$(mktemp "$SETTINGS.XXXXXX" 2>/dev/null) || {
+        ACTIONS+=("mktemp failed — skipped permission update")
+        TMP=""
+      }
+      if [[ -n "$TMP" ]] && jq --argjson new "$PLUGIN_RULES" '
         (.permissions.allow // []) as $orig
         | .permissions.allow = $orig + [$new[] | select(. as $r | $orig | index($r) | not)]
       ' "$SETTINGS" > "$TMP"; then
