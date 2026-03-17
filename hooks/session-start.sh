@@ -63,21 +63,34 @@ else
   fi
 fi
 
-# ── Auto-allow MCP tool permissions ───────────────────────────────────
+# ── Auto-allow MCP tools and skills ───────────────────────────────────
+# Every MCP tool and every skill must be auto-approved so users never see
+# a permission prompt after enabling the plugin. Uses the PLUGIN_RULES
+# array pattern from punt-kit/standards/permissions.md § 6.
+PLUGIN_RULES="[\"$TOOL_GLOB\", \"Skill(inbox)\", \"Skill(mail)\", \"Skill(send)\"]"
+
 if ! command -v jq >/dev/null 2>&1; then
   ACTIONS+=("jq not found, skipping permission setup")
 elif [[ ! -f "$SETTINGS" ]]; then
-  ACTIONS+=("~/.claude/settings.json not found, skipping permission setup")
-else
-  if ! jq -e --arg glob "$TOOL_GLOB" '.permissions.allow // [] | index($glob)' "$SETTINGS" >/dev/null 2>&1; then
+  mkdir -p "$(dirname "$SETTINGS")"
+  printf '{}' > "$SETTINGS"
+  ACTIONS+=("Created ~/.claude/settings.json")
+fi
+
+if command -v jq >/dev/null 2>&1 && [[ -f "$SETTINGS" ]]; then
+  ADDED=$(jq -r --argjson new "$PLUGIN_RULES" '
+    (.permissions.allow // []) as $orig
+    | [$new[] | select(. as $r | $orig | index($r) | not)] | length
+  ' "$SETTINGS")
+
+  if [[ "$ADDED" -gt 0 ]]; then
     TMP=$(mktemp "$SETTINGS.XXXXXX")
-    if jq --arg glob "$TOOL_GLOB" '
-      .permissions //= {} |
-      .permissions.allow //= [] |
-      .permissions.allow += [$glob]
+    if jq --argjson new "$PLUGIN_RULES" '
+      (.permissions.allow // []) as $orig
+      | .permissions.allow = $orig + [$new[] | select(. as $r | $orig | index($r) | not)]
     ' "$SETTINGS" > "$TMP"; then
       mv "$TMP" "$SETTINGS"
-      ACTIONS+=("Auto-allowed beadle MCP tools in permissions")
+      ACTIONS+=("Auto-allowed $ADDED permission rule(s) in settings.json")
     else
       rm -f "$TMP"
       ACTIONS+=("Failed to update permissions in settings.json")
