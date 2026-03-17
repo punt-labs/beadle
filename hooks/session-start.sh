@@ -106,7 +106,7 @@ else
         mv "$TMP" "$SETTINGS"
         ACTIONS+=("Auto-allowed $ADDED permission rule(s) in settings.json")
       else
-        rm -f "$TMP"
+        [[ -n "$TMP" ]] && rm -f "$TMP"
         ACTIONS+=("Failed to update permissions in settings.json")
       fi
     fi
