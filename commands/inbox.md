@@ -51,7 +51,14 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### Disable polling (`n`)
 
-1. Write `.claude/beadle.local.md` with `inbox_poll: n`.
+1. Write `.claude/beadle.local.md` with the disabled config:
+
+   ```markdown
+   ---
+   inbox_poll: n
+   ---
+   ```
+
 2. Cancel any existing beadle inbox cron (CronList + CronDelete).
 3. Confirm: "Inbox polling disabled."
 
