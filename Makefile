@@ -1,7 +1,7 @@
 VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: help lint docs test check format build clean dist cover tools doctor
+.PHONY: help lint docs test check format build install clean dist cover tools doctor
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -23,6 +23,10 @@ format: ## Format code
 
 build: ## Build binary
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o beadle-email ./cmd/beadle-email/
+
+install: build ## Build and install to ~/.local/bin
+	mkdir -p $(HOME)/.local/bin
+	cp beadle-email $(HOME)/.local/bin/beadle-email
 
 clean: ## Remove build artifacts
 	rm -f beadle-email coverage.out
