@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Configurable inbox polling. SessionStart hook auto-schedules `/inbox` via
+  CronCreate at a configurable interval (default 30m). Configure with
+  `/inbox 5m`, `/inbox 1h`, or `/inbox n` to disable. Settings persist in
+  `.claude/beadle.local.md`. Run `/inbox status` to check current config.
 - `send_email`: cc and bcc support. `to` now accepts comma-separated addresses
   for multiple recipients. New optional `cc` and `bcc` string parameters
   (comma-separated). BCC addresses are envelope-only (never in headers or tool

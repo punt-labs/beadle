@@ -121,6 +121,34 @@ else
   fi
 fi
 
+# ── Inbox polling configuration ──────────────────────────────────────
+BEADLE_CONFIG="${PLUGIN_ROOT}/.claude/beadle.local.md"
+INBOX_POLL="30m"  # default
+
+if [[ -f "$BEADLE_CONFIG" ]]; then
+  POLL_VALUE=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$BEADLE_CONFIG" \
+    | grep '^inbox_poll:' | head -1 | sed 's/inbox_poll: *//' | sed 's/^"\(.*\)"$/\1/')
+  if [[ -n "$POLL_VALUE" ]]; then
+    INBOX_POLL="$POLL_VALUE"
+  else
+    ACTIONS+=("Found $BEADLE_CONFIG but no inbox_poll value — using default 30m")
+  fi
+fi
+
+if [[ "$INBOX_POLL" != "n" ]]; then
+  case "$INBOX_POLL" in
+    5m)  CRON_EXPR="*/5 * * * *" ;;
+    10m) CRON_EXPR="*/10 * * * *" ;;
+    15m) CRON_EXPR="*/15 * * * *" ;;
+    30m) CRON_EXPR="*/30 * * * *" ;;
+    1h)  CRON_EXPR="7 * * * *" ;;
+    2h)  CRON_EXPR="7 */2 * * *" ;;
+    *)   CRON_EXPR="*/30 * * * *"
+         ACTIONS+=("Unknown inbox_poll value '$INBOX_POLL' in $BEADLE_CONFIG — falling back to 30m") ;;
+  esac
+  ACTIONS+=("Schedule inbox polling: call CronCreate with cron '$CRON_EXPR' and prompt '/inbox' (recurring: true)")
+fi
+
 # ── First-run check: verify beadle-email binary is available ──────────
 if ! command -v beadle-email >/dev/null 2>&1; then
   ACTIONS+=("beadle-email binary not found on PATH")
