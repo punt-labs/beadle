@@ -188,10 +188,10 @@ pair using the Unix rwx model.
 
 **Two entities:**
 
-- **Identity** — who beadle is operating as. A first-class entity with its own
-  email address, mailbox (IMAP config), GPG key, and persona. Today:
-  `claude@punt-labs.com`. Future: `jim@punt-labs.com`, `builds@punt-labs.com`,
-  etc. The current `email.json` config represents one identity's config.
+- **Identity** — who beadle is operating as. Owned by ethos, not beadle
+  (see DES-013). Beadle reads `email`, `name`, `handle` from the ethos
+  identity YAML. Today: `claude@punt-labs.com`. Future:
+  `jim@punt-labs.com`, `builds@punt-labs.com`, etc.
 
 - **Contact** — who beadle is interacting with. Stored in the address book with
   name, email, aliases, GPG key ID, notes, and a permissions map.
@@ -259,9 +259,10 @@ Contact {
 4. Combined with transport trust: only act if both identity trust AND transport
    trust are sufficient
 
-**Status:** Identity is not yet implemented as a separate entity. Contact
+**Status:** Identity ownership moved to ethos (see DES-013). Contact
 `permissions` field not yet in the struct. Current code has a single identity
-hardcoded via `email.json`. This ADR captures the target architecture.
+hardcoded via `email.json`. This ADR captures the permission model;
+DES-013 captures the identity model.
 
 ## DES-013: Identity via ethos sidecar with namespaced extensions
 
