@@ -76,7 +76,7 @@ if ! command -v jq >/dev/null 2>&1; then
 else
   # Build PLUGIN_RULES via jq to avoid JSON injection from $TOOL_GLOB
   PLUGIN_RULES=$(jq -n --arg glob "$TOOL_GLOB" \
-    '[$glob, "Skill(inbox)", "Skill(mail)", "Skill(send)"]' 2>/dev/null) || {
+    '[$glob, "Skill(inbox)", "Skill(mail)", "Skill(send)", "Skill(contacts)"]' 2>/dev/null) || {
     ACTIONS+=("jq failed to build permission rules — skipping permission setup")
     PLUGIN_RULES=""
   }

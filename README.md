@@ -109,6 +109,7 @@ Available when installed as a Claude Code plugin.
 | `/inbox status` | Show current polling configuration. |
 | `/mail` | Mail something to the owner or a specific recipient. |
 | `/send` | Send via any channel (email today, Signal later). |
+| `/contacts` | Manage address book (list, add, remove, find). |
 
 ## Setup
 
