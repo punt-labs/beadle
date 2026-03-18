@@ -280,8 +280,12 @@ const contactUsage = `Usage:
 `
 
 func extractContactsPath(args []string) string {
-	for i := 0; i < len(args)-1; i++ {
+	for i := 0; i < len(args); i++ {
 		if args[i] == "--contacts" {
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				fmt.Fprintln(os.Stderr, "error: --contacts requires a path")
+				os.Exit(2)
+			}
 			return args[i+1]
 		}
 	}
@@ -363,10 +367,8 @@ func runContactAdd(args []string, path string) int {
 		case "--contacts":
 			i++ // skip value, already handled by extractContactsPath
 		default:
-			if strings.HasPrefix(args[i], "--") {
-				fmt.Fprintf(os.Stderr, "error: unknown flag %q\n", args[i])
-				return 2
-			}
+			fmt.Fprintf(os.Stderr, "error: unexpected argument %q\n", args[i])
+			return 2
 		}
 	}
 	if name == "" || addr == "" {

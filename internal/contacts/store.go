@@ -65,6 +65,14 @@ func (s *Store) Count() int {
 // Add validates the contact, checks for name/alias conflicts, appends it,
 // and writes the file atomically.
 func (s *Store) Add(c Contact) error {
+	// Normalize whitespace on input.
+	c.Name = strings.TrimSpace(c.Name)
+	c.Email = strings.TrimSpace(c.Email)
+	for i := range c.Aliases {
+		c.Aliases[i] = strings.TrimSpace(c.Aliases[i])
+	}
+	c.GPGKeyID = strings.TrimSpace(c.GPGKeyID)
+
 	if err := Validate(c); err != nil {
 		return err
 	}

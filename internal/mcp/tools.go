@@ -117,16 +117,16 @@ func listFoldersTool() mcplib.Tool {
 
 func sendEmailTool() mcplib.Tool {
 	return mcplib.NewTool("send_email",
-		mcplib.WithDescription("Send an email via Proton Bridge SMTP (primary) or Resend API (fallback). Sends from the configured address. Supports file attachments."),
+		mcplib.WithDescription("Send an email via Proton Bridge SMTP (primary) or Resend API (fallback). Sends from the configured address. Supports file attachments. Recipients can be email addresses or contact names/aliases from the address book — names are resolved inline."),
 		mcplib.WithString("to",
 			mcplib.Required(),
-			mcplib.Description("Recipient email address(es), comma-separated for multiple"),
+			mcplib.Description("Recipient(s), comma-separated. Accepts email addresses or contact names/aliases (e.g., 'jim' or 'jim,kai@example.com')"),
 		),
 		mcplib.WithString("cc",
-			mcplib.Description("CC recipient(s), comma-separated"),
+			mcplib.Description("CC recipient(s), comma-separated. Accepts email addresses or contact names/aliases"),
 		),
 		mcplib.WithString("bcc",
-			mcplib.Description("BCC recipient(s), comma-separated"),
+			mcplib.Description("BCC recipient(s), comma-separated. Accepts email addresses or contact names/aliases"),
 		),
 		mcplib.WithString("subject",
 			mcplib.Required(),
@@ -405,17 +405,19 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	html := stringParam(req, "html", "")
 
 	// Resolve contact names to email addresses before splitting.
-	toResolved, err := h.resolveAddressField(toRaw)
+	// Load contacts once for all three address fields.
+	ccRaw := stringParam(req, "cc", "")
+	bccRaw := stringParam(req, "bcc", "")
+	store, storeErr := h.loadContactsIfNeeded(toRaw, ccRaw, bccRaw)
+	toResolved, err := resolveField(store, storeErr, toRaw)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("to: %v", err)), nil
 	}
-	ccRaw := stringParam(req, "cc", "")
-	ccResolved, err := h.resolveAddressField(ccRaw)
+	ccResolved, err := resolveField(store, storeErr, ccRaw)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("cc: %v", err)), nil
 	}
-	bccRaw := stringParam(req, "bcc", "")
-	bccResolved, err := h.resolveAddressField(bccRaw)
+	bccResolved, err := resolveField(store, storeErr, bccRaw)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("bcc: %v", err)), nil
 	}
@@ -973,31 +975,32 @@ func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (
 	return jsonResult(removeContactResult{Status: "removed", Name: name})
 }
 
-// resolveAddressField resolves names in a comma-separated address string
-// using the contacts store. Tokens containing @ are passed through as-is.
-// Returns the resolved comma-separated email string.
-//
-// Only loads the contacts store if at least one token needs resolution
-// (lacks @). This ensures a corrupted contacts file does not break
-// sending to raw email addresses.
-func (h *handler) resolveAddressField(raw string) (string, error) {
+// loadContactsIfNeeded loads the contacts store only if any token across
+// the given address fields lacks @. Returns nil store (no error) when no
+// resolution is needed. This ensures a corrupted contacts file does not
+// break sending to raw email addresses.
+func (h *handler) loadContactsIfNeeded(fields ...string) (*contacts.Store, error) {
+	for _, raw := range fields {
+		for _, tok := range strings.Split(raw, ",") {
+			if t := strings.TrimSpace(tok); t != "" && !strings.Contains(t, "@") {
+				return h.loadContacts()
+			}
+		}
+	}
+	return nil, nil
+}
+
+// resolveField resolves names in a comma-separated address string using
+// a pre-loaded contacts store. If store is nil, returns raw unchanged.
+func resolveField(store *contacts.Store, storeErr error, raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
-	// Fast path: if all tokens contain @, no resolution needed.
-	needsResolve := false
-	for _, tok := range strings.Split(raw, ",") {
-		if !strings.Contains(strings.TrimSpace(tok), "@") {
-			needsResolve = true
-			break
+	if store == nil {
+		if storeErr != nil {
+			return "", fmt.Errorf("load contacts: %w", storeErr)
 		}
-	}
-	if !needsResolve {
 		return raw, nil
-	}
-	store, err := h.loadContacts()
-	if err != nil {
-		return "", fmt.Errorf("load contacts: %w", err)
 	}
 	return store.ResolveAddresses(raw)
 }
