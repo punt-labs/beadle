@@ -179,3 +179,86 @@ the complete product"). Any MCP client that can spawn `beadle-email serve` gets
 the full MCP tool set. What they miss: output suppression (two-channel display),
 slash commands, and lifecycle hooks. These are Claude Code affordances, not
 capabilities.
+
+## DES-012: Two-party identity trust model (rwx)
+
+**Decision:** Beadle's address book implements a two-party permission system
+orthogonal to transport trust. Permissions are stored per (identity, contact)
+pair using the Unix rwx model.
+
+**Two entities:**
+
+- **Identity** — who beadle is operating as. A first-class entity with its own
+  email address, mailbox (IMAP config), GPG key, and persona. Today:
+  `claude@punt-labs.com`. Future: `jim@punt-labs.com`, `builds@punt-labs.com`,
+  etc. The current `email.json` config represents one identity's config.
+
+- **Contact** — who beadle is interacting with. Stored in the address book with
+  name, email, aliases, GPG key ID, notes, and a permissions map.
+
+**Permission matrix:**
+
+```text
+permissions[identity_email][contact] → "rwx" | "rw-" | "r--" | "---"
+```
+
+| Permission | Meaning |
+|------------|---------|
+| `r` (read) | Beadle reads and surfaces the message to the owner. No autonomous action. |
+| `w` (write) | Beadle may compose and send replies to this contact. |
+| `x` (execute) | Beadle may execute instructions/commands from this contact. |
+
+Example for identity `claude@punt-labs.com`:
+
+| Contact | Permissions | Effect |
+|---------|------------|--------|
+| Jim Freeman | `rwx` | Full authority — read, reply, execute tasks |
+| Eric | `rw-` | Read and reply, but not execute instructions |
+| Vendor X | `r--` | Read only, surface to owner for action |
+| Unknown sender | `r--` | Default: read only |
+
+**Orthogonal to transport trust:** Transport trust (trusted/verified/untrusted/
+unverified from DES-001) answers "is this message authentic?" Identity trust
+answers "given it's authentic, what should beadle do?" Both must pass: an
+unverified message from an `rwx` contact should NOT be executed (identity claim
+not verified). An authenticated message from an `r--` contact should NOT trigger
+autonomous action (sender lacks authority).
+
+**No inheritance between identities.** Jim may grant Eric `rwx` on
+`jim@punt-labs.com` but only `rw-` on `claude@punt-labs.com`. Each cell in the
+matrix is explicit. No implicit propagation.
+
+**Default permissions:** Contacts without explicit permissions for an identity
+default to `r--`. The owner identity is always `rwx` (enforced, not stored).
+
+**Data model:**
+
+```text
+Identity {
+    name          string   // "Claude"
+    email         string   // "claude@punt-labs.com"
+    gpg_key_id    string   // signing key for this identity
+    config_path   string   // path to this identity's email.json
+}
+
+Contact {
+    name          string
+    email         string
+    aliases       []string
+    gpg_key_id    string
+    notes         string
+    permissions   map[string]string  // identity_email → "rwx"
+}
+```
+
+**Processing inbound mail:**
+
+1. Which identity's mailbox am I reading? → "who am I"
+2. Who sent this message? → look up contact by sender address
+3. What permissions does this contact have for this identity? → gate behavior
+4. Combined with transport trust: only act if both identity trust AND transport
+   trust are sufficient
+
+**Status:** Identity is not yet implemented as a separate entity. Contact
+`permissions` field not yet in the struct. Current code has a single identity
+hardcoded via `email.json`. This ADR captures the target architecture.
