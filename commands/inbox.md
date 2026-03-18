@@ -1,6 +1,6 @@
 ---
 description: "Check beadle's email inbox"
-argument-hint: "[filter | 5m | 10m | 15m | 30m | 1h | 2h | n | status]"
+argument-hint: "[<filter text> | 5m | 10m | 15m | 30m | 1h | 2h | n | status]"
 allowed-tools: ["mcp__plugin_beadle_email__list_messages", "mcp__plugin_beadle_email__read_message", "mcp__plugin_beadle_email__move_message", "mcp__plugin_beadle_email__check_trust", "mcp__plugin_beadle-dev_email__list_messages", "mcp__plugin_beadle-dev_email__read_message", "mcp__plugin_beadle-dev_email__move_message", "mcp__plugin_beadle-dev_email__check_trust", "Write", "Read", "CronCreate", "CronDelete", "CronList"]
 ---
 <!-- markdownlint-disable MD041 -->
