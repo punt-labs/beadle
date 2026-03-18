@@ -29,10 +29,11 @@ func formatMessages(msgs []channel.MessageSummary) string {
 		if m.Unread {
 			unread = "*"
 		}
-		fmt.Fprintf(&b, "%s %-4s %-20s %-8s %s\n",
+		fmt.Fprintf(&b, "%s %-4s %-20s %-12s %-8s %s\n",
 			unread,
 			m.ID,
 			truncate(m.From, 20),
+			m.Date.Format("Jan 02 15:04"),
 			string(m.TrustLevel),
 			truncate(m.Subject, 40),
 		)
@@ -122,6 +123,9 @@ func formatTrustResult(r email.TrustResult) string {
 	if r.Encryption != "" {
 		s += " · " + r.Encryption
 	}
+	if r.Reason != "" {
+		s += "\n" + r.Reason
+	}
 	return s
 }
 
@@ -132,7 +136,7 @@ func formatMoveResult(r *moveResult) string {
 
 // formatDownloadResult formats a download result.
 func formatDownloadResult(r *downloadResult) string {
-	return fmt.Sprintf("%s: %s (%d bytes)", r.Status, r.Filename, r.Size)
+	return fmt.Sprintf("%s: %s (%d bytes)\n%s", r.Status, r.Filename, r.Size, r.Path)
 }
 
 // formatContacts formats a list of contacts.
@@ -162,10 +166,11 @@ func formatContactRemoved(r removeContactResult) string {
 }
 
 func truncate(s string, max int) string {
-	if len(s) <= max {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max-1] + "…"
+	return string(runes[:max-1]) + "…"
 }
 
 // contactsToResults converts a slice of contacts.Contact to contactResult.

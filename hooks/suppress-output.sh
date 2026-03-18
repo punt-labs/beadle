@@ -57,105 +57,21 @@ if [[ "$IS_ERROR" == "true" ]]; then
   exit 0
 fi
 
-# If RESULT is not valid JSON, treat it as an opaque string.
-if ! echo "$RESULT" | jq -e 'type' >/dev/null 2>&1; then
-  emit "$RESULT"
-  exit 0
-fi
+# Tools return pre-formatted text (not JSON). The first line is the
+# panel summary; the full text goes to additionalContext.
+# Extract the first line as summary, pass full text as context.
+FIRST_LINE=$(echo "$RESULT" | head -1)
 
 case "$TOOL_NAME" in
-  send_email)
-    TO=$(echo "$RESULT" | jq -r '.to // "unknown"')
-    CC=$(echo "$RESULT" | jq -r '.cc // empty')
-    METHOD=$(echo "$RESULT" | jq -r '.method // "unknown"')
-    # Strip method prefix for brevity: proton-bridge-smtp → smtp
-    METHOD="${METHOD##*-}"
-    SUMMARY="sent to ${TO} via ${METHOD}"
-    [[ -n "$CC" ]] && SUMMARY="${SUMMARY} cc:${CC}"
-    # BCC intentionally omitted from display output
-    emit "$SUMMARY"
+  # Silent tools: panel summary only, no context spill
+  send_email|move_message|add_contact|remove_contact)
+    emit "$RESULT"
     ;;
 
-  list_messages)
-    TOTAL=$(echo "$RESULT" | jq 'if type == "array" then length elif . == null then 0 else 0 end')
-    UNREAD=$(echo "$RESULT" | jq 'if type == "array" then [.[] | select(.unread == true)] | length else 0 end')
-    if [[ "$TOTAL" -eq 0 ]]; then
-      emit "no messages"
-    elif [[ "$UNREAD" -gt 0 ]]; then
-      emit "${TOTAL} messages (${UNREAD} unread)" "$RESULT"
-    else
-      emit "${TOTAL} messages" "$RESULT"
-    fi
-    ;;
-
-  read_message)
-    FROM=$(echo "$RESULT" | jq -r '.from // "unknown"')
-    TRUST=$(echo "$RESULT" | jq -r '.trust_level // "unknown"')
-    emit "from: ${FROM} · ${TRUST}" "$RESULT"
-    ;;
-
-  list_folders)
-    COUNT=$(echo "$RESULT" | jq 'if type == "array" then length else 0 end')
-    emit "${COUNT} folders" "$RESULT"
-    ;;
-
-  show_mime)
-    emit "MIME structure" "$RESULT"
-    ;;
-
-  verify_signature)
-    VALID=$(echo "$RESULT" | jq -r '.valid // false')
-    KEY_ID=$(echo "$RESULT" | jq -r '.key_id // empty')
-    if [[ "$VALID" == "true" ]]; then
-      SUMMARY="verified"
-      [[ -n "$KEY_ID" ]] && SUMMARY="verified · key ${KEY_ID}"
-    else
-      SUMMARY="invalid signature"
-    fi
-    emit "$SUMMARY" "$RESULT"
-    ;;
-
-  move_message)
-    DEST=$(echo "$RESULT" | jq -r '.destination // "Archive"')
-    MSG_ID=$(echo "$RESULT" | jq -r '.message_id // "?"')
-    emit "moved #${MSG_ID} → ${DEST}"
-    ;;
-
-  check_trust)
-    # TrustResult serializes trust level as "level", not "trust_level".
-    TRUST=$(echo "$RESULT" | jq -r '.level // "unknown"')
-    ENCRYPTION=$(echo "$RESULT" | jq -r '.encryption // empty')
-    SUMMARY="$TRUST"
-    [[ -n "$ENCRYPTION" ]] && SUMMARY="${TRUST} · ${ENCRYPTION}"
-    emit "$SUMMARY" "$RESULT"
-    ;;
-
-  download_attachment)
-    STATUS=$(echo "$RESULT" | jq -r '.status // "saved"')
-    FILENAME=$(echo "$RESULT" | jq -r '.filename // "unknown"')
-    SIZE=$(echo "$RESULT" | jq -r '.size // 0')
-    emit "${STATUS}: ${FILENAME} (${SIZE} bytes)" "$RESULT"
-    ;;
-
-  list_contacts)
-    COUNT=$(echo "$RESULT" | jq 'if type == "array" then length else 0 end')
-    emit "${COUNT} contacts" "$RESULT"
-    ;;
-
-  find_contact)
-    COUNT=$(echo "$RESULT" | jq 'if type == "array" then length else 0 end')
-    emit "${COUNT} matches" "$RESULT"
-    ;;
-
-  add_contact)
-    NAME=$(echo "$RESULT" | jq -r '.name // "unknown"')
-    EMAIL=$(echo "$RESULT" | jq -r '.email // "unknown"')
-    emit "added ${NAME} <${EMAIL}>"
-    ;;
-
-  remove_contact)
-    NAME=$(echo "$RESULT" | jq -r '.name // "unknown"')
-    emit "removed ${NAME}"
+  # Data tools: first line as summary, full text in context
+  list_messages|read_message|list_folders|show_mime|verify_signature|\
+  check_trust|download_attachment|list_contacts|find_contact)
+    emit "$FIRST_LINE" "$RESULT"
     ;;
 
   *)
