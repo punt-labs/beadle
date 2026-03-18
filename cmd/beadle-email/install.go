@@ -86,7 +86,11 @@ func runUninstall(g globalOpts, _ []string) int {
 	}
 
 	// 2. Remove deployed commands
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		g.errorf("cannot determine home directory: %v", err)
+		return 1
+	}
 	commandsDir := filepath.Join(home, ".claude", "commands")
 	for _, name := range []string{"inbox.md", "mail.md", "send.md", "contacts.md"} {
 		path := filepath.Join(commandsDir, name)

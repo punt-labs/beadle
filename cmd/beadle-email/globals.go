@@ -14,11 +14,11 @@ type globalOpts struct {
 	Quiet   bool // --quiet / -q: errors only
 }
 
-// parseGlobalOpts extracts global flags from args, returning the opts
-// and remaining args with global flags stripped.
+// parseGlobalOpts extracts global flags from args before the subcommand,
+// returning the opts and remaining args with global flags stripped.
+// Only parses flags before the first non-flag token (the subcommand).
 func parseGlobalOpts(args []string) (globalOpts, []string) {
 	var g globalOpts
-	var remaining []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--json", "-j":
@@ -28,10 +28,11 @@ func parseGlobalOpts(args []string) (globalOpts, []string) {
 		case "--quiet", "-q":
 			g.Quiet = true
 		default:
-			remaining = append(remaining, args[i])
+			// First non-global-flag token — return it and everything after
+			return g, args[i:]
 		}
 	}
-	return g, remaining
+	return g, nil
 }
 
 // slogLevel returns the appropriate log level based on flags.

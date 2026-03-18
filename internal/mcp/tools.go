@@ -51,7 +51,6 @@ type handler struct {
 	logger       *slog.Logger
 }
 
-// sendResult aliases email.SendResult for MCP tool responses.
 
 // verifyResult is the typed response for the verify_signature tool.
 type verifyResult struct {

@@ -231,17 +231,24 @@ func runDoctor(g globalOpts, configPath string) int {
 
 	failed := false
 	for _, c := range checks {
-		mark := "+"
 		if c.Status == "FAIL" {
-			mark = "!"
 			failed = true
 		}
-		if c.Detail != "" {
-			fmt.Printf("[%s] %-16s %s\n", mark, c.Name, c.Detail)
-		} else {
-			fmt.Printf("[%s] %s\n", mark, c.Name)
-		}
 	}
+
+	g.printResult(checks, func() {
+		for _, c := range checks {
+			mark := "+"
+			if c.Status == "FAIL" {
+				mark = "!"
+			}
+			if c.Detail != "" {
+				fmt.Printf("[%s] %-16s %s\n", mark, c.Name, c.Detail)
+			} else {
+				fmt.Printf("[%s] %s\n", mark, c.Name)
+			}
+		}
+	})
 
 	if failed {
 		return 1
@@ -283,8 +290,11 @@ func runStatus(g globalOpts, configPath string) int {
 		status["contacts_error"] = contactsError
 	}
 
-	data, _ := json.MarshalIndent(status, "", "  ")
-	fmt.Println(string(data))
+	g.printResult(status, func() {
+		for k, v := range status {
+			fmt.Printf("%-16s %s\n", k+":", v)
+		}
+	})
 	return 0
 }
 
