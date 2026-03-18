@@ -976,9 +976,24 @@ func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (
 // resolveAddressField resolves names in a comma-separated address string
 // using the contacts store. Tokens containing @ are passed through as-is.
 // Returns the resolved comma-separated email string.
+//
+// Only loads the contacts store if at least one token needs resolution
+// (lacks @). This ensures a corrupted contacts file does not break
+// sending to raw email addresses.
 func (h *handler) resolveAddressField(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
+	}
+	// Fast path: if all tokens contain @, no resolution needed.
+	needsResolve := false
+	for _, tok := range strings.Split(raw, ",") {
+		if !strings.Contains(strings.TrimSpace(tok), "@") {
+			needsResolve = true
+			break
+		}
+	}
+	if !needsResolve {
+		return raw, nil
 	}
 	store, err := h.loadContacts()
 	if err != nil {
