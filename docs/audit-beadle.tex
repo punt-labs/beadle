@@ -1,0 +1,242 @@
+%
+% audit-beadle.tex
+%
+% Beadle audit against Punt Labs user-facing standards
+% Generated 2026-03-18
+%
+% Compile: pdflatex audit-beadle.tex
+%
+
+\documentclass[a4paper,10pt]{article}
+\usepackage[margin=0.8in]{geometry}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{amssymb}
+\usepackage{xcolor}
+
+\titlespacing*{\section}{0pt}{2ex}{0.5ex}
+\titlespacing*{\subsection}{0pt}{1.2ex}{0.3ex}
+
+\newcommand{\pass}{{\color{green!60!black}$\blacksquare$\hspace{0.4em}\textsc{pass}}\hspace{0.5em}}
+\newcommand{\fail}{{\color{red!70!black}$\blacksquare$\hspace{0.4em}\textsc{fail}}\hspace{0.5em}}
+\newcommand{\na}{{\color{gray}$\square$\hspace{0.4em}\textsc{n/a}}\hspace{0.5em}}
+
+\setlist[itemize]{nosep, left=0pt, labelsep=0em, label={}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Beadle Audit --- 2026-03-18}
+\lhead{\leftmark}
+\rfoot{\thepage}
+
+\begin{document}
+
+\title{Beadle: User-Facing Standards Audit}
+\author{Project: \texttt{punt-labs/beadle} (v0.3.1)}
+\date{March 18, 2026}
+\maketitle
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+& \textsc{pass} & \textsc{fail} & \textsc{n/a} \\
+\midrule
+Naming \& Identity    & 2 & 2 & 1 \\
+CLI Design            & 8 & 7 & 0 \\
+Permissions \& Safety & 8 & 1 & 0 \\
+Plugin Experience     & 9 & 0 & 0 \\
+Hooks                 & 7 & 2 & 2 \\
+Installation          & 3 & 5 & 0 \\
+Filesystem Layout     & 0 & 4 & 1 \\
+README \& Docs        & 2 & 1 & 1 \\
+Integration           & 2 & 0 & 3 \\
+\midrule
+\textbf{Total}        & \textbf{41} & \textbf{22} & \textbf{8} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\tableofcontents
+\newpage
+
+% 
+\section{Naming \& Identity}
+
+\begin{itemize}
+  \item \fail Project name = CLI command = repo name ---
+    Repo is \texttt{beadle}, CLI is \texttt{beadle-email}. Mismatch.
+  \item \na PyPI package --- Go project, not applicable.
+  \item \pass No \texttt{-mcp} suffix.
+  \item \pass Slash commands: \texttt{/inbox}, \texttt{/mail}, \texttt{/send}.
+  \item \fail Version match --- \texttt{plugin.json} has 0.3.1,
+    \texttt{main.go} uses ldflags (\texttt{dev} default),
+    \texttt{install.sh} has no VERSION pin.
+\end{itemize}
+
+% 
+\section{CLI Design}
+
+\subsection{Required Subcommands}
+\begin{itemize}
+  \item \pass \texttt{version}
+  \item \pass \texttt{doctor} --- per-dependency pass/fail checks
+  \item \pass \texttt{status} --- JSON state summary
+  \item \fail \texttt{install} --- missing; no machine-scoped setup command
+  \item \pass \texttt{serve} --- stdio transport
+\end{itemize}
+
+\subsection{Subcommand Naming}
+\begin{itemize}
+  \item \pass Single verbs for all subcommands
+  \item \pass Arguments disambiguate
+  \item \fail Product commands first in \texttt{--help} --- admin commands
+    (\texttt{serve}) listed before product commands (\texttt{contact})
+\end{itemize}
+
+\subsection{Global Flags}
+\begin{itemize}
+  \item \fail \texttt{--json} --- not implemented
+  \item \fail \texttt{--verbose} --- uses \texttt{BEADLE\_DEBUG} env var instead
+  \item \fail \texttt{--quiet} --- not implemented
+\end{itemize}
+
+\subsection{CLI $\leftrightarrow$ MCP Parity}
+\begin{itemize}
+  \item \fail Core email operations (list, read, send, move) exist only as
+    MCP tools. No CLI subcommands for email operations.
+  \item \pass Contact operations have full CLI/MCP parity.
+  \item \pass Slash commands map to MCP tools.
+  \item \fail Hooks call shell scripts directly, not
+    \texttt{beadle-email hook <event>} dispatcher.
+\end{itemize}
+
+% 
+\section{Permissions \& Safety}
+
+\begin{itemize}
+  \item \pass \texttt{settings.json} portable, checked in
+  \item \pass \texttt{settings.local.json} gitignored
+  \item \pass MCP wildcards auto-allowed by SessionStart
+  \item \pass Skill permissions auto-allowed
+  \item \pass All required deny rules present (destructive, network, secrets)
+  \item \pass Permission injection via \texttt{jq} atomic merge
+  \item \pass Pattern-specific rules (include plugin name)
+  \item \fail No uninstaller to remove injected permissions
+\end{itemize}
+
+% 
+\section{Plugin Experience}
+
+\begin{itemize}
+  \item \pass Zero-prompt install --- SessionStart auto-allows everything
+  \item \pass \texttt{plugin.json}: name, description, version, author all correct
+  \item \pass Dev/prod isolation: \texttt{beadle-dev} / \texttt{beadle}
+  \item \pass Command deployment: diff-and-copy, skips \texttt{-dev.md}
+  \item \pass Output suppression: all 13 MCP tools have handlers
+  \item \pass Two-channel display working
+  \item \pass Matcher covers dev and prod namespaces
+  \item \pass \texttt{allowed-tools} frontmatter correct
+  \item \pass MCP-first commands
+\end{itemize}
+
+% 
+\section{Hooks}
+
+\begin{itemize}
+  \item \fail Three-layer dispatch --- shell scripts contain business logic
+    directly (session-start: 182 lines, suppress-output: 164 lines).
+    Standard requires shell thin gate $\to$ CLI handler.
+  \item \fail Business logic in shell exceeds 10-line threshold.
+  \item \pass Observation hooks fail-open (both exit 0 on all paths)
+  \item \pass Matcher covers dev and prod
+  \item \pass SessionStart: deploys commands, auto-allows, first-run check
+  \item \pass PostToolUse: all 13 tools suppressed with two-channel display
+  \item \pass No dead code, no orphan handlers
+\end{itemize}
+
+% 
+\section{Installation \& Distribution}
+
+\begin{itemize}
+  \item \pass One-command install via \texttt{curl | sh}
+  \item \pass POSIX \texttt{install.sh}, idempotent, transparent
+  \item \pass Stdin protection on claude/ssh commands
+  \item \fail URL pinned to SHA in README but \texttt{install.sh} itself
+    references \texttt{main} in a comment
+  \item \fail No VERSION pin in \texttt{install.sh} --- downloads
+    \texttt{releases/latest}
+  \item \fail Missing ``verify'' trust tier (only convenience + inspect)
+  \item \fail \texttt{install.sh} tells user to run \texttt{doctor} but
+    does not run it automatically
+  \item \fail No uninstall mechanism (script or CLI command)
+\end{itemize}
+
+% 
+\section{Filesystem Layout}
+
+\begin{itemize}
+  \item \fail Three root paths instead of one:
+    \texttt{\textasciitilde/.punt-labs/beadle/} (contacts),
+    \texttt{\textasciitilde/.config/beadle/} (config),
+    \texttt{\textasciitilde/.beadle/} (attachments)
+  \item \fail \texttt{\textasciitilde/.beadle/} and
+    \texttt{\textasciitilde/.config/beadle/} are non-compliant top-level dirs
+  \item \fail No single root constant --- three separate path derivations
+  \item \na Per-project sentinel --- not applicable (user-level tool)
+  \item \fail No file-based logging under
+    \texttt{\textasciitilde/.punt-labs/beadle/logs/}
+\end{itemize}
+
+% 
+\section{README \& Documentation}
+
+\begin{itemize}
+  \item \pass All required sections present in correct order
+  \item \pass Tone: factual, no marketing, no anthropomorphizing
+  \item \fail License section says ``TBD'' instead of MIT
+  \item \na Competitor mentions --- not needed
+\end{itemize}
+
+% 
+\section{Integration}
+
+\begin{itemize}
+  \item \pass Graceful degradation (SMTP $\to$ Resend fallback, missing
+    contacts file not an error)
+  \item \pass Sole writer (beadle only writes to its own paths)
+  \item \na L0/L1 discovery --- no inter-tool checks
+\end{itemize}
+
+% 
+\newpage
+\section{Priority Fixes for Release Readiness}
+
+Ordered by user impact:
+
+\begin{enumerate}
+  \item \textbf{Filesystem consolidation} --- migrate
+    \texttt{\textasciitilde/.config/beadle/} and
+    \texttt{\textasciitilde/.beadle/} to
+    \texttt{\textasciitilde/.punt-labs/beadle/}. Single root constant.
+  \item \textbf{CLI parity for email ops} --- add \texttt{list}, \texttt{read},
+    \texttt{send}, \texttt{move} CLI subcommands calling same internal functions.
+  \item \textbf{install subcommand} --- \texttt{beadle-email install} for
+    MCP registration, data dir creation, credential prompting.
+  \item \textbf{uninstall subcommand} --- remove deployed commands, permissions,
+    MCP registration.
+  \item \textbf{VERSION pin in install.sh} --- pin to specific version, not
+    \texttt{latest}.
+  \item \textbf{License} --- set to MIT in README and add LICENSE file.
+  \item \textbf{Global flags} --- \texttt{--json}, \texttt{--verbose},
+    \texttt{--quiet}.
+  \item \textbf{Hook refactor} --- extract shell business logic to Go CLI
+    handler (\texttt{beadle-email hook session-start}).
+  \item \textbf{Version consistency} --- single source of truth across
+    plugin.json, main.go, install.sh.
+  \item \textbf{install.sh doctor} --- auto-run \texttt{doctor} at end.
+\end{enumerate}
+
+\end{document}
