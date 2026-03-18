@@ -188,10 +188,10 @@ pair using the Unix rwx model.
 
 **Two entities:**
 
-- **Identity** — who beadle is operating as. A first-class entity with its own
-  email address, mailbox (IMAP config), GPG key, and persona. Today:
-  `claude@punt-labs.com`. Future: `jim@punt-labs.com`, `builds@punt-labs.com`,
-  etc. The current `email.json` config represents one identity's config.
+- **Identity** — who beadle is operating as. Owned by ethos, not beadle
+  (see DES-013). Beadle reads `email`, `name`, `handle` from the ethos
+  identity YAML. Today: `claude@punt-labs.com`. Future:
+  `jim@punt-labs.com`, `builds@punt-labs.com`, etc.
 
 - **Contact** — who beadle is interacting with. Stored in the address book with
   name, email, aliases, GPG key ID, notes, and a permissions map.
@@ -259,6 +259,96 @@ Contact {
 4. Combined with transport trust: only act if both identity trust AND transport
    trust are sufficient
 
-**Status:** Identity is not yet implemented as a separate entity. Contact
+**Status:** Identity ownership moved to ethos (see DES-013). Contact
 `permissions` field not yet in the struct. Current code has a single identity
-hardcoded via `email.json`. This ADR captures the target architecture.
+hardcoded via `email.json`. This ADR captures the permission model;
+DES-013 captures the identity model.
+
+## DES-013: Identity via ethos sidecar with namespaced extensions
+
+**Decision:** Beadle does not own identity. Ethos does. Beadle reads identity
+from the ethos sidecar and stores beadle-specific data in ethos's namespaced
+extension mechanism (ethos DES-008).
+
+**Core identity** (owned by ethos, read-only for beadle):
+
+- File: `~/.punt-labs/ethos/identities/<handle>.yaml`
+- Fields beadle reads: `email` (which mailbox), `name` (display), `handle` (key)
+
+**Beadle extension** (owned by beadle, ethos preserves but never interprets):
+
+- File: `~/.punt-labs/ethos/identities/<handle>.ext/beadle.yaml`
+- Fields: `gpg_key_id`, contact permissions, any beadle-specific state
+- CLI access: `ethos ext set <handle> beadle gpg_key_id <value>`
+- Merged view: `ethos show <handle>` includes `ext.beadle`
+
+**Identity resolution at session start:**
+
+1. SessionStart hook calls `ethos whoami` (CLI, ~10ms in Go)
+2. Gets active handle → reads `email` field from identity YAML
+3. Loads beadle identity directory keyed by email address
+4. If ethos not installed → fall back to beadle default identity
+
+Fall back uses the same directory structure as ethos-sourced identities. No
+split between "ethos mode" and "legacy mode." One code path.
+
+**Default identity:**
+
+Beadle always has a default identity. File `~/.punt-labs/beadle/default-identity`
+contains the default email address. When ethos is absent or has no active
+identity, beadle uses this default. Same per-identity directory structure either
+way.
+
+**Identity-scoped directory structure:**
+
+```text
+~/.punt-labs/beadle/
+  identities/
+    claude@punt-labs.com/
+      email.json          # IMAP/SMTP config for this identity
+      contacts.json       # contacts + permissions for this identity
+      attachments/        # downloaded attachments
+    jim@punt-labs.com/
+      email.json
+      contacts.json
+      attachments/
+  default-identity        # file: default email address
+```
+
+**How beadle accesses ethos data:**
+
+| Path | Method | Why |
+|------|--------|-----|
+| Hook → identity resolution | CLI (`ethos whoami`) | Hook is shell, fast |
+| MCP tool → read identity | Read file directly | No subprocess needed |
+| MCP tool → read extensions | Read `.ext/beadle.yaml` | Same |
+
+The LLM never reads ethos files directly. Beadle's MCP tools read them
+internally and expose relevant data through beadle's own tool responses.
+
+**Identity switching:**
+
+`ethos iam <handle>` writes the active identity. On next SessionStart or MCP
+tool invocation, beadle reads `ethos whoami`, gets the email, loads the
+corresponding identity directory.
+
+**User identification:**
+
+The user is identified at session start. Priority chain:
+
+1. `ethos iam <handle>` was called previously → active identity exists
+2. Logged-in OS username → map to ethos handle
+3. Beadle default identity
+
+**Rejected alternatives:**
+
+- Beadle builds its own Identity struct with its own config files — duplicates
+  ethos, creates a parallel identity system.
+- Beadle adds a "beadle binding" block to the ethos schema — tight coupling,
+  violates ethos DES-001 (sidecar, no import dependency).
+- Beadle writes freeform fields into the identity YAML — conflicts with ethos
+  schema ownership. The extension mechanism exists for exactly this purpose.
+- Two directory structures (ethos mode vs legacy) — unnecessary complexity.
+  One structure with a default identity fallback.
+
+**Depends on:** ethos DES-008 (generic extension mechanism).
