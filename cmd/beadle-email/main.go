@@ -32,15 +32,23 @@ var version = "dev"
 const usage = `beadle-email: Beadle email channel MCP server
 
 Usage:
-  beadle-email serve [--config PATH]              Start MCP server (stdio transport)
-  beadle-email version                            Print version and exit
-  beadle-email doctor [--config PATH]             Check installation health
-  beadle-email status [--config PATH]             Show current state
-  beadle-email contact list [--contacts PATH]     List all contacts
-  beadle-email contact add [flags]                Add a contact
-  beadle-email contact remove <name>              Remove a contact
-  beadle-email contact find <query>               Find contacts by name/alias/email
-  beadle-email --help                             Show this help
+  beadle-email list [--folder F] [--count N] [--unread]   List messages
+  beadle-email read <uid> [--folder F]                    Read a message
+  beadle-email send --to ADDR --subject S --body B        Send an email
+  beadle-email move <uid> [--folder F] [--to DEST]        Move a message
+  beadle-email folders                                    List IMAP folders
+  beadle-email contact list|add|remove|find               Manage contacts
+  beadle-email serve [--config PATH]                      Start MCP server
+  beadle-email install                                    Set up beadle-email
+  beadle-email uninstall                                  Remove beadle-email
+  beadle-email doctor [--config PATH]                     Check health
+  beadle-email status [--config PATH]                     Show current state
+  beadle-email version                                    Print version
+
+Global flags:
+  --json, -j      JSON output
+  --verbose, -v   Debug logging
+  --quiet, -q     Errors only
 
 Without a subcommand, starts the MCP server (same as 'serve').
 `
@@ -50,39 +58,56 @@ func main() {
 }
 
 func run() int {
-	args := os.Args[1:]
+	g, args := parseGlobalOpts(os.Args[1:])
 
 	// Default to serve when no subcommand given
 	if len(args) == 0 {
-		return runServe(email.DefaultConfigPath())
+		return runServe(g, email.DefaultConfigPath())
 	}
 
 	switch args[0] {
-	case "version":
+	case "version", "--version":
 		fmt.Printf("beadle-email %s\n", version)
 		return 0
 
 	case "doctor":
 		configPath := extractConfig(args[1:])
-		return runDoctor(configPath)
+		return runDoctor(g, configPath)
 
 	case "status":
 		configPath := extractConfig(args[1:])
-		return runStatus(configPath)
+		return runStatus(g, configPath)
 
 	case "serve":
 		configPath := extractConfig(args[1:])
-		return runServe(configPath)
+		return runServe(g, configPath)
 
 	case "contact":
-		return runContact(args[1:])
+		return runContact(g, args[1:])
+
+	case "list":
+		return runEmailList(g, args[1:])
+
+	case "read":
+		return runEmailRead(g, args[1:])
+
+	case "send":
+		return runEmailSend(g, args[1:])
+
+	case "move":
+		return runEmailMove(g, args[1:])
+
+	case "folders":
+		return runEmailFolders(g, args[1:])
+
+	case "install":
+		return runInstall(g, args[1:])
+
+	case "uninstall":
+		return runUninstall(g, args[1:])
 
 	case "--help", "-h":
 		fmt.Fprint(os.Stderr, usage)
-		return 0
-
-	case "--version", "-v":
-		fmt.Printf("beadle-email %s\n", version)
 		return 0
 
 	default:
@@ -100,9 +125,9 @@ func extractConfig(args []string) string {
 	return email.DefaultConfigPath()
 }
 
-func runServe(configPath string) int {
+func runServe(g globalOpts, configPath string) int {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: logLevel(),
+		Level: g.slogLevel(),
 	}))
 
 	cfg, err := email.LoadConfig(configPath)
@@ -128,7 +153,7 @@ func runServe(configPath string) int {
 	return 0
 }
 
-func runDoctor(configPath string) int {
+func runDoctor(g globalOpts, configPath string) int {
 	type check struct {
 		Name   string `json:"name"`
 		Status string `json:"status"`
@@ -224,7 +249,7 @@ func runDoctor(configPath string) int {
 	return 0
 }
 
-func runStatus(configPath string) int {
+func runStatus(g globalOpts, configPath string) int {
 	cfg, err := email.LoadConfig(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -263,12 +288,7 @@ func runStatus(configPath string) int {
 	return 0
 }
 
-func logLevel() slog.Level {
-	if os.Getenv("BEADLE_DEBUG") != "" {
-		return slog.LevelDebug
-	}
-	return slog.LevelInfo
-}
+// logLevel moved to globalOpts.slogLevel() in globals.go
 
 // --- Contact CLI ---
 
@@ -292,7 +312,7 @@ func extractContactsPath(args []string) string {
 	return contacts.DefaultPath()
 }
 
-func runContact(args []string) int {
+func runContact(g globalOpts, args []string) int {
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, contactUsage)
 		return 2

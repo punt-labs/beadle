@@ -3,7 +3,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,20 +51,7 @@ type handler struct {
 	logger       *slog.Logger
 }
 
-// sendResult is the typed response for the send_email tool.
-// Bcc is intentionally omitted — BCC addresses are confidential by design.
-type sendResult struct {
-	Status      string `json:"status"`
-	Method      string `json:"method"`
-	Signed      bool   `json:"signed"`
-	ID          string `json:"id,omitempty"`
-	From        string `json:"from"`
-	To          string `json:"to"`
-	Cc          string `json:"cc,omitempty"`
-	BccCount    int    `json:"bcc_count,omitempty"`
-	Subject     string `json:"subject"`
-	Attachments int    `json:"attachments"`
-}
+// sendResult aliases email.SendResult for MCP tool responses.
 
 // verifyResult is the typed response for the verify_signature tool.
 type verifyResult struct {
@@ -409,16 +395,16 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	// Load contacts once for all three address fields.
 	ccRaw := stringParam(req, "cc", "")
 	bccRaw := stringParam(req, "bcc", "")
-	store, storeErr := h.loadContactsIfNeeded(toRaw, ccRaw, bccRaw)
-	toResolved, err := resolveField(store, storeErr, toRaw)
+	store, storeErr := email.LoadContactsIfNeeded(h.contactsPath, toRaw, ccRaw, bccRaw)
+	toResolved, err := email.ResolveField(store, storeErr, toRaw)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("to: %v", err)), nil
 	}
-	ccResolved, err := resolveField(store, storeErr, ccRaw)
+	ccResolved, err := email.ResolveField(store, storeErr, ccRaw)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("cc: %v", err)), nil
 	}
-	bccResolved, err := resolveField(store, storeErr, bccRaw)
+	bccResolved, err := email.ResolveField(store, storeErr, bccRaw)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("bcc: %v", err)), nil
 	}
@@ -441,91 +427,14 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	// (multipart/signed envelopes). Neither Proton Bridge (strips MIME) nor
 	// Resend (no raw MIME API) supports this. Tracked in beadle-atz: Amazon SES
 	// will be added as the PGP-signing transport in a future release.
-	result, sendErr := h.trySendChain(to, cc, bcc, subject, body, html, attachments)
+	result, sendErr := email.TrySendChain(h.cfg, h.logger, to, cc, bcc, subject, body, html, attachments)
 	if sendErr != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("send email: %v", sendErr)), nil
 	}
 	return jsonResult(result)
 }
 
-// trySendChain attempts to send via the best available method.
-func (h *handler) trySendChain(to, cc, bcc []string, subject, body, html string, attachments []email.OutboundAttachment) (*sendResult, error) {
-	// Validate BCC addresses for CR/LF injection. ComposeRaw validates to/cc
-	// but never receives bcc (by design — BCC must not appear in headers).
-	// Without this check, malicious bcc values could inject SMTP commands.
-	for _, addr := range bcc {
-		if strings.ContainsAny(addr, "\r\n") {
-			return nil, fmt.Errorf("bcc address contains CR/LF")
-		}
-	}
-
-	// All envelope recipients (SMTP RCPT TO + Resend arrays).
-	allRecipients := make([]string, 0, len(to)+len(cc)+len(bcc))
-	allRecipients = append(allRecipients, to...)
-	allRecipients = append(allRecipients, cc...)
-	allRecipients = append(allRecipients, bcc...)
-
-	toStr := strings.Join(to, ", ")
-	ccStr := strings.Join(cc, ", ")
-
-	// 1. Proton Bridge SMTP — passes SPF/DKIM/DMARC for punt-labs.com
-	// Note: SMTP path sends plain text only (no HTML). The html parameter
-	// is only used by the Resend fallback which supports structured HTML fields.
-	if email.SMTPAvailable(h.cfg) {
-		raw, composeErr := email.ComposeRaw(h.cfg.FromAddress, to, cc, subject, body, attachments)
-		if composeErr != nil {
-			return nil, composeErr
-		}
-		if err := email.SMTPSend(h.cfg, h.cfg.FromAddress, allRecipients, raw); err != nil {
-			h.logger.Warn("smtp send failed, falling back to resend", "err", err)
-		} else {
-			return &sendResult{
-				Status:      "sent",
-				Method:      "proton-bridge-smtp",
-				From:        h.cfg.FromAddress,
-				To:          toStr,
-				Cc:          ccStr,
-				BccCount:    len(bcc),
-				Subject:     subject,
-				Attachments: len(attachments),
-			}, nil
-		}
-	}
-
-	// 2. Resend API — fallback when Bridge is unavailable
-	var resendAtts []email.ResendAttachment
-	for _, att := range attachments {
-		resendAtts = append(resendAtts, email.ResendAttachment{
-			Filename: att.Filename,
-			Content:  base64.StdEncoding.EncodeToString(att.Data),
-		})
-	}
-
-	resp, err := email.Send(h.cfg, email.SendRequest{
-		To:          to,
-		Cc:          cc,
-		Bcc:         bcc,
-		Subject:     subject,
-		Text:        body,
-		HTML:        html,
-		Attachments: resendAtts,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &sendResult{
-		Status:      "sent",
-		Method:      "resend",
-		ID:          resp.ID,
-		From:        h.cfg.FromAddress,
-		To:          toStr,
-		Cc:          ccStr,
-		BccCount:    len(bcc),
-		Subject:     subject,
-		Attachments: len(attachments),
-	}, nil
-}
+// trySendChain is now email.TrySendChain — called directly above.
 
 func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	folder := stringParam(req, "folder", "INBOX")
@@ -977,32 +886,5 @@ func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (
 	return jsonResult(removeContactResult{Status: "removed", Name: name})
 }
 
-// loadContactsIfNeeded loads the contacts store only if any token across
-// the given address fields lacks @. Returns nil store (no error) when no
-// resolution is needed. This ensures a corrupted contacts file does not
-// break sending to raw email addresses.
-func (h *handler) loadContactsIfNeeded(fields ...string) (*contacts.Store, error) {
-	for _, raw := range fields {
-		for _, tok := range strings.Split(raw, ",") {
-			if t := strings.TrimSpace(tok); t != "" && !strings.Contains(t, "@") {
-				return h.loadContacts()
-			}
-		}
-	}
-	return nil, nil
-}
-
-// resolveField resolves names in a comma-separated address string using
-// a pre-loaded contacts store. If store is nil, returns raw unchanged.
-func resolveField(store *contacts.Store, storeErr error, raw string) (string, error) {
-	if raw == "" {
-		return "", nil
-	}
-	if store == nil {
-		if storeErr != nil {
-			return "", fmt.Errorf("load contacts: %w", storeErr)
-		}
-		return raw, nil
-	}
-	return store.ResolveAddresses(raw)
-}
+// loadContactsIfNeeded and resolveField are now email.LoadContactsIfNeeded
+// and email.ResolveField — called directly in sendEmail above.

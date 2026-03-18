@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- CLI parity for email operations: `list`, `read`, `send`, `move`, `folders`
+  subcommands calling the same internal functions as MCP tools. Contact
+  name resolution works in CLI send (`--to jim` resolves to stored email).
+- Global CLI flags: `--json`/`-j` for JSON output, `--verbose`/`-v` for
+  debug logging, `--quiet`/`-q` for errors only. `-v` changed from
+  `--version` to `--verbose` per punt-kit standard.
+- `install` subcommand: creates `~/.punt-labs/beadle/` dirs, interactive
+  `email.json` config creation, MCP server registration, runs doctor.
+- `uninstall` subcommand: removes MCP registration, deployed commands,
+  and beadle permissions from `settings.json`.
+- `TrySendChain` extracted from MCP handler to `internal/email/chain.go`
+  for CLI reuse. Contact resolve helpers extracted to `internal/email/resolve.go`.
 - Configurable inbox polling. SessionStart hook auto-schedules `/inbox` via
   CronCreate at a configurable interval (default 30m). Configure with
   `/inbox 5m`, `/inbox 1h`, or `/inbox n` to disable. Settings persist in
