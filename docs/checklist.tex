@@ -1,0 +1,405 @@
+%
+% checklist.tex
+%
+% Punt Labs Standards Audit Checklist
+% Derived from punt-kit/standards/*.md
+%
+% Compile: pdflatex checklist.tex && pdflatex checklist.tex
+%
+
+\documentclass[a4paper,10pt]{article}
+\usepackage[margin=0.8in]{geometry}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{amssymb}
+
+\titlespacing*{\section}{0pt}{2ex}{0.5ex}
+\titlespacing*{\subsection}{0pt}{1.2ex}{0.3ex}
+
+\newcommand{\must}{\textsc{must}}
+\newcommand{\should}{\textsc{should}}
+
+\setlist[itemize]{nosep, left=1.5em, labelsep=0.5em, label={$\square$}}
+\setlist[enumerate]{nosep}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Punt Labs Standards Audit}
+\lhead{\leftmark}
+\rfoot{\thepage}
+
+\begin{document}
+
+\title{Punt Labs Standards Audit Checklist}
+\author{Derived from \texttt{punt-kit/standards/*.md}}
+\date{\today}
+\maketitle
+
+\noindent Two parts: \textbf{Part~I} covers what users see and touch ---
+naming, CLI, permissions, hooks, installation, documentation.
+\textbf{Part~II} covers developer workflow --- git, CI, build, code
+standards, release.
+
+\tableofcontents
+\newpage
+
+% ╔════════════════════════════════════════════════════════════════════╗
+% ║  PART I: USER-FACING                                             ║
+% ╚════════════════════════════════════════════════════════════════════╝
+
+\part{User-Facing}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Naming \& Identity}
+\label{sec:naming}
+Sources: \texttt{naming.md}, \texttt{cli.md~\S3}
+
+\begin{itemize}
+  \item Project name = CLI command = GitHub repo name
+  \item PyPI package: \texttt{punt-<name>}; CLI entry point: short name, no prefix
+  \item No \texttt{-mcp} suffix --- the CLI \emph{is} the product, MCP is a projection
+  \item Slash commands: \texttt{/<name>} or \texttt{/<name>:<sub>}
+  \item Version matches across all locations (pyproject.toml, plugin.json, install.sh, \_\_init\_\_.py)
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{CLI Design}
+\label{sec:cli}
+Source: \texttt{cli.md}
+
+\subsection{Core Principle}
+The CLI is the complete product. Every capability must be accessible from the
+terminal. MCP tools, slash commands, and hooks are projections --- a user
+without Claude Code can use every feature.
+
+\subsection{Required Subcommands (\must)}
+\begin{itemize}
+  \item \texttt{version} --- print version
+  \item \texttt{doctor} --- per-dependency pass/fail health check
+  \item \texttt{status} --- current state summary
+  \item \texttt{install} --- machine-scoped setup (MCP registration, data dirs)
+  \item \texttt{serve} --- start MCP server (stdio transport)
+\end{itemize}
+
+\subsection{Subcommand Naming (\must)}
+\begin{itemize}
+  \item Single verbs: \texttt{search}, \texttt{ingest}, \texttt{talk}
+  \item Arguments disambiguate, not subcommand names
+  \item Product commands first in \texttt{--help}, admin commands after
+\end{itemize}
+
+\subsection{Global Flags (\should)}
+\begin{itemize}
+  \item \texttt{--json} / \texttt{-j}: JSON output for every command
+  \item \texttt{--verbose} / \texttt{-v}: debug logging
+  \item \texttt{--quiet} / \texttt{-q}: errors only
+\end{itemize}
+
+\subsection{CLI $\leftrightarrow$ MCP Parity (\must)}
+\begin{itemize}
+  \item New capabilities implemented in CLI first
+  \item MCP tools call same functions as CLI
+  \item Slash commands map to CLI commands via MCP tools
+  \item Hooks call \texttt{<tool> hook <event>} dispatcher
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Permissions \& Safety}
+\label{sec:permissions}
+Source: \texttt{permissions.md}
+
+\subsection{Settings File Split (\must)}
+\begin{itemize}
+  \item \texttt{settings.json}: portable permissions (checked in)
+  \item \texttt{settings.local.json}: machine-specific (gitignored)
+\end{itemize}
+
+\subsection{Auto-Allow Rules (\must)}
+\begin{itemize}
+  \item MCP plugin wildcards: \texttt{mcp\_\_plugin\_*}
+  \item Skill permissions: \texttt{Skill(<name>)} for every plugin skill
+  \item SessionStart hook populates both automatically
+\end{itemize}
+
+\subsection{Required Deny Rules (\must)}
+\begin{itemize}
+  \item Destructive: \texttt{rm -rf /}, \texttt{rm -rf \textasciitilde}, \texttt{dd}, \texttt{sudo}, \texttt{su}
+  \item Network: curl, wget, ssh, scp, ftp, nc, telnet, socat
+  \item Secrets: \texttt{Edit(.env)}, \texttt{Write(.env)}, \texttt{Edit(.envrc)}, \texttt{Write(.envrc)}
+\end{itemize}
+
+\subsection{Plugin-Distributed Permissions (\must)}
+\begin{itemize}
+  \item Installer injects permissions via \texttt{jq} atomic merge
+  \item Uninstaller removes injected permissions
+  \item Pattern-specific (include plugin name in rules)
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Plugin Experience}
+\label{sec:plugins}
+Source: \texttt{plugins.md}
+
+\subsection{Zero-Prompt Install (\must)}
+Users should never see a permission prompt after enabling the plugin.
+SessionStart auto-allows all MCP tools and skills.
+
+\subsection{plugin.json (\must)}
+\begin{itemize}
+  \item \texttt{name}, \texttt{description}, \texttt{version} (semver)
+  \item \texttt{author}: ``Punt Labs'', email: \texttt{hello@punt-labs.com}
+  \item Dev name: \texttt{<project>-dev}; prod name: \texttt{<project>}
+\end{itemize}
+
+\subsection{Command Deployment (\must)}
+\begin{itemize}
+  \item SessionStart copies commands to \texttt{\textasciitilde/.claude/commands/}
+  \item Diff-and-copy on every session (not skip-if-exists)
+  \item Skips \texttt{-dev.md} files in prod mode
+\end{itemize}
+
+\subsection{Output Suppression (\must)}
+\begin{itemize}
+  \item PostToolUse hook suppresses raw MCP JSON
+  \item Every MCP tool has a handler in suppress-output
+  \item Two-channel display: compact panel summary + full data in context
+  \item Matcher covers dev and prod namespaces
+\end{itemize}
+
+\subsection{Command Frontmatter (\must)}
+\begin{itemize}
+  \item \texttt{allowed-tools} lists only tools actually used
+  \item MCP-first: prefer MCP tools over Bash/Read/Write
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Hooks}
+\label{sec:hooks}
+Source: \texttt{hooks.md}
+
+\subsection{Architecture (\must)}
+Three layers: \texttt{hooks.json} registration $\to$ shell thin gate $\to$
+CLI/language handler. No business logic in shell scripts ($<$10 lines
+non-boilerplate).
+
+\subsection{Behavior (\must)}
+\begin{itemize}
+  \item Observation hooks fail-open (\texttt{|| true})
+  \item Mutation hooks fail-closed (propagate errors)
+  \item Matcher regex covers dev and prod: \texttt{mcp\_\_plugin\_<t>(-dev)?\_<s>\_\_.*}
+  \item \texttt{async: true} for fire-and-forget hooks
+\end{itemize}
+
+\subsection{Required Hooks (marketplace plugins)}
+\begin{itemize}
+  \item \textbf{SessionStart}: deploy commands, auto-allow permissions, first-run setup
+  \item \textbf{PostToolUse}: suppress output, two-channel display for all MCP tools
+\end{itemize}
+
+\subsection{Audit}
+\begin{itemize}
+  \item Every shell script calls its handler (no dead code)
+  \item Every handler has \texttt{hooks.json} registration (no orphans)
+  \item No \texttt{sys.stdin.read()} in Python handlers
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Installation \& Distribution}
+\label{sec:distribution}
+Source: \texttt{distribution.md}
+
+\subsection{Install Experience (\must)}
+\begin{itemize}
+  \item One command: \texttt{curl -fsSL .../SHA/install.sh | sh}
+  \item URL pinned to commit SHA (not \texttt{main})
+  \item Three trust tiers in README: convenience, inspect, verify
+  \item Ends with \texttt{doctor} to confirm success
+\end{itemize}
+
+\subsection{install.sh (\must)}
+\begin{itemize}
+  \item POSIX: \texttt{\#!/bin/sh}, shellcheck with \texttt{--shell=sh}
+  \item Idempotent and transparent (prints each step)
+  \item Stdin protection: \texttt{< /dev/null} on all claude/ssh commands
+  \item VERSION and EXTRAS pins (mandatory)
+\end{itemize}
+
+\subsection{Uninstall (\must)}
+\begin{itemize}
+  \item Removes deployed commands, MCP permissions, status line wrapping
+  \item Removes marketplace registration (conditionally)
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Filesystem Layout}
+\label{sec:filesystem}
+Source: \texttt{filesystem.md}
+
+\begin{itemize}
+  \item All tool data under \texttt{\textasciitilde/.punt-labs/<tool>/}
+  \item No per-tool top-level dot-directories in \texttt{\$HOME}
+  \item Single root constant in code; all paths derive from it
+  \item Per-project sentinel files at repo root (e.g., \texttt{.biff}, \texttt{.beads/})
+  \item Logs: \texttt{\textasciitilde/.punt-labs/<tool>/logs/} (5\,MB rotation, 5 backups)
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{README \& Documentation}
+\label{sec:readme}
+Source: \texttt{readme.md}
+
+\subsection{Required Sections (in order)}
+Title + tagline, Badges (max 4), Description (1 paragraph), Quick Start,
+Commands/API table, Development, License (MIT).
+
+\subsection{Tone}
+Describe, don't sell. No marketing verbs (``Unlock'', ``Supercharge'').
+No anthropomorphizing (``understands'', ``thinks'').
+Respect competitors --- name them, link them, praise what they do well.
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Integration}
+\label{sec:integration}
+Source: \texttt{integration.md} (draft)
+
+\begin{itemize}
+  \item No hard dependencies between tools --- every integration degrades gracefully
+  \item L0 Presence: sentinel file check, no imports
+  \item L1 Discovery: lazy, cached; missing binary = unavailable
+  \item Owning tool is sole writer (never write across boundaries)
+  \item Building blocks never check for consumers (one-way arrows)
+\end{itemize}
+
+% ╔════════════════════════════════════════════════════════════════════╗
+% ║  PART II: DEVELOPER WORKFLOW                                     ║
+% ╚════════════════════════════════════════════════════════════════════╝
+
+\part{Developer Workflow}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Git \& Branching}
+\label{sec:git}
+Source: \texttt{workflow.md}
+
+\begin{itemize}
+  \item No direct commits to \texttt{main} --- all work on feature branches
+  \item Prefixes: \texttt{feat/}, \texttt{fix/}, \texttt{refactor/}, \texttt{docs/}, \texttt{release/}, \texttt{chore/}
+  \item One logical change per commit, 1--5 files, under 100 lines
+  \item Conventional format: \texttt{type(scope): description}
+  \item Quality gates pass before every commit (\texttt{make check})
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Issue Tracking}
+\label{sec:beads}
+Source: \texttt{workflow.md}
+
+\begin{itemize}
+  \item \texttt{.beads/} initialized via \texttt{bd init}
+  \item Claim before working: \texttt{bd update <id> --status in\_progress}
+  \item Close when done: \texttt{bd close <id>}
+  \item Work not complete until \texttt{git push} succeeds
+  \item Session close: \texttt{git status}, commit, \texttt{bd sync}, push
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Quality Gates \& CI}
+\label{sec:ci}
+Sources: \texttt{makefile.md}, \texttt{github.md}, \texttt{workflow.md}
+
+\subsection{Makefile Targets (\must)}
+\texttt{help}, \texttt{test}, \texttt{lint}, \texttt{check} (composes all),
+\texttt{format}, \texttt{build}, \texttt{clean}. All in \texttt{.PHONY},
+each with \texttt{\#\#} comment. \texttt{lint} never mutates.
+
+\subsection{GitHub Branch Protection (\must)}
+Require PR, conversation resolution, status checks. Prevent force push
+and branch deletion. Zero bypass actors.
+
+\subsection{CI Workflows (\must)}
+Language-appropriate lint + test. \texttt{docs.yml} with markdownlint.
+Action versions pinned to full SHA. Dependabot, secret scanning, push
+protection enabled.
+
+\subsection{Code Review (\must)}
+PR via MCP $\to$ Copilot review $\to$ CI watch $\to$ address every comment
+$\to$ 2--6 cycles $\to$ merge via MCP. Pre-PR local review with
+\texttt{code-reviewer} + \texttt{silent-failure-hunter}.
+
+% ──────────────────────────────────────────────────────────────────────
+\section{CHANGELOG \& Docs}
+\label{sec:changelog}
+Source: \texttt{workflow.md}
+
+\begin{itemize}
+  \item Entries in PR branch before merge, under \texttt{[Unreleased]}
+  \item Categories: Added, Changed, Fixed, Removed (omit empty)
+  \item README updated when user-facing behavior changes
+  \item Design decisions logged in \texttt{DESIGN.md} with reasoning and alternatives
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Shell Scripts}
+\label{sec:shell}
+Source: \texttt{shell.md}
+
+\begin{itemize}
+  \item shellcheck: zero warnings, zero errors
+  \item \texttt{\#!/usr/bin/env bash} + \texttt{set -euo pipefail}
+  \item Double-quote all variable expansions and command substitutions
+  \item Install scripts: \texttt{\#!/bin/sh} (POSIX), shellcheck with \texttt{--shell=sh}
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Language Standards}
+\label{sec:lang}
+
+\subsection{Python}
+Source: \texttt{python.md}.
+Python 3.13+, uv, ruff, mypy strict, pyright strict, pytest, typer, FastMCP.
+\texttt{from \_\_future\_\_ import annotations} in every file.
+\texttt{internal/} for everything; core never imports from CLI.
+No \texttt{Any} without documented reason.
+
+\subsection{Go}
+\texttt{internal/} for everything.
+No \texttt{interface\{\}} or \texttt{any} unless unavoidable.
+Errors are values: \texttt{fmt.Errorf("context: \%w", err)}.
+Table-driven tests with testify. \texttt{-race} mandatory. Never log secrets.
+
+\subsection{Node.js}
+Source: \texttt{node.md}.
+Node 20+, npm, ES modules, zod for validation,
+\texttt{@modelcontextprotocol/sdk} for MCP.
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Logging}
+\label{sec:logging}
+Source: \texttt{logging.md}
+
+Logs for diagnosis, not monitoring. Never log content, messages, or API keys.
+Location: \texttt{\textasciitilde/.punt-labs/<tool>/logs/}. MCP server logs to
+stderr only (stdout reserved for stdio transport). Per-module logger via
+\texttt{logging.getLogger(\_\_name\_\_)}. 5\,MB rotation, 5 backups.
+
+% ──────────────────────────────────────────────────────────────────────
+\section{Release Process}
+\label{sec:release}
+Sources: \texttt{release-process.md}, \texttt{release-requirements.md}
+
+11 phases: Preflight $\to$ Version bump $\to$ Build $\to$ Release PR $\to$
+Tag $\to$ CI wait $\to$ GitHub Release $\to$ PyPI verify $\to$
+Post-release $\to$ Propagate $\to$ Verify.
+
+\begin{itemize}
+  \item All version locations match before tagging
+  \item CHANGELOG stamped with date; new \texttt{[Unreleased]} inserted
+  \item install.sh SHA updated in post-release
+  \item Sibling repos updated (install-all.sh, marketplace, website)
+  \item Idempotent: each step checks for diff before committing
+\end{itemize}
+
+\end{document}
