@@ -94,7 +94,7 @@ Every tool that returns a message includes the `trust_level` field. Claude can u
 
 ## Configuration
 
-Single config file at `~/.config/beadle/email.json`:
+Single config file at `~/.punt-labs/beadle/email.json`:
 
 ```json
 {

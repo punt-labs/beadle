@@ -75,10 +75,10 @@ Resolved at runtime by name through a priority chain:
 
 1. **macOS Keychain** (`security` CLI) — v0.1.0
 2. **Linux libsecret** (`secret-tool` CLI) — v0.1.1
-3. **Secret file** (`~/.config/beadle/<name>`, mode 600)
+3. **Secret file** (`~/.punt-labs/beadle/secrets/<name>`, mode 600)
 4. **Environment variable** (`BEADLE_IMAP_PASSWORD`, `BEADLE_RESEND_API_KEY`)
 
-Config file (`~/.config/beadle/email.json`) stores only connection parameters, never secrets.
+Config file (`~/.punt-labs/beadle/email.json`) stores only connection parameters, never secrets.
 
 ### Design Invariants
 

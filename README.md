@@ -91,7 +91,7 @@ sh install.sh
 | `show_mime` | Inspect multipart MIME structure, PGP parts, and attachments. |
 | `verify_signature` | Verify PGP signature on a message. Returns signer info and key ID. |
 | `check_trust` | Detailed trust classification with encryption type and origin analysis. |
-| `download_attachment` | Extract an attachment by MIME part index (from `show_mime`). Saves to `~/.beadle/<mailbox>/attachments/` and returns the path. |
+| `download_attachment` | Extract an attachment by MIME part index (from `show_mime`). Saves to `~/.punt-labs/beadle/attachments/<mailbox>/` and returns the path. |
 | `list_contacts` | List all contacts in the address book. |
 | `find_contact` | Look up a contact by name, email, or alias. |
 | `add_contact` | Add a contact (name, email, aliases, GPG key ID). |
@@ -123,20 +123,21 @@ security add-generic-password -s beadle -a imap-password -w 'your-bridge-passwor
 security add-generic-password -s beadle -a resend-api-key -w 'your-resend-key'
 security add-generic-password -s beadle -a gpg-passphrase -w 'your-gpg-passphrase'
 
-# Or secret files (~/.config/beadle/<name>, mode 600)
-echo -n 'your-bridge-password' > ~/.config/beadle/imap-password
-chmod 600 ~/.config/beadle/imap-password
+# Or secret files (~/.punt-labs/beadle/secrets/<name>, mode 600)
+mkdir -p ~/.punt-labs/beadle/secrets
+echo -n 'your-bridge-password' > ~/.punt-labs/beadle/secrets/imap-password
+chmod 600 ~/.punt-labs/beadle/secrets/imap-password
 
 # Or environment variables
 export BEADLE_IMAP_PASSWORD='your-bridge-password'
 export BEADLE_RESEND_API_KEY='your-resend-key'
 ```
 
-Create the configuration file (`~/.config/beadle/email.json`) with your connection parameters:
+Create the configuration file (`~/.punt-labs/beadle/email.json`) with your connection parameters:
 
 ```bash
-mkdir -p ~/.config/beadle
-cat > ~/.config/beadle/email.json << 'EOF'
+mkdir -p ~/.punt-labs/beadle
+cat > ~/.punt-labs/beadle/email.json << 'EOF'
 {
   "imap_host": "127.0.0.1",
   "imap_port": 1143,

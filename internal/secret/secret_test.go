@@ -14,7 +14,7 @@ func TestFileGet(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
-	cfgDir := filepath.Join(dir, ".config", "beadle")
+	cfgDir := filepath.Join(dir, ".punt-labs", "beadle", "secrets")
 	require.NoError(t, os.MkdirAll(cfgDir, 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "test-cred"), []byte("s3cret\n"), 0600))
 
@@ -27,7 +27,7 @@ func TestFileGet_UnsafePerms(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
-	cfgDir := filepath.Join(dir, ".config", "beadle")
+	cfgDir := filepath.Join(dir, ".punt-labs", "beadle", "secrets")
 	require.NoError(t, os.MkdirAll(cfgDir, 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "world-readable"), []byte("s3cret\n"), 0644))
 
@@ -54,7 +54,7 @@ func TestAvailable(t *testing.T) {
 	backends := Available()
 	assert.NotEmpty(t, backends)
 	// File and env are always available
-	assert.Contains(t, backends, "file (~/.config/beadle/)")
+	assert.Contains(t, backends, "file (~/.punt-labs/beadle/secrets/)")
 	assert.Contains(t, backends, "environment variable")
 }
 
