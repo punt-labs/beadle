@@ -165,14 +165,23 @@ PGP verification uses an isolated GNUPGHOME per operation. When no key is attach
 ## CLI
 
 ```bash
-beadle-email serve [--config PATH]              # Start MCP server (stdio transport)
-beadle-email version                            # Print version
-beadle-email doctor [--config PATH]             # Check installation health
-beadle-email status [--config PATH]             # Current state summary
-beadle-email contact list [--contacts PATH]     # List all contacts
-beadle-email contact add [flags]                # Add a contact
-beadle-email contact remove <name>              # Remove a contact
-beadle-email contact find <query>               # Find contacts by name/alias/email
+beadle-email list [--folder F] [--count N] [--unread]   # List messages
+beadle-email read <uid> [--folder F]                    # Read a message
+beadle-email send --to ADDR --subject S --body B        # Send an email
+beadle-email move <uid> [--folder F] [--to DEST]        # Move a message
+beadle-email folders                                    # List IMAP folders
+beadle-email contact list|add|remove|find               # Manage contacts
+beadle-email install                                    # Set up beadle-email
+beadle-email uninstall                                  # Remove beadle-email
+beadle-email serve [--config PATH]                      # Start MCP server
+beadle-email doctor [--config PATH]                     # Check installation health
+beadle-email status [--config PATH]                     # Current state summary
+beadle-email version                                    # Print version
+
+# Global flags (work with any subcommand)
+beadle-email --json list                                # JSON output
+beadle-email --verbose doctor                           # Debug logging
+beadle-email --quiet send --to ...                      # Errors only
 ```
 
 ## Documentation
