@@ -70,7 +70,7 @@ sh install.sh
 
 ## Features
 
-- **9 MCP tools** --- list, read, send, move/archive, download attachments, verify signatures, inspect MIME, classify trust, list folders
+- **13 MCP tools** --- list, read, send, move/archive, download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts)
 - **Four-level trust model** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
 - **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically
 - **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound)
@@ -85,13 +85,17 @@ sh install.sh
 |------|---------|
 | `list_messages` | List messages with trust levels. PGP signatures verified inline. |
 | `read_message` | Read full message body, headers, attachments, and trust classification. |
-| `send_email` | Send via Proton Bridge SMTP (primary) or Resend API (fallback). |
+| `send_email` | Send via Proton Bridge SMTP (primary) or Resend API (fallback). Resolves contact names inline. |
 | `move_message` | Move a message to another folder. Defaults to Archive. |
 | `list_folders` | List all IMAP mailbox folders. |
 | `show_mime` | Inspect multipart MIME structure, PGP parts, and attachments. |
 | `verify_signature` | Verify PGP signature on a message. Returns signer info and key ID. |
 | `check_trust` | Detailed trust classification with encryption type and origin analysis. |
 | `download_attachment` | Extract an attachment by MIME part index (from `show_mime`). Saves to `~/.beadle/<mailbox>/attachments/` and returns the path. |
+| `list_contacts` | List all contacts in the address book. |
+| `find_contact` | Look up a contact by name, email, or alias. |
+| `add_contact` | Add a contact (name, email, aliases, GPG key ID). |
+| `remove_contact` | Remove a contact by name. |
 
 ## Commands
 
@@ -159,10 +163,14 @@ PGP verification uses an isolated GNUPGHOME per operation. When no key is attach
 ## CLI
 
 ```bash
-beadle-email serve [--config PATH]    # Start MCP server (stdio transport)
-beadle-email version                  # Print version
-beadle-email doctor [--config PATH]   # Check installation health
-beadle-email status [--config PATH]   # Current state summary
+beadle-email serve [--config PATH]              # Start MCP server (stdio transport)
+beadle-email version                            # Print version
+beadle-email doctor [--config PATH]             # Check installation health
+beadle-email status [--config PATH]             # Current state summary
+beadle-email contact list [--contacts PATH]     # List all contacts
+beadle-email contact add [flags]                # Add a contact
+beadle-email contact remove <name>              # Remove a contact
+beadle-email contact find <query>               # Find contacts by name/alias/email
 ```
 
 ## Documentation
