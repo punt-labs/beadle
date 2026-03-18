@@ -387,11 +387,12 @@ func runContactAdd(args []string, path string) int {
 		GPGKeyID: gpgKeyID,
 		Notes:    notes,
 	}
-	if err := store.Add(c); err != nil {
+	normalized, err := store.Add(c)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	data, _ := json.MarshalIndent(c, "", "  ")
+	data, _ := json.MarshalIndent(normalized, "", "  ")
 	fmt.Println(string(data))
 	return 0
 }

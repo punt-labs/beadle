@@ -954,10 +954,11 @@ func (h *handler) addContact(_ context.Context, req mcplib.CallToolRequest) (*mc
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
 	}
-	if err := store.Add(c); err != nil {
+	normalized, err := store.Add(c)
+	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
-	return jsonResult(contactToResult(c))
+	return jsonResult(contactToResult(normalized))
 }
 
 func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
