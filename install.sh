@@ -1,6 +1,6 @@
 #!/bin/sh
 # Install beadle-email — MCP server for email communication via Proton Bridge.
-# Usage: curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/<SHA>/install.sh | sh
 set -eu
 
 # --- Colors (disabled when not a terminal) ---
@@ -15,6 +15,7 @@ ok()   { printf '  %b✓%b %s\n' "$GREEN" "$NC" "$1"; }
 warn() { printf '  %b!%b %s\n' "$YELLOW" "$NC" "$1"; }
 fail() { printf '  %b✗%b %s\n' "$YELLOW" "$NC" "$1"; exit 1; }
 
+VERSION="0.3.1"
 REPO="punt-labs/beadle"
 BINARY="beadle-email"
 INSTALL_DIR="$HOME/.local/bin"
@@ -70,8 +71,8 @@ ok "$OS/$ARCH"
 
 info "Downloading $BINARY..."
 
-DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ASSET"
-CHECKSUMS_URL="https://github.com/$REPO/releases/latest/download/checksums.txt"
+DOWNLOAD_URL="https://github.com/$REPO/releases/download/v${VERSION}/$ASSET"
+CHECKSUMS_URL="https://github.com/$REPO/releases/download/v${VERSION}/checksums.txt"
 
 TMPDIR_DL="$(mktemp -d)"
 cleanup() { rm -rf "$TMPDIR_DL"; }
@@ -173,7 +174,17 @@ else
   fail "$BINARY not found after installation"
 fi
 
+# --- Step 10: Health check ---
+
+info "Running doctor..."
+
+if command -v "$BINARY" >/dev/null 2>&1; then
+  "$BINARY" doctor || true
+elif [ -x "$INSTALL_DIR/$BINARY" ]; then
+  "$INSTALL_DIR/$BINARY" doctor || true
+fi
+
 # --- Done ---
 
 printf '\n%b%b%s is ready!%b\n\n' "$GREEN" "$BOLD" "$BINARY" "$NC"
-printf 'Restart Claude Code to activate. Run beadle-email doctor to check credentials.\n\n'
+printf 'Restart Claude Code to activate.\n\n'
