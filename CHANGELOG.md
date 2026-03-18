@@ -18,6 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `send_email` resolves names inline — `/mail jim` works in a single
   roundtrip. Contacts stored at `~/.punt-labs/beadle/contacts.json` with
   GPG key ID and alias support.
+- Filesystem consolidation: all runtime data now under `~/.punt-labs/beadle/`.
+  Config at `email.json`, secrets at `secrets/`, attachments at
+  `attachments/<mailbox>/`, contacts at `contacts.json`. Single root function
+  (`paths.DataDir()`) in `internal/paths/`.
 - `send_email`: cc and bcc support. `to` now accepts comma-separated addresses
   for multiple recipients. New optional `cc` and `bcc` string parameters
   (comma-separated). BCC addresses are envelope-only (never in headers or tool
@@ -47,7 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   absolute file paths). Builds `multipart/mixed` MIME for SMTP and structured
   attachments for Resend API. Per-file 25 MB limit, auto-detected MIME types.
 - `download_attachment`: extract attachment content by MIME part index (from
-  `show_mime`). Saves to `~/.beadle/<mailbox>/attachments/` and returns the path.
+  `show_mime`). Saves to `~/.punt-labs/beadle/attachments/<mailbox>/` and returns the path.
 
 ### Fixed
 

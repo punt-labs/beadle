@@ -20,6 +20,7 @@ import (
 	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/pgp"
 )
 
@@ -260,7 +261,7 @@ func removeContactTool() mcplib.Tool {
 
 func downloadAttachmentTool() mcplib.Tool {
 	return mcplib.NewTool("download_attachment",
-		mcplib.WithDescription("Extract an attachment from a message by MIME part index (from show_mime). Saves the file to ~/.beadle/<mailbox>/attachments/ and returns the path."),
+		mcplib.WithDescription("Extract an attachment from a message by MIME part index (from show_mime). Saves the file to ~/.punt-labs/beadle/attachments/<mailbox>/ and returns the path."),
 		mcplib.WithString("folder",
 			mcplib.Description("IMAP folder name"),
 			mcplib.DefaultString("INBOX"),
@@ -680,17 +681,17 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 			return mcplib.NewToolResultError(fmt.Sprintf("extract part: %v", err)), nil
 		}
 
-		// Build output path: ~/.beadle/<mailbox>/attachments/<uid>_<filename>
+		// Build output path: ~/.punt-labs/beadle/attachments/<mailbox>/<uid>_<filename>
 		// Use filepath.Base to prevent path traversal via attacker-controlled filenames.
 		filename := filepath.Base(part.Filename)
 		if filename == "" || filename == "." {
 			filename = fmt.Sprintf("part_%d", partIndex)
 		}
-		homeDir, err := os.UserHomeDir()
+		dataDir, err := paths.DataDir()
 		if err != nil {
-			return mcplib.NewToolResultError(fmt.Sprintf("resolve home directory: %v", err)), nil
+			return mcplib.NewToolResultError(fmt.Sprintf("resolve data directory: %v", err)), nil
 		}
-		attachDir := filepath.Join(homeDir, ".beadle", filepath.Base(h.cfg.IMAPUser), "attachments")
+		attachDir := filepath.Join(dataDir, "attachments", filepath.Base(h.cfg.IMAPUser))
 		if err := os.MkdirAll(attachDir, 0o750); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("create attachment dir: %v", err)), nil
 		}

@@ -2,7 +2,7 @@
 //
 // Resolution priority:
 //  1. OS credential store (macOS Keychain via `security` CLI)
-//  2. Secret file (~/.config/beadle/<name>, mode 600)
+//  2. Secret file (~/.punt-labs/beadle/secrets/<name>, mode 600)
 //  3. Environment variable (BEADLE_<NAME>)
 //
 // v0.1.1 will add Linux libsecret (`secret-tool`) as a keychain backend.
@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/punt-labs/beadle/internal/paths"
 )
 
 // Get resolves a named credential through the priority chain.
@@ -52,29 +54,28 @@ func Available() []string {
 			backends = append(backends, "libsecret")
 		}
 	}
-	backends = append(backends, "file (~/.config/beadle/)")
+	backends = append(backends, "file (~/.punt-labs/beadle/secrets/)")
 	backends = append(backends, "environment variable")
 	return backends
 }
 
-// configDir returns ~/.config/beadle/, creating it with 700 perms if needed.
-func configDir() (string, error) {
-	home, err := os.UserHomeDir()
+// secretsDir returns ~/.punt-labs/beadle/secrets/, creating it with 700 perms if needed.
+func secretsDir() (string, error) {
+	root, err := paths.DataDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
+		return "", err
 	}
-
-	dir := filepath.Join(home, ".config", "beadle")
+	dir := filepath.Join(root, "secrets")
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", fmt.Errorf("create config dir: %w", err)
+		return "", fmt.Errorf("create secrets dir: %w", err)
 	}
 	return dir, nil
 }
 
-// fileGet reads a credential from ~/.config/beadle/<name>.
+// fileGet reads a credential from ~/.punt-labs/beadle/secrets/<name>.
 // Rejects files that are group/world readable.
 func fileGet(name string) (string, error) {
-	dir, err := configDir()
+	dir, err := secretsDir()
 	if err != nil {
 		return "", err
 	}
