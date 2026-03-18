@@ -12,6 +12,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   CronCreate at a configurable interval (default 30m). Configure with
   `/inbox 5m`, `/inbox 1h`, or `/inbox n` to disable. Settings persist in
   `.claude/beadle.local.md`. Run `/inbox status` to check current config.
+- Address book with name-based recipient resolution. 4 new MCP tools
+  (`list_contacts`, `find_contact`, `add_contact`, `remove_contact`) and
+  matching CLI subcommands (`beadle-email contact list/add/remove/find`).
+  `send_email` resolves names inline — `/mail jim` works in a single
+  roundtrip. Contacts stored at `~/.punt-labs/beadle/contacts.json` with
+  GPG key ID and alias support.
 - `send_email`: cc and bcc support. `to` now accepts comma-separated addresses
   for multiple recipients. New optional `cc` and `bcc` string parameters
   (comma-separated). BCC addresses are envelope-only (never in headers or tool
