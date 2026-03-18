@@ -687,7 +687,11 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 		if filename == "" || filename == "." {
 			filename = fmt.Sprintf("part_%d", partIndex)
 		}
-		attachDir := filepath.Join(paths.DataDir(), "attachments", filepath.Base(h.cfg.IMAPUser))
+		dataDir, err := paths.DataDir()
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("resolve data directory: %v", err)), nil
+		}
+		attachDir := filepath.Join(dataDir, "attachments", filepath.Base(h.cfg.IMAPUser))
 		if err := os.MkdirAll(attachDir, 0o750); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("create attachment dir: %v", err)), nil
 		}

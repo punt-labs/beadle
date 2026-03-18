@@ -124,6 +124,7 @@ security add-generic-password -s beadle -a resend-api-key -w 'your-resend-key'
 security add-generic-password -s beadle -a gpg-passphrase -w 'your-gpg-passphrase'
 
 # Or secret files (~/.punt-labs/beadle/secrets/<name>, mode 600)
+mkdir -p ~/.punt-labs/beadle/secrets
 echo -n 'your-bridge-password' > ~/.punt-labs/beadle/secrets/imap-password
 chmod 600 ~/.punt-labs/beadle/secrets/imap-password
 

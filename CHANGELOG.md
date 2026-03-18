@@ -20,8 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   GPG key ID and alias support.
 - Filesystem consolidation: all runtime data now under `~/.punt-labs/beadle/`.
   Config at `email.json`, secrets at `secrets/`, attachments at
-  `attachments/<mailbox>/`, contacts at `contacts.json`. Single root constant
-  in `internal/paths/`.
+  `attachments/<mailbox>/`, contacts at `contacts.json`. Single root function
+  (`paths.DataDir()`) in `internal/paths/`.
 - `send_email`: cc and bcc support. `to` now accepts comma-separated addresses
   for multiple recipients. New optional `cc` and `bcc` string parameters
   (comma-separated). BCC addresses are envelope-only (never in headers or tool

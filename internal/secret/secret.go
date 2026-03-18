@@ -61,7 +61,11 @@ func Available() []string {
 
 // secretsDir returns ~/.punt-labs/beadle/secrets/, creating it with 700 perms if needed.
 func secretsDir() (string, error) {
-	dir := filepath.Join(paths.DataDir(), "secrets")
+	root, err := paths.DataDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(root, "secrets")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("create secrets dir: %w", err)
 	}

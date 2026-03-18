@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/secret"
@@ -31,7 +32,7 @@ type Config struct {
 
 // DefaultConfigPath returns ~/.punt-labs/beadle/email.json.
 func DefaultConfigPath() string {
-	return paths.DataDir() + "/email.json"
+	return filepath.Join(paths.MustDataDir(), "email.json")
 }
 
 // LoadConfig reads configuration from the given path.
