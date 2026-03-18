@@ -193,4 +193,4 @@ make help                  # List all targets
 
 ## License
 
-TBD
+[MIT](LICENSE)
