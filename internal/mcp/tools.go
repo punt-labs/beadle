@@ -18,6 +18,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/punt-labs/beadle/internal/channel"
+	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/pgp"
 )
@@ -25,8 +26,8 @@ import (
 const maxAttachmentSize = 25 * 1024 * 1024 // 25 MB
 
 // RegisterTools adds all email channel tools to the MCP server.
-func RegisterTools(s *server.MCPServer, cfg *email.Config, logger *slog.Logger) {
-	h := &handler{cfg: cfg, logger: logger}
+func RegisterTools(s *server.MCPServer, cfg *email.Config, contactsPath string, logger *slog.Logger) {
+	h := &handler{cfg: cfg, contactsPath: contactsPath, logger: logger}
 
 	s.AddTool(listMessagesTool(), h.listMessages)
 	s.AddTool(readMessageTool(), h.readMessage)
@@ -37,11 +38,17 @@ func RegisterTools(s *server.MCPServer, cfg *email.Config, logger *slog.Logger) 
 	s.AddTool(checkTrustTool(), h.checkTrust)
 	s.AddTool(moveMessageTool(), h.moveMessage)
 	s.AddTool(downloadAttachmentTool(), h.downloadAttachment)
+
+	s.AddTool(listContactsTool(), h.listContacts)
+	s.AddTool(findContactTool(), h.findContact)
+	s.AddTool(addContactTool(), h.addContact)
+	s.AddTool(removeContactTool(), h.removeContact)
 }
 
 type handler struct {
-	cfg    *email.Config
-	logger *slog.Logger
+	cfg          *email.Config
+	contactsPath string
+	logger       *slog.Logger
 }
 
 // sendResult is the typed response for the send_email tool.
@@ -110,16 +117,16 @@ func listFoldersTool() mcplib.Tool {
 
 func sendEmailTool() mcplib.Tool {
 	return mcplib.NewTool("send_email",
-		mcplib.WithDescription("Send an email via Proton Bridge SMTP (primary) or Resend API (fallback). Sends from the configured address. Supports file attachments."),
+		mcplib.WithDescription("Send an email via Proton Bridge SMTP (primary) or Resend API (fallback). Sends from the configured address. Supports file attachments. Recipients can be email addresses or contact names/aliases from the address book — names are resolved inline."),
 		mcplib.WithString("to",
 			mcplib.Required(),
-			mcplib.Description("Recipient email address(es), comma-separated for multiple"),
+			mcplib.Description("Recipient(s), comma-separated. Accepts email addresses or contact names/aliases (e.g., 'alice' or 'alice,bob@example.com')"),
 		),
 		mcplib.WithString("cc",
-			mcplib.Description("CC recipient(s), comma-separated"),
+			mcplib.Description("CC recipient(s), comma-separated. Accepts email addresses or contact names/aliases"),
 		),
 		mcplib.WithString("bcc",
-			mcplib.Description("BCC recipient(s), comma-separated"),
+			mcplib.Description("BCC recipient(s), comma-separated. Accepts email addresses or contact names/aliases"),
 		),
 		mcplib.WithString("subject",
 			mcplib.Required(),
@@ -195,6 +202,58 @@ func moveMessageTool() mcplib.Tool {
 		mcplib.WithString("destination",
 			mcplib.Description("Destination folder name"),
 			mcplib.DefaultString("Archive"),
+		),
+	)
+}
+
+// --- Contact Tool Definitions ---
+
+func listContactsTool() mcplib.Tool {
+	return mcplib.NewTool("list_contacts",
+		mcplib.WithDescription("List all contacts in the address book."),
+	)
+}
+
+func findContactTool() mcplib.Tool {
+	return mcplib.NewTool("find_contact",
+		mcplib.WithDescription("Look up a contact by name, email, or alias. Returns all exact matches (case-insensitive)."),
+		mcplib.WithString("query",
+			mcplib.Required(),
+			mcplib.Description("Name, email, or alias to search for"),
+		),
+	)
+}
+
+func addContactTool() mcplib.Tool {
+	return mcplib.NewTool("add_contact",
+		mcplib.WithDescription("Add a contact to the address book. Name and email are required. Names and aliases must be unique."),
+		mcplib.WithString("name",
+			mcplib.Required(),
+			mcplib.Description("Contact display name (unique key)"),
+		),
+		mcplib.WithString("email",
+			mcplib.Required(),
+			mcplib.Description("Email address"),
+		),
+		mcplib.WithArray("aliases",
+			mcplib.Description("Alternative names for lookup (e.g., nicknames)"),
+			mcplib.WithStringItems(),
+		),
+		mcplib.WithString("gpg_key_id",
+			mcplib.Description("GPG key fingerprint for future encryption"),
+		),
+		mcplib.WithString("notes",
+			mcplib.Description("Free-text notes"),
+		),
+	)
+}
+
+func removeContactTool() mcplib.Tool {
+	return mcplib.NewTool("remove_contact",
+		mcplib.WithDescription("Remove a contact from the address book by name."),
+		mcplib.WithString("name",
+			mcplib.Required(),
+			mcplib.Description("Contact name to remove (case-insensitive)"),
 		),
 	)
 }
@@ -345,12 +404,30 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	}
 	html := stringParam(req, "html", "")
 
-	to := splitAddresses(toRaw)
+	// Resolve contact names to email addresses before splitting.
+	// Load contacts once for all three address fields.
+	ccRaw := stringParam(req, "cc", "")
+	bccRaw := stringParam(req, "bcc", "")
+	store, storeErr := h.loadContactsIfNeeded(toRaw, ccRaw, bccRaw)
+	toResolved, err := resolveField(store, storeErr, toRaw)
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("to: %v", err)), nil
+	}
+	ccResolved, err := resolveField(store, storeErr, ccRaw)
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("cc: %v", err)), nil
+	}
+	bccResolved, err := resolveField(store, storeErr, bccRaw)
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("bcc: %v", err)), nil
+	}
+
+	to := splitAddresses(toResolved)
 	if len(to) == 0 {
 		return mcplib.NewToolResultError("to: at least one valid email address is required"), nil
 	}
-	cc := splitAddresses(stringParam(req, "cc", ""))
-	bcc := splitAddresses(stringParam(req, "bcc", ""))
+	cc := splitAddresses(ccResolved)
+	bcc := splitAddresses(bccResolved)
 
 	attachments, err := readAttachments(req)
 	if err != nil {
@@ -787,4 +864,144 @@ func jsonResult(v any) (*mcplib.CallToolResult, error) {
 		return mcplib.NewToolResultError(fmt.Sprintf("marshal result: %v", err)), nil
 	}
 	return mcplib.NewToolResultText(string(data)), nil
+}
+
+// --- Contact Handlers ---
+
+type contactResult struct {
+	Name     string   `json:"name"`
+	Email    string   `json:"email"`
+	Aliases  []string `json:"aliases,omitempty"`
+	GPGKeyID string   `json:"gpg_key_id,omitempty"`
+	Notes    string   `json:"notes,omitempty"`
+}
+
+type removeContactResult struct {
+	Status string `json:"status"`
+	Name   string `json:"name"`
+}
+
+func contactToResult(c contacts.Contact) contactResult {
+	return contactResult{
+		Name:     c.Name,
+		Email:    c.Email,
+		Aliases:  c.Aliases,
+		GPGKeyID: c.GPGKeyID,
+		Notes:    c.Notes,
+	}
+}
+
+func (h *handler) loadContacts() (*contacts.Store, error) {
+	s := contacts.NewStore(h.contactsPath)
+	if err := s.Load(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (h *handler) listContacts(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	store, err := h.loadContacts()
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
+	}
+	results := make([]contactResult, 0, store.Count())
+	for _, c := range store.Contacts() {
+		results = append(results, contactToResult(c))
+	}
+	return jsonResult(results)
+}
+
+func (h *handler) findContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	query, err := req.RequireString("query")
+	if err != nil {
+		return mcplib.NewToolResultError("query is required"), nil
+	}
+	store, err := h.loadContacts()
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
+	}
+	matches := store.Find(query)
+	results := make([]contactResult, 0, len(matches))
+	for _, c := range matches {
+		results = append(results, contactToResult(c))
+	}
+	return jsonResult(results)
+}
+
+func (h *handler) addContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	name, err := req.RequireString("name")
+	if err != nil {
+		return mcplib.NewToolResultError("name is required"), nil
+	}
+	email, err := req.RequireString("email")
+	if err != nil {
+		return mcplib.NewToolResultError("email is required"), nil
+	}
+	aliases, err := stringSliceParam(req, "aliases")
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
+	c := contacts.Contact{
+		Name:     name,
+		Email:    email,
+		Aliases:  aliases,
+		GPGKeyID: stringParam(req, "gpg_key_id", ""),
+		Notes:    stringParam(req, "notes", ""),
+	}
+
+	store, err := h.loadContacts()
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
+	}
+	normalized, err := store.Add(c)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	return jsonResult(contactToResult(normalized))
+}
+
+func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	name, err := req.RequireString("name")
+	if err != nil {
+		return mcplib.NewToolResultError("name is required"), nil
+	}
+	store, err := h.loadContacts()
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
+	}
+	if err := store.Remove(name); err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	return jsonResult(removeContactResult{Status: "removed", Name: name})
+}
+
+// loadContactsIfNeeded loads the contacts store only if any token across
+// the given address fields lacks @. Returns nil store (no error) when no
+// resolution is needed. This ensures a corrupted contacts file does not
+// break sending to raw email addresses.
+func (h *handler) loadContactsIfNeeded(fields ...string) (*contacts.Store, error) {
+	for _, raw := range fields {
+		for _, tok := range strings.Split(raw, ",") {
+			if t := strings.TrimSpace(tok); t != "" && !strings.Contains(t, "@") {
+				return h.loadContacts()
+			}
+		}
+	}
+	return nil, nil
+}
+
+// resolveField resolves names in a comma-separated address string using
+// a pre-loaded contacts store. If store is nil, returns raw unchanged.
+func resolveField(store *contacts.Store, storeErr error, raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	if store == nil {
+		if storeErr != nil {
+			return "", fmt.Errorf("load contacts: %w", storeErr)
+		}
+		return raw, nil
+	}
+	return store.ResolveAddresses(raw)
 }

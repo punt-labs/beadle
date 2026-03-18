@@ -137,6 +137,27 @@ case "$TOOL_NAME" in
     emit "${STATUS}: ${FILENAME} (${SIZE} bytes)" "$RESULT"
     ;;
 
+  list_contacts)
+    COUNT=$(echo "$RESULT" | jq 'if type == "array" then length else 0 end')
+    emit "${COUNT} contacts" "$RESULT"
+    ;;
+
+  find_contact)
+    COUNT=$(echo "$RESULT" | jq 'if type == "array" then length else 0 end')
+    emit "${COUNT} matches" "$RESULT"
+    ;;
+
+  add_contact)
+    NAME=$(echo "$RESULT" | jq -r '.name // "unknown"')
+    EMAIL=$(echo "$RESULT" | jq -r '.email // "unknown"')
+    emit "added ${NAME} <${EMAIL}>"
+    ;;
+
+  remove_contact)
+    NAME=$(echo "$RESULT" | jq -r '.name // "unknown"')
+    emit "removed ${NAME}"
+    ;;
+
   *)
     emit "done" "$RESULT"
     ;;

@@ -1,7 +1,7 @@
 ---
 description: "Send something via any channel (email today, more later)"
 argument-hint: "<what to send> [via <channel>]"
-allowed-tools: ["mcp__plugin_beadle_email__send_email", "mcp__plugin_beadle-dev_email__send_email"]
+allowed-tools: ["mcp__plugin_beadle_email__send_email", "mcp__plugin_beadle_email__list_contacts", "mcp__plugin_beadle_email__find_contact", "mcp__plugin_beadle-dev_email__send_email", "mcp__plugin_beadle-dev_email__list_contacts", "mcp__plugin_beadle-dev_email__find_contact"]
 ---
 <!-- markdownlint-disable MD041 -->
 
