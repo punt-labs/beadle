@@ -102,7 +102,7 @@ Proton Bridge for Proton-to-Proton. Resend becomes last resort.
 Config files store only connection parameters.
 
 **Why:** Prevents accidental secret commits. The config file
-(`~/.config/beadle/email.json`) can be shared or version-controlled safely.
+(`~/.punt-labs/beadle/email.json`) can be shared or version-controlled safely.
 Secrets live in the OS keychain (macOS Keychain, Linux libsecret in v0.1.1)
 or mode-600 files.
 

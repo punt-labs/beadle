@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/secret"
 )
 
@@ -29,10 +29,9 @@ type Config struct {
 	GPGSigner   string `json:"gpg_signer"`
 }
 
-// DefaultConfigPath returns ~/.config/beadle/email.json.
+// DefaultConfigPath returns ~/.punt-labs/beadle/email.json.
 func DefaultConfigPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "beadle", "email.json")
+	return paths.DataDir() + "/email.json"
 }
 
 // LoadConfig reads configuration from the given path.

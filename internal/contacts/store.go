@@ -7,12 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/punt-labs/beadle/internal/paths"
 )
 
 // DefaultPath returns ~/.punt-labs/beadle/contacts.json.
 func DefaultPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".punt-labs", "beadle", "contacts.json")
+	return filepath.Join(paths.DataDir(), "contacts.json")
 }
 
 // Store manages the contacts file on disk.
