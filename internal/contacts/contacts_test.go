@@ -51,7 +51,7 @@ func TestFind(t *testing.T) {
 		{"by email", "kai@example.com", 1},
 		{"no match", "nobody", 0},
 		{"empty query", "", 0},
-		{"ambiguous first name not alias", "Jim Freeman", 1},
+		{"full name exact match", "Jim Freeman", 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

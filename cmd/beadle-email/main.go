@@ -404,13 +404,15 @@ func runContactRemove(args []string, path string) int {
 		case "--contacts":
 			i++ // skip value
 		default:
-			if !strings.HasPrefix(args[i], "--") {
-				if name != "" {
-					fmt.Fprintf(os.Stderr, "error: unexpected argument %q (use quotes for multi-word names)\n", args[i])
-					return 2
-				}
-				name = args[i]
+			if strings.HasPrefix(args[i], "--") {
+				fmt.Fprintf(os.Stderr, "error: unknown flag %q\n", args[i])
+				return 2
 			}
+			if name != "" {
+				fmt.Fprintf(os.Stderr, "error: unexpected argument %q (use quotes for multi-word names)\n", args[i])
+				return 2
+			}
+			name = args[i]
 		}
 	}
 	if name == "" {
@@ -440,9 +442,11 @@ func runContactFind(args []string, path string) int {
 			i++ // skip
 			continue
 		}
-		if !strings.HasPrefix(args[i], "--") {
-			parts = append(parts, args[i])
+		if strings.HasPrefix(args[i], "--") {
+			fmt.Fprintf(os.Stderr, "error: unknown flag %q\n", args[i])
+			return 2
 		}
+		parts = append(parts, args[i])
 	}
 	query := strings.Join(parts, " ")
 	if query == "" {

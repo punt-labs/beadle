@@ -71,9 +71,14 @@ func (s *Store) Add(c Contact) (Contact, error) {
 	// Normalize whitespace on input.
 	c.Name = strings.TrimSpace(c.Name)
 	c.Email = strings.TrimSpace(c.Email)
-	for i := range c.Aliases {
-		c.Aliases[i] = strings.TrimSpace(c.Aliases[i])
+	var aliases []string
+	for _, a := range c.Aliases {
+		a = strings.TrimSpace(a)
+		if a != "" {
+			aliases = append(aliases, a)
+		}
 	}
+	c.Aliases = aliases
 	c.GPGKeyID = strings.TrimSpace(c.GPGKeyID)
 
 	if err := Validate(c); err != nil {
@@ -88,6 +93,7 @@ func (s *Store) Add(c Contact) (Contact, error) {
 
 // Remove deletes the contact with the given name (case-insensitive).
 func (s *Store) Remove(name string) error {
+	name = strings.TrimSpace(name)
 	idx := -1
 	for i, c := range s.contacts {
 		if equalsIgnoreCase(c.Name, name) {
@@ -99,6 +105,9 @@ func (s *Store) Remove(name string) error {
 		return fmt.Errorf("contact %q not found", name)
 	}
 	s.contacts = append(s.contacts[:idx], s.contacts[idx+1:]...)
+	if s.contacts == nil {
+		s.contacts = []Contact{}
+	}
 	return s.write()
 }
 
