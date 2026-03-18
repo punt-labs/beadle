@@ -120,7 +120,7 @@ func sendEmailTool() mcplib.Tool {
 		mcplib.WithDescription("Send an email via Proton Bridge SMTP (primary) or Resend API (fallback). Sends from the configured address. Supports file attachments. Recipients can be email addresses or contact names/aliases from the address book — names are resolved inline."),
 		mcplib.WithString("to",
 			mcplib.Required(),
-			mcplib.Description("Recipient(s), comma-separated. Accepts email addresses or contact names/aliases (e.g., 'jim' or 'jim,kai@example.com')"),
+			mcplib.Description("Recipient(s), comma-separated. Accepts email addresses or contact names/aliases (e.g., 'alice' or 'alice,bob@example.com')"),
 		),
 		mcplib.WithString("cc",
 			mcplib.Description("CC recipient(s), comma-separated. Accepts email addresses or contact names/aliases"),

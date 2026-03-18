@@ -8,8 +8,8 @@ import (
 )
 
 var testContacts = []Contact{
-	{Name: "Jim Freeman", Email: "jim@punt-labs.com", Aliases: []string{"jim", "jmf"}},
-	{Name: "Jim Chen", Email: "jim.chen@example.com", Aliases: []string{"jimchen"}},
+	{Name: "Alice Smith", Email: "alice@example.com", Aliases: []string{"alice", "asmith"}},
+	{Name: "Alice Chen", Email: "alice.chen@example.com", Aliases: []string{"achen"}},
 	{Name: "Kai", Email: "kai@example.com", GPGKeyID: "ABCD1234"},
 }
 
@@ -44,14 +44,14 @@ func TestFind(t *testing.T) {
 		query string
 		want  int
 	}{
-		{"by name", "Jim Freeman", 1},
-		{"by name case insensitive", "jim freeman", 1},
-		{"by alias", "jim", 1},
-		{"by alias jmf", "jmf", 1},
+		{"by name", "Alice Smith", 1},
+		{"by name case insensitive", "alice smith", 1},
+		{"by alias", "alice", 1},
+		{"by alias asmith", "asmith", 1},
 		{"by email", "kai@example.com", 1},
 		{"no match", "nobody", 0},
 		{"empty query", "", 0},
-		{"full name exact match", "Jim Freeman", 1},
+		{"full name exact match", "Alice Smith", 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -71,8 +71,8 @@ func TestResolveAddress(t *testing.T) {
 	}{
 		{"email passthrough", "kai@example.com", "kai@example.com", "", 0},
 		{"exact name", "Kai", "kai@example.com", "", 1},
-		{"alias", "jmf", "jim@punt-labs.com", "", 1},
-		{"case insensitive", "JMF", "jim@punt-labs.com", "", 1},
+		{"alias", "asmith", "alice@example.com", "", 1},
+		{"case insensitive", "ASMITH", "alice@example.com", "", 1},
 		{"no match", "nobody", "", "no contact matching", 0},
 		{"empty", "", "", "empty address", 0},
 	}
@@ -102,8 +102,8 @@ func TestResolveAddresses(t *testing.T) {
 	}{
 		{"single email", "kai@example.com", "kai@example.com", ""},
 		{"single name", "Kai", "kai@example.com", ""},
-		{"multiple mixed", "jim, kai@example.com", "jim@punt-labs.com,kai@example.com", ""},
-		{"alias", "jmf,Kai", "jim@punt-labs.com,kai@example.com", ""},
+		{"multiple mixed", "alice, kai@example.com", "alice@example.com,kai@example.com", ""},
+		{"alias", "asmith,Kai", "alice@example.com,kai@example.com", ""},
 		{"empty", "", "", ""},
 		{"no match", "nobody", "", "no contact matching"},
 	}
@@ -127,11 +127,11 @@ func TestCheckNameConflict(t *testing.T) {
 		contact Contact
 		wantErr string
 	}{
-		{"no conflict", Contact{Name: "Alice", Email: "a@test.com"}, ""},
-		{"name conflicts with existing name", Contact{Name: "jim freeman", Email: "a@test.com"}, "conflicts with existing contact"},
-		{"name conflicts with existing alias", Contact{Name: "jmf", Email: "a@test.com"}, "conflicts with existing contact"},
-		{"alias conflicts with existing name", Contact{Name: "Alice", Email: "a@test.com", Aliases: []string{"kai"}}, "conflicts with existing contact"},
-		{"alias conflicts with existing alias", Contact{Name: "Alice", Email: "a@test.com", Aliases: []string{"jimchen"}}, "conflicts with existing contact"},
+		{"no conflict", Contact{Name: "Bob", Email: "b@test.com"}, ""},
+		{"name conflicts with existing name", Contact{Name: "alice smith", Email: "b@test.com"}, "conflicts with existing contact"},
+		{"name conflicts with existing alias", Contact{Name: "asmith", Email: "b@test.com"}, "conflicts with existing contact"},
+		{"alias conflicts with existing name", Contact{Name: "Bob", Email: "b@test.com", Aliases: []string{"kai"}}, "conflicts with existing contact"},
+		{"alias conflicts with existing alias", Contact{Name: "Bob", Email: "b@test.com", Aliases: []string{"achen"}}, "conflicts with existing contact"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

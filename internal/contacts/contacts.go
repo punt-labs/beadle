@@ -1,6 +1,6 @@
 // Package contacts provides address book storage and lookup for Beadle.
 // Contact resolution enables name-based addressing: "/mail jim" resolves
-// to jim@punt-labs.com without a separate MCP roundtrip.
+// to the stored email address without a separate MCP roundtrip.
 package contacts
 
 import (
