@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-18
+
 ### Added
 
 - CLI parity for email operations: `list`, `read`, `send`, `move`, `folders`
