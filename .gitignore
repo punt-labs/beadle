@@ -6,10 +6,16 @@
 *.log
 *.out
 *.run.xml
+*.pdf
+*.toc
+*.synctex.gz
 
 # TTS ephemeral audio
 .tts/
 .vox/
+
+# Lux display surface
+.lux/
 
 # Claude local settings
 .claude/settings.local.json
