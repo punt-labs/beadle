@@ -27,7 +27,7 @@ Provides MCP tools, slash commands (`/inbox`, `/mail`, `/send`), output suppress
 ### MCP-only (standalone)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/cb8dd05/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/0efbb69/install.sh | sh
 ```
 
 Registers the MCP server with Claude Code. For other MCP clients, use the manual install below and configure your client to run `beadle-email serve`.
@@ -51,7 +51,7 @@ Ensure `~/.local/bin` is on your `PATH`.
 <summary>Inspect before running</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/cb8dd05/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/0efbb69/install.sh -o install.sh
 cat install.sh
 sh install.sh
 ```
