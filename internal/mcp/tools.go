@@ -3,7 +3,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -319,7 +318,7 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 			}
 		}
 
-		return jsonResult(msgs)
+		return textResult(formatMessages(msgs))
 	})
 }
 
@@ -361,7 +360,7 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 			}
 		}
 
-		return jsonResult(msg)
+		return textResult(formatMessage(msg))
 	})
 }
 
@@ -371,7 +370,7 @@ func (h *handler) listFolders(ctx context.Context, req mcplib.CallToolRequest) (
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("list folders: %v", err)), nil
 		}
-		return jsonResult(folders)
+		return textResult(formatFolders(folders))
 	})
 }
 
@@ -430,7 +429,7 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	if sendErr != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("send email: %v", sendErr)), nil
 	}
-	return jsonResult(result)
+	return textResult(formatSendResult(result))
 }
 
 // trySendChain is now email.TrySendChain — called directly above.
@@ -464,14 +463,15 @@ func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolReques
 			trustLevel = channel.Verified
 		}
 
-		return jsonResult(&verifyResult{
+		vr := &verifyResult{
 			TrustLevel:  trustLevel,
 			Valid:       result.Valid,
 			KeyID:       result.KeyID,
 			Signer:      result.Signer,
 			KeyImported: result.KeyImported,
 			GPGOutput:   result.Output,
-		})
+		}
+		return textResult(formatVerifyResult(vr))
 	})
 }
 
@@ -497,7 +497,7 @@ func (h *handler) showMIME(ctx context.Context, req mcplib.CallToolRequest) (*mc
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("parse MIME: %v", err)), nil
 		}
-		return jsonResult(parts)
+		return textResult(formatMIME(parts))
 	})
 }
 
@@ -522,7 +522,7 @@ func (h *handler) checkTrust(ctx context.Context, req mcplib.CallToolRequest) (*
 		_, _, headers := email.ParseMIME(raw)
 		result := email.ClassifyTrustDetailed(headers, raw)
 
-		return jsonResult(result)
+		return textResult(formatTrustResult(result))
 	})
 }
 
@@ -551,12 +551,13 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		if err := c.MoveMessage(folder, uint32(uid), destination); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("move message: %v", err)), nil
 		}
-		return jsonResult(&moveResult{
+		mr := &moveResult{
 			Status:      "moved",
 			MessageID:   msgID,
 			Source:      folder,
 			Destination: destination,
-		})
+		}
+		return textResult(formatMoveResult(mr))
 	})
 }
 
@@ -614,13 +615,14 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("resolve output path: %v", err)), nil
 		}
-		return jsonResult(&downloadResult{
+		dr := &downloadResult{
 			Status:      "saved",
 			Path:        absPath,
 			Filename:    filename,
 			ContentType: part.ContentType,
 			Size:        part.Size,
-		})
+		}
+		return textResult(formatDownloadResult(dr))
 	})
 }
 
@@ -767,13 +769,8 @@ func boolParam(req mcplib.CallToolRequest, key string) bool {
 	return false
 }
 
-func jsonResult(v any) (*mcplib.CallToolResult, error) {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("marshal result: %v", err)), nil
-	}
-	return mcplib.NewToolResultText(string(data)), nil
-}
+// jsonResult is no longer used — all tools return pre-formatted text via
+// textResult() in format.go. Kept as a comment for reference.
 
 // --- Contact Handlers ---
 
@@ -813,11 +810,8 @@ func (h *handler) listContacts(_ context.Context, _ mcplib.CallToolRequest) (*mc
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
 	}
-	results := make([]contactResult, 0, store.Count())
-	for _, c := range store.Contacts() {
-		results = append(results, contactToResult(c))
-	}
-	return jsonResult(results)
+	results := contactsToResults(store.Contacts())
+	return textResult(formatContacts(results))
 }
 
 func (h *handler) findContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -830,11 +824,8 @@ func (h *handler) findContact(_ context.Context, req mcplib.CallToolRequest) (*m
 		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
 	}
 	matches := store.Find(query)
-	results := make([]contactResult, 0, len(matches))
-	for _, c := range matches {
-		results = append(results, contactToResult(c))
-	}
-	return jsonResult(results)
+	results := contactsToResults(matches)
+	return textResult(formatContacts(results))
 }
 
 func (h *handler) addContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -867,7 +858,7 @@ func (h *handler) addContact(_ context.Context, req mcplib.CallToolRequest) (*mc
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
-	return jsonResult(contactToResult(normalized))
+	return textResult(formatContactAdded(contactToResult(normalized)))
 }
 
 func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -882,7 +873,7 @@ func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (
 	if err := store.Remove(name); err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
-	return jsonResult(removeContactResult{Status: "removed", Name: name})
+	return textResult(formatContactRemoved(removeContactResult{Status: "removed", Name: name}))
 }
 
 // loadContactsIfNeeded and resolveField are now email.LoadContactsIfNeeded
