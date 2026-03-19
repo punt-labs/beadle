@@ -1,0 +1,566 @@
+%
+% architecture.tex
+%
+% Beadle Email Channel: Architecture & Z Specification
+% Package structure, trust model, credential resolution, message lifecycle,
+% and security boundaries for beadle-email v0.1.x.
+%
+% Type-check: fuzz -t architecture.tex
+%
+
+\documentclass[a4paper,10pt,fleqn]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{fuzz}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{booktabs}
+\usepackage{longtable}
+
+\begin{document}
+
+\title{Beadle Email Channel: Architecture \& Z Specification}
+\author{Punt Labs}
+\date{March 2026}
+\hypersetup{
+  pdftitle={Beadle Email Channel: Architecture and Z Specification},
+  pdfauthor={Punt Labs},
+  pdfsubject={Architecture Document},
+  pdfcreator={fuzz}
+}
+\maketitle
+
+\tableofcontents
+\newpage
+
+%%----------------------------------------------------------------------
+\section{Introduction}
+%%----------------------------------------------------------------------
+
+Beadle is an autonomous agent daemon with cryptographic owner control.
+Every action requires a GPG-signed instruction from the owner; the
+daemon has no independent decision-making authority.
+
+The first shipping component is \texttt{beadle-email} --- an MCP server
+that provides email communication via Proton Bridge with a four-level
+PGP trust model.  This document describes the architecture of
+\texttt{beadle-email} v0.1.x: its package structure, data flows,
+security boundaries, and key state machines formalised in Z.
+
+%%----------------------------------------------------------------------
+\section{System Overview}
+%%----------------------------------------------------------------------
+
+\texttt{beadle-email} runs as a stdio-transport MCP server.  It
+connects to Proton Bridge via IMAP/STARTTLS on localhost, sends mail
+via Proton Bridge SMTP (primary) or Resend API (fallback), and
+verifies PGP signatures using an isolated GPG keyring.
+
+The binary exposes four subcommands:
+
+\begin{itemize}
+  \item \texttt{serve} --- start the MCP server (default when no
+    subcommand is given).
+  \item \texttt{version} --- print the version string.
+  \item \texttt{doctor} --- check installation health (config,
+    credentials, GPG, SMTP reachability).
+  \item \texttt{status} --- print current configuration as JSON.
+\end{itemize}
+
+%%----------------------------------------------------------------------
+\section{Package Map}
+%%----------------------------------------------------------------------
+
+All packages live under \texttt{internal/} --- nothing is exported
+outside the module.
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Package} & \textbf{Responsibility} \\
+\midrule
+\texttt{cmd/beadle-email/} & CLI entry point: subcommand dispatch \\
+\texttt{internal/channel/}  & Channel interface: \texttt{Message}, \texttt{TrustLevel}, shared types \\
+\texttt{internal/email/}    & IMAP client, MIME parser, trust classifier, SMTP/Resend senders \\
+\texttt{internal/pgp/}      & GPG signature verification and signing via isolated GNUPGHOME \\
+\texttt{internal/mcp/}      & MCP tool definitions and handlers (8 tools) \\
+\texttt{internal/secret/}   & Credential resolution: OS keychain $\to$ file $\to$ env var \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Dependency Graph}
+
+Dependencies flow strictly downward.  No package imports a package
+above it in this ordering.
+
+\begin{verbatim}
+    cmd/beadle-email
+          |
+      internal/mcp
+       /    |    \
+  email    pgp   channel
+    |
+  secret
+\end{verbatim}
+
+\texttt{internal/channel} is a leaf package with no internal
+dependencies.  \texttt{internal/pgp} depends only on the standard
+library.  \texttt{internal/email} depends on \texttt{channel} and
+\texttt{secret}.  \texttt{internal/mcp} depends on \texttt{email},
+\texttt{pgp}, and \texttt{channel}.
+
+%%----------------------------------------------------------------------
+\section{Basic Types}
+%%----------------------------------------------------------------------
+
+\begin{zed}
+  [MSGID, ADDRESS, BODY, HEADER, RAWBYTES, KEYID, SIGNER, CREDNAME]
+\end{zed}
+
+$MSGID$ is an IMAP UID (numeric string).  $ADDRESS$ is an RFC~5322
+email address.  $BODY$ is the plain-text message body.  $HEADER$ is
+a header name-value pair.  $RAWBYTES$ is the raw RFC~822 message.
+$KEYID$ is a GPG key fingerprint.  $SIGNER$ is a GPG user identity.
+$CREDNAME$ is a named credential (e.g.\ \texttt{imap-password}).
+
+%%----------------------------------------------------------------------
+\section{Free Types}
+%%----------------------------------------------------------------------
+
+\begin{zed}
+  ZBOOL ::= ztrue | zfalse
+\end{zed}
+
+\begin{zed}
+  TrustLevel ::= trusted | verified | untrusted | unverified
+\end{zed}
+
+Four trust levels classify inbound messages:
+
+\begin{itemize}
+  \item $trusted$ --- Proton-to-Proton, end-to-end encrypted by Proton
+    infrastructure.
+  \item $verified$ --- external sender with a valid PGP signature.
+  \item $untrusted$ --- external sender with an invalid PGP signature.
+  \item $unverified$ --- external sender with no signature present.
+\end{itemize}
+
+\begin{zed}
+  SendMethod ::= smProtonSMTP | smResend
+\end{zed}
+
+Outbound messages use Proton Bridge SMTP as the primary transport,
+falling back to Resend API when Bridge is unavailable.
+
+\begin{zed}
+  CredBackend ::= cbKeychain | cbFile | cbEnvVar
+\end{zed}
+
+Credentials are resolved through a priority chain of three backends.
+
+\begin{zed}
+  IMAPState ::= imapDisconnected | imapConnected | imapSelected
+\end{zed}
+
+The IMAP client progresses through connection, authentication, and
+folder selection before fetching messages.
+
+%%----------------------------------------------------------------------
+\section{Trust Model}
+%%----------------------------------------------------------------------
+
+This section formalises the trust classification state machine.
+Trust classification is a pure function of message headers and
+PGP verification outcome.
+
+\begin{schema}{TrustInput}
+  hasProtonE2E : ZBOOL \\
+  hasProtonInternal : ZBOOL \\
+  hasPGPSignature : ZBOOL \\
+  pgpVerified : ZBOOL
+\end{schema}
+
+$hasProtonE2E$ is true when the header
+\texttt{X-Pm-Content-Encryption} contains \texttt{end-to-end}.
+$hasProtonInternal$ is true when \texttt{X-Pm-Origin} is
+\texttt{internal}.  $hasPGPSignature$ is true when the Content-Type
+is \texttt{multipart/signed} or raw bytes contain
+\texttt{application/pgp-signature}.  $pgpVerified$ is the result of
+\texttt{gpg --verify} (only meaningful when $hasPGPSignature = ztrue$).
+
+\begin{schema}{ClassifyTrust}
+  TrustInput \\
+  level! : TrustLevel
+  \where
+  (hasProtonE2E = ztrue \land hasProtonInternal = ztrue
+    \implies level! = trusted) \\
+  \land \\
+  (hasPGPSignature = ztrue \land pgpVerified = ztrue
+    \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
+    \implies level! = verified) \\
+  \land \\
+  (hasPGPSignature = ztrue \land pgpVerified = zfalse
+    \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
+    \implies level! = untrusted) \\
+  \land \\
+  (hasPGPSignature = zfalse
+    \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
+    \implies level! = unverified)
+\end{schema}
+
+The classification is total: every combination of inputs maps to
+exactly one trust level.  Proton E2E takes priority over PGP
+signatures (a Proton-internal message with a PGP signature is
+still $trusted$, not $verified$).
+
+\subsection{Two-Phase Trust Resolution}
+
+Trust classification happens in two phases because PGP verification
+requires fetching the raw message bytes and running \texttt{gpg}:
+
+\begin{enumerate}
+  \item \textbf{Header scan} --- \texttt{ClassifyTrust} runs with
+    $pgpVerified = zfalse$.  Messages with signatures return
+    $unverified$ with $hasPGPSignature = ztrue$, signalling the
+    caller to proceed to phase~2.
+  \item \textbf{PGP verification} --- the caller fetches raw bytes,
+    runs \texttt{gpg --verify} in an isolated GNUPGHOME, and
+    re-classifies with the actual $pgpVerified$ value.
+\end{enumerate}
+
+%%----------------------------------------------------------------------
+\section{Credential Resolution}
+%%----------------------------------------------------------------------
+
+\begin{schema}{CredentialStore}
+  keychainAvail : ZBOOL \\
+  keychainValues : CREDNAME \pfun BODY \\
+  fileValues : CREDNAME \pfun BODY \\
+  envValues : CREDNAME \pfun BODY
+\end{schema}
+
+Credentials are resolved by name.  The keychain maps to
+OS-specific stores: macOS Keychain (\texttt{security} CLI) on
+Darwin, libsecret (\texttt{secret-tool} CLI) on Linux.  File
+credentials live in \texttt{\~{}/.config/beadle/<name>} with mode
+600.  Environment variables follow the pattern
+\texttt{BEADLE\_<NAME>}.
+
+\begin{schema}{ResolveCredential}
+  \Xi CredentialStore \\
+  name? : CREDNAME \\
+  value! : BODY
+  \where
+  (keychainAvail = ztrue \land name? \in \dom keychainValues
+    \implies value! = keychainValues(name?)) \\
+  \land \\
+  ((\lnot (keychainAvail = ztrue \land name? \in \dom keychainValues))
+    \land name? \in \dom fileValues
+    \implies value! = fileValues(name?)) \\
+  \land \\
+  ((\lnot (keychainAvail = ztrue \land name? \in \dom keychainValues))
+    \land name? \notin \dom fileValues
+    \land name? \in \dom envValues
+    \implies value! = envValues(name?))
+\end{schema}
+
+The resolution is a priority chain: keychain beats file, file beats
+environment variable.  File credentials are rejected if group or
+world readable (permissions check enforces mode 600).
+
+The three named credentials used by \texttt{beadle-email}:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Name} & \textbf{Env Var} & \textbf{Purpose} \\
+\midrule
+\texttt{imap-password}   & \texttt{BEADLE\_IMAP\_PASSWORD}   & Proton Bridge login \\
+\texttt{resend-api-key}  & \texttt{BEADLE\_RESEND\_API\_KEY}  & Resend API authentication \\
+\texttt{gpg-passphrase}  & \texttt{BEADLE\_GPG\_PASSPHRASE}  & PGP signing key passphrase \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%%----------------------------------------------------------------------
+\section{Message Receive Path}
+%%----------------------------------------------------------------------
+
+The receive path is the data flow from IMAP mailbox to MCP tool
+response.
+
+\begin{schema}{IMAPConnection}
+  state : IMAPState \\
+  host : ADDRESS \\
+  user : ADDRESS
+\end{schema}
+
+\begin{schema}{Connect}
+  \Delta IMAPConnection
+  \where
+  state = imapDisconnected \\
+  state' = imapConnected
+\end{schema}
+
+Connection uses STARTTLS.  The TLS certificate check is skipped for
+loopback addresses only (Proton Bridge uses self-signed certificates
+on localhost).
+
+\begin{schema}{SelectFolder}
+  \Delta IMAPConnection \\
+  folder? : CREDNAME
+  \where
+  state = imapConnected \lor state = imapSelected \\
+  state' = imapSelected
+\end{schema}
+
+\subsection{Fetch and Parse}
+
+Once a folder is selected, messages are fetched by UID.  The raw
+RFC~822 bytes are parsed through a pipeline:
+
+\begin{enumerate}
+  \item \textbf{MIME parse} --- \texttt{ParseMIME} extracts the
+    plain-text body, attachments, and selected headers.  Multipart
+    messages are walked using the \texttt{go-message} library.
+    PGP signature and key parts are skipped (handled separately).
+  \item \textbf{Header trust} --- \texttt{ClassifyTrust} runs on
+    headers to determine the initial trust level.
+  \item \textbf{PGP verify} (conditional) --- if the message has a
+    PGP signature ($hasPGPSignature = ztrue$), raw bytes are
+    passed to \texttt{pgp.Verify} for full verification.
+  \item \textbf{Response assembly} --- the parsed message, trust
+    level, and attachments are serialised as JSON in the MCP tool
+    response.
+\end{enumerate}
+
+%%----------------------------------------------------------------------
+\section{Message Send Path}
+%%----------------------------------------------------------------------
+
+\begin{schema}{SendState}
+  smtpAvailable : ZBOOL \\
+  method! : SendMethod
+  \where
+  smtpAvailable = ztrue \implies method! = smProtonSMTP \\
+  smtpAvailable = zfalse \implies method! = smResend
+\end{schema}
+
+The send path attempts Proton Bridge SMTP first.  If the Bridge is
+unreachable (a TCP dial to the SMTP port times out in 2~seconds),
+the Resend API is used as fallback.
+
+\subsection{Proton Bridge SMTP}
+
+SMTP uses STARTTLS with the same self-signed certificate exception
+as IMAP (loopback only).  Authentication uses \texttt{PLAIN} with
+the same credentials as IMAP.  The raw RFC~822 message is composed
+by \texttt{ComposeRaw}, which validates header fields against CR/LF
+injection.
+
+\subsection{Resend API}
+
+The Resend fallback sends via HTTPS POST to
+\texttt{api.resend.com/emails}.  It supports both plain text and
+HTML bodies.  The API key is resolved via the credential store.
+
+\subsection{PGP Signing (Future)}
+
+PGP signing of outbound mail requires a transport that preserves raw
+MIME (\texttt{multipart/signed} envelopes).  Neither Proton Bridge
+(strips MIME) nor Resend (no raw MIME API) supports this.  Amazon
+SES will be added as the PGP-signing transport in a future release.
+
+%%----------------------------------------------------------------------
+\section{PGP Subsystem}
+%%----------------------------------------------------------------------
+
+The PGP subsystem handles signature verification and signing via
+the system \texttt{gpg} binary.  It never uses a Go PGP library ---
+\texttt{gpg} handles keyring management, trust models, and
+signature formats.
+
+\begin{schema}{GPGEnvironment}
+  systemKeys : \power KEYID \\
+  importedKeys : \power KEYID \\
+  isolated : ZBOOL
+  \where
+  isolated = ztrue \\
+  importedKeys \subseteq systemKeys
+\end{schema}
+
+Every verification runs in an isolated GNUPGHOME under
+\texttt{/tmp/bg-*}.  The short path prefix avoids the 108-byte
+Unix socket path limit for \texttt{gpg-agent}.
+
+\subsection{Verify Flow}
+
+\begin{enumerate}
+  \item Extract signed data, detached signature, and optional public
+    key from the \texttt{multipart/signed} envelope (RFC~3156).
+  \item Create an isolated GNUPGHOME directory.
+  \item If the message includes a public key attachment
+    (\texttt{application/pgp-keys}), import it into the isolated
+    keyring.
+  \item If no key was attached, export all public keys from the
+    system keyring (\texttt{\~{}/.gnupg}) into the isolated keyring.
+    This is a one-way bridge: read from system, never write.
+  \item Run \texttt{gpg --verify} with the detached signature and
+    signed data.
+  \item Parse the exit code and stderr for validity, signer identity,
+    and key ID.
+  \item Remove the temporary directory.
+\end{enumerate}
+
+\subsection{Sign Flow}
+
+\begin{enumerate}
+  \item Compose the body as a MIME part with CRLF line endings
+    (mandatory per RFC~3156).
+  \item Write the GPG passphrase to a temporary file (mode 600) to
+    avoid exposing it in process arguments or \texttt{ps} output.
+  \item Run \texttt{gpg --detach-sign --armor} with
+    \texttt{--passphrase-file}.
+  \item Assemble the full RFC~822 message with a
+    \texttt{multipart/signed} envelope containing the body part and
+    detached signature.
+  \item Generate the MIME boundary using \texttt{crypto/rand}.
+\end{enumerate}
+
+%%----------------------------------------------------------------------
+\section{MCP Tool Surface}
+%%----------------------------------------------------------------------
+
+\texttt{beadle-email} registers 8 MCP tools:
+
+\begin{center}
+\begin{longtable}{@{}llp{6.5cm}@{}}
+\toprule
+\textbf{Tool} & \textbf{Required Params} & \textbf{Description} \\
+\midrule
+\texttt{list\_messages}     & ---               & List messages from a folder (id, from, date, subject, trust). Inline PGP verification for signed messages. \\
+\texttt{read\_message}      & \texttt{message\_id} & Read a single message by UID. Auto-verifies PGP if Content-Type indicates \texttt{multipart/signed}. \\
+\texttt{list\_folders}      & ---               & List all IMAP mailbox folders. \\
+\texttt{send\_email}        & \texttt{to}, \texttt{subject}, \texttt{body} & Send via SMTP (primary) or Resend (fallback). \\
+\texttt{verify\_signature}  & \texttt{message\_id} & Explicit PGP verification. Returns trust level, validity, key ID, signer. \\
+\texttt{show\_mime}         & \texttt{message\_id} & Show MIME structure of a message. \\
+\texttt{check\_trust}       & \texttt{message\_id} & Classify trust level with detailed explanation. \\
+\texttt{move\_message}      & \texttt{message\_id} & Move a message to another folder (default: Archive). \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+All tool handlers use a \texttt{withClient} pattern: a fresh IMAP
+connection is established per request and closed when the handler
+returns.  This avoids stale connection state at the cost of one
+TCP handshake per tool call.
+
+%%----------------------------------------------------------------------
+\section{Design Invariants}
+%%----------------------------------------------------------------------
+
+These invariants are enforced by the architecture and hold across
+all operations:
+
+\begin{enumerate}
+  \item \textbf{Zero agent authority.}  Every action requires a
+    GPG-signed instruction from the owner.  The daemon has no
+    independent decision-making.
+
+  \item \textbf{Preflight before execute.}  All permissions are
+    validated before any command runs.  No partial execution.
+
+  \item \textbf{Isolated keychain.}  PGP operations use temporary
+    GNUPGHOME directories, never touching the user's system GPG
+    keyring for writes.
+
+  \item \textbf{Non-expiring keys rejected.}  All command-signing
+    keys must have an expiration date.
+
+  \item \textbf{Audit log is tamperproof.}  Append-only,
+    GPG-signed entries.  Only the owner can clear the log.
+
+  \item \textbf{No secrets in logs.}  GPG key material, passwords,
+    API keys, and raw email content are never logged.
+
+  \item \textbf{No shell execution.}  All \texttt{exec.Command}
+    calls use argument lists, never \texttt{shell=true}.
+
+  \item \textbf{Header injection prevention.}  \texttt{ComposeRaw}
+    and \texttt{Sign} reject header fields containing CR/LF.
+
+  \item \textbf{File permission enforcement.}  Secret files must
+    not be group or world readable (mode 600).
+
+  \item \textbf{Loopback-only TLS exception.}  Self-signed
+    certificate verification is skipped only for loopback
+    addresses (Proton Bridge on localhost).
+\end{enumerate}
+
+%%----------------------------------------------------------------------
+\section{Security Boundaries}
+%%----------------------------------------------------------------------
+
+\subsection{Network Boundary}
+
+\begin{itemize}
+  \item \textbf{IMAP/SMTP}: localhost only (Proton Bridge).
+    STARTTLS with self-signed cert exception for loopback.
+  \item \textbf{Resend API}: outbound HTTPS to
+    \texttt{api.resend.com}.  Bearer token authentication.
+  \item \textbf{MCP}: stdio transport.  No network listener.
+\end{itemize}
+
+\subsection{Process Boundary}
+
+\begin{itemize}
+  \item \textbf{GPG}: subprocess with isolated GNUPGHOME.
+    Passphrase passed via temp file (mode 600), never via
+    arguments or environment.
+  \item \textbf{Keychain}: subprocess (\texttt{security} on macOS,
+    \texttt{secret-tool} on Linux).  No direct library binding.
+\end{itemize}
+
+\subsection{Trust Boundary}
+
+\begin{itemize}
+  \item \textbf{Trusted}: Proton-to-Proton messages.  E2E
+    encryption verified by Proton infrastructure, not by beadle.
+  \item \textbf{Verified}: external messages with valid PGP
+    signatures.  Verification performed by beadle in isolated GPG.
+  \item \textbf{Untrusted}: external messages with invalid PGP
+    signatures.  The signature was present but did not verify.
+  \item \textbf{Unverified}: external messages with no signature.
+    No cryptographic assertion about the sender.
+\end{itemize}
+
+%%----------------------------------------------------------------------
+\section{Key Properties}
+%%----------------------------------------------------------------------
+
+The specification captures these properties, verifiable by
+inspection and testing:
+
+\begin{enumerate}
+  \item \textbf{Trust totality}: every inbound message receives
+    exactly one of the four trust levels.  The
+    \texttt{ClassifyTrust} schema is total over all input
+    combinations.
+
+  \item \textbf{Credential priority}: keychain always takes
+    priority over file, file over environment variable.  The
+    \texttt{ResolveCredential} schema enforces this ordering.
+
+  \item \textbf{GPG isolation}: the $isolated = ztrue$ invariant
+    in \texttt{GPGEnvironment} ensures no PGP operation writes to
+    the user's system keyring.
+
+  \item \textbf{Send fallback}: if SMTP is available, it is
+    always preferred.  Resend is used only when SMTP is
+    unreachable.
+
+  \item \textbf{Connection-per-request}: each MCP tool call
+    creates and destroys its own IMAP connection, preventing
+    stale state across calls.
+\end{enumerate}
+
+\end{document}
