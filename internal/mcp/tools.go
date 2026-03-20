@@ -416,6 +416,11 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		// Enforce read permission — deny before exposing body to caller
 		perm, senderEmail := senderPermission(store, id, msg.From)
 		if !perm.Read {
+			if senderEmail == "" {
+				return mcplib.NewToolResultError(
+					fmt.Sprintf("permission denied: unparseable sender %q", msg.From),
+				), nil
+			}
 			return mcplib.NewToolResultError(
 				fmt.Sprintf("permission denied: no read permission for sender %s", senderEmail),
 			), nil
@@ -508,21 +513,22 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	for _, addr := range allRecipients {
 		recipientEmail := email.ExtractEmailAddress(addr)
 		if recipientEmail == "" {
+			denied = append(denied, addr+" (invalid address)")
 			continue
 		}
 		matches := store.Find(recipientEmail)
 		if len(matches) == 0 {
-			denied = append(denied, recipientEmail+" (unknown contact)")
+			denied = append(denied, recipientEmail)
 			continue
 		}
 		perm := contacts.CheckPermission(matches[0], id.Email)
 		if !perm.Write {
-			denied = append(denied, recipientEmail+" ("+perm.String()+")")
+			denied = append(denied, recipientEmail)
 		}
 	}
 	if len(denied) > 0 {
 		return mcplib.NewToolResultError(
-			fmt.Sprintf("permission denied: no write permission for: %s", strings.Join(denied, ", ")),
+			fmt.Sprintf("permission denied: %d recipient(s) lack write permission", len(denied)),
 		), nil
 	}
 
@@ -730,6 +736,11 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 		_, _, headers := email.ParseMIME(raw)
 		perm, senderEmail := senderPermission(store, id, headers["From"])
 		if !perm.Read {
+			if senderEmail == "" {
+				return mcplib.NewToolResultError(
+					fmt.Sprintf("permission denied: unparseable sender %q", headers["From"]),
+				), nil
+			}
 			return mcplib.NewToolResultError(
 				fmt.Sprintf("permission denied: no read permission for sender %s", senderEmail),
 			), nil
