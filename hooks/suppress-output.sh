@@ -76,9 +76,9 @@ fi
 # ── list_messages ──────────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "list_messages" ]]; then
   # Record poll timestamp for UserPromptSubmit reminder
-  POLL_TS_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/.claude"
-  if [[ -n "$POLL_TS_DIR" ]]; then
-    date +%s > "$POLL_TS_DIR/beadle.poll.ts" 2>/dev/null
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+  if [[ -n "$REPO_ROOT" ]] && [[ -d "$REPO_ROOT/.claude" ]]; then
+    date +%s > "$REPO_ROOT/.claude/beadle.poll.ts" 2>/dev/null
   fi
   if [[ "$RESULT" == "No messages." ]]; then
     emit "$RESULT"
@@ -91,7 +91,7 @@ fi
 
 # ── read_message ───────────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "read_message" ]]; then
-  SUBJ=$(printf '%s' "$RESULT" | grep 'Subject:' | head -1 | sed 's/.*Subject: *//')
+  SUBJ=$(printf '%s' "$RESULT" | grep 'Subject:' | head -1 | sed 's/^[[:space:]]*Subject:[[:space:]]*//')
   if [[ -z "$SUBJ" ]]; then
     SUBJ="(no subject)"
   fi
