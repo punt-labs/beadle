@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/pgp"
 )
@@ -25,8 +27,8 @@ import (
 const maxAttachmentSize = 25 * 1024 * 1024 // 25 MB
 
 // RegisterTools adds all email channel tools to the MCP server.
-func RegisterTools(s *server.MCPServer, cfg *email.Config, contactsPath string, logger *slog.Logger) {
-	h := &handler{cfg: cfg, contactsPath: contactsPath, logger: logger}
+func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slog.Logger) {
+	h := &handler{resolver: resolver, logger: logger}
 
 	s.AddTool(listMessagesTool(), h.listMessages)
 	s.AddTool(readMessageTool(), h.readMessage)
@@ -45,9 +47,59 @@ func RegisterTools(s *server.MCPServer, cfg *email.Config, contactsPath string, 
 }
 
 type handler struct {
-	cfg          *email.Config
-	contactsPath string
-	logger       *slog.Logger
+	resolver *identity.Resolver
+	logger   *slog.Logger
+}
+
+// resolveIdentityAndConfig resolves the active identity and loads the
+// corresponding email config. Used by tools that don't need contacts.
+func (h *handler) resolveIdentityAndConfig() (*identity.Identity, *email.Config, string, error) {
+	id, err := h.resolver.Resolve()
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("resolve identity: %w", err)
+	}
+
+	// Ensure identity-scoped directory exists (auto-migrate)
+	beadleDir, err := paths.DataDir()
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("resolve data dir: %w", err)
+	}
+	idDir, err := identity.EnsureIdentityDir(beadleDir, id.Email)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("ensure identity dir: %w", err)
+	}
+
+	// Load config from identity dir, fall back to root only if missing
+	configPath := filepath.Join(idDir, "email.json")
+	cfg, err := email.LoadConfig(configPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, nil, "", fmt.Errorf("load identity config %s: %w", configPath, err)
+		}
+		cfg, err = email.LoadConfig(email.DefaultConfigPath())
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("load config: %w", err)
+		}
+	}
+
+	return id, cfg, idDir, nil
+}
+
+// resolveContext resolves identity, config, and contacts.
+// Used by tools that need the address book.
+func (h *handler) resolveContext() (*identity.Identity, *email.Config, *contacts.Store, error) {
+	id, cfg, idDir, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	contactsPath := filepath.Join(idDir, "contacts.json")
+	store := contacts.NewStore(contactsPath)
+	if loadErr := store.Load(); loadErr != nil {
+		return nil, nil, nil, fmt.Errorf("load contacts: %w", loadErr)
+	}
+
+	return id, cfg, store, nil
 }
 
 
@@ -211,7 +263,7 @@ func findContactTool() mcplib.Tool {
 
 func addContactTool() mcplib.Tool {
 	return mcplib.NewTool("add_contact",
-		mcplib.WithDescription("Add a contact to the address book. Name and email are required. Names and aliases must be unique."),
+		mcplib.WithDescription("Add a contact to the address book. Name and email are required. Names and aliases must be unique. Permissions control what beadle can do with this contact for the active identity."),
 		mcplib.WithString("name",
 			mcplib.Required(),
 			mcplib.Description("Contact display name (unique key)"),
@@ -229,6 +281,9 @@ func addContactTool() mcplib.Tool {
 		),
 		mcplib.WithString("notes",
 			mcplib.Description("Free-text notes"),
+		),
+		mcplib.WithString("permissions",
+			mcplib.Description("rwx permission string for active identity (e.g., 'rwx', 'rw-', 'r--'). Default: r--"),
 		),
 	)
 }
@@ -272,8 +327,8 @@ type downloadResult struct {
 
 // --- Tool Handlers ---
 
-func (h *handler) withClient(ctx context.Context, fn func(*email.Client) (*mcplib.CallToolResult, error)) (*mcplib.CallToolResult, error) {
-	client, err := email.Dial(h.cfg, h.logger)
+func (h *handler) withClient(cfg *email.Config, fn func(*email.Client) (*mcplib.CallToolResult, error)) (*mcplib.CallToolResult, error) {
+	client, err := email.Dial(cfg, h.logger)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("IMAP connection failed: %v", err)), nil
 	}
@@ -282,11 +337,16 @@ func (h *handler) withClient(ctx context.Context, fn func(*email.Client) (*mcpli
 }
 
 func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	folder := stringParam(req, "folder", "INBOX")
 	count := intParam(req, "count", 10)
 	unreadOnly := boolParam(req, "unread_only")
 
-	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		msgs, err := c.ListMessages(folder, count, unreadOnly)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("list messages: %v", err)), nil
@@ -306,7 +366,7 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 				h.logger.Warn("pgp: fetch raw failed", "uid", msgs[i].ID, "err", fetchErr)
 				continue
 			}
-			result, verifyErr := pgp.Verify(h.cfg.GPGBinary, raw)
+			result, verifyErr := pgp.Verify(cfg.GPGBinary, raw)
 			if verifyErr != nil {
 				h.logger.Warn("pgp: verify failed", "uid", msgs[i].ID, "err", verifyErr)
 				continue
@@ -323,6 +383,11 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 }
 
 func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	folder := stringParam(req, "folder", "INBOX")
 	msgID, err := req.RequireString("message_id")
 	if err != nil {
@@ -334,22 +399,18 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
 	}
 
-	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		msg, err := c.FetchMessage(folder, uint32(uid))
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("read message: %v", err)), nil
 		}
 
-		// Verify PGP signature if the Content-Type indicates multipart/signed.
-		// We pass nil for raw bytes — this checks the header only, not body
-		// scanning. Messages with PGP markers only in the body (no header)
-		// will not be auto-verified; use verify_signature explicitly for those.
 		if msg.TrustLevel == channel.Unverified && email.HasPGPSignature(msg.RawHeaders["Content-Type"], nil) {
 			raw, fetchErr := c.FetchRaw(folder, uint32(uid))
 			if fetchErr != nil {
 				h.logger.Warn("pgp: fetch raw failed", "uid", msgID, "err", fetchErr)
 			} else {
-				result, verifyErr := pgp.Verify(h.cfg.GPGBinary, raw)
+				result, verifyErr := pgp.Verify(cfg.GPGBinary, raw)
 				if verifyErr != nil {
 					h.logger.Warn("pgp: verify failed", "uid", msgID, "err", verifyErr)
 				} else if result.Valid {
@@ -365,7 +426,12 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 }
 
 func (h *handler) listFolders(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
+	_, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		folders, err := c.ListFolders()
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("list folders: %v", err)), nil
@@ -375,6 +441,11 @@ func (h *handler) listFolders(ctx context.Context, req mcplib.CallToolRequest) (
 }
 
 func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, cfg, store, err := h.resolveContext()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	toRaw, err := req.RequireString("to")
 	if err != nil {
 		return mcplib.NewToolResultError("to is required"), nil
@@ -389,20 +460,18 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	}
 	html := stringParam(req, "html", "")
 
-	// Resolve contact names to email addresses before splitting.
-	// Load contacts once for all three address fields.
+	// Resolve contact names to email addresses using the identity's contacts.
 	ccRaw := stringParam(req, "cc", "")
 	bccRaw := stringParam(req, "bcc", "")
-	store, storeErr := email.LoadContactsIfNeeded(h.contactsPath, toRaw, ccRaw, bccRaw)
-	toResolved, err := email.ResolveField(store, storeErr, toRaw)
+	toResolved, err := email.ResolveField(store, nil, toRaw)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("to: %v", err)), nil
 	}
-	ccResolved, err := email.ResolveField(store, storeErr, ccRaw)
+	ccResolved, err := email.ResolveField(store, nil, ccRaw)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("cc: %v", err)), nil
 	}
-	bccResolved, err := email.ResolveField(store, storeErr, bccRaw)
+	bccResolved, err := email.ResolveField(store, nil, bccRaw)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("bcc: %v", err)), nil
 	}
@@ -425,7 +494,7 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	// (multipart/signed envelopes). Neither Proton Bridge (strips MIME) nor
 	// Resend (no raw MIME API) supports this. Tracked in beadle-atz: Amazon SES
 	// will be added as the PGP-signing transport in a future release.
-	result, sendErr := email.TrySendChain(h.cfg, h.logger, to, cc, bcc, subject, body, html, attachments)
+	result, sendErr := email.TrySendChain(cfg, h.logger, to, cc, bcc, subject, body, html, attachments)
 	if sendErr != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("send email: %v", sendErr)), nil
 	}
@@ -435,6 +504,11 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 // trySendChain is now email.TrySendChain — called directly above.
 
 func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	folder := stringParam(req, "folder", "INBOX")
 	msgID, err := req.RequireString("message_id")
 	if err != nil {
@@ -446,13 +520,13 @@ func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolReques
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id: %v", err)), nil
 	}
 
-	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		raw, err := c.FetchRaw(folder, uint32(uid))
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
 		}
 
-		result, err := pgp.Verify(h.cfg.GPGBinary, raw)
+		result, err := pgp.Verify(cfg.GPGBinary, raw)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("verify signature: %v", err)), nil
 		}
@@ -476,6 +550,11 @@ func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolReques
 }
 
 func (h *handler) showMIME(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	folder := stringParam(req, "folder", "INBOX")
 	msgID, err := req.RequireString("message_id")
 	if err != nil {
@@ -487,7 +566,7 @@ func (h *handler) showMIME(ctx context.Context, req mcplib.CallToolRequest) (*mc
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id: %v", err)), nil
 	}
 
-	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		raw, err := c.FetchRaw(folder, uint32(uid))
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
@@ -502,6 +581,11 @@ func (h *handler) showMIME(ctx context.Context, req mcplib.CallToolRequest) (*mc
 }
 
 func (h *handler) checkTrust(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	id, cfg, store, err := h.resolveContext()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	folder := stringParam(req, "folder", "INBOX")
 	msgID, err := req.RequireString("message_id")
 	if err != nil {
@@ -513,7 +597,7 @@ func (h *handler) checkTrust(ctx context.Context, req mcplib.CallToolRequest) (*
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id: %v", err)), nil
 	}
 
-	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		raw, err := c.FetchRaw(folder, uint32(uid))
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
@@ -522,7 +606,25 @@ func (h *handler) checkTrust(ctx context.Context, req mcplib.CallToolRequest) (*
 		_, _, headers := email.ParseMIME(raw)
 		result := email.ClassifyTrustDetailed(headers, raw)
 
-		return textResult(formatTrustResult(result))
+		// Look up sender in contacts for identity permission
+		senderPerm := ""
+		from := headers["From"]
+		if from != "" {
+			senderEmail := email.ExtractEmailAddress(from)
+			if senderEmail != "" {
+				matches := store.Find(senderEmail)
+				if len(matches) > 0 {
+					perm := contacts.CheckPermission(matches[0], id.Email, id.OwnerEmail)
+					senderPerm = perm.String()
+				}
+			}
+		}
+		if senderPerm == "" {
+			// Default for unknown senders
+			senderPerm = "r--"
+		}
+
+		return textResult(formatTrustResultWithPerm(result, senderPerm))
 	})
 }
 
@@ -535,6 +637,11 @@ type moveResult struct {
 }
 
 func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	folder := stringParam(req, "folder", "INBOX")
 	msgID, err := req.RequireString("message_id")
 	if err != nil {
@@ -547,7 +654,7 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
 	}
 
-	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		if err := c.MoveMessage(folder, uint32(uid), destination); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("move message: %v", err)), nil
 		}
@@ -562,6 +669,11 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 }
 
 func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	id, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	folder := stringParam(req, "folder", "INBOX")
 	msgID, err := req.RequireString("message_id")
 	if err != nil {
@@ -577,7 +689,7 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
 	}
 
-	return h.withClient(ctx, func(c *email.Client) (*mcplib.CallToolResult, error) {
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		raw, err := c.FetchRaw(folder, uint32(uid))
 		if err != nil {
 			h.logger.Warn("download_attachment: fetch failed", "uid", msgID, "folder", folder, "err", err)
@@ -590,17 +702,17 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 			return mcplib.NewToolResultError(fmt.Sprintf("extract part: %v", err)), nil
 		}
 
-		// Build output path: ~/.punt-labs/beadle/attachments/<mailbox>/<uid>_<filename>
+		// Build output path under identity-scoped directory.
 		// Use filepath.Base to prevent path traversal via attacker-controlled filenames.
 		filename := filepath.Base(part.Filename)
 		if filename == "" || filename == "." {
 			filename = fmt.Sprintf("part_%d", partIndex)
 		}
-		dataDir, err := paths.DataDir()
+		idDir, err := paths.IdentityDir(id.Email)
 		if err != nil {
-			return mcplib.NewToolResultError(fmt.Sprintf("resolve data directory: %v", err)), nil
+			return mcplib.NewToolResultError(fmt.Sprintf("resolve identity directory: %v", err)), nil
 		}
-		attachDir := filepath.Join(dataDir, "attachments", filepath.Base(h.cfg.IMAPUser))
+		attachDir := filepath.Join(idDir, "attachments", filepath.Base(cfg.IMAPUser))
 		if err := os.MkdirAll(attachDir, 0o750); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("create attachment dir: %v", err)), nil
 		}
@@ -775,11 +887,12 @@ func boolParam(req mcplib.CallToolRequest, key string) bool {
 // --- Contact Handlers ---
 
 type contactResult struct {
-	Name     string   `json:"name"`
-	Email    string   `json:"email"`
-	Aliases  []string `json:"aliases,omitempty"`
-	GPGKeyID string   `json:"gpg_key_id,omitempty"`
-	Notes    string   `json:"notes,omitempty"`
+	Name        string   `json:"name"`
+	Email       string   `json:"email"`
+	Aliases     []string `json:"aliases,omitempty"`
+	GPGKeyID    string   `json:"gpg_key_id,omitempty"`
+	Notes       string   `json:"notes,omitempty"`
+	Permissions string   `json:"permissions,omitempty"` // effective rwx for active identity
 }
 
 type removeContactResult struct {
@@ -797,43 +910,48 @@ func contactToResult(c contacts.Contact) contactResult {
 	}
 }
 
-func (h *handler) loadContacts() (*contacts.Store, error) {
-	s := contacts.NewStore(h.contactsPath)
-	if err := s.Load(); err != nil {
-		return nil, err
-	}
-	return s, nil
+// contactToResultWithPerms includes the effective permission for the active identity.
+func contactToResultWithPerms(c contacts.Contact, identityEmail, ownerEmail string) contactResult {
+	r := contactToResult(c)
+	perm := contacts.CheckPermission(c, identityEmail, ownerEmail)
+	r.Permissions = perm.String()
+	return r
 }
 
 func (h *handler) listContacts(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	store, err := h.loadContacts()
+	id, _, store, err := h.resolveContext()
 	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
+		return mcplib.NewToolResultError(err.Error()), nil
 	}
-	results := contactsToResults(store.Contacts())
+	results := contactsToResultsWithPerms(store.Contacts(), id.Email, id.OwnerEmail)
 	return textResult(formatContacts(results))
 }
 
 func (h *handler) findContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	id, _, store, err := h.resolveContext()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
 	query, err := req.RequireString("query")
 	if err != nil {
 		return mcplib.NewToolResultError("query is required"), nil
 	}
-	store, err := h.loadContacts()
-	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
-	}
 	matches := store.Find(query)
-	results := contactsToResults(matches)
+	results := contactsToResultsWithPerms(matches, id.Email, id.OwnerEmail)
 	return textResult(formatContacts(results))
 }
 
 func (h *handler) addContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	id, _, store, err := h.resolveContext()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	name, err := req.RequireString("name")
 	if err != nil {
 		return mcplib.NewToolResultError("name is required"), nil
 	}
-	email, err := req.RequireString("email")
+	addr, err := req.RequireString("email")
 	if err != nil {
 		return mcplib.NewToolResultError("email is required"), nil
 	}
@@ -844,36 +962,57 @@ func (h *handler) addContact(_ context.Context, req mcplib.CallToolRequest) (*mc
 
 	c := contacts.Contact{
 		Name:     name,
-		Email:    email,
+		Email:    addr,
 		Aliases:  aliases,
 		GPGKeyID: stringParam(req, "gpg_key_id", ""),
 		Notes:    stringParam(req, "notes", ""),
 	}
 
-	store, err := h.loadContacts()
-	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
+	// Set permissions for active identity if provided
+	permStr := stringParam(req, "permissions", "")
+	if permStr != "" {
+		if _, parseErr := contacts.ParsePermission(permStr); parseErr != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("invalid permissions %q: %v", permStr, parseErr)), nil
+		}
+		c.Permissions = map[string]string{
+			strings.ToLower(id.Email): permStr,
+		}
 	}
+
 	normalized, err := store.Add(c)
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
-	return textResult(formatContactAdded(contactToResult(normalized)))
+	return textResult(formatContactAdded(contactToResultWithPerms(normalized, id.Email, id.OwnerEmail)))
 }
 
 func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	id, _, store, err := h.resolveContext()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
 	name, err := req.RequireString("name")
 	if err != nil {
 		return mcplib.NewToolResultError("name is required"), nil
 	}
-	store, err := h.loadContacts()
-	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("load contacts: %v", err)), nil
+
+	// Check write permission before mutating. Find matches by name/email/alias
+	// but Remove works by canonical name, so resolve to the canonical name.
+	matches := store.Find(name)
+	if len(matches) == 0 {
+		return mcplib.NewToolResultError(fmt.Sprintf("contact %q not found", name)), nil
 	}
-	if err := store.Remove(name); err != nil {
+	canonical := matches[0].Name
+	perm := contacts.CheckPermission(matches[0], id.Email, id.OwnerEmail)
+	if !perm.Write {
+		return mcplib.NewToolResultError(fmt.Sprintf("permission denied: identity %s has %s on contact %q (write required)", id.Email, perm, canonical)), nil
+	}
+
+	if err := store.Remove(canonical); err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
-	return textResult(formatContactRemoved(removeContactResult{Status: "removed", Name: name}))
+	return textResult(formatContactRemoved(removeContactResult{Status: "removed", Name: canonical}))
 }
 
 // loadContactsIfNeeded and resolveField are now email.LoadContactsIfNeeded

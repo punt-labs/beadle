@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Multi-identity support via ethos sidecar (DES-013). Beadle reads the active
+  identity from ethos (`~/.punt-labs/ethos/identities/<handle>.yaml`) with
+  fallback to `default-identity` file and legacy `email.json`. Identity is
+  resolved per MCP tool call — no restart needed to switch identities.
+- Identity-scoped directories (`~/.punt-labs/beadle/identities/<email>/`) for
+  config, contacts, and attachments. Auto-migrates root files on first use.
+- Repo-local ethos config (`.punt-labs/ethos/config.yaml`) pins beadle's
+  identity to `claude` regardless of global active identity.
+- Per-identity rwx contact permissions (DES-012). Each contact can have
+  different permissions per identity: `r` (read/surface), `w` (reply),
+  `x` (execute instructions). Owner identity always gets `rwx`.
+  Default for contacts without explicit permissions: `r--`.
+- `add_contact` accepts optional `permissions` parameter (e.g., "rwx", "rw-").
+- `list_contacts` and `find_contact` show effective permissions for active identity.
+- `check_trust` includes identity permission alongside transport trust level.
+- `beadle-email status` shows active identity, source, and handle.
+- `beadle-email doctor` checks ethos availability.
+
 ## [0.4.0] - 2026-03-18
 
 ### Added

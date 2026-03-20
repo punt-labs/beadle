@@ -4,12 +4,67 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/identity"
+	"github.com/punt-labs/beadle/internal/paths"
 )
+
+// resolveConfig loads email config using identity resolution, falling back
+// to the explicit --config path. CLI commands use this instead of
+// email.LoadConfig directly.
+func resolveConfig(explicitPath string) (*email.Config, error) {
+	resolver, err := newResolver()
+	if err != nil {
+		return email.LoadConfig(explicitPath)
+	}
+	id, err := resolver.Resolve()
+	if err != nil {
+		return email.LoadConfig(explicitPath)
+	}
+	beadleDir, err := paths.DataDir()
+	if err != nil {
+		return email.LoadConfig(explicitPath)
+	}
+	idDir, err := identity.EnsureIdentityDir(beadleDir, id.Email)
+	if err != nil {
+		return email.LoadConfig(explicitPath)
+	}
+	cfg, err := email.LoadConfig(filepath.Join(idDir, "email.json"))
+	if err != nil {
+		return email.LoadConfig(explicitPath)
+	}
+	return cfg, nil
+}
+
+// resolveContactsPath returns the identity-scoped contacts path, or the default.
+// Ensures the identity directory exists so callers can read/write contacts.
+func resolveContactsPath() string {
+	resolver, err := newResolver()
+	if err != nil {
+		return defaultContactsPath()
+	}
+	id, err := resolver.Resolve()
+	if err != nil {
+		return defaultContactsPath()
+	}
+	beadleDir, err := paths.DataDir()
+	if err != nil {
+		return defaultContactsPath()
+	}
+	idDir, err := identity.EnsureIdentityDir(beadleDir, id.Email)
+	if err != nil {
+		return defaultContactsPath()
+	}
+	return filepath.Join(idDir, "contacts.json")
+}
+
+func defaultContactsPath() string {
+	return filepath.Join(paths.MustDataDir(), "contacts.json")
+}
 
 func runEmailList(g globalOpts, args []string) int {
 	folder := "INBOX"
@@ -43,7 +98,7 @@ func runEmailList(g globalOpts, args []string) int {
 	}
 
 	configPath := extractConfig(args)
-	cfg, err := email.LoadConfig(configPath)
+	cfg, err := resolveConfig(configPath)
 	if err != nil {
 		g.errorf("%v", err)
 		return 1
@@ -108,7 +163,7 @@ func runEmailRead(g globalOpts, args []string) int {
 	}
 
 	configPath := extractConfig(args)
-	cfg, err := email.LoadConfig(configPath)
+	cfg, err := resolveConfig(configPath)
 	if err != nil {
 		g.errorf("%v", err)
 		return 1
@@ -183,8 +238,8 @@ func runEmailSend(g globalOpts, args []string) int {
 		return 2
 	}
 
-	// Resolve contact names
-	contactsPath := contacts.DefaultPath()
+	// Resolve contact names using identity-scoped contacts
+	contactsPath := resolveContactsPath()
 	store, storeErr := email.LoadContactsIfNeeded(contactsPath, toRaw, ccRaw, bccRaw)
 	toResolved, err := email.ResolveField(store, storeErr, toRaw)
 	if err != nil {
@@ -212,7 +267,7 @@ func runEmailSend(g globalOpts, args []string) int {
 	}
 
 	configPath := extractConfig(args)
-	cfg, err := email.LoadConfig(configPath)
+	cfg, err := resolveConfig(configPath)
 	if err != nil {
 		g.errorf("%v", err)
 		return 1
@@ -270,7 +325,7 @@ func runEmailMove(g globalOpts, args []string) int {
 	}
 
 	configPath := extractConfig(args)
-	cfg, err := email.LoadConfig(configPath)
+	cfg, err := resolveConfig(configPath)
 	if err != nil {
 		g.errorf("%v", err)
 		return 1
@@ -298,7 +353,7 @@ func runEmailMove(g globalOpts, args []string) int {
 
 func runEmailFolders(g globalOpts, args []string) int {
 	configPath := extractConfig(args)
-	cfg, err := email.LoadConfig(configPath)
+	cfg, err := resolveConfig(configPath)
 	if err != nil {
 		g.errorf("%v", err)
 		return 1
