@@ -65,9 +65,27 @@ func validateHandle(handle string) error {
 	return nil
 }
 
+// ValidateEmailAsPath rejects email strings that would cause path traversal
+// when used as directory names. Called before using email in filepath.Join.
+func ValidateEmailAsPath(email string) error {
+	if email == "" {
+		return fmt.Errorf("email is empty")
+	}
+	if strings.ContainsAny(email, "/\\") {
+		return fmt.Errorf("email %q contains path separator", email)
+	}
+	if email == ".." || strings.Contains(email, "..") {
+		return fmt.Errorf("email %q contains parent directory reference", email)
+	}
+	return nil
+}
+
 func (r *Resolver) Resolve() (*Identity, error) {
 	// Try ethos-based resolution (steps 1-4)
-	handle := r.resolveHandle()
+	handle, err := r.resolveHandle()
+	if err != nil {
+		return nil, err
+	}
 	if handle != "" {
 		if err := validateHandle(handle); err != nil {
 			return nil, err
@@ -99,13 +117,18 @@ func (r *Resolver) Resolve() (*Identity, error) {
 
 // resolveHandle returns the active ethos handle, or "" if unavailable.
 // Checks repo-local config first, then global active file.
-func (r *Resolver) resolveHandle() string {
+// Returns an error if a config file exists but is corrupt (fail closed).
+func (r *Resolver) resolveHandle() (string, error) {
 	// Step 1: repo-local ethos config
 	if r.repoDir != "" {
 		repoConfig := filepath.Join(r.repoDir, ".punt-labs", "ethos", "config.yaml")
 		handle, err := readRepoEthosConfig(repoConfig)
 		if err == nil && handle != "" {
-			return handle
+			return handle, nil
+		}
+		// Fail closed: if file exists but is corrupt, don't fall back
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("repo-local ethos config %s: %w", repoConfig, err)
 		}
 	}
 
@@ -113,9 +136,9 @@ func (r *Resolver) resolveHandle() string {
 	activePath := filepath.Join(r.ethosDir, "active")
 	data, err := os.ReadFile(activePath)
 	if err != nil {
-		return ""
+		return "", nil //nolint: no ethos installed
 	}
-	return strings.TrimSpace(string(data))
+	return strings.TrimSpace(string(data)), nil
 }
 
 // repoEthosConfig is the structure of .punt-labs/ethos/config.yaml.
@@ -151,6 +174,9 @@ func (r *Resolver) fromEthos(handle string) (*Identity, error) {
 	}
 	if eid.Email == "" {
 		return nil, fmt.Errorf("ethos identity %s has no email field", idPath)
+	}
+	if err := ValidateEmailAsPath(eid.Email); err != nil {
+		return nil, fmt.Errorf("ethos identity %s: %w", idPath, err)
 	}
 
 	id := &Identity{
@@ -193,6 +219,9 @@ func (r *Resolver) fromDefault() (*Identity, error) {
 	if email == "" {
 		return nil, fmt.Errorf("default-identity file is empty")
 	}
+	if err := ValidateEmailAsPath(email); err != nil {
+		return nil, fmt.Errorf("default-identity: %w", err)
+	}
 	return &Identity{
 		Email:      email,
 		OwnerEmail: email, // default identity is its own owner
@@ -213,6 +242,9 @@ func (r *Resolver) fromLegacy() (*Identity, error) {
 	}
 	if cfg.FromAddress == "" {
 		return nil, fmt.Errorf("email.json has no from_address")
+	}
+	if err := ValidateEmailAsPath(cfg.FromAddress); err != nil {
+		return nil, fmt.Errorf("email.json from_address: %w", err)
 	}
 	return &Identity{
 		Email:      cfg.FromAddress,

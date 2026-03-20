@@ -302,7 +302,12 @@ func runStatus(g globalOpts, configPath string) int {
 	if idErr == nil {
 		idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
 		if pathErr == nil {
-			cfg, _ = email.LoadConfig(idConfigPath)
+			idCfg, cfgErr := email.LoadConfig(idConfigPath)
+			if cfgErr == nil {
+				cfg = idCfg
+			} else if !os.IsNotExist(cfgErr) {
+				fmt.Fprintf(os.Stderr, "warning: identity config %s: %v (using fallback)\n", idConfigPath, cfgErr)
+			}
 		}
 	}
 	if cfg == nil {

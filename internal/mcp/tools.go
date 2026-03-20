@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -50,36 +51,48 @@ type handler struct {
 	logger   *slog.Logger
 }
 
-// resolveContext resolves the active identity and loads the corresponding
-// config and contacts store. Called at the top of each tool handler.
-func (h *handler) resolveContext() (*identity.Identity, *email.Config, *contacts.Store, error) {
+// resolveIdentityAndConfig resolves the active identity and loads the
+// corresponding email config. Used by tools that don't need contacts.
+func (h *handler) resolveIdentityAndConfig() (*identity.Identity, *email.Config, string, error) {
 	id, err := h.resolver.Resolve()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("resolve identity: %w", err)
+		return nil, nil, "", fmt.Errorf("resolve identity: %w", err)
 	}
 
 	// Ensure identity-scoped directory exists (auto-migrate)
 	beadleDir, err := paths.DataDir()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("resolve data dir: %w", err)
+		return nil, nil, "", fmt.Errorf("resolve data dir: %w", err)
 	}
 	idDir, err := identity.EnsureIdentityDir(beadleDir, id.Email)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("ensure identity dir: %w", err)
+		return nil, nil, "", fmt.Errorf("ensure identity dir: %w", err)
 	}
 
-	// Load config from identity dir, fall back to root
+	// Load config from identity dir, fall back to root only if missing
 	configPath := filepath.Join(idDir, "email.json")
 	cfg, err := email.LoadConfig(configPath)
 	if err != nil {
-		// Fall back to root config
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, nil, "", fmt.Errorf("load identity config %s: %w", configPath, err)
+		}
 		cfg, err = email.LoadConfig(email.DefaultConfigPath())
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("load config: %w", err)
+			return nil, nil, "", fmt.Errorf("load config: %w", err)
 		}
 	}
 
-	// Load contacts from identity dir
+	return id, cfg, idDir, nil
+}
+
+// resolveContext resolves identity, config, and contacts.
+// Used by tools that need the address book.
+func (h *handler) resolveContext() (*identity.Identity, *email.Config, *contacts.Store, error) {
+	id, cfg, idDir, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	contactsPath := filepath.Join(idDir, "contacts.json")
 	store := contacts.NewStore(contactsPath)
 	if loadErr := store.Load(); loadErr != nil {
@@ -324,7 +337,7 @@ func (h *handler) withClient(cfg *email.Config, fn func(*email.Client) (*mcplib.
 }
 
 func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	_, cfg, _, err := h.resolveContext()
+	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -370,7 +383,7 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 }
 
 func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	_, cfg, _, err := h.resolveContext()
+	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -413,7 +426,7 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 }
 
 func (h *handler) listFolders(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	_, cfg, _, err := h.resolveContext()
+	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -491,7 +504,7 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 // trySendChain is now email.TrySendChain — called directly above.
 
 func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	_, cfg, _, err := h.resolveContext()
+	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -537,7 +550,7 @@ func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolReques
 }
 
 func (h *handler) showMIME(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	_, cfg, _, err := h.resolveContext()
+	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -624,7 +637,7 @@ type moveResult struct {
 }
 
 func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	_, cfg, _, err := h.resolveContext()
+	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -656,7 +669,7 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 }
 
 func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	id, cfg, _, err := h.resolveContext()
+	id, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -984,19 +997,22 @@ func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (
 		return mcplib.NewToolResultError("name is required"), nil
 	}
 
-	// Check write permission before mutating
+	// Check write permission before mutating. Find matches by name/email/alias
+	// but Remove works by canonical name, so resolve to the canonical name.
 	matches := store.Find(name)
-	if len(matches) > 0 {
-		perm := contacts.CheckPermission(matches[0], id.Email, id.OwnerEmail)
-		if !perm.Write {
-			return mcplib.NewToolResultError(fmt.Sprintf("permission denied: identity %s has %s on contact %q (write required)", id.Email, perm, name)), nil
-		}
+	if len(matches) == 0 {
+		return mcplib.NewToolResultError(fmt.Sprintf("contact %q not found", name)), nil
+	}
+	canonical := matches[0].Name
+	perm := contacts.CheckPermission(matches[0], id.Email, id.OwnerEmail)
+	if !perm.Write {
+		return mcplib.NewToolResultError(fmt.Sprintf("permission denied: identity %s has %s on contact %q (write required)", id.Email, perm, canonical)), nil
 	}
 
-	if err := store.Remove(name); err != nil {
+	if err := store.Remove(canonical); err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
-	return textResult(formatContactRemoved(removeContactResult{Status: "removed", Name: name}))
+	return textResult(formatContactRemoved(removeContactResult{Status: "removed", Name: canonical}))
 }
 
 // loadContactsIfNeeded and resolveField are now email.LoadContactsIfNeeded

@@ -1,22 +1,27 @@
 package email
 
-import "strings"
+import (
+	"net/mail"
+	"strings"
+)
 
 // ExtractEmailAddress extracts the email address from a From header value.
-// Handles "Name <email@example.com>" and bare "email@example.com" formats.
+// Uses net/mail.ParseAddress for RFC 5322 compliance. Falls back to bare
+// address detection for simple "user@domain" strings.
 func ExtractEmailAddress(from string) string {
 	from = strings.TrimSpace(from)
 	if from == "" {
 		return ""
 	}
-	// Try "Name <email>" format
-	if start := strings.LastIndex(from, "<"); start >= 0 {
-		if end := strings.Index(from[start:], ">"); end >= 0 {
-			return strings.TrimSpace(from[start+1 : start+end])
-		}
+
+	// Use stdlib parser for proper RFC 5322 handling
+	addr, err := mail.ParseAddress(from)
+	if err == nil && addr != nil {
+		return strings.TrimSpace(addr.Address)
 	}
-	// Bare email address
-	if strings.Contains(from, "@") {
+
+	// Fallback: bare email with no special characters
+	if strings.Contains(from, "@") && !strings.ContainsAny(from, " <>\"\t") {
 		return from
 	}
 	return ""
