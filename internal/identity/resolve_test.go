@@ -37,29 +37,7 @@ func TestResolve_EthosWithRepoConfig(t *testing.T) {
 	assert.Equal(t, "Claude Agento", id.Name)
 	assert.Equal(t, "claude@punt-labs.com", id.Email)
 	assert.Equal(t, "ABCD1234", id.GPGKeyID)
-	assert.Equal(t, "claude@punt-labs.com", id.OwnerEmail) // no owner_email in ext → defaults to own email
 	assert.Equal(t, "ethos", id.Source)
-}
-
-func TestResolve_EthosWithOwnerEmail(t *testing.T) {
-	ethosDir := t.TempDir()
-	beadleDir := t.TempDir()
-
-	require.NoError(t, os.WriteFile(filepath.Join(ethosDir, "active"), []byte("claude"), 0o640))
-
-	idDir := filepath.Join(ethosDir, "identities")
-	require.NoError(t, os.MkdirAll(idDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(idDir, "claude.yaml"), []byte("name: Claude\nhandle: claude\nemail: claude@punt-labs.com\n"), 0o640))
-
-	extDir := filepath.Join(idDir, "claude.ext")
-	require.NoError(t, os.MkdirAll(extDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(extDir, "beadle.yaml"), []byte("gpg_key_id: KEY1\nowner_email: jim@punt-labs.com\n"), 0o640))
-
-	r := NewResolver(ethosDir, beadleDir, "")
-	id, err := r.Resolve()
-	require.NoError(t, err)
-	assert.Equal(t, "jim@punt-labs.com", id.OwnerEmail)
-	assert.Equal(t, "KEY1", id.GPGKeyID)
 }
 
 func TestResolve_EthosCorruptExtensionErrors(t *testing.T) {

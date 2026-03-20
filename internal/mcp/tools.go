@@ -614,7 +614,7 @@ func (h *handler) checkTrust(ctx context.Context, req mcplib.CallToolRequest) (*
 			if senderEmail != "" {
 				matches := store.Find(senderEmail)
 				if len(matches) > 0 {
-					perm := contacts.CheckPermission(matches[0], id.Email, id.OwnerEmail)
+					perm := contacts.CheckPermission(matches[0], id.Email)
 					senderPerm = perm.String()
 				}
 			}
@@ -911,9 +911,9 @@ func contactToResult(c contacts.Contact) contactResult {
 }
 
 // contactToResultWithPerms includes the effective permission for the active identity.
-func contactToResultWithPerms(c contacts.Contact, identityEmail, ownerEmail string) contactResult {
+func contactToResultWithPerms(c contacts.Contact, identityEmail string) contactResult {
 	r := contactToResult(c)
-	perm := contacts.CheckPermission(c, identityEmail, ownerEmail)
+	perm := contacts.CheckPermission(c, identityEmail)
 	r.Permissions = perm.String()
 	return r
 }
@@ -923,7 +923,7 @@ func (h *handler) listContacts(_ context.Context, _ mcplib.CallToolRequest) (*mc
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
-	results := contactsToResultsWithPerms(store.Contacts(), id.Email, id.OwnerEmail)
+	results := contactsToResultsWithPerms(store.Contacts(), id.Email)
 	return textResult(formatContacts(results))
 }
 
@@ -937,7 +937,7 @@ func (h *handler) findContact(_ context.Context, req mcplib.CallToolRequest) (*m
 		return mcplib.NewToolResultError("query is required"), nil
 	}
 	matches := store.Find(query)
-	results := contactsToResultsWithPerms(matches, id.Email, id.OwnerEmail)
+	results := contactsToResultsWithPerms(matches, id.Email)
 	return textResult(formatContacts(results))
 }
 
@@ -983,11 +983,11 @@ func (h *handler) addContact(_ context.Context, req mcplib.CallToolRequest) (*mc
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
-	return textResult(formatContactAdded(contactToResultWithPerms(normalized, id.Email, id.OwnerEmail)))
+	return textResult(formatContactAdded(contactToResultWithPerms(normalized, id.Email)))
 }
 
 func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	id, _, store, err := h.resolveContext()
+	_, _, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -997,17 +997,13 @@ func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (
 		return mcplib.NewToolResultError("name is required"), nil
 	}
 
-	// Check write permission before mutating. Find matches by name/email/alias
-	// but Remove works by canonical name, so resolve to the canonical name.
+	// Find matches by name/email/alias to resolve the canonical name,
+	// since Remove works by canonical name.
 	matches := store.Find(name)
 	if len(matches) == 0 {
 		return mcplib.NewToolResultError(fmt.Sprintf("contact %q not found", name)), nil
 	}
 	canonical := matches[0].Name
-	perm := contacts.CheckPermission(matches[0], id.Email, id.OwnerEmail)
-	if !perm.Write {
-		return mcplib.NewToolResultError(fmt.Sprintf("permission denied: identity %s has %s on contact %q (write required)", id.Email, perm, canonical)), nil
-	}
 
 	if err := store.Remove(canonical); err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
