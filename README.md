@@ -14,47 +14,34 @@ The first shipping component is `beadle-email` — an MCP server providing email
 
 ## Quick Start
 
-Two install paths (mutually exclusive per [DES-011](DESIGN.md)). Do not install both — this creates duplicate MCP server registrations.
-
-### Claude Code Plugin (full experience)
-
 ```bash
-claude plugin install punt-labs/beadle
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/main/install.sh | sh
 ```
 
-Provides MCP tools, slash commands (`/inbox`, `/mail`, `/send`), output suppression, and lifecycle hooks. Marketplace releases use the prod plugin name (`beadle`) which enables command deployment.
-
-### MCP-only (standalone)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/24c56a5/install.sh | sh
-```
-
-Registers the MCP server with Claude Code. For other MCP clients, use the manual install below and configure your client to run `beadle-email serve`.
-
-<details>
-<summary>Manual install</summary>
-
-```bash
-mkdir -p ~/.local/bin
-curl -fsSL https://github.com/punt-labs/beadle/releases/latest/download/beadle-email-darwin-arm64 -o ~/.local/bin/beadle-email
-chmod +x ~/.local/bin/beadle-email
-claude mcp add -s user beadle-email -- ~/.local/bin/beadle-email serve
-```
-
-Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
-Ensure `~/.local/bin` is on your `PATH`.
-
-</details>
+Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts to install the Claude Code plugin (MCP tools + slash commands + hooks). If plugin installation fails, the script falls back to registering the standalone MCP server (no slash commands or hooks). Runs `doctor` to check your setup. Restart Claude Code after install. If you previously registered `beadle-email` as a standalone MCP server via `claude mcp add`, remove it first with `claude mcp remove beadle-email` to avoid duplicate registrations.
 
 <details>
 <summary>Inspect before running</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/24c56a5/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/main/install.sh -o install.sh
 cat install.sh
 sh install.sh
 ```
+
+</details>
+
+<details>
+<summary>Manual install (other MCP clients)</summary>
+
+```bash
+mkdir -p ~/.local/bin
+curl -fsSL https://github.com/punt-labs/beadle/releases/latest/download/beadle-email-darwin-arm64 -o ~/.local/bin/beadle-email
+chmod +x ~/.local/bin/beadle-email
+```
+
+Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
+Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadle-email serve`.
 
 </details>
 
