@@ -279,9 +279,10 @@ Contact {
 
 **Status:** Implemented. Identity resolved via ethos sidecar (DES-013).
 Contact `Permissions` field stores `map[identity_email]string` with rwx
-values. `CheckPermission()` looks up stored permissions and defaults to
-`r--`. No implicit overrides. MCP tools expose effective permissions in
-`list_contacts`, `find_contact`, and `check_trust` responses.
+values. `CheckPermission()` looks up stored permissions and, when none are
+set, defaults to `---` (no access; whitelist model). No implicit overrides.
+MCP tools expose effective permissions in `list_contacts`, `find_contact`,
+and `check_trust` responses.
 
 **Scope of rwx permissions:** The rwx model governs inbound mail processing
 behavior — how beadle handles messages from a given sender when operating as

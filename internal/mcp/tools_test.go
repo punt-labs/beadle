@@ -12,7 +12,7 @@ import (
 )
 
 func TestSenderPermission(t *testing.T) {
-	// Create a store with a known contact
+	// Create an empty store (nonexistent file, no contacts) to test unknown-sender defaults
 	store := contacts.NewStore("/nonexistent/contacts.json")
 	// Load returns nil error for missing file (empty store)
 	_ = store.Load()

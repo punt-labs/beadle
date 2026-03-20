@@ -516,19 +516,19 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 			denied = append(denied, addr+" (invalid address)")
 			continue
 		}
-		matches := store.Find(recipientEmail)
-		if len(matches) == 0 {
-			denied = append(denied, recipientEmail)
+		match, ok := findByEmail(store, recipientEmail)
+		if !ok {
+			denied = append(denied, recipientEmail+" (unknown contact)")
 			continue
 		}
-		perm := contacts.CheckPermission(matches[0], id.Email)
+		perm := contacts.CheckPermission(match, id.Email)
 		if !perm.Write {
-			denied = append(denied, recipientEmail)
+			denied = append(denied, recipientEmail+" (no write permission)")
 		}
 	}
 	if len(denied) > 0 {
 		return mcplib.NewToolResultError(
-			fmt.Sprintf("permission denied: %d recipient(s) lack write permission", len(denied)),
+			fmt.Sprintf("permission denied: no write permission for: %s", strings.Join(denied, ", ")),
 		), nil
 	}
 
@@ -941,11 +941,24 @@ func senderPermission(store *contacts.Store, id *identity.Identity, from string)
 	if senderEmail == "" {
 		return contacts.Permission{}, ""
 	}
-	matches := store.Find(senderEmail)
-	if len(matches) == 0 {
+	match, ok := findByEmail(store, senderEmail)
+	if !ok {
 		return contacts.Permission{}, senderEmail
 	}
-	return contacts.CheckPermission(matches[0], id.Email), senderEmail
+	return contacts.CheckPermission(match, id.Email), senderEmail
+}
+
+// findByEmail returns the first contact whose Email field matches addr
+// (case-insensitive). This is stricter than store.Find, which also matches
+// on Name and Alias — preventing a contact whose name happens to be an
+// email address from granting unintended permissions.
+func findByEmail(store *contacts.Store, addr string) (contacts.Contact, bool) {
+	for _, c := range store.Find(addr) {
+		if strings.EqualFold(c.Email, addr) {
+			return c, true
+		}
+	}
+	return contacts.Contact{}, false
 }
 
 // --- Contact Handlers ---
