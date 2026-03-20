@@ -147,6 +147,9 @@ func formatContacts(cs []contactResult) string {
 	var b strings.Builder
 	for _, c := range cs {
 		fmt.Fprintf(&b, "%-20s %-30s", c.Name, c.Email)
+		if c.Permissions != "" {
+			fmt.Fprintf(&b, "  %s", c.Permissions)
+		}
 		if len(c.Aliases) > 0 {
 			fmt.Fprintf(&b, "  [%s]", strings.Join(c.Aliases, ", "))
 		}
@@ -173,11 +176,18 @@ func truncate(s string, max int) string {
 	return string(runes[:max-1]) + "…"
 }
 
-// contactsToResults converts a slice of contacts.Contact to contactResult.
-func contactsToResults(cs []contacts.Contact) []contactResult {
+// contactsToResultsWithPerms converts contacts with effective permissions.
+func contactsToResultsWithPerms(cs []contacts.Contact, identityEmail, ownerEmail string) []contactResult {
 	results := make([]contactResult, 0, len(cs))
 	for _, c := range cs {
-		results = append(results, contactToResult(c))
+		results = append(results, contactToResultWithPerms(c, identityEmail, ownerEmail))
 	}
 	return results
+}
+
+// formatTrustResultWithPerm formats a trust result with identity permission.
+func formatTrustResultWithPerm(r email.TrustResult, perm string) string {
+	s := formatTrustResult(r)
+	s += " · perm:" + perm
+	return s
 }

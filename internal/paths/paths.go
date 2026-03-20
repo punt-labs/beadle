@@ -29,3 +29,39 @@ func MustDataDir() string {
 	}
 	return dir
 }
+
+// EthosDir returns ~/.punt-labs/ethos/.
+func EthosDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	return filepath.Join(home, ".punt-labs", "ethos"), nil
+}
+
+// IdentityDir returns ~/.punt-labs/beadle/identities/<email>/.
+func IdentityDir(email string) (string, error) {
+	base, err := DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "identities", email), nil
+}
+
+// IdentityConfigPath returns the email.json path for a given identity.
+func IdentityConfigPath(email string) (string, error) {
+	dir, err := IdentityDir(email)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "email.json"), nil
+}
+
+// IdentityContactsPath returns the contacts.json path for a given identity.
+func IdentityContactsPath(email string) (string, error) {
+	dir, err := IdentityDir(email)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "contacts.json"), nil
+}
