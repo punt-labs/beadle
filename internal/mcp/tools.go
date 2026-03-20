@@ -983,7 +983,7 @@ func (h *handler) addContact(_ context.Context, req mcplib.CallToolRequest) (*mc
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
-	return textResult(formatContactAdded(contactToResult(normalized)))
+	return textResult(formatContactAdded(contactToResultWithPerms(normalized, id.Email, id.OwnerEmail)))
 }
 
 func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {

@@ -11,6 +11,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -305,7 +306,7 @@ func runStatus(g globalOpts, configPath string) int {
 			idCfg, cfgErr := email.LoadConfig(idConfigPath)
 			if cfgErr == nil {
 				cfg = idCfg
-			} else if !os.IsNotExist(cfgErr) {
+			} else if !errors.Is(cfgErr, os.ErrNotExist) {
 				fmt.Fprintf(os.Stderr, "warning: identity config %s: %v (using fallback)\n", idConfigPath, cfgErr)
 			}
 		}
