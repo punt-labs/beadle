@@ -79,7 +79,7 @@ if [[ "$TOOL_NAME" == "list_messages" ]]; then
     emit "$RESULT"
   else
     SUMMARY=$(printf '%s' "$RESULT" | head -1)
-    emit "${SUMMARY} messages" "$RESULT"
+    emit "${SUMMARY}" "$RESULT"
   fi
   exit 0
 fi
@@ -99,7 +99,7 @@ if [[ "$TOOL_NAME" == "list_folders" ]]; then
   if [[ "$RESULT" == "No folders." ]]; then
     emit "$RESULT"
   else
-    COUNT=$(printf '%s' "$RESULT" | grep -c '[^ ]')
+    COUNT=$(printf '%s' "$RESULT" | grep -c '^   ')
     emit "${COUNT} folders" "$RESULT"
   fi
   exit 0
@@ -123,7 +123,7 @@ if [[ "$TOOL_NAME" == "show_mime" ]]; then
   if [[ "$RESULT" == "No MIME parts." ]]; then
     emit "$RESULT"
   else
-    COUNT=$(printf '%s' "$RESULT" | grep -c '[^ ]')
+    COUNT=$(printf '%s' "$RESULT" | grep -c '^   ')
     emit "${COUNT} parts" "$RESULT"
   fi
   exit 0
@@ -154,7 +154,7 @@ if [[ "$TOOL_NAME" == "list_contacts" ]]; then
   if [[ "$RESULT" == "No contacts." ]]; then
     emit "$RESULT"
   else
-    COUNT=$(printf '%s' "$RESULT" | grep -c '[^ ]')
+    COUNT=$(printf '%s' "$RESULT" | grep -c '^   ')
     emit "${COUNT} contacts" "$RESULT"
   fi
   exit 0
@@ -165,7 +165,7 @@ if [[ "$TOOL_NAME" == "find_contact" ]]; then
   if [[ "$RESULT" == "No contacts." ]]; then
     emit "no matches"
   else
-    COUNT=$(printf '%s' "$RESULT" | grep -c '[^ ]')
+    COUNT=$(printf '%s' "$RESULT" | grep -c '^   ')
     emit "${COUNT} matches" "$RESULT"
   fi
   exit 0

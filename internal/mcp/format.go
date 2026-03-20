@@ -41,13 +41,13 @@ func formatMessages(msgs []channel.MessageSummary, total int) string {
 			marker,
 			m.ID,
 			email.ExtractDisplayName(m.From),
-			m.Date.Format("Mar 02 15:04"),
+			m.Date.Format("Jan 02 15:04"),
 			trustIcon(m.TrustLevel),
 			m.Subject,
 		}
 	}
 	table := formatTable(cols, rows)
-	return fmt.Sprintf("showing %d of %d\n%s", len(msgs), total, table)
+	return fmt.Sprintf("showing %d of %d messages\n%s", len(msgs), total, table)
 }
 
 // formatMessage formats a full message for display.

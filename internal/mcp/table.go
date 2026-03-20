@@ -128,11 +128,12 @@ func truncateRunes(s string, maxRunes int) string {
 // fmtKV formats a key-value header block (From, To, Subject, etc.)
 // with aligned keys. Uses the same 3-space prefix as table rows.
 func fmtKV(pairs [][2]string) string {
-	// Find max key width.
+	// Find max key width (including colon).
 	maxKey := 0
 	for _, p := range pairs {
-		if len(p[0]) > maxKey {
-			maxKey = len(p[0])
+		w := len(p[0]) + 1 // +1 for colon
+		if w > maxKey {
+			maxKey = w
 		}
 	}
 	var b strings.Builder
