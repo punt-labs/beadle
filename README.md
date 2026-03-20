@@ -185,7 +185,7 @@ Each contact has an optional `permissions` map keyed by identity email. Permissi
 | `w` (write) | Beadle may compose and send replies to this contact. |
 | `x` (execute) | Beadle may execute instructions from this contact. |
 
-All permissions are stored explicitly. There are no implicit overrides. Contacts without explicit permissions default to `r--`. This is orthogonal to transport trust — both must be sufficient for autonomous action.
+All permissions are stored explicitly. There are no implicit overrides. Contacts without explicit permissions default to `---` (no permissions). The address book is a whitelist: messages from unknown senders appear redacted in listings and cannot be read. `r` and `w` are enforced; `x` enforcement is planned. This is orthogonal to transport trust — both must be sufficient for autonomous action.
 
 ## CLI
 

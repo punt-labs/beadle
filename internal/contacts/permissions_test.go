@@ -71,13 +71,13 @@ func TestCheckPermission_Explicit(t *testing.T) {
 func TestCheckPermission_Default(t *testing.T) {
 	c := Contact{Name: "Unknown", Email: "unknown@test.com"}
 	perm := CheckPermission(c, "claude@punt-labs.com")
-	assert.Equal(t, Permission{true, false, false}, perm)
+	assert.Equal(t, Permission{}, perm)
 }
 
 func TestCheckPermission_NilMap(t *testing.T) {
 	c := Contact{Name: "Test", Email: "test@test.com", Permissions: nil}
 	perm := CheckPermission(c, "claude@punt-labs.com")
-	assert.Equal(t, "r--", perm.String())
+	assert.Equal(t, "---", perm.String())
 }
 
 func TestCheckPermission_MalformedFallsToDefault(t *testing.T) {
@@ -89,7 +89,7 @@ func TestCheckPermission_MalformedFallsToDefault(t *testing.T) {
 		},
 	}
 	perm := CheckPermission(c, "claude@punt-labs.com")
-	assert.Equal(t, "r--", perm.String())
+	assert.Equal(t, "---", perm.String())
 }
 
 func TestParsePermission_Roundtrip(t *testing.T) {
