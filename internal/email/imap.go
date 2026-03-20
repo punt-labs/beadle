@@ -88,8 +88,9 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool) ([]chan
 
 	// Clamp count to a safe range for uint32 conversion.
 	if count <= 0 {
-		count = 10
-	} else if count > int(mbox.NumMessages) {
+		return []channel.MessageSummary{}, nil
+	}
+	if count > int(mbox.NumMessages) {
 		count = int(mbox.NumMessages)
 	}
 

@@ -86,7 +86,7 @@ fi
 
 # ── read_message ───────────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "read_message" ]]; then
-  SUBJ=$(printf '%s' "$RESULT" | grep '^Subject:' | head -1 | cut -c10-70)
+  SUBJ=$(printf '%s' "$RESULT" | grep '^Subject:' | head -1 | sed 's/^Subject: *//')
   if [[ -z "$SUBJ" ]]; then
     SUBJ="(no subject)"
   fi
@@ -113,7 +113,7 @@ fi
 
 # ── verify_signature ───────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "verify_signature" ]]; then
-  FIRST=$(printf '%s' "$RESULT" | head -1 | cut -c1-60)
+  FIRST=$(printf '%s' "$RESULT" | head -1)
   emit "${FIRST}" "$RESULT"
   exit 0
 fi
@@ -131,7 +131,7 @@ fi
 
 # ── check_trust ────────────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "check_trust" ]]; then
-  FIRST=$(printf '%s' "$RESULT" | head -1 | cut -c1-60)
+  FIRST=$(printf '%s' "$RESULT" | head -1)
   emit "${FIRST}" "$RESULT"
   exit 0
 fi
@@ -144,7 +144,7 @@ fi
 
 # ── download_attachment ────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "download_attachment" ]]; then
-  FIRST=$(printf '%s' "$RESULT" | head -1 | cut -c1-60)
+  FIRST=$(printf '%s' "$RESULT" | head -1)
   emit "${FIRST}" "$RESULT"
   exit 0
 fi
