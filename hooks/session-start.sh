@@ -140,7 +140,7 @@ if [[ -n "$BEADLE_CONFIG" ]] && [[ -f "$BEADLE_CONFIG" ]]; then
 fi
 
 if [[ "$INBOX_POLL" == "n" ]]; then
-  ACTIONS+=("Inbox polling disabled — call CronList and CronDelete any job whose prompt is exactly '/inbox'")
+  ACTIONS+=("Inbox polling disabled")
 else
   case "$INBOX_POLL" in
     5m)  CRON_EXPR="*/5 * * * *" ;;
@@ -152,7 +152,7 @@ else
     *)   CRON_EXPR="*/30 * * * *"
          ACTIONS+=("Unknown inbox_poll value '$INBOX_POLL' in $BEADLE_CONFIG — falling back to 30m") ;;
   esac
-  ACTIONS+=("Schedule inbox polling: call CronCreate with cron '$CRON_EXPR' and prompt '/inbox' (recurring: true) — first call CronList and CronDelete any job whose prompt is exactly '/inbox' to avoid duplicates")
+  ACTIONS+=("Execute: CronCreate cron='$CRON_EXPR' prompt='/inbox' recurring=true")
 fi
 
 # ── First-run check: verify beadle-email binary is available ──────────
