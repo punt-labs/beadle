@@ -56,19 +56,6 @@ func TestPermission_String(t *testing.T) {
 	}
 }
 
-func TestCheckPermission_Owner(t *testing.T) {
-	c := Contact{Name: "Jim", Email: "jim@test.com"}
-	// Owner always gets rwx regardless of stored permissions
-	perm := CheckPermission(c, "jim@punt-labs.com", "jim@punt-labs.com")
-	assert.Equal(t, Permission{true, true, true}, perm)
-}
-
-func TestCheckPermission_OwnerCaseInsensitive(t *testing.T) {
-	c := Contact{Name: "Jim", Email: "jim@test.com"}
-	perm := CheckPermission(c, "Jim@Punt-Labs.com", "jim@punt-labs.com")
-	assert.Equal(t, Permission{true, true, true}, perm)
-}
-
 func TestCheckPermission_Explicit(t *testing.T) {
 	c := Contact{
 		Name:  "Eric",
@@ -77,19 +64,19 @@ func TestCheckPermission_Explicit(t *testing.T) {
 			"claude@punt-labs.com": "rw-",
 		},
 	}
-	perm := CheckPermission(c, "claude@punt-labs.com", "jim@punt-labs.com")
+	perm := CheckPermission(c, "claude@punt-labs.com")
 	assert.Equal(t, Permission{true, true, false}, perm)
 }
 
 func TestCheckPermission_Default(t *testing.T) {
 	c := Contact{Name: "Unknown", Email: "unknown@test.com"}
-	perm := CheckPermission(c, "claude@punt-labs.com", "jim@punt-labs.com")
+	perm := CheckPermission(c, "claude@punt-labs.com")
 	assert.Equal(t, Permission{true, false, false}, perm)
 }
 
 func TestCheckPermission_NilMap(t *testing.T) {
 	c := Contact{Name: "Test", Email: "test@test.com", Permissions: nil}
-	perm := CheckPermission(c, "claude@punt-labs.com", "jim@punt-labs.com")
+	perm := CheckPermission(c, "claude@punt-labs.com")
 	assert.Equal(t, "r--", perm.String())
 }
 
@@ -101,7 +88,7 @@ func TestCheckPermission_MalformedFallsToDefault(t *testing.T) {
 			"claude@punt-labs.com": "invalid",
 		},
 	}
-	perm := CheckPermission(c, "claude@punt-labs.com", "jim@punt-labs.com")
+	perm := CheckPermission(c, "claude@punt-labs.com")
 	assert.Equal(t, "r--", perm.String())
 }
 

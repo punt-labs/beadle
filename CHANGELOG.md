@@ -18,13 +18,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   identity to `claude` regardless of global active identity.
 - Per-identity rwx contact permissions (DES-012). Each contact can have
   different permissions per identity: `r` (read/surface), `w` (reply),
-  `x` (execute instructions). Owner identity always gets `rwx`.
+  `x` (execute instructions). All permissions are stored explicitly.
   Default for contacts without explicit permissions: `r--`.
 - `add_contact` accepts optional `permissions` parameter (e.g., "rwx", "rw-").
 - `list_contacts` and `find_contact` show effective permissions for active identity.
 - `check_trust` includes identity permission alongside transport trust level.
 - `beadle-email status` shows active identity, source, and handle.
 - `beadle-email doctor` checks ethos availability.
+
+### Fixed
+
+- Removed incorrect owner override from `CheckPermission` — all permissions
+  are now stored explicitly per DES-012. The owner identity no longer gets
+  implicit `rwx`; permissions must be set in the contact's permissions map.
+- Removed permission gate from `remove_contact` — rwx permissions govern
+  inbound mail processing behavior, not address book CRUD operations.
 
 ## [0.4.0] - 2026-03-18
 

@@ -5,10 +5,9 @@ package identity
 
 // Identity represents the active beadle identity.
 type Identity struct {
-	Handle     string // ethos handle ("claude"), empty for non-ethos sources
-	Name       string // display name ("Claude Agento")
-	Email      string // email address — directory key
-	GPGKeyID   string // from beadle extension (optional)
-	OwnerEmail string // owner's email — owner always gets rwx on contacts
-	Source     string // "ethos", "default", or "legacy"
+	Handle   string // ethos handle ("claude"), empty for non-ethos sources
+	Name     string // display name ("Claude Agento")
+	Email    string // email address — directory key
+	GPGKeyID string // from beadle extension (optional)
+	Source   string // "ethos", "default", or "legacy"
 }

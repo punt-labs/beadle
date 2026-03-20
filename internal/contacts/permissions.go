@@ -67,18 +67,12 @@ func (p Permission) String() string {
 }
 
 // CheckPermission returns the effective permission for a contact given
-// the active identity email and the owner email.
+// the active identity email.
 //
 // Rules:
-//   - Owner identity always gets rwx (enforced, not stored).
 //   - Explicit entry in contact.Permissions[identityEmail] is parsed.
 //   - Default: r-- (read only).
-func CheckPermission(c Contact, identityEmail, ownerEmail string) Permission {
-	// Owner override — always rwx
-	if strings.EqualFold(identityEmail, ownerEmail) {
-		return Permission{Read: true, Write: true, Execute: true}
-	}
-
+func CheckPermission(c Contact, identityEmail string) Permission {
 	// Explicit permission for this identity
 	if c.Permissions != nil {
 		if perm, ok := c.Permissions[strings.ToLower(identityEmail)]; ok {
