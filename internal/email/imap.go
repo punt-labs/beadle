@@ -86,6 +86,13 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool) ([]chan
 		return []channel.MessageSummary{}, nil
 	}
 
+	// Clamp count to a safe range for uint32 conversion.
+	if count <= 0 {
+		count = 10
+	} else if count > int(mbox.NumMessages) {
+		count = int(mbox.NumMessages)
+	}
+
 	// Determine which messages to fetch
 	var numSet imap.NumSet
 	if unreadOnly {
