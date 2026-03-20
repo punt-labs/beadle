@@ -76,19 +76,26 @@ func (c *Client) ListFolders() ([]channel.Folder, error) {
 }
 
 // ListMessages returns recent messages from a folder.
-func (c *Client) ListMessages(folder string, count int, unreadOnly bool) ([]channel.MessageSummary, error) {
+// ListResult holds the messages returned by ListMessages along with the
+// total number of messages matching the query criteria.
+type ListResult struct {
+	Messages []channel.MessageSummary
+	Total    int // total matching messages (before count limit)
+}
+
+func (c *Client) ListMessages(folder string, count int, unreadOnly bool) (*ListResult, error) {
 	mbox, err := c.imap.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {
 		return nil, fmt.Errorf("select %q: %w", folder, err)
 	}
 
 	if mbox.NumMessages == 0 {
-		return []channel.MessageSummary{}, nil
+		return &ListResult{}, nil
 	}
 
 	// Clamp count to a safe range for uint32 conversion.
 	if count <= 0 {
-		return []channel.MessageSummary{}, nil
+		return &ListResult{}, nil
 	}
 	if count > int(mbox.NumMessages) {
 		count = int(mbox.NumMessages)
@@ -96,6 +103,7 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool) ([]chan
 
 	// Determine which messages to fetch
 	var numSet imap.NumSet
+	var total int
 	if unreadOnly {
 		searchData, err := c.imap.UIDSearch(&imap.SearchCriteria{
 			NotFlag: []imap.Flag{imap.FlagSeen},
@@ -104,8 +112,9 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool) ([]chan
 			return nil, fmt.Errorf("search unseen: %w", err)
 		}
 		uids := searchData.AllUIDs()
-		if len(uids) == 0 {
-			return []channel.MessageSummary{}, nil
+		total = len(uids)
+		if total == 0 {
+			return &ListResult{}, nil
 		}
 		// Take the last `count` UIDs
 		if len(uids) > count {
@@ -113,6 +122,7 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool) ([]chan
 		}
 		numSet = imap.UIDSetNum(uids...)
 	} else {
+		total = int(mbox.NumMessages)
 		// Fetch the last `count` messages by sequence number
 		start := uint32(1)
 		if mbox.NumMessages > uint32(count) {
@@ -176,7 +186,7 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool) ([]chan
 		})
 	}
 
-	return summaries, nil
+	return &ListResult{Messages: summaries, Total: total}, nil
 }
 
 // FetchMessage retrieves a full message by UID from the given folder.

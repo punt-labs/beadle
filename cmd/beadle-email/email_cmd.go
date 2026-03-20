@@ -112,14 +112,14 @@ func runEmailList(g globalOpts, args []string) int {
 	}
 	defer client.Close()
 
-	messages, err := client.ListMessages(folder, count, unreadOnly)
+	lr, err := client.ListMessages(folder, count, unreadOnly)
 	if err != nil {
 		g.errorf("list messages: %v", err)
 		return 1
 	}
 
-	g.printResult(messages, func() {
-		for _, m := range messages {
+	g.printResult(lr.Messages, func() {
+		for _, m := range lr.Messages {
 			unread := " "
 			if m.Unread {
 				unread = "*"

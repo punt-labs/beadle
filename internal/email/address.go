@@ -38,3 +38,32 @@ func ExtractEmailAddress(from string) string {
 	}
 	return ""
 }
+
+// ExtractDisplayName extracts the display name from a From header value.
+// Returns the name part before angle brackets, or the email address if
+// no display name is present.
+func ExtractDisplayName(from string) string {
+	from = strings.TrimSpace(from)
+	if from == "" {
+		return ""
+	}
+
+	// Try stdlib parser first.
+	addr, err := mail.ParseAddress(from)
+	if err == nil && addr != nil {
+		if addr.Name != "" {
+			return addr.Name
+		}
+		return addr.Address
+	}
+
+	// Fallback: extract text before angle brackets.
+	if idx := strings.LastIndex(from, "<"); idx > 0 {
+		name := strings.TrimSpace(from[:idx])
+		if name != "" {
+			return name
+		}
+	}
+
+	return from
+}

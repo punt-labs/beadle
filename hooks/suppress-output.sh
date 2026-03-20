@@ -78,15 +78,15 @@ if [[ "$TOOL_NAME" == "list_messages" ]]; then
   if [[ "$RESULT" == "No messages." ]]; then
     emit "$RESULT"
   else
-    COUNT=$(printf '%s' "$RESULT" | grep -c '^ *[* ] ')
-    emit "${COUNT} messages" "$RESULT"
+    SUMMARY=$(printf '%s' "$RESULT" | head -1)
+    emit "${SUMMARY} messages" "$RESULT"
   fi
   exit 0
 fi
 
 # ── read_message ───────────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "read_message" ]]; then
-  SUBJ=$(printf '%s' "$RESULT" | grep '^Subject:' | head -1 | sed 's/^Subject: *//')
+  SUBJ=$(printf '%s' "$RESULT" | grep 'Subject:' | head -1 | sed 's/.*Subject: *//')
   if [[ -z "$SUBJ" ]]; then
     SUBJ="(no subject)"
   fi

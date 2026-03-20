@@ -347,46 +347,46 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 	unreadOnly := boolParam(req, "unread_only")
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		msgs, err := c.ListMessages(folder, count, unreadOnly)
+		lr, err := c.ListMessages(folder, count, unreadOnly)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("list messages: %v", err)), nil
 		}
 
 		// Verify PGP signatures inline so trust levels are accurate
-		for i := range msgs {
-			if !msgs[i].HasSig {
+		for i := range lr.Messages {
+			if !lr.Messages[i].HasSig {
 				continue
 			}
-			uid, parseErr := strconv.ParseUint(msgs[i].ID, 10, 32)
+			uid, parseErr := strconv.ParseUint(lr.Messages[i].ID, 10, 32)
 			if parseErr != nil {
 				continue
 			}
 			raw, fetchErr := c.FetchRaw(folder, uint32(uid))
 			if fetchErr != nil {
-				h.logger.Warn("pgp: fetch raw failed", "uid", msgs[i].ID, "err", fetchErr)
+				h.logger.Warn("pgp: fetch raw failed", "uid", lr.Messages[i].ID, "err", fetchErr)
 				continue
 			}
 			result, verifyErr := pgp.Verify(cfg.GPGBinary, raw)
 			if verifyErr != nil {
-				h.logger.Warn("pgp: verify failed", "uid", msgs[i].ID, "err", verifyErr)
+				h.logger.Warn("pgp: verify failed", "uid", lr.Messages[i].ID, "err", verifyErr)
 				continue
 			}
 			if result.Valid {
-				msgs[i].TrustLevel = channel.Verified
+				lr.Messages[i].TrustLevel = channel.Verified
 			} else {
-				msgs[i].TrustLevel = channel.Untrusted
+				lr.Messages[i].TrustLevel = channel.Untrusted
 			}
 		}
 
 		// Enforce read permission: redact subjects for senders without r
-		for i := range msgs {
-			perm, _ := senderPermission(store, id, msgs[i].From)
+		for i := range lr.Messages {
+			perm, _ := senderPermission(store, id, lr.Messages[i].From)
 			if !perm.Read {
-				msgs[i].Subject = "[redacted — no read permission]"
+				lr.Messages[i].Subject = "[redacted — no read permission]"
 			}
 		}
 
-		return textResult(formatMessages(msgs))
+		return textResult(formatMessages(lr.Messages, lr.Total))
 	})
 }
 

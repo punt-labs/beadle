@@ -3,7 +3,6 @@ package mcp
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/contacts"
@@ -19,59 +18,76 @@ func textResult(s string) (*mcplib.CallToolResult, error) {
 }
 
 // formatMessages formats a list of message summaries as a table.
-func formatMessages(msgs []channel.MessageSummary) string {
+// total is the total number of messages matching the query criteria.
+func formatMessages(msgs []channel.MessageSummary, total int) string {
 	if len(msgs) == 0 {
 		return "No messages."
 	}
-	var b strings.Builder
-	for _, m := range msgs {
-		unread := " "
-		if m.Unread {
-			unread = "*"
-		}
-		fmt.Fprintf(&b, "%s %-4s %-20s %-12s %-8s %s\n",
-			unread,
-			m.ID,
-			truncate(m.From, 20),
-			m.Date.Format("Jan 02 15:04"),
-			string(m.TrustLevel),
-			truncate(m.Subject, 40),
-		)
+	cols := []column{
+		{header: "R", minWidth: 1},  // read status: ● unread, space read
+		{header: "ID", minWidth: 2},
+		{header: "FROM", minWidth: 10},
+		{header: "DATE", minWidth: 12},
+		{header: "T", minWidth: 1}, // trust: ✓ trusted, + verified, ? unverified, ✗ untrusted
+		{header: "SUBJECT", minWidth: 10, variable: true},
 	}
-	return b.String()
+	rows := make([][]string, len(msgs))
+	for i, m := range msgs {
+		marker := " "
+		if m.Unread {
+			marker = "●"
+		}
+		rows[i] = []string{
+			marker,
+			m.ID,
+			email.ExtractDisplayName(m.From),
+			m.Date.Format("Mar 02 15:04"),
+			trustIcon(m.TrustLevel),
+			m.Subject,
+		}
+	}
+	table := formatTable(cols, rows)
+	return fmt.Sprintf("showing %d of %d\n%s", len(msgs), total, table)
 }
 
 // formatMessage formats a full message for display.
 func formatMessage(msg *channel.Message) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "From:    %s\n", msg.From)
-	fmt.Fprintf(&b, "To:      %s\n", msg.To)
-	fmt.Fprintf(&b, "Date:    %s\n", msg.Date.Format(time.RFC1123Z))
-	fmt.Fprintf(&b, "Subject: %s\n", msg.Subject)
-	fmt.Fprintf(&b, "Trust:   %s\n", msg.TrustLevel)
+	pairs := [][2]string{
+		{"From", msg.From},
+		{"To", msg.To},
+		{"Date", msg.Date.Format("Mon, 02 Jan 2006 15:04:05 -0700")},
+		{"Subject", msg.Subject},
+		{"Trust", string(msg.TrustLevel)},
+	}
 	if msg.Encryption != "" {
-		fmt.Fprintf(&b, "Crypto:  %s\n", msg.Encryption)
+		pairs = append(pairs, [2]string{"Crypto", msg.Encryption})
 	}
 	if len(msg.Attachments) > 0 {
-		fmt.Fprintf(&b, "Attach:  %d file(s)\n", len(msg.Attachments))
+		pairs = append(pairs, [2]string{"Attach", fmt.Sprintf("%d file(s)", len(msg.Attachments))})
+	}
+	s := fmtKV(pairs)
+	if len(msg.Attachments) > 0 {
 		for i, a := range msg.Attachments {
-			fmt.Fprintf(&b, "  [%d] %s (%s, %d bytes)\n", i, a.Filename, a.ContentType, a.Size)
+			s += fmt.Sprintf("\n   [%d] %s (%s, %d bytes)", i, a.Filename, a.ContentType, a.Size)
 		}
 	}
-	fmt.Fprintf(&b, "\n%s", msg.Body)
-	return b.String()
+	s += "\n\n" + msg.Body
+	return s
 }
 
-// formatFolders formats a list of folders.
+// formatFolders formats a list of folders as a table.
 func formatFolders(folders []channel.Folder) string {
 	if len(folders) == 0 {
 		return "No folders."
 	}
-	var b strings.Builder
-	for _, f := range folders {
-		fmt.Fprintln(&b, f.Name)
+	cols := []column{
+		{header: "FOLDER", minWidth: 10, variable: true},
 	}
-	return b.String()
+	rows := make([][]string, len(folders))
+	for i, f := range folders {
+		rows[i] = []string{f.Name}
+	}
+	return formatTable(cols, rows)
 }
 
 // formatSendResult formats a send result.
@@ -98,23 +114,35 @@ func formatVerifyResult(r *verifyResult) string {
 	return fmt.Sprintf("invalid signature · %s", r.GPGOutput)
 }
 
-// formatMIME formats MIME structure.
+// formatMIME formats MIME structure as a table.
 func formatMIME(parts []email.MIMEPart) string {
 	if len(parts) == 0 {
 		return "No MIME parts."
 	}
-	var b strings.Builder
-	for _, p := range parts {
-		fmt.Fprintf(&b, "[%d] %s", p.Index, p.ContentType)
-		if p.Filename != "" {
-			fmt.Fprintf(&b, " (%s)", p.Filename)
-		}
-		if p.Size > 0 {
-			fmt.Fprintf(&b, " %d bytes", p.Size)
-		}
-		fmt.Fprintln(&b)
+	cols := []column{
+		{header: "#", minWidth: 1},
+		{header: "TYPE", minWidth: 10, variable: true},
+		{header: "FILE", minWidth: 4},
+		{header: "SIZE", minWidth: 4},
 	}
-	return b.String()
+	rows := make([][]string, len(parts))
+	for i, p := range parts {
+		filename := ""
+		if p.Filename != "" {
+			filename = p.Filename
+		}
+		size := ""
+		if p.Size > 0 {
+			size = fmt.Sprintf("%d B", p.Size)
+		}
+		rows[i] = []string{
+			fmt.Sprintf("%d", p.Index),
+			p.ContentType,
+			filename,
+			size,
+		}
+	}
+	return formatTable(cols, rows)
 }
 
 // formatTrustResult formats a trust classification.
@@ -139,23 +167,31 @@ func formatDownloadResult(r *downloadResult) string {
 	return fmt.Sprintf("%s: %s (%d bytes)\n%s", r.Status, r.Filename, r.Size, r.Path)
 }
 
-// formatContacts formats a list of contacts.
+// formatContacts formats a list of contacts as a table.
 func formatContacts(cs []contactResult) string {
 	if len(cs) == 0 {
 		return "No contacts."
 	}
-	var b strings.Builder
-	for _, c := range cs {
-		fmt.Fprintf(&b, "%-20s %-30s", c.Name, c.Email)
-		if c.Permissions != "" {
-			fmt.Fprintf(&b, "  %s", c.Permissions)
-		}
-		if len(c.Aliases) > 0 {
-			fmt.Fprintf(&b, "  [%s]", strings.Join(c.Aliases, ", "))
-		}
-		fmt.Fprintln(&b)
+	cols := []column{
+		{header: "NAME", minWidth: 6},
+		{header: "EMAIL", minWidth: 10, variable: true},
+		{header: "PERM", minWidth: 3},
+		{header: "ALIASES", minWidth: 4},
 	}
-	return b.String()
+	rows := make([][]string, len(cs))
+	for i, c := range cs {
+		aliases := ""
+		if len(c.Aliases) > 0 {
+			aliases = strings.Join(c.Aliases, ", ")
+		}
+		rows[i] = []string{
+			c.Name,
+			c.Email,
+			c.Permissions,
+			aliases,
+		}
+	}
+	return formatTable(cols, rows)
 }
 
 // formatContactAdded formats an add result.
@@ -166,14 +202,6 @@ func formatContactAdded(c contactResult) string {
 // formatContactRemoved formats a remove result.
 func formatContactRemoved(r removeContactResult) string {
 	return fmt.Sprintf("removed %s", r.Name)
-}
-
-func truncate(s string, max int) string {
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
-	}
-	return string(runes[:max-1]) + "…"
 }
 
 // contactsToResultsWithPerms converts contacts with effective permissions.
@@ -190,4 +218,18 @@ func formatTrustResultWithPerm(r email.TrustResult, perm string) string {
 	s := formatTrustResult(r)
 	s += " · perm:" + perm
 	return s
+}
+
+// trustIcon returns a single-character trust indicator.
+func trustIcon(level channel.TrustLevel) string {
+	switch level {
+	case channel.Trusted:
+		return "✓"
+	case channel.Verified:
+		return "+"
+	case channel.Untrusted:
+		return "✗"
+	default:
+		return "?"
+	}
 }
