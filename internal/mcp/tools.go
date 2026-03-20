@@ -283,7 +283,7 @@ func addContactTool() mcplib.Tool {
 			mcplib.Description("Free-text notes"),
 		),
 		mcplib.WithString("permissions",
-			mcplib.Description("rwx permission string for active identity (e.g., 'rwx', 'rw-', 'r--'). Default: r--"),
+			mcplib.Description("rwx permission string for active identity (e.g., 'rwx', 'rw-', 'r--'). Default: ---"),
 		),
 	)
 }
@@ -337,7 +337,7 @@ func (h *handler) withClient(cfg *email.Config, fn func(*email.Client) (*mcplib.
 }
 
 func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	_, cfg, _, err := h.resolveIdentityAndConfig()
+	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -378,12 +378,20 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 			}
 		}
 
+		// Enforce read permission: redact subjects for senders without r
+		for i := range msgs {
+			perm, _ := senderPermission(store, id, msgs[i].From)
+			if !perm.Read {
+				msgs[i].Subject = "[redacted — no read permission]"
+			}
+		}
+
 		return textResult(formatMessages(msgs))
 	})
 }
 
 func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	_, cfg, _, err := h.resolveIdentityAndConfig()
+	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -403,6 +411,14 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		msg, err := c.FetchMessage(folder, uint32(uid))
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("read message: %v", err)), nil
+		}
+
+		// Enforce read permission — deny before exposing body to caller
+		perm, senderEmail := senderPermission(store, id, msg.From)
+		if !perm.Read {
+			return mcplib.NewToolResultError(
+				fmt.Sprintf("permission denied: no read permission for sender %s", senderEmail),
+			), nil
 		}
 
 		if msg.TrustLevel == channel.Unverified && email.HasPGPSignature(msg.RawHeaders["Content-Type"], nil) {
@@ -441,7 +457,7 @@ func (h *handler) listFolders(ctx context.Context, req mcplib.CallToolRequest) (
 }
 
 func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	_, cfg, store, err := h.resolveContext()
+	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -482,6 +498,33 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	}
 	cc := splitAddresses(ccResolved)
 	bcc := splitAddresses(bccResolved)
+
+	// Enforce write permission for all recipients
+	allRecipients := make([]string, 0, len(to)+len(cc)+len(bcc))
+	allRecipients = append(allRecipients, to...)
+	allRecipients = append(allRecipients, cc...)
+	allRecipients = append(allRecipients, bcc...)
+	var denied []string
+	for _, addr := range allRecipients {
+		recipientEmail := email.ExtractEmailAddress(addr)
+		if recipientEmail == "" {
+			continue
+		}
+		matches := store.Find(recipientEmail)
+		if len(matches) == 0 {
+			denied = append(denied, recipientEmail+" (unknown contact)")
+			continue
+		}
+		perm := contacts.CheckPermission(matches[0], id.Email)
+		if !perm.Write {
+			denied = append(denied, recipientEmail+" ("+perm.String()+")")
+		}
+	}
+	if len(denied) > 0 {
+		return mcplib.NewToolResultError(
+			fmt.Sprintf("permission denied: no write permission for: %s", strings.Join(denied, ", ")),
+		), nil
+	}
 
 	attachments, err := readAttachments(req)
 	if err != nil {
@@ -607,22 +650,9 @@ func (h *handler) checkTrust(ctx context.Context, req mcplib.CallToolRequest) (*
 		result := email.ClassifyTrustDetailed(headers, raw)
 
 		// Look up sender in contacts for identity permission
-		senderPerm := ""
 		from := headers["From"]
-		if from != "" {
-			senderEmail := email.ExtractEmailAddress(from)
-			if senderEmail != "" {
-				matches := store.Find(senderEmail)
-				if len(matches) > 0 {
-					perm := contacts.CheckPermission(matches[0], id.Email)
-					senderPerm = perm.String()
-				}
-			}
-		}
-		if senderPerm == "" {
-			// Default for unknown senders
-			senderPerm = "r--"
-		}
+		perm, _ := senderPermission(store, id, from)
+		senderPerm := perm.String()
 
 		return textResult(formatTrustResultWithPerm(result, senderPerm))
 	})
@@ -669,7 +699,7 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 }
 
 func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	id, cfg, _, err := h.resolveIdentityAndConfig()
+	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
@@ -694,6 +724,15 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 		if err != nil {
 			h.logger.Warn("download_attachment: fetch failed", "uid", msgID, "folder", folder, "err", err)
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
+		}
+
+		// Enforce read permission before extracting attachment content
+		_, _, headers := email.ParseMIME(raw)
+		perm, senderEmail := senderPermission(store, id, headers["From"])
+		if !perm.Read {
+			return mcplib.NewToolResultError(
+				fmt.Sprintf("permission denied: no read permission for sender %s", senderEmail),
+			), nil
 		}
 
 		part, data, err := email.ExtractPart(raw, partIndex)
@@ -883,6 +922,20 @@ func boolParam(req mcplib.CallToolRequest, key string) bool {
 
 // jsonResult is no longer used — all tools return pre-formatted text via
 // textResult() in format.go. Kept as a comment for reference.
+
+// senderPermission looks up the sender's permission for the active identity.
+// Returns the Permission and the extracted sender email.
+func senderPermission(store *contacts.Store, id *identity.Identity, from string) (contacts.Permission, string) {
+	senderEmail := email.ExtractEmailAddress(from)
+	if senderEmail == "" {
+		return contacts.Permission{}, ""
+	}
+	matches := store.Find(senderEmail)
+	if len(matches) == 0 {
+		return contacts.Permission{}, senderEmail
+	}
+	return contacts.CheckPermission(matches[0], id.Email), senderEmail
+}
 
 // --- Contact Handlers ---
 

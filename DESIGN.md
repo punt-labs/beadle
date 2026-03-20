@@ -215,7 +215,7 @@ Example for identity `claude@punt-labs.com`:
 | Jim Freeman | `rwx` | Full authority — read, reply, execute tasks |
 | Eric | `rw-` | Read and reply, but not execute instructions |
 | Vendor X | `r--` | Read only, surface to owner for action |
-| Unknown sender | `r--` | Default: read only |
+| Unknown sender | `---` | Default: no permissions (whitelist) |
 
 **Orthogonal to transport trust:** Transport trust (trusted/verified/untrusted/
 unverified from DES-001) answers "is this message authentic?" Identity trust
@@ -229,8 +229,25 @@ autonomous action (sender lacks authority).
 matrix is explicit. No implicit propagation.
 
 **Default permissions:** Contacts without explicit permissions for an identity
-default to `r--`. All permissions are stored explicitly. There are no implicit
-overrides.
+default to `---` (no permissions). The address book is a whitelist — only known
+contacts with explicit `r` get their messages surfaced. All permissions are
+stored explicitly. There are no implicit overrides.
+
+**Enforcement:** `r` is enforced on `list_messages` (redacted subject for
+senders without read), `read_message` (permission denied), and
+`download_attachment` (permission denied). `w` is enforced on `send_email`
+(all recipients must have write permission). `x` (execute) is not yet
+enforced — it requires instruction parsing infrastructure.
+
+**Exempt tools:** `check_trust`, `verify_signature`, and `show_mime` are
+diagnostic — they return metadata (trust classification, signature validity,
+MIME structure) without exposing message body content. They are intentionally
+ungated. `move_message` is identity-local inbox management (archiving,
+organizing), not a sender-directed action — no sender permission required.
+
+**Redacted listings:** `list_messages` shows sender, date, and trust level
+for all messages but redacts the subject for senders without `r`. This lets
+the owner discover unknown senders and decide whether to add them to contacts.
 
 **Data model:**
 
@@ -262,9 +279,16 @@ Contact {
 
 **Status:** Implemented. Identity resolved via ethos sidecar (DES-013).
 Contact `Permissions` field stores `map[identity_email]string` with rwx
-values. `CheckPermission()` enforces owner override and default `r--`.
-MCP tools expose effective permissions in `list_contacts`, `find_contact`,
-and `check_trust` responses.
+values. `CheckPermission()` looks up stored permissions and defaults to
+`r--`. No implicit overrides. MCP tools expose effective permissions in
+`list_contacts`, `find_contact`, and `check_trust` responses.
+
+**Scope of rwx permissions:** The rwx model governs inbound mail processing
+behavior — how beadle handles messages from a given sender when operating as
+a given identity. It does NOT govern address book CRUD. Any identity can add
+or remove contacts regardless of permissions. The permissions answer "what
+should beadle do with mail from this person?", not "who may edit the address
+book?"
 
 ## DES-013: Identity via ethos sidecar with namespaced extensions
 
@@ -317,6 +341,57 @@ way.
   default-identity        # file: default email address
 ```
 
+**Filesystem layout (both systems):**
+
+```text
+~/.punt-labs/
+├── ethos/                              ← ethos owns this tree
+│   ├── active                          ← global active handle ("jfreeman")
+│   ├── sessions/                       ← session roster data
+│   └── identities/
+│       ├── jfreeman.yaml               ← Jim's persona (kind: human)
+│       ├── jfreeman.ext/               ← extensions for Jim
+│       ├── claude.yaml                 ← Claude's persona (kind: agent)
+│       └── claude.ext/
+│           └── beadle.yaml             ← beadle extension (gpg_key_id)
+│
+└── beadle/                             ← beadle owns this tree
+    ├── default-identity                ← fallback email when ethos absent
+    └── identities/
+        └── claude@punt-labs.com/       ← scoped by email (pivot key from ethos)
+            ├── email.json              ← IMAP/SMTP connection config
+            ├── contacts.json           ← address book + rwx permissions
+            └── attachments/            ← downloaded files
+```
+
+Plus repo-local identity pin:
+
+```text
+<repo>/.punt-labs/ethos/config.yaml     ← "active: claude" (overrides global)
+```
+
+**Ownership boundaries:**
+
+| Concern | Owner | File |
+|---------|-------|------|
+| Who am I? (name, email, handle, kind) | ethos | `identities/<handle>.yaml` |
+| What's my GPG key? | beadle (via ethos extension) | `identities/<handle>.ext/beadle.yaml` |
+| Which identity for this repo? | ethos (repo-local) | `<repo>/.punt-labs/ethos/config.yaml` |
+| How do I connect to mail? | beadle | `beadle/identities/<email>/email.json` |
+| Who do I know + permissions? | beadle | `beadle/identities/<email>/contacts.json` |
+
+**The email address is the pivot key.** Ethos provides `email` in the identity
+YAML. Beadle uses that email to locate its own scoped directory under
+`~/.punt-labs/beadle/identities/<email>/`. Ethos does not know that directory
+exists. Beadle does not write to ethos directories (except its own extension).
+
+**Why repo-local config exists:** The global `active` file may say `jfreeman`
+(Jim is the active human). But in the beadle repo, Claude is the agent that
+operates. The repo-local `config.yaml` pins `active: claude` so beadle
+operates as Claude in this repo regardless of the global identity. This is
+how one machine supports a human identity globally and an agent identity
+per-repo.
+
 **How beadle accesses ethos data:**
 
 | Path | Method | Why |
@@ -327,6 +402,14 @@ way.
 
 The LLM never reads ethos files directly. Beadle's MCP tools read them
 internally and expose relevant data through beadle's own tool responses.
+
+**Ethos is a peer identity system.** The same schema describes humans and
+agents — only a `kind` field distinguishes them. There is no "owner" concept
+in ethos. Ownership and authority relationships (e.g., "Jim owns Claude") are
+application-level policy that belongs in the consuming application (beadle),
+not in the identity layer (ethos). Beadle previously encoded `owner_email` in
+the ethos extension; this was removed in PR #46 because it violated this
+boundary.
 
 **Identity switching:**
 

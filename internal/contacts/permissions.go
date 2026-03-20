@@ -71,7 +71,7 @@ func (p Permission) String() string {
 //
 // Rules:
 //   - Explicit entry in contact.Permissions[identityEmail] is parsed.
-//   - Default: r-- (read only).
+//   - Default: --- (no permissions, whitelist model).
 func CheckPermission(c Contact, identityEmail string) Permission {
 	// Explicit permission for this identity
 	if c.Permissions != nil {
@@ -84,6 +84,6 @@ func CheckPermission(c Contact, identityEmail string) Permission {
 		}
 	}
 
-	// Default: read only
-	return Permission{Read: true}
+	// Default: no permissions (whitelist model)
+	return Permission{}
 }
