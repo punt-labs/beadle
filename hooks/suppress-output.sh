@@ -3,11 +3,14 @@
 # Format beadle-email MCP tool output for the UI panel.
 #
 # Two-channel display (see punt-kit/patterns/two-channel-display.md):
-#   updatedMCPToolOutput  -> compact panel line (max 80 cols)
+#   updatedMCPToolOutput  -> compact panel line for the UI
 #   additionalContext     -> full data for the model to reference
 #
 # No `set -euo pipefail` — hooks must degrade gracefully on
 # malformed input rather than failing the tool call.
+
+# Require jq — without it, let raw output through.
+command -v jq >/dev/null 2>&1 || exit 0
 
 INPUT=$(cat)
 TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
@@ -84,6 +87,9 @@ fi
 # ── read_message ───────────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "read_message" ]]; then
   SUBJ=$(printf '%s' "$RESULT" | grep '^Subject:' | head -1 | cut -c10-70)
+  if [[ -z "$SUBJ" ]]; then
+    SUBJ="(no subject)"
+  fi
   emit "${SUBJ}" "$RESULT"
   exit 0
 fi
@@ -93,7 +99,7 @@ if [[ "$TOOL_NAME" == "list_folders" ]]; then
   if [[ "$RESULT" == "No folders." ]]; then
     emit "$RESULT"
   else
-    COUNT=$(printf '%s' "$RESULT" | wc -l | tr -d ' ')
+    COUNT=$(printf '%s' "$RESULT" | grep -c '[^ ]')
     emit "${COUNT} folders" "$RESULT"
   fi
   exit 0
@@ -117,7 +123,7 @@ if [[ "$TOOL_NAME" == "show_mime" ]]; then
   if [[ "$RESULT" == "No MIME parts." ]]; then
     emit "$RESULT"
   else
-    COUNT=$(printf '%s' "$RESULT" | wc -l | tr -d ' ')
+    COUNT=$(printf '%s' "$RESULT" | grep -c '[^ ]')
     emit "${COUNT} parts" "$RESULT"
   fi
   exit 0
