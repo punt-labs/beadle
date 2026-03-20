@@ -75,18 +75,23 @@ fi
 
 # ── list_messages ──────────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "list_messages" ]]; then
+  # Record poll timestamp for UserPromptSubmit reminder
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+  if [[ -n "$REPO_ROOT" ]] && [[ -d "$REPO_ROOT/.claude" ]]; then
+    date +%s > "$REPO_ROOT/.claude/beadle.poll.ts" 2>/dev/null
+  fi
   if [[ "$RESULT" == "No messages." ]]; then
     emit "$RESULT"
   else
-    COUNT=$(printf '%s' "$RESULT" | grep -c '^ *[* ] ')
-    emit "${COUNT} messages" "$RESULT"
+    SUMMARY=$(printf '%s' "$RESULT" | head -1)
+    emit "${SUMMARY}" "$RESULT"
   fi
   exit 0
 fi
 
 # ── read_message ───────────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "read_message" ]]; then
-  SUBJ=$(printf '%s' "$RESULT" | grep '^Subject:' | head -1 | sed 's/^Subject: *//')
+  SUBJ=$(printf '%s' "$RESULT" | grep 'Subject:' | head -1 | sed 's/^[[:space:]]*Subject:[[:space:]]*//')
   if [[ -z "$SUBJ" ]]; then
     SUBJ="(no subject)"
   fi
@@ -99,7 +104,7 @@ if [[ "$TOOL_NAME" == "list_folders" ]]; then
   if [[ "$RESULT" == "No folders." ]]; then
     emit "$RESULT"
   else
-    COUNT=$(printf '%s' "$RESULT" | grep -c '[^ ]')
+    COUNT=$(printf '%s' "$RESULT" | grep -c '^   ')
     emit "${COUNT} folders" "$RESULT"
   fi
   exit 0
@@ -123,7 +128,7 @@ if [[ "$TOOL_NAME" == "show_mime" ]]; then
   if [[ "$RESULT" == "No MIME parts." ]]; then
     emit "$RESULT"
   else
-    COUNT=$(printf '%s' "$RESULT" | grep -c '[^ ]')
+    COUNT=$(printf '%s' "$RESULT" | grep -c '^   ')
     emit "${COUNT} parts" "$RESULT"
   fi
   exit 0
@@ -154,7 +159,7 @@ if [[ "$TOOL_NAME" == "list_contacts" ]]; then
   if [[ "$RESULT" == "No contacts." ]]; then
     emit "$RESULT"
   else
-    COUNT=$(printf '%s' "$RESULT" | grep -c '[^ ]')
+    COUNT=$(printf '%s' "$RESULT" | grep -c '^   ')
     emit "${COUNT} contacts" "$RESULT"
   fi
   exit 0
@@ -165,7 +170,7 @@ if [[ "$TOOL_NAME" == "find_contact" ]]; then
   if [[ "$RESULT" == "No contacts." ]]; then
     emit "no matches"
   else
-    COUNT=$(printf '%s' "$RESULT" | grep -c '[^ ]')
+    COUNT=$(printf '%s' "$RESULT" | grep -c '^   ')
     emit "${COUNT} matches" "$RESULT"
   fi
   exit 0

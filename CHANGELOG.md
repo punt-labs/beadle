@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Table formatter (`internal/mcp/table.go`) matching biff's `format_table`
+  pattern: `▶` header prefix, 3-space row prefix, aligned columns, 80-col
+  budget, variable column with `…` truncation.
+- `ExtractDisplayName` for clean FROM column display (name only, no email).
+- `ListMessages` returns total count alongside messages. Panel summary
+  shows "showing X of Y" (e.g., "showing 10 of 178 messages").
+- Trust column uses single-char icons: `✓` trusted, `+` verified, `?`
+  unverified, `✗` untrusted.
+- Read status column (`R`) with `●` for unread.
+
+### Changed
+
+- All list tools (`list_messages`, `list_contacts`, `list_folders`,
+  `show_mime`) use the table formatter with headers and aligned columns.
+- `formatMessage` uses key-value block with 3-space prefix for consistency.
+- SessionStart hook CronCreate instruction simplified (no unnecessary
+  CronList/CronDelete since cron doesn't persist across sessions).
+
 ### Fixed
 
 - `ExtractEmailAddress` now handles malformed RFC 5322 display names with

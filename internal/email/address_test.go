@@ -29,3 +29,24 @@ func TestExtractEmailAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractDisplayName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"RFC 5322", "Jim Freeman <jim@punt-labs.com>", "Jim Freeman"},
+		{"quoted", `"Jim Freeman" <jim@punt-labs.com>`, "Jim Freeman"},
+		{"bare email", "user@example.com", "user@example.com"},
+		{"bot brackets", "github-actions[bot] <notifications@github.com>", "github-actions[bot]"},
+		{"empty", "", ""},
+		{"angle only", "<jim@punt-labs.com>", "jim@punt-labs.com"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ExtractDisplayName(tc.input)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
