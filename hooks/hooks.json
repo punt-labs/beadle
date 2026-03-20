@@ -2,7 +2,7 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "mcp__(plugin_beadle(-dev)?_)?email__.*",
+        "matcher": "mcp__(plugin_beadle(-dev)?_|beadle-)email__.*",
         "hooks": [
           {
             "type": "command",
