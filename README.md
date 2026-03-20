@@ -71,13 +71,15 @@ sh install.sh
 ## Features
 
 - **13 MCP tools** --- list, read, send, move/archive, download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts)
-- **Four-level trust model** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
+- **Multi-identity via ethos** --- identity resolved per-request from ethos sidecar. Repo-local config pins identity. Fallback to `default-identity` file or legacy `email.json`
+- **Two-dimensional trust** --- transport trust (trusted/verified/untrusted/unverified) + identity permissions (rwx per contact per identity). Both must pass before autonomous action
+- **Four-level transport trust** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
 - **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically
 - **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound)
 - **Two-channel display** (plugin only) --- compact panel summaries with full data in context, no raw JSON in conversation
 - **Proton Bridge native** --- IMAP STARTTLS for reading, SMTP for sending, Resend API fallback
 - **Credential isolation** --- secrets resolved at runtime from OS keychain, never stored in config files
-- **Health checks** --- `doctor` validates all dependencies; `status` shows current configuration
+- **Health checks** --- `doctor` validates all dependencies; `status` shows active identity and configuration
 
 ## MCP Tools
 
@@ -90,11 +92,11 @@ sh install.sh
 | `list_folders` | List all IMAP mailbox folders. |
 | `show_mime` | Inspect multipart MIME structure, PGP parts, and attachments. |
 | `verify_signature` | Verify PGP signature on a message. Returns signer info and key ID. |
-| `check_trust` | Detailed trust classification with encryption type and origin analysis. |
-| `download_attachment` | Extract an attachment by MIME part index (from `show_mime`). Saves to `~/.punt-labs/beadle/attachments/<mailbox>/` and returns the path. |
-| `list_contacts` | List all contacts in the address book. |
-| `find_contact` | Look up a contact by name, email, or alias. |
-| `add_contact` | Add a contact (name, email, aliases, GPG key ID). |
+| `check_trust` | Detailed trust classification with encryption type, origin analysis, and identity permission for sender. |
+| `download_attachment` | Extract an attachment by MIME part index (from `show_mime`). Saves to identity-scoped directory. |
+| `list_contacts` | List all contacts with effective permissions for the active identity. |
+| `find_contact` | Look up a contact by name, email, or alias. Shows effective permissions. |
+| `add_contact` | Add a contact (name, email, aliases, GPG key ID, permissions). |
 | `remove_contact` | Remove a contact by name. |
 
 ## Commands
@@ -161,6 +163,29 @@ EOF
 | `unverified` | External | No `multipart/signed` | No PGP signature present |
 
 PGP verification uses an isolated GNUPGHOME per operation. When no key is attached to the message, keys are bridged from the system keyring (`~/.gnupg/`) into the isolated environment.
+
+## Identity
+
+Beadle reads identity from [ethos](https://github.com/punt-labs/ethos) (sidecar pattern — file reads, no import dependency). Resolution chain:
+
+1. **Repo-local config** — `.punt-labs/ethos/config.yaml` with `active: <handle>`
+2. **Global ethos active** — `~/.punt-labs/ethos/active`
+3. **Default identity** — `~/.punt-labs/beadle/default-identity` (plain email string)
+4. **Legacy fallback** — `~/.punt-labs/beadle/email.json` `from_address` field
+
+Each identity gets its own directory under `~/.punt-labs/beadle/identities/<email>/` with separate `email.json`, `contacts.json`, and `attachments/`. Root files are auto-migrated on first use.
+
+## Contact Permissions
+
+Each contact has an optional `permissions` map keyed by identity email. Permissions use the Unix rwx model:
+
+| Permission | Meaning |
+|------------|---------|
+| `r` (read) | Beadle reads and surfaces the message. No autonomous action. |
+| `w` (write) | Beadle may compose and send replies to this contact. |
+| `x` (execute) | Beadle may execute instructions from this contact. |
+
+The owner identity always has `rwx` (enforced, not stored). Contacts without explicit permissions default to `r--`. This is orthogonal to transport trust — both must be sufficient for autonomous action.
 
 ## CLI
 

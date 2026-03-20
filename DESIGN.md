@@ -259,10 +259,11 @@ Contact {
 4. Combined with transport trust: only act if both identity trust AND transport
    trust are sufficient
 
-**Status:** Identity ownership moved to ethos (see DES-013). Contact
-`permissions` field not yet in the struct. Current code has a single identity
-hardcoded via `email.json`. This ADR captures the permission model;
-DES-013 captures the identity model.
+**Status:** Implemented. Identity resolved via ethos sidecar (DES-013).
+Contact `Permissions` field stores `map[identity_email]string` with rwx
+values. `CheckPermission()` enforces owner override and default `r--`.
+MCP tools expose effective permissions in `list_contacts`, `find_contact`,
+and `check_trust` responses.
 
 ## DES-013: Identity via ethos sidecar with namespaced extensions
 
