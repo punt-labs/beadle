@@ -1,6 +1,6 @@
 #!/bin/sh
 # Install beadle-email — MCP server for email communication via Proton Bridge.
-# Usage: curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/<SHA>/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/main/install.sh | sh
 set -eu
 
 # --- Colors (disabled when not a terminal) ---
@@ -15,7 +15,7 @@ ok()   { printf '  %b✓%b %s\n' "$GREEN" "$NC" "$1"; }
 warn() { printf '  %b!%b %s\n' "$YELLOW" "$NC" "$1"; }
 fail() { printf '  %b✗%b %s\n' "$YELLOW" "$NC" "$1"; exit 1; }
 
-VERSION="0.4.0"
+VERSION="0.6.0"
 REPO="punt-labs/beadle"
 BINARY="beadle-email"
 INSTALL_DIR="$HOME/.local/bin"
