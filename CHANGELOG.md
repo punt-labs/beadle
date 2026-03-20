@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `r` permission enforcement on `list_messages`, `read_message`, and
+  `download_attachment`. Messages from senders without read permission show
+  redacted subjects in listings, and return "permission denied" when read
+  or when attachments are downloaded.
+- `w` permission enforcement on `send_email`. All recipients (to, cc, bcc)
+  must have write permission; unknown contacts are denied.
 - Multi-identity support via ethos sidecar (DES-013). Beadle reads the active
   identity from ethos (`~/.punt-labs/ethos/identities/<handle>.yaml`) with
   fallback to `default-identity` file and legacy `email.json`. Identity is
@@ -19,12 +25,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Per-identity rwx contact permissions (DES-012). Each contact can have
   different permissions per identity: `r` (read/surface), `w` (reply),
   `x` (execute instructions). All permissions are stored explicitly.
-  Default for contacts without explicit permissions: `r--`.
+  Default for contacts without explicit permissions: `---`.
 - `add_contact` accepts optional `permissions` parameter (e.g., "rwx", "rw-").
 - `list_contacts` and `find_contact` show effective permissions for active identity.
 - `check_trust` includes identity permission alongside transport trust level.
 - `beadle-email status` shows active identity, source, and handle.
 - `beadle-email doctor` checks ethos availability.
+
+### Changed
+
+- Default permission for unknown contacts changed from `r--` to `---`.
+  The address book is now a whitelist — only known contacts with explicit
+  read permission have their messages surfaced.
 
 ### Fixed
 
