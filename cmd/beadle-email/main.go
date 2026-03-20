@@ -21,7 +21,9 @@ import (
 
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/identity"
 	mcptools "github.com/punt-labs/beadle/internal/mcp"
+	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/secret"
 )
 
@@ -125,12 +127,29 @@ func extractConfig(args []string) string {
 	return email.DefaultConfigPath()
 }
 
+// newResolver creates an identity resolver using standard paths.
+func newResolver() (*identity.Resolver, error) {
+	ethosDir, err := paths.EthosDir()
+	if err != nil {
+		return nil, err
+	}
+	beadleDir, err := paths.DataDir()
+	if err != nil {
+		return nil, err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("resolve cwd: %w", err)
+	}
+	return identity.NewResolver(ethosDir, beadleDir, cwd), nil
+}
+
 func runServe(g globalOpts, configPath string) int {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: g.slogLevel(),
 	}))
 
-	cfg, err := email.LoadConfig(configPath)
+	resolver, err := newResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
@@ -142,9 +161,9 @@ func runServe(g globalOpts, configPath string) int {
 		server.WithToolCapabilities(false),
 	)
 
-	mcptools.RegisterTools(s, cfg, contacts.DefaultPath(), logger)
+	mcptools.RegisterTools(s, resolver, logger)
 
-	logger.Info("starting beadle-email MCP server", "version", version, "config", configPath)
+	logger.Info("starting beadle-email MCP server", "version", version)
 
 	if err := server.ServeStdio(s); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -161,6 +180,19 @@ func runDoctor(g globalOpts, configPath string) int {
 	}
 
 	var checks []check
+
+	// Check identity resolution
+	resolver, resolverErr := newResolver()
+	if resolverErr != nil {
+		checks = append(checks, check{"identity", "FAIL", resolverErr.Error()})
+	} else {
+		id, idErr := resolver.Resolve()
+		if idErr != nil {
+			checks = append(checks, check{"identity", "WARN", fmt.Sprintf("no identity: %v", idErr)})
+		} else {
+			checks = append(checks, check{"identity", "OK", fmt.Sprintf("%s (source: %s)", id.Email, id.Source)})
+		}
+	}
 
 	// Check credential backends
 	backends := secret.Available()
@@ -219,7 +251,7 @@ func runDoctor(g globalOpts, configPath string) int {
 	}
 
 	// Check contacts file
-	contactsPath := contacts.DefaultPath()
+	contactsPath := resolveContactsPath()
 	cs := contacts.NewStore(contactsPath)
 	if err := cs.Load(); err != nil {
 		checks = append(checks, check{"contacts", "FAIL", err.Error()})
@@ -257,13 +289,33 @@ func runDoctor(g globalOpts, configPath string) int {
 }
 
 func runStatus(g globalOpts, configPath string) int {
-	cfg, err := email.LoadConfig(configPath)
+	// Resolve identity first
+	resolver, err := newResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	id, idErr := resolver.Resolve()
 
-	contactsPath := contacts.DefaultPath()
+	// Load config — identity-scoped if available, else from configPath
+	var cfg *email.Config
+	if idErr == nil {
+		idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
+		if pathErr == nil {
+			cfg, _ = email.LoadConfig(idConfigPath)
+		}
+	}
+	if cfg == nil {
+		var cfgErr error
+		cfg, cfgErr = email.LoadConfig(configPath)
+		if cfgErr != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", cfgErr)
+			return 1
+		}
+	}
+
+	// Load contacts — identity-scoped if available
+	contactsPath := resolveContactsPath()
 	cs := contacts.NewStore(contactsPath)
 	contactsCount := "0"
 	contactsError := ""
@@ -286,13 +338,25 @@ func runStatus(g globalOpts, configPath string) int {
 		"contacts_path":  contactsPath,
 		"contacts_count": contactsCount,
 	}
+	if idErr == nil {
+		status["identity_email"] = id.Email
+		status["identity_source"] = id.Source
+		if id.Handle != "" {
+			status["identity_handle"] = id.Handle
+		}
+		if id.Name != "" {
+			status["identity_name"] = id.Name
+		}
+	} else {
+		status["identity_error"] = idErr.Error()
+	}
 	if contactsError != "" {
 		status["contacts_error"] = contactsError
 	}
 
 	g.printResult(status, func() {
 		for k, v := range status {
-			fmt.Printf("%-16s %s\n", k+":", v)
+			fmt.Printf("%-18s %s\n", k+":", v)
 		}
 	})
 	return 0
@@ -319,7 +383,8 @@ func extractContactsPath(args []string) string {
 			return args[i+1]
 		}
 	}
-	return contacts.DefaultPath()
+	// Use identity-scoped contacts path if available
+	return resolveContactsPath()
 }
 
 func runContact(g globalOpts, args []string) int {

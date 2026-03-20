@@ -10,11 +10,12 @@ import (
 
 // Contact represents a person in the address book.
 type Contact struct {
-	Name     string   `json:"name"`
-	Email    string   `json:"email"`
-	Aliases  []string `json:"aliases,omitempty"`
-	GPGKeyID string   `json:"gpg_key_id,omitempty"`
-	Notes    string   `json:"notes,omitempty"`
+	Name        string            `json:"name"`
+	Email       string            `json:"email"`
+	Aliases     []string          `json:"aliases,omitempty"`
+	GPGKeyID    string            `json:"gpg_key_id,omitempty"`
+	Notes       string            `json:"notes,omitempty"`
+	Permissions map[string]string `json:"permissions,omitempty"` // identity_email → "rwx"
 }
 
 // Validate checks that required fields are present and well-formed.
