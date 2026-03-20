@@ -1,7 +1,7 @@
 VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: help lint docs test check format build install clean dist cover tools doctor
+.PHONY: help lint docs test check format build install deploy-commands clean dist cover tools doctor
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -27,6 +27,17 @@ build: ## Build binary
 install: build ## Build and install to ~/.local/bin
 	mkdir -p $(HOME)/.local/bin
 	cp beadle-email $(HOME)/.local/bin/beadle-email
+
+deploy-commands: ## Deploy commands to ~/.claude/commands/
+	mkdir -p $(HOME)/.claude/commands
+	@for f in commands/*.md; do \
+		name=$$(basename "$$f"); \
+		case "$$name" in *-dev.md) continue;; esac; \
+		if [ ! -f "$(HOME)/.claude/commands/$$name" ] || ! diff -q "$$f" "$(HOME)/.claude/commands/$$name" >/dev/null 2>&1; then \
+			cp "$$f" "$(HOME)/.claude/commands/$$name"; \
+			echo "  deployed /$$( echo $$name | sed 's/\.md$$//')"; \
+		fi; \
+	done
 
 clean: ## Remove build artifacts
 	rm -f beadle-email coverage.out
