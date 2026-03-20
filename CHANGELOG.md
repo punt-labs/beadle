@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `ExtractEmailAddress` now handles malformed RFC 5322 display names with
+  unquoted brackets (e.g., `github-actions[bot] <notifications@github.com>`).
+  Falls back to angle-bracket extraction when `net/mail.ParseAddress` fails.
+- Rewrote `suppress-output.sh` PostToolUse hook to follow punt-kit two-channel
+  display standard. Fixes: removed `set -euo pipefail` (hooks must degrade
+  gracefully), switched `echo` to `printf '%s'`, added kill-switch, improved
+  summaries (count-based instead of first-line for list tools).
+
 ## [0.5.0] - 2026-03-20
 
 ### Added
