@@ -229,7 +229,8 @@ autonomous action (sender lacks authority).
 matrix is explicit. No implicit propagation.
 
 **Default permissions:** Contacts without explicit permissions for an identity
-default to `r--`. The owner identity is always `rwx` (enforced, not stored).
+default to `r--`. All permissions are stored explicitly. There are no implicit
+overrides.
 
 **Data model:**
 

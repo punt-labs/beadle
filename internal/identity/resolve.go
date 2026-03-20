@@ -20,8 +20,7 @@ type ethosIdentity struct {
 
 // beadleExtension is the beadle namespace in ethos extensions.
 type beadleExtension struct {
-	GPGKeyID   string `yaml:"gpg_key_id"`
-	OwnerEmail string `yaml:"owner_email"`
+	GPGKeyID string `yaml:"gpg_key_id"`
 }
 
 // legacyConfig is the subset of email.json needed for legacy fallback.
@@ -195,14 +194,8 @@ func (r *Resolver) fromEthos(handle string) (*Identity, error) {
 			return nil, fmt.Errorf("parse beadle extension %s: %w", extPath, parseErr)
 		}
 		id.GPGKeyID = ext.GPGKeyID
-		id.OwnerEmail = ext.OwnerEmail
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("read beadle extension %s: %w", extPath, err)
-	}
-
-	// Default: if no owner set, the identity is its own owner (human identity)
-	if id.OwnerEmail == "" {
-		id.OwnerEmail = id.Email
 	}
 
 	return id, nil
@@ -223,9 +216,8 @@ func (r *Resolver) fromDefault() (*Identity, error) {
 		return nil, fmt.Errorf("default-identity: %w", err)
 	}
 	return &Identity{
-		Email:      email,
-		OwnerEmail: email, // default identity is its own owner
-		Source:     "default",
+		Email:  email,
+		Source: "default",
 	}, nil
 }
 
@@ -247,8 +239,7 @@ func (r *Resolver) fromLegacy() (*Identity, error) {
 		return nil, fmt.Errorf("email.json from_address: %w", err)
 	}
 	return &Identity{
-		Email:      cfg.FromAddress,
-		OwnerEmail: cfg.FromAddress, // legacy identity is its own owner
-		Source:     "legacy",
+		Email:  cfg.FromAddress,
+		Source: "legacy",
 	}, nil
 }

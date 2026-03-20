@@ -177,10 +177,10 @@ func truncate(s string, max int) string {
 }
 
 // contactsToResultsWithPerms converts contacts with effective permissions.
-func contactsToResultsWithPerms(cs []contacts.Contact, identityEmail, ownerEmail string) []contactResult {
+func contactsToResultsWithPerms(cs []contacts.Contact, identityEmail string) []contactResult {
 	results := make([]contactResult, 0, len(cs))
 	for _, c := range cs {
-		results = append(results, contactToResultWithPerms(c, identityEmail, ownerEmail))
+		results = append(results, contactToResultWithPerms(c, identityEmail))
 	}
 	return results
 }
