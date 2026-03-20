@@ -241,18 +241,18 @@ Every PR must update the docs it affects. If a PR changes user-facing behavior a
 1. **Bump version** in `cmd/beadle-email/main.go`
 2. **Move `[Unreleased]`** entries in `CHANGELOG.md` to new version section
 3. **Run all quality gates**: `make check`
-4. **Build locally**: `make dist`
+4. **Build locally**: `make dist` (cross-compiles binaries + generates `dist/checksums.txt`)
 5. **Commit**: `chore: release vX.Y.Z`
 6. **Tag**: `git tag vX.Y.Z`
 7. **Push**: `git push origin main vX.Y.Z`
-8. **GitHub release**: `gh release create vX.Y.Z --title "vX.Y.Z" --notes-file -`
+8. **GitHub release**: `gh release create vX.Y.Z --title "vX.Y.Z" --notes-file - dist/*`
 
 ### Distribution
 
 Static binaries via GitHub Releases. Four platforms: darwin/arm64, darwin/amd64, linux/arm64, linux/amd64.
 
 ```bash
-make dist    # Cross-compile all four targets into dist/
+make dist    # Cross-compile all four targets + checksums.txt into dist/
 ```
 
 ### Session Close Protocol

@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `install.sh`: bumped VERSION from 0.4.0 to 0.6.0 to match current release.
 - README install SHA now uses `main` ref instead of pinned commit SHA that
   pointed to a stale version of `install.sh`.
+- `make dist`: now generates `checksums.txt` alongside binaries. v0.5.0 and
+  v0.6.0 were released without checksums, breaking `install.sh` at the SHA256
+  verification step.
 
 ## [0.6.0] - 2026-03-20
 
