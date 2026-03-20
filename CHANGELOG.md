@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- README Quick Start: removed broken `claude plugin install` path that installed
+  the plugin without the `beadle-email` binary, causing MCP server startup
+  failures. `install.sh` is now the single recommended install method — it
+  downloads the binary, verifies checksums, and installs the plugin.
+- `install.sh`: bumped VERSION from 0.4.0 to 0.6.0 to match current release.
+- README install SHA now uses `main` ref instead of pinned commit SHA that
+  pointed to a stale version of `install.sh`.
+
 ## [0.6.0] - 2026-03-20
 
 ### Added
