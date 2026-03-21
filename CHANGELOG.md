@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `beadle-email identity` subcommand: show resolved identity (email, handle,
+  source, contacts path). `identity set <handle>` writes per-repo ethos config.
+- `whoami` MCP tool: returns active identity so Claude sessions can
+  self-diagnose permission errors caused by wrong identity resolution.
+
 ### Changed
 
 - CLI framework: migrated from hand-rolled arg parsing to

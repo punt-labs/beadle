@@ -52,9 +52,9 @@ func NewResolver(ethosDir, beadleDir, repoDir string) *Resolver {
 //  4. Handle → beadle extension → gpg_key_id (optional)
 //  5. Beadle default-identity file → email (no handle)
 //  6. Beadle email.json → from_address (legacy)
-// validateHandle rejects handles containing path separators or parent
+// ValidateHandle rejects handles containing path separators or parent
 // directory references to prevent path traversal attacks.
-func validateHandle(handle string) error {
+func ValidateHandle(handle string) error {
 	if strings.ContainsAny(handle, "/\\") {
 		return fmt.Errorf("ethos handle %q contains path separator", handle)
 	}
@@ -86,7 +86,7 @@ func (r *Resolver) Resolve() (*Identity, error) {
 		return nil, err
 	}
 	if handle != "" {
-		if err := validateHandle(handle); err != nil {
+		if err := ValidateHandle(handle); err != nil {
 			return nil, err
 		}
 		id, err := r.fromEthos(handle)
