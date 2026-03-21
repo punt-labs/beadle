@@ -9,108 +9,116 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/paths"
 )
 
-func runInstall(g globalOpts, args []string) int {
-	// 1. Create directory tree
-	dataDir, err := paths.DataDir()
-	if err != nil {
-		g.errorf("%v", err)
-		return 1
-	}
-	for _, sub := range []string{"", "secrets", "attachments"} {
-		dir := filepath.Join(dataDir, sub)
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			g.errorf("create %s: %v", dir, err)
-			return 1
+var installCmd = &cobra.Command{
+	Use:   "install",
+	Short: "Set up beadle-email",
+	Long:  "Interactive setup: create directories, prompt for config, register MCP server.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// 1. Create directory tree
+		dataDir, err := paths.DataDir()
+		if err != nil {
+			return err
 		}
-	}
-	fmt.Fprintf(os.Stderr, "created %s\n", dataDir)
+		for _, sub := range []string{"", "secrets", "attachments"} {
+			dir := filepath.Join(dataDir, sub)
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				return fmt.Errorf("create %s: %w", dir, err)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "created %s\n", dataDir)
 
-	// 2. Create email.json if missing
-	configPath := filepath.Join(dataDir, "email.json")
-	if _, err := os.Stat(configPath); err == nil {
-		fmt.Fprintf(os.Stderr, "config already exists at %s; skipping\n", configPath)
-	} else {
-		cfg := promptConfig()
-		data, _ := json.MarshalIndent(cfg, "", "  ")
-		data = append(data, '\n')
-		tmp := configPath + ".tmp"
-		if err := os.WriteFile(tmp, data, 0o640); err != nil {
-			g.errorf("write config: %v", err)
-			return 1
-		}
-		if err := os.Rename(tmp, configPath); err != nil {
-			os.Remove(tmp)
-			g.errorf("rename config: %v", err)
-			return 1
-		}
-		fmt.Fprintf(os.Stderr, "wrote %s\n", configPath)
-	}
-
-	// 3. Register MCP server
-	if _, err := exec.LookPath("claude"); err != nil {
-		fmt.Fprintf(os.Stderr, "claude CLI not found — register manually: claude mcp add -s user beadle-email -- %s serve\n", selfPath())
-	} else {
-		cmd := exec.Command("claude", "mcp", "add", "-s", "user", "beadle-email", "--", selfPath(), "serve")
-		cmd.Stdout = os.Stderr
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "MCP registration failed: %v (register manually)\n", err)
+		// 2. Create email.json if missing
+		configPath := filepath.Join(dataDir, "email.json")
+		if _, err := os.Stat(configPath); err == nil {
+			fmt.Fprintf(os.Stderr, "config already exists at %s; skipping\n", configPath)
 		} else {
-			fmt.Fprintln(os.Stderr, "MCP server registered")
+			cfg := promptConfig()
+			data, _ := json.MarshalIndent(cfg, "", "  ")
+			data = append(data, '\n')
+			tmp := configPath + ".tmp"
+			if err := os.WriteFile(tmp, data, 0o640); err != nil {
+				return fmt.Errorf("write config: %w", err)
+			}
+			if err := os.Rename(tmp, configPath); err != nil {
+				os.Remove(tmp)
+				return fmt.Errorf("rename config: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "wrote %s\n", configPath)
 		}
-	}
 
-	// 4. Run doctor
-	fmt.Fprintln(os.Stderr)
-	return runDoctor(g, configPath)
+		// 3. Register MCP server
+		if _, err := exec.LookPath("claude"); err != nil {
+			fmt.Fprintf(os.Stderr, "claude CLI not found — register manually: claude mcp add -s user beadle-email -- %s serve\n", selfPath())
+		} else {
+			regCmd := exec.Command("claude", "mcp", "add", "-s", "user", "beadle-email", "--", selfPath(), "serve")
+			regCmd.Stdout = os.Stderr
+			regCmd.Stderr = os.Stderr
+			if err := regCmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "MCP registration failed: %v (register manually)\n", err)
+			} else {
+				fmt.Fprintln(os.Stderr, "MCP server registered")
+			}
+		}
+
+		// 4. Run doctor with the config we just created/selected
+		fmt.Fprintln(os.Stderr)
+		doctorConfig = configPath
+		return doctorCmd.RunE(doctorCmd, nil)
+	},
 }
 
-func runUninstall(g globalOpts, _ []string) int {
-	removed := 0
+var uninstallCmd = &cobra.Command{
+	Use:   "uninstall",
+	Short: "Remove beadle-email",
+	Long:  "Remove MCP registration, deployed commands, and permissions.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		removed := 0
 
-	// 1. Remove MCP registration
-	if _, err := exec.LookPath("claude"); err == nil {
-		cmd := exec.Command("claude", "mcp", "remove", "beadle-email")
-		cmd.Stdout = os.Stderr
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "MCP removal failed (may not be registered): %v\n", err)
-		} else {
-			fmt.Fprintln(os.Stderr, "removed MCP registration")
+		// 1. Remove MCP registration
+		if _, err := exec.LookPath("claude"); err == nil {
+			regCmd := exec.Command("claude", "mcp", "remove", "beadle-email")
+			regCmd.Stdout = os.Stderr
+			regCmd.Stderr = os.Stderr
+			if err := regCmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "MCP removal failed (may not be registered): %v\n", err)
+			} else {
+				fmt.Fprintln(os.Stderr, "removed MCP registration")
+				removed++
+			}
+		}
+
+		// 2. Remove deployed commands
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		commandsDir := filepath.Join(home, ".claude", "commands")
+		for _, name := range []string{"inbox.md", "mail.md", "send.md", "contacts.md"} {
+			path := filepath.Join(commandsDir, name)
+			if err := os.Remove(path); err == nil {
+				fmt.Fprintf(os.Stderr, "removed %s\n", path)
+				removed++
+			}
+		}
+
+		// 3. Clean permissions from settings.json
+		settingsPath := filepath.Join(home, ".claude", "settings.json")
+		if cleanedPerms := cleanSettings(settingsPath); cleanedPerms > 0 {
+			fmt.Fprintf(os.Stderr, "removed %d permission rule(s) from settings.json\n", cleanedPerms)
 			removed++
 		}
-	}
 
-	// 2. Remove deployed commands
-	home, err := os.UserHomeDir()
-	if err != nil {
-		g.errorf("cannot determine home directory: %v", err)
-		return 1
-	}
-	commandsDir := filepath.Join(home, ".claude", "commands")
-	for _, name := range []string{"inbox.md", "mail.md", "send.md", "contacts.md"} {
-		path := filepath.Join(commandsDir, name)
-		if err := os.Remove(path); err == nil {
-			fmt.Fprintf(os.Stderr, "removed %s\n", path)
-			removed++
+		if removed == 0 {
+			fmt.Fprintln(os.Stderr, "nothing to remove")
 		}
-	}
-
-	// 3. Clean permissions from settings.json
-	settingsPath := filepath.Join(home, ".claude", "settings.json")
-	if cleanedPerms := cleanSettings(settingsPath); cleanedPerms > 0 {
-		fmt.Fprintf(os.Stderr, "removed %d permission rule(s) from settings.json\n", cleanedPerms)
-		removed++
-	}
-
-	if removed == 0 {
-		fmt.Fprintln(os.Stderr, "nothing to remove")
-	}
-	return 0
+		return nil
+	},
 }
 
 func promptConfig() email.Config {
@@ -159,7 +167,6 @@ func selfPath() string {
 }
 
 // cleanSettings removes beadle-related entries from settings.json.
-// Returns the number of rules removed.
 func cleanSettings(path string) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -173,7 +180,6 @@ func cleanSettings(path string) int {
 
 	removed := 0
 
-	// Clean permissions.allow
 	if perms, ok := settings["permissions"].(map[string]any); ok {
 		if allow, ok := perms["allow"].([]any); ok {
 			var cleaned []any

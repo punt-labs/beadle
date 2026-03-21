@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- CLI framework: migrated from hand-rolled arg parsing to
+  [cobra](https://cobra.dev/). All commands now support `--flag=value` syntax,
+  auto-generated `--help` with per-flag documentation, and global flags
+  (`--json`, `--verbose`, `--quiet`) in any position. Cobra is the Go CLI
+  standard per punt-kit/standards/cli.md.
+- Default behavior: running `beadle-email` without a subcommand now prints help
+  instead of starting the MCP server. Use `beadle-email serve` explicitly.
+- Contact commands now route through `g.printResult()` — `--json` and `--quiet`
+  work for `contact list`, `contact add`, `contact remove`, and `contact find`.
+
+### Fixed
+
+- `beadle-email contact add --name="Jim" --email="jim@x.com"` now works. The
+  `--flag=value` syntax was rejected by the hand-rolled parser with "unexpected
+  argument."
+- Unknown flags now show cobra's auto-generated usage with all valid flags,
+  instead of the vague "unexpected argument" error.
+- Markdownlint config: added `.tmp/` to ignores so leaked pytest temp files
+  don't break `make check`.
+
 ## [0.6.1] - 2026-03-21
 
 ### Fixed

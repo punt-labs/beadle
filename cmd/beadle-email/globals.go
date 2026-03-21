@@ -14,27 +14,6 @@ type globalOpts struct {
 	Quiet   bool // --quiet / -q: errors only
 }
 
-// parseGlobalOpts extracts global flags from args before the subcommand,
-// returning the opts and remaining args with global flags stripped.
-// Only parses flags before the first non-flag token (the subcommand).
-func parseGlobalOpts(args []string) (globalOpts, []string) {
-	var g globalOpts
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--json", "-j":
-			g.JSON = true
-		case "--verbose", "-v":
-			g.Verbose = true
-		case "--quiet", "-q":
-			g.Quiet = true
-		default:
-			// First non-global-flag token — return it and everything after
-			return g, args[i:]
-		}
-	}
-	return g, nil
-}
-
 // slogLevel returns the appropriate log level based on flags.
 func (g globalOpts) slogLevel() slog.Level {
 	if g.Verbose {
@@ -64,9 +43,4 @@ func (g globalOpts) printResult(v any, humanFn func()) {
 	if !g.Quiet {
 		humanFn()
 	}
-}
-
-// errorf prints an error to stderr.
-func (g globalOpts) errorf(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "error: "+format+"\n", a...)
 }
