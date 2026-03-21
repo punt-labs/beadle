@@ -438,3 +438,28 @@ The user is identified at session start. Priority chain:
   One structure with a default identity fallback.
 
 **Depends on:** ethos DES-008 (generic extension mechanism).
+
+## DES-014: Cobra for CLI framework
+
+**Decision:** Migrate from hand-rolled arg parsing to
+[cobra](https://cobra.dev/) for all CLI commands.
+
+**Why:** The hand-rolled parser caused a user-facing bug: `--flag=value` syntax
+was rejected because `switch args[i]` matched exact strings only. The parser also
+lacked per-flag help generation, global flag propagation to subcommands, and
+actionable error messages. These are solved problems in cobra.
+
+**Status:** Implemented. All 14 subcommands migrated. punt-kit/standards/cli.md
+updated with Go/cobra guidance alongside Python/typer.
+
+**Rejected alternatives:**
+
+- **Keep hand-rolled parser, add `parseFlag` helper** — Fixes the immediate bug
+  but leaves the structural problem. Every new flag or subcommand requires manual
+  parsing code, help text maintenance, and global flag forwarding. The bug
+  recurrence risk is high.
+- **stdlib `flag` package** — Handles `--flag=value` natively but has no
+  subcommand support. Would require hand-rolled dispatch for `contact list`,
+  `contact add`, etc.
+- **urfave/cli** — Lighter than cobra but less ecosystem adoption. Cobra is used
+  by kubectl, docker, gh, and is the de facto Go CLI standard.
