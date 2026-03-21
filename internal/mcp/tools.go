@@ -1107,7 +1107,7 @@ func (h *handler) whoami(ctx context.Context, req mcplib.CallToolRequest) (*mcpl
 		return mcplib.NewToolResultError(fmt.Sprintf("identity resolution failed: %v", err)), nil
 	}
 
-	contactsPath, contactsErr := h.resolveContactsPath(id.Email)
+	contactsPath, contactsErr := paths.IdentityContactsPath(id.Email)
 
 	lines := []string{
 		fmt.Sprintf("   %-16s %s", "email:", id.Email),
@@ -1133,15 +1133,3 @@ func (h *handler) whoami(ctx context.Context, req mcplib.CallToolRequest) (*mcpl
 	return textResult(strings.Join(lines, "\n"))
 }
 
-// resolveContactsPath returns the identity-scoped contacts path for the given email.
-func (h *handler) resolveContactsPath(email string) (string, error) {
-	beadleDir, err := paths.DataDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve data dir: %w", err)
-	}
-	idDir, err := identity.EnsureIdentityDir(beadleDir, email)
-	if err != nil {
-		return "", fmt.Errorf("ensure identity dir for %s: %w", email, err)
-	}
-	return filepath.Join(idDir, "contacts.json"), nil
-}

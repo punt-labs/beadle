@@ -47,7 +47,7 @@ func identityShowRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve identity: %w", err)
 	}
 
-	contactsPath, pathErr := contactsPathForEmail(id.Email)
+	contactsPath, pathErr := paths.IdentityContactsPath(id.Email)
 	contactCount := 0
 	contactsError := ""
 	if pathErr != nil {
@@ -139,8 +139,14 @@ var identitySetCmd = &cobra.Command{
 		}
 
 		// Verify by resolving with repo root as repoDir
-		ethosDir, _ := paths.EthosDir()
-		beadleDir, _ := paths.DataDir()
+		ethosDir, err := paths.EthosDir()
+		if err != nil {
+			return fmt.Errorf("resolve ethos dir: %w", err)
+		}
+		beadleDir, err := paths.DataDir()
+		if err != nil {
+			return fmt.Errorf("resolve beadle dir: %w", err)
+		}
 		resolver := identity.NewResolver(ethosDir, beadleDir, root)
 		id, err := resolver.Resolve()
 		if err != nil {
@@ -154,15 +160,3 @@ var identitySetCmd = &cobra.Command{
 	},
 }
 
-// contactsPathForEmail returns the identity-scoped contacts path for a given email.
-func contactsPathForEmail(email string) (string, error) {
-	beadleDir, err := paths.DataDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve data dir: %w", err)
-	}
-	idDir, err := identity.EnsureIdentityDir(beadleDir, email)
-	if err != nil {
-		return "", fmt.Errorf("ensure identity dir for %s: %w", email, err)
-	}
-	return filepath.Join(idDir, "contacts.json"), nil
-}
