@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `/inbox` command: `rwx` (owner) messages now auto-reply when the message asks
+  a question, using the same reply rules and safety constraints as `rw-`. Previously
+  said "Never auto-reply," which was more restrictive than trusted contacts — the
+  `x` bit is for command execution, not reply permission.
+- Plugin hooks: moved `hooks/hooks.json` to `.claude-plugin/hooks/hooks.json`
+  so Claude Code discovers PostToolUse output suppression. Previously the hook
+  was not firing, causing raw MCP output to appear in the tool-result panel
+  (truncated behind ctrl+o) instead of the two-channel display pattern.
 - README Quick Start: removed broken `claude plugin install` path that installed
   the plugin without the `beadle-email` binary, causing MCP server startup
   failures. `install.sh` is now the single recommended install method — it
