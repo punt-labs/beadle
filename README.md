@@ -57,7 +57,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 
 ## Features
 
-- **13 MCP tools** --- list, read, send, move/archive, download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts)
+- **14 MCP tools** --- list, read, send, move/archive, download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts), whoami
 - **Multi-identity via ethos** --- identity resolved per-request from ethos sidecar. Repo-local config pins identity. Fallback to `default-identity` file or legacy `email.json`
 - **Two-dimensional trust** --- transport trust (trusted/verified/untrusted/unverified) + identity permissions (rwx per contact per identity). Both must pass before autonomous action
 - **Four-level transport trust** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
@@ -188,6 +188,8 @@ beadle-email uninstall                                  # Remove beadle-email
 beadle-email serve [--config PATH]                      # Start MCP server
 beadle-email doctor [--config PATH]                     # Check installation health
 beadle-email status [--config PATH]                     # Current state summary
+beadle-email identity                                   # Show active identity
+beadle-email identity set <handle>                      # Set per-repo identity
 beadle-email version                                    # Print version
 
 # Global flags (work with any subcommand)

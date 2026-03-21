@@ -1,0 +1,365 @@
+%
+% beadle-identity.tex
+%
+% Z Specification for Beadle Identity, Address Book, and Permissions
+% Formal model of the identity resolution chain, contact management,
+% and per-identity rwx permission system.
+%
+
+\documentclass[a4paper,10pt,fleqn]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{fuzz}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+
+\begin{document}
+
+\title{Beadle Identity and Permissions: A Z Specification}
+\author{Formal Model of Identity Resolution, Address Book, and rwx Permissions}
+\date{March 2026}
+\hypersetup{
+  pdftitle={Beadle Identity and Permissions: A Z Specification},
+  pdfauthor={Punt Labs},
+  pdfsubject={Z Specification},
+  pdfcreator={fuzz/probcli}
+}
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+
+Beadle's identity and permission systems govern three concerns:
+
+\begin{enumerate}
+\item \textbf{Identity resolution}: determining which email address beadle
+  operates as, via a chain of sources (ethos, default file, legacy config).
+\item \textbf{Address book}: a contact store with uniqueness constraints on
+  names and aliases, supporting name-based address resolution.
+\item \textbf{Permissions}: an rwx bit model per (identity, contact) pair
+  that gates what beadle may do with messages from each contact.
+\end{enumerate}
+
+\section{Basic Types}
+
+\begin{zed}
+[EMAIL, NAME, HANDLE, GPGKEYID]
+\end{zed}
+
+$EMAIL$ represents email addresses (e.g., \texttt{claude@punt-labs.com}).
+$NAME$ represents display names and aliases (case-insensitive in the
+implementation, modeled here as distinct values).
+$HANDLE$ represents ethos identity handles (e.g., \texttt{claude}).
+$GPGKEYID$ represents GPG key identifiers.
+
+\section{Free Types}
+
+\subsection{Boolean}
+
+\begin{zed}
+ZBOOL ::= ztrue | zfalse
+\end{zed}
+
+\subsection{Identity Source}
+
+The source from which the active identity was resolved, ordered by
+priority (ethos highest, legacy lowest).
+
+\begin{zed}
+IdentitySource ::= ethos | defaultFile | legacy
+\end{zed}
+
+\subsection{Trust Level}
+
+Transport-level trust classification for incoming messages.
+
+\begin{zed}
+TrustLevel ::= trusted | verified | untrusted | unverified
+\end{zed}
+
+\section{Identity}
+
+An identity is the email address beadle operates as, plus optional
+metadata from the resolution source.
+
+\begin{schema}{Identity}
+email : EMAIL \\
+handle : HANDLE \\
+name : NAME \\
+gpgKeyId : GPGKEYID \\
+source : IdentitySource \\
+hasHandle : ZBOOL \\
+hasGpgKey : ZBOOL
+\end{schema}
+
+\subsection{Identity Resolution Chain}
+
+The resolver checks sources in priority order. At most one identity
+is active at any time.
+
+\begin{schema}{IdentityStore}
+activeIdentity : EMAIL \\
+identitySource : IdentitySource \\
+ethosIdentities : HANDLE \pfun EMAIL \\
+defaultIdentity : EMAIL \\
+legacyIdentity : EMAIL \\
+hasEthos : ZBOOL \\
+hasDefault : ZBOOL \\
+hasLegacy : ZBOOL
+\where
+hasEthos = ztrue \implies activeIdentity \in \ran ethosIdentities \\
+hasEthos = ztrue \implies identitySource = ethos \\
+hasEthos = zfalse \land hasDefault = ztrue \implies
+  activeIdentity = defaultIdentity \\
+hasEthos = zfalse \land hasDefault = ztrue \implies
+  identitySource = defaultFile \\
+hasEthos = zfalse \land hasDefault = zfalse \land hasLegacy = ztrue \implies
+  activeIdentity = legacyIdentity \\
+hasEthos = zfalse \land hasDefault = zfalse \land hasLegacy = ztrue \implies
+  identitySource = legacy
+\end{schema}
+
+\begin{schema}{InitIdentityStore}
+IdentityStore'
+\where
+ethosIdentities' = \emptyset \\
+hasEthos' = zfalse \\
+hasDefault' = zfalse \\
+hasLegacy' = zfalse
+\end{schema}
+
+\section{Permissions}
+
+Permissions are a top-level entity: a relation between identities and
+contacts, not a property of a contact. This separates access control
+from contact data and simplifies permission updates.
+
+\subsection{Permission Bits}
+
+Each permission is a triple of read/write/execute bits.
+
+\begin{schema}{Permission}
+canRead : ZBOOL \\
+canWrite : ZBOOL \\
+canExecute : ZBOOL
+\end{schema}
+
+The default permission is no access (whitelist model).
+
+\begin{axdef}
+noPermission : ZBOOL \cross ZBOOL \cross ZBOOL
+\where
+noPermission = (zfalse, zfalse, zfalse)
+\end{axdef}
+
+\subsection{Permission Semantics}
+
+Permission bits control what beadle may do with a contact's messages:
+
+\begin{itemize}
+\item \textbf{r} (read): beadle may read the message content
+\item \textbf{w} (write): the LLM may reply and generate text (no tool use)
+\item \textbf{x} (execute): beadle may execute tools as part of a reply
+\end{itemize}
+
+\subsection{Permission Store}
+
+The permission store maps (identity email, contact name) pairs to
+permission triples. It is independent of the address book.
+
+\begin{schema}{PermissionStore}
+perms : (EMAIL \cross NAME) \pfun (ZBOOL \cross ZBOOL \cross ZBOOL)
+\end{schema}
+
+\begin{schema}{InitPermissionStore}
+PermissionStore'
+\where
+perms' = \emptyset
+\end{schema}
+
+\section{Address Book}
+
+\subsection{Contact}
+
+\begin{schema}{Contact}
+contactName : NAME \\
+contactEmail : EMAIL \\
+aliases : \power NAME \\
+gpgKeyId : GPGKEYID \\
+hasGpgKey : ZBOOL
+\where
+contactName \notin aliases
+\end{schema}
+
+A contact's name is not in its alias set (they are distinct identifiers).
+
+\subsection{Address Book State}
+
+The address book maps names to contacts, enforcing uniqueness of all
+identifiers (names and aliases) across the entire book.
+
+\begin{schema}{AddressBook}
+contacts : NAME \pinj Contact \\
+allNames : \power NAME \\
+identityEmail : EMAIL
+\where
+\forall n : \dom contacts @ \\
+\quad~ (contacts~n).contactName = n \\
+allNames = \dom contacts \cup
+  \bigcup \{ n : \dom contacts @ (contacts~n).aliases \} \\
+\forall n1, n2 : \dom contacts | n1 \neq n2 @ \\
+\quad~ (\{ n1 \} \cup (contacts~n1).aliases) \cap
+  (\{ n2 \} \cup (contacts~n2).aliases) = \emptyset
+\end{schema}
+
+Key invariants:
+\begin{itemize}
+\item Contact names are unique (partial injection).
+\item The union of all names and aliases is disjoint across contacts.
+\item Each contact's key matches its internal name field.
+\end{itemize}
+
+\subsection{Initialization}
+
+\begin{schema}{InitAddressBook}
+AddressBook'
+\where
+contacts' = \emptyset \\
+allNames' = \emptyset
+\end{schema}
+
+\section{Operations}
+
+\subsection{Add Contact}
+
+Adding a contact succeeds only if the name and all aliases are fresh
+(no conflicts with any existing contact's name or aliases).
+
+\begin{schema}{AddContact}
+\Delta AddressBook \\
+newName? : NAME \\
+newEmail? : EMAIL \\
+newAliases? : \power NAME
+\where
+newName? \notin allNames \\
+newAliases? \cap allNames = \emptyset \\
+newName? \notin newAliases? \\
+\exists c : Contact @ \\
+\quad~ c.contactName = newName? \land \\
+\quad~ c.contactEmail = newEmail? \land \\
+\quad~ c.aliases = newAliases? \land \\
+\quad~ contacts' = contacts \cup \{ newName? \mapsto c \} \\
+allNames' = allNames \cup \{ newName? \} \cup newAliases? \\
+identityEmail' = identityEmail
+\end{schema}
+
+\subsection{Remove Contact}
+
+\begin{schema}{RemoveContact}
+\Delta AddressBook \\
+targetName? : NAME
+\where
+targetName? \in \dom contacts \\
+contacts' = \{ targetName? \} \ndres contacts \\
+allNames' = allNames \setminus
+  (\{ targetName? \} \cup (contacts~targetName?).aliases) \\
+identityEmail' = identityEmail
+\end{schema}
+
+\subsection{Find Contact}
+
+Finding a contact by query matches against name, email, or any alias.
+This is a query operation (no state change).
+
+\begin{schema}{FindContact}
+\Xi AddressBook \\
+query? : NAME \\
+results! : \power Contact
+\where
+results! = \{ n : \dom contacts |
+  (contacts~n).contactName = query? \lor \\
+\quad~ query? \in (contacts~n).aliases @ contacts~n \}
+\end{schema}
+
+\subsection{Resolve Address}
+
+Resolve a name to an email. Succeeds only when exactly one contact
+matches (no ambiguity).
+
+\begin{schema}{ResolveAddress}
+\Xi AddressBook \\
+token? : NAME \\
+resolved! : EMAIL
+\where
+\exists_1 n : \dom contacts @
+  (contacts~n).contactName = token? \lor
+  token? \in (contacts~n).aliases \\
+\forall n : \dom contacts |
+  (contacts~n).contactName = token? \lor
+  token? \in (contacts~n).aliases @
+  resolved! = (contacts~n).contactEmail
+\end{schema}
+
+\subsection{Check Permission}
+
+Look up the effective permission for a contact given the active identity.
+Returns the explicit permission if set, otherwise no-permission (whitelist).
+
+\begin{schema}{CheckPermission}
+\Xi PermissionStore \\
+identityEmail? : EMAIL \\
+targetName? : NAME \\
+permRead! : ZBOOL \\
+permWrite! : ZBOOL \\
+permExecute! : ZBOOL
+\where
+((identityEmail?, targetName?) \in \dom perms \implies \\
+\quad~ (permRead!, permWrite!, permExecute!) =
+  perms~(identityEmail?, targetName?)) \\
+((identityEmail?, targetName?) \notin \dom perms \implies \\
+\quad~ (permRead!, permWrite!, permExecute!) = noPermission)
+\end{schema}
+
+\subsection{Set Permission}
+
+Grant or change permission for a contact.
+
+\begin{schema}{SetPermission}
+\Delta PermissionStore \\
+forIdentity? : EMAIL \\
+targetName? : NAME \\
+newRead? : ZBOOL \\
+newWrite? : ZBOOL \\
+newExecute? : ZBOOL
+\where
+perms' = perms \oplus
+  \{ (forIdentity?, targetName?) \mapsto
+    (newRead?, newWrite?, newExecute?) \}
+\end{schema}
+
+\section{Unified Initialization}
+
+\begin{schema}{Init}
+InitAddressBook \\
+InitIdentityStore \\
+InitPermissionStore
+\end{schema}
+
+\section{System Invariants}
+
+Key properties that hold across all reachable states:
+
+\begin{enumerate}
+\item \textbf{Name uniqueness}: no two contacts share a name or alias.
+  Enforced by the partial injection $contacts$ and the disjointness
+  constraint on $allNames$.
+\item \textbf{Whitelist default}: absent permission entries default to
+  $---$ (no access). There is no implicit grant.
+\item \textbf{Identity resolution is deterministic}: exactly one source
+  provides the active identity, selected by priority chain.
+\item \textbf{Fail-closed resolution}: if ethos has an active handle but
+  the identity file is corrupt, resolution fails rather than falling
+  back to a lower-priority source.
+\end{enumerate}
+
+\end{document}
