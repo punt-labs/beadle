@@ -3,7 +3,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -17,8 +16,9 @@ var version = "dev"
 var g globalOpts
 
 var rootCmd = &cobra.Command{
-	Use:   "beadle-email",
-	Short: "beadle-email: Beadle email channel MCP server",
+	Use:           "beadle-email",
+	Short:         "beadle-email: Beadle email channel MCP server",
+	SilenceUsage: true,
 }
 
 func init() {
@@ -45,7 +45,6 @@ func init() {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

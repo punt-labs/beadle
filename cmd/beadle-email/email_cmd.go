@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -161,8 +162,8 @@ var readCmd = &cobra.Command{
 	Long:  "Fetch and display a message by its UID.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var uidNum uint64
-		if _, err := fmt.Sscanf(args[0], "%d", &uidNum); err != nil {
+		uidNum, err := strconv.ParseUint(args[0], 10, 32)
+		if err != nil {
 			return fmt.Errorf("invalid UID %q", args[0])
 		}
 
@@ -281,8 +282,8 @@ var moveCmd = &cobra.Command{
 	Long:  "Move a message to a different IMAP folder.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var uidNum uint64
-		if _, err := fmt.Sscanf(args[0], "%d", &uidNum); err != nil {
+		uidNum, err := strconv.ParseUint(args[0], 10, 32)
+		if err != nil {
 			return fmt.Errorf("invalid UID %q", args[0])
 		}
 

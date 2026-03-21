@@ -20,8 +20,6 @@ import (
 
 // --- serve ---
 
-var serveConfig string
-
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start MCP server",
@@ -43,10 +41,6 @@ var serveCmd = &cobra.Command{
 		logger.Info("starting beadle-email MCP server", "version", version)
 		return server.ServeStdio(s)
 	},
-}
-
-func init() {
-	serveCmd.Flags().StringVarP(&serveConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
 }
 
 // --- version ---
