@@ -47,16 +47,21 @@ func identityShowRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve identity: %w", err)
 	}
 
-	contactsPath := contactsPathForEmail(id.Email)
-	store := contacts.NewStore(contactsPath)
+	contactsPath, pathErr := contactsPathForEmail(id.Email)
 	contactCount := 0
 	contactsError := ""
-	if loadErr := store.Load(); loadErr != nil {
-		if !errors.Is(loadErr, os.ErrNotExist) {
-			contactsError = loadErr.Error()
-		}
+	if pathErr != nil {
+		contactsError = pathErr.Error()
+		contactsPath = "(unavailable)"
 	} else {
-		contactCount = store.Count()
+		store := contacts.NewStore(contactsPath)
+		if loadErr := store.Load(); loadErr != nil {
+			if !errors.Is(loadErr, os.ErrNotExist) {
+				contactsError = loadErr.Error()
+			}
+		} else {
+			contactCount = store.Count()
+		}
 	}
 
 	result := map[string]string{
@@ -133,11 +138,10 @@ var identitySetCmd = &cobra.Command{
 			return fmt.Errorf("write %s: %w", configPath, err)
 		}
 
-		// Verify by resolving again
-		resolver, err := newResolver()
-		if err != nil {
-			return fmt.Errorf("create resolver: %w", err)
-		}
+		// Verify by resolving with repo root as repoDir
+		ethosDir, _ := paths.EthosDir()
+		beadleDir, _ := paths.DataDir()
+		resolver := identity.NewResolver(ethosDir, beadleDir, root)
 		id, err := resolver.Resolve()
 		if err != nil {
 			return fmt.Errorf("set handle %q but resolution failed: %w\n(the handle may not exist in ethos — check ~/.punt-labs/ethos/identities/%s.yaml)", handle, err, handle)
@@ -151,14 +155,14 @@ var identitySetCmd = &cobra.Command{
 }
 
 // contactsPathForEmail returns the identity-scoped contacts path for a given email.
-func contactsPathForEmail(email string) string {
+func contactsPathForEmail(email string) (string, error) {
 	beadleDir, err := paths.DataDir()
 	if err != nil {
-		return filepath.Join(paths.MustDataDir(), "contacts.json")
+		return "", fmt.Errorf("resolve data dir: %w", err)
 	}
 	idDir, err := identity.EnsureIdentityDir(beadleDir, email)
 	if err != nil {
-		return filepath.Join(paths.MustDataDir(), "contacts.json")
+		return "", fmt.Errorf("ensure identity dir for %s: %w", email, err)
 	}
-	return filepath.Join(idDir, "contacts.json")
+	return filepath.Join(idDir, "contacts.json"), nil
 }
