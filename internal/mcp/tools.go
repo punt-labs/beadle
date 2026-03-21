@@ -44,6 +44,8 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 	s.AddTool(findContactTool(), h.findContact)
 	s.AddTool(addContactTool(), h.addContact)
 	s.AddTool(removeContactTool(), h.removeContact)
+
+	s.AddTool(whoamiTool(), h.whoami)
 }
 
 type handler struct {
@@ -1090,3 +1092,44 @@ func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (
 
 // loadContactsIfNeeded and resolveField are now email.LoadContactsIfNeeded
 // and email.ResolveField — called directly in sendEmail above.
+
+// --- Identity Tool ---
+
+func whoamiTool() mcplib.Tool {
+	return mcplib.NewTool("whoami",
+		mcplib.WithDescription("Show the active beadle identity: email, handle, source, and contacts path. Use to diagnose permission errors."),
+	)
+}
+
+func (h *handler) whoami(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	id, err := h.resolver.Resolve()
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("identity resolution failed: %v", err)), nil
+	}
+
+	contactsPath, contactsErr := paths.IdentityContactsPath(id.Email)
+
+	lines := []string{
+		fmt.Sprintf("   %-16s %s", "email:", id.Email),
+		fmt.Sprintf("   %-16s %s", "source:", id.Source),
+	}
+	if id.Handle != "" {
+		lines = append(lines, fmt.Sprintf("   %-16s %s", "handle:", id.Handle))
+	}
+	if id.Name != "" {
+		lines = append(lines, fmt.Sprintf("   %-16s %s", "name:", id.Name))
+	}
+	if contactsErr != nil {
+		lines = append(lines, fmt.Sprintf("   %-16s error: %v", "contacts:", contactsErr))
+	} else {
+		store := contacts.NewStore(contactsPath)
+		if loadErr := store.Load(); loadErr != nil {
+			lines = append(lines, fmt.Sprintf("   %-16s %s (error: %v)", "contacts:", contactsPath, loadErr))
+		} else {
+			lines = append(lines, fmt.Sprintf("   %-16s %s (%d contacts)", "contacts:", contactsPath, store.Count()))
+		}
+	}
+
+	return textResult(strings.Join(lines, "\n"))
+}
+
