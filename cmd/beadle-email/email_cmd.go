@@ -216,10 +216,6 @@ var sendCmd = &cobra.Command{
 	Short: "Send an email",
 	Long:  "Send an email via Proton Bridge SMTP or Resend API fallback.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if sendTo == "" || sendSubject == "" || sendBody == "" {
-			return fmt.Errorf("--to, --subject, and --body are required")
-		}
-
 		contactsPath := resolveContactsPath()
 		store, storeErr := email.LoadContactsIfNeeded(contactsPath, sendTo, sendCc, sendBcc)
 		toResolved, err := email.ResolveField(store, storeErr, sendTo)
@@ -266,6 +262,9 @@ func init() {
 	sendCmd.Flags().StringVar(&sendSubject, "subject", "", "Subject line (required)")
 	sendCmd.Flags().StringVar(&sendBody, "body", "", "Message body (required)")
 	sendCmd.Flags().StringVarP(&sendConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
+	_ = sendCmd.MarkFlagRequired("to")
+	_ = sendCmd.MarkFlagRequired("subject")
+	_ = sendCmd.MarkFlagRequired("body")
 }
 
 // --- move ---

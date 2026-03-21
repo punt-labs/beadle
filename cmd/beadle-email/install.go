@@ -66,8 +66,9 @@ var installCmd = &cobra.Command{
 			}
 		}
 
-		// 4. Run doctor
+		// 4. Run doctor with the config we just created/selected
 		fmt.Fprintln(os.Stderr)
+		doctorConfig = configPath
 		return doctorCmd.RunE(doctorCmd, nil)
 	},
 }

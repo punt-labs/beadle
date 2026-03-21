@@ -73,9 +73,6 @@ var contactAddCmd = &cobra.Command{
 	Short: "Add a new contact",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if contactAddName == "" || contactAddEmail == "" {
-			return fmt.Errorf("--name and --email are required")
-		}
 		path := contactAddContacts
 		if path == "" {
 			path = resolveContactsPath()
@@ -105,10 +102,12 @@ var contactAddCmd = &cobra.Command{
 func init() {
 	contactAddCmd.Flags().StringVar(&contactAddName, "name", "", "Contact name (required)")
 	contactAddCmd.Flags().StringVar(&contactAddEmail, "email", "", "Email address (required)")
-	contactAddCmd.Flags().StringSliceVar(&contactAddAliases, "alias", nil, "Alternate name (repeatable)")
+	contactAddCmd.Flags().StringArrayVar(&contactAddAliases, "alias", nil, "Alternate name (repeatable)")
 	contactAddCmd.Flags().StringVar(&contactAddGPGKeyID, "gpg-key-id", "", "GPG key ID for signature verification")
 	contactAddCmd.Flags().StringVar(&contactAddNotes, "notes", "", "Freeform notes")
 	contactAddCmd.Flags().StringVar(&contactAddContacts, "contacts", "", "Contacts file path (default: identity-scoped)")
+	_ = contactAddCmd.MarkFlagRequired("name")
+	_ = contactAddCmd.MarkFlagRequired("email")
 }
 
 // --- contact remove ---

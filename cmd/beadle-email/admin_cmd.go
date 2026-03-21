@@ -192,12 +192,14 @@ var statusCmd = &cobra.Command{
 		id, idErr := resolver.Resolve()
 
 		var cfg *email.Config
+		usedConfigPath := statusConfig
 		if idErr == nil {
 			idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
 			if pathErr == nil {
 				idCfg, cfgErr := email.LoadConfig(idConfigPath)
 				if cfgErr == nil {
 					cfg = idCfg
+					usedConfigPath = idConfigPath
 				} else if !errors.Is(cfgErr, os.ErrNotExist) {
 					fmt.Fprintf(os.Stderr, "warning: identity config %s: %v (using fallback)\n", idConfigPath, cfgErr)
 				}
@@ -230,7 +232,7 @@ var statusCmd = &cobra.Command{
 			"from_address":   cfg.FromAddress,
 			"gpg_binary":     cfg.GPGBinary,
 			"gpg_signer":     cfg.GPGSigner,
-			"config":         statusConfig,
+			"config":         usedConfigPath,
 			"contacts_path":  contactsPath,
 			"contacts_count": contactsCount,
 		}
