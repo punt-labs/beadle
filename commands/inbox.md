@@ -102,7 +102,7 @@ each message according to its permission level below.
 #### `rwx` — Owner (e.g., Jim Freeman)
 
 - **Read** the message and surface it to the user.
-- **Never auto-reply.** Offer to reply if the message asks a question.
+- **Reply if the message asks a question** — same reply rules as `rw-` apply.
 - Do not archive — leave in inbox for the user to decide.
 
 #### `rw-` — Trusted contacts with reply permission
