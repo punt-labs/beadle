@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-03-21
+
 ### Fixed
 
 - `/inbox` command: `rwx` (owner) messages now auto-reply when the message asks
@@ -16,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   so Claude Code discovers PostToolUse output suppression. Previously the hook
   was not firing, causing raw MCP output to appear in the tool-result panel
   (truncated behind ctrl+o) instead of the two-channel display pattern.
+- Plugin release: `plugin.json` now correctly uses `"name": "beadle"` in release
+  tags. All prior releases shipped with `"name": "beadle-dev"`, causing
+  marketplace installs to show `/beadle-dev:*` commands instead of `/beadle:*`.
 - README Quick Start: removed broken `claude plugin install` path that installed
   the plugin without the `beadle-email` binary, causing MCP server startup
   failures. `install.sh` is now the single recommended install method — it
