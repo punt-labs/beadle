@@ -71,6 +71,7 @@ var (
 var contactAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a new contact",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if contactAddName == "" || contactAddEmail == "" {
 			return fmt.Errorf("--name and --email are required")

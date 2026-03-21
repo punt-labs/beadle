@@ -16,9 +16,11 @@ var version = "dev"
 var g globalOpts
 
 var rootCmd = &cobra.Command{
-	Use:           "beadle-email",
-	Short:         "beadle-email: Beadle email channel MCP server",
-	SilenceUsage: true,
+	Use:   "beadle-email",
+	Short: "beadle-email: Beadle email channel MCP server",
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		cmd.SilenceUsage = true
+	},
 }
 
 func init() {
