@@ -15,7 +15,7 @@ The first shipping component is `beadle-email` — an MCP server providing email
 ## Quick Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/f03d2e22d0cbe252dedae4a02d248d56590a2dc9/install.sh | sh
 ```
 
 Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts to install the Claude Code plugin (MCP tools + slash commands + hooks). If plugin installation fails, the script falls back to registering the standalone MCP server (no slash commands or hooks). Runs `doctor` to check your setup. Restart Claude Code after install. If you previously registered `beadle-email` as a standalone MCP server via `claude mcp add`, remove it first with `claude mcp remove beadle-email` to avoid duplicate registrations.
@@ -24,7 +24,7 @@ Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts 
 <summary>Inspect before running</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/main/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/f03d2e22d0cbe252dedae4a02d248d56590a2dc9/install.sh -o install.sh
 cat install.sh
 sh install.sh
 ```
@@ -71,7 +71,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 ## MCP Tools
 
 | Tool | Purpose |
-|------|---------|
+|------|--------|
 | `list_messages` | List messages with trust levels. PGP signatures verified inline. |
 | `read_message` | Read full message body, headers, attachments, and trust classification. |
 | `send_email` | Send via Proton Bridge SMTP (primary) or Resend API (fallback). Resolves contact names inline. |
@@ -167,7 +167,7 @@ Each identity gets its own directory under `~/.punt-labs/beadle/identities/<emai
 Each contact has an optional `permissions` map keyed by identity email. Permissions use the Unix rwx model:
 
 | Permission | Meaning |
-|------------|---------|
+|------------|--------|
 | `r` (read) | Beadle reads and surfaces the message. No autonomous action. |
 | `w` (write) | Beadle may compose and send replies to this contact. |
 | `x` (execute) | Beadle may execute instructions from this contact. |
