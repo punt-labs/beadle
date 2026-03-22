@@ -21,6 +21,9 @@
 .claude/settings.local.json
 .claude/*.local.md
 .claude/beadle.poll.ts
+.claude/projects/
+.claude/worktrees/
+.claude/scheduled_tasks.lock
 
 # direnv
 .envrc
@@ -32,6 +35,9 @@
 
 # Beadle runtime data (downloaded attachments, etc.)
 .beadle/
+
+# Session transcripts
+*-transcript.txt
 
 # Go build artifacts
 /beadle-email
