@@ -169,7 +169,11 @@ func (s *memSession) Close() error { return nil }
 
 func (s *memSession) Login(username, password string) error {
 	if username != s.backend.user || password != s.backend.pass {
-		return fmt.Errorf("invalid credentials")
+		return &imap.Error{
+			Type: imap.StatusResponseTypeNo,
+			Code: imap.ResponseCodeAuthenticationFailed,
+			Text: "invalid credentials",
+		}
 	}
 	return nil
 }

@@ -36,14 +36,13 @@ func NewFixture(t testing.TB) *Fixture {
 	_, smtpPortStr, _ := net.SplitHostPort(smtpAddr)
 	smtpPort, _ := strconv.Atoi(smtpPortStr)
 
-	t.Setenv("BEADLE_IMAP_PASSWORD", testPass)
-
 	cfg := &email.Config{
-		IMAPHost:    imapHost,
-		IMAPPort:    imapPort,
-		IMAPUser:    testUser,
-		SMTPPort:    smtpPort,
-		FromAddress: testUser,
+		IMAPHost:     imapHost,
+		IMAPPort:     imapPort,
+		IMAPUser:     testUser,
+		SMTPPort:     smtpPort,
+		FromAddress:  testUser,
+		TestPassword: testPass,
 	}
 
 	return &Fixture{

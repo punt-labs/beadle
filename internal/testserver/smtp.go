@@ -1,11 +1,13 @@
 package testserver
 
 import (
+	"crypto/tls"
 	"io"
 	"net"
 	"sync"
 	"testing"
 
+	"github.com/emersion/go-sasl"
 	gosmtp "github.com/emersion/go-smtp"
 )
 
@@ -30,6 +32,7 @@ func NewSMTPServer(t testing.TB) (*SMTPServer, string) {
 	backend := &memSMTPBackend{}
 	srv := gosmtp.NewServer(backend)
 	srv.AllowInsecureAuth = true
+	srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{selfSignedCert(t)}}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -75,6 +78,17 @@ type memSMTPSession struct {
 	backend *memSMTPBackend
 	from    string
 	to      []string
+}
+
+func (s *memSMTPSession) AuthMechanisms() []string {
+	return []string{sasl.Plain}
+}
+
+func (s *memSMTPSession) Auth(mech string) (sasl.Server, error) {
+	return sasl.NewPlainServer(func(identity, username, password string) error {
+		// Accept any credentials for testing.
+		return nil
+	}), nil
 }
 
 func (s *memSMTPSession) Mail(from string, _ *gosmtp.MailOptions) error {
