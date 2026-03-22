@@ -135,7 +135,10 @@ func (r *Resolver) resolveHandle() (string, error) {
 	activePath := filepath.Join(r.ethosDir, "active")
 	data, err := os.ReadFile(activePath)
 	if err != nil {
-		return "", nil //nolint:nilerr // no ethos installed — missing file is expected
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil // no ethos installed
+		}
+		return "", fmt.Errorf("read ethos active %s: %w", activePath, err)
 	}
 	return strings.TrimSpace(string(data)), nil
 }
