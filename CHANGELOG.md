@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- Legacy `email.json` `from_address` fallback from identity resolution chain.
+  Identity must now come from ethos (repo-local config or global active file) or
+  the `default-identity` file. The per-identity `email.json` (connection config)
+  is unchanged.
+
 ## [0.7.0] - 2026-03-21
 
 ### Added

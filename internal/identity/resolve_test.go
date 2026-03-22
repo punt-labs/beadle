@@ -131,20 +131,6 @@ func TestResolve_DefaultIdentity(t *testing.T) {
 	assert.Equal(t, "default", id.Source)
 }
 
-func TestResolve_LegacyFallback(t *testing.T) {
-	ethosDir := t.TempDir()
-	beadleDir := t.TempDir()
-
-	require.NoError(t, os.WriteFile(filepath.Join(beadleDir, "email.json"), []byte(`{"from_address":"legacy@example.com"}`), 0o640))
-
-	r := NewResolver(ethosDir, beadleDir, "")
-	id, err := r.Resolve()
-	require.NoError(t, err)
-
-	assert.Equal(t, "legacy@example.com", id.Email)
-	assert.Equal(t, "legacy", id.Source)
-}
-
 func TestResolve_NothingFound(t *testing.T) {
 	ethosDir := t.TempDir()
 	beadleDir := t.TempDir()

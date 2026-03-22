@@ -20,7 +20,7 @@ func (g globalOpts) slogLevel() slog.Level {
 		return slog.LevelDebug
 	}
 	if g.Quiet {
-		return slog.LevelWarn
+		return slog.LevelError
 	}
 	if os.Getenv("BEADLE_DEBUG") != "" {
 		return slog.LevelDebug

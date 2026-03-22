@@ -3,6 +3,7 @@
 package main
 
 import (
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -20,6 +21,9 @@ var rootCmd = &cobra.Command{
 	Short: "beadle-email: Beadle email channel MCP server",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cmd.SilenceUsage = true
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: g.slogLevel(),
+		})))
 	},
 }
 

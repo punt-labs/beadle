@@ -1,7 +1,6 @@
 package identity
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -21,11 +20,6 @@ type ethosIdentity struct {
 // beadleExtension is the beadle namespace in ethos extensions.
 type beadleExtension struct {
 	GPGKeyID string `yaml:"gpg_key_id"`
-}
-
-// legacyConfig is the subset of email.json needed for legacy fallback.
-type legacyConfig struct {
-	FromAddress string `json:"from_address"`
 }
 
 // Resolver resolves the active identity from ethos or beadle fallbacks.
@@ -51,7 +45,6 @@ func NewResolver(ethosDir, beadleDir, repoDir string) *Resolver {
 //  3. Handle → ethos identity YAML → email, name
 //  4. Handle → beadle extension → gpg_key_id (optional)
 //  5. Beadle default-identity file → email (no handle)
-//  6. Beadle email.json → from_address (legacy)
 // ValidateHandle rejects handles containing path separators or parent
 // directory references to prevent path traversal attacks.
 func ValidateHandle(handle string) error {
@@ -105,13 +98,7 @@ func (r *Resolver) Resolve() (*Identity, error) {
 		return id, nil
 	}
 
-	// Step 6: legacy email.json
-	id, err = r.fromLegacy()
-	if err == nil {
-		return id, nil
-	}
-
-	return nil, fmt.Errorf("no identity found: checked ethos (%s), default-identity, email.json in %s", r.ethosDir, r.beadleDir)
+	return nil, fmt.Errorf("no identity found: checked ethos (%s), default-identity in %s", r.ethosDir, r.beadleDir)
 }
 
 // resolveHandle returns the active ethos handle, or "" if unavailable.
@@ -231,25 +218,3 @@ func (r *Resolver) fromDefault() (*Identity, error) {
 	}, nil
 }
 
-// fromLegacy reads from_address from the legacy email.json.
-func (r *Resolver) fromLegacy() (*Identity, error) {
-	path := filepath.Join(r.beadleDir, "email.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var cfg legacyConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	if cfg.FromAddress == "" {
-		return nil, fmt.Errorf("email.json has no from_address")
-	}
-	if err := ValidateEmailAsPath(cfg.FromAddress); err != nil {
-		return nil, fmt.Errorf("email.json from_address: %w", err)
-	}
-	return &Identity{
-		Email:  cfg.FromAddress,
-		Source: "legacy",
-	}, nil
-}

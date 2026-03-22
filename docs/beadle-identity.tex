@@ -33,7 +33,7 @@ Beadle's identity and permission systems govern three concerns:
 
 \begin{enumerate}
 \item \textbf{Identity resolution}: determining which email address beadle
-  operates as, via a chain of sources (ethos, default file, legacy config).
+  operates as, via a chain of sources (ethos, default file).
 \item \textbf{Address book}: a contact store with uniqueness constraints on
   names and aliases, supporting name-based address resolution.
 \item \textbf{Permissions}: an rwx bit model per (identity, contact) pair
@@ -63,10 +63,10 @@ ZBOOL ::= ztrue | zfalse
 \subsection{Identity Source}
 
 The source from which the active identity was resolved, ordered by
-priority (ethos highest, legacy lowest).
+priority (ethos highest, defaultFile lowest).
 
 \begin{zed}
-IdentitySource ::= ethos | defaultFile | legacy
+IdentitySource ::= ethos | defaultFile
 \end{zed}
 
 \subsection{Trust Level}
@@ -102,21 +102,15 @@ activeIdentity : EMAIL \\
 identitySource : IdentitySource \\
 ethosIdentities : HANDLE \pfun EMAIL \\
 defaultIdentity : EMAIL \\
-legacyIdentity : EMAIL \\
 hasEthos : ZBOOL \\
-hasDefault : ZBOOL \\
-hasLegacy : ZBOOL
+hasDefault : ZBOOL
 \where
 hasEthos = ztrue \implies activeIdentity \in \ran ethosIdentities \\
 hasEthos = ztrue \implies identitySource = ethos \\
 hasEthos = zfalse \land hasDefault = ztrue \implies
   activeIdentity = defaultIdentity \\
 hasEthos = zfalse \land hasDefault = ztrue \implies
-  identitySource = defaultFile \\
-hasEthos = zfalse \land hasDefault = zfalse \land hasLegacy = ztrue \implies
-  activeIdentity = legacyIdentity \\
-hasEthos = zfalse \land hasDefault = zfalse \land hasLegacy = ztrue \implies
-  identitySource = legacy
+  identitySource = defaultFile
 \end{schema}
 
 \begin{schema}{InitIdentityStore}
@@ -124,8 +118,7 @@ IdentityStore'
 \where
 ethosIdentities' = \emptyset \\
 hasEthos' = zfalse \\
-hasDefault' = zfalse \\
-hasLegacy' = zfalse
+hasDefault' = zfalse
 \end{schema}
 
 \section{Permissions}
