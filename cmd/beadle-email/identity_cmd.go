@@ -133,7 +133,7 @@ var identitySetCmd = &cobra.Command{
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
 		configPath := filepath.Join(dir, "config.yaml")
-		content := fmt.Sprintf("active: %s\n", handle)
+		content := fmt.Sprintf("agent: %s\n", handle)
 		if err := os.WriteFile(configPath, []byte(content), 0o640); err != nil {
 			return fmt.Errorf("write %s: %w", configPath, err)
 		}
