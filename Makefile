@@ -1,7 +1,7 @@
 VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: help lint docs test check format build install deploy-commands clean dist cover tools doctor
+.PHONY: help lint docs test test-integration check format build install deploy-commands clean dist cover tools doctor
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -15,6 +15,9 @@ docs: ## Lint markdown
 
 test: ## Run tests with race detection
 	go test -race -count=1 ./...
+
+test-integration: ## Run integration tests (in-process IMAP/SMTP)
+	go test -race -count=1 -tags=integration ./...
 
 check: lint docs test ## Run all quality gates
 

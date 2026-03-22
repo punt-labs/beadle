@@ -123,12 +123,14 @@ Config file (`~/.punt-labs/beadle/email.json`) stores only connection parameters
 
 ### Test Pyramid
 
-| Layer | What | Speed |
-|-------|------|-------|
-| Unit | Pure functions, table-driven, no I/O | < 5s |
-| PGP integration | Ephemeral GPG keypair, sign/verify round-trip | < 5s |
-| MCP smoke | Binary handshake, tool registration | < 2s |
-| Live (manual) | Real Proton Bridge, iCloud, GPG Mail | Manual |
+| Layer | What | Speed | Tag |
+|-------|------|-------|-----|
+| Unit | Pure functions, table-driven, no I/O | < 5s | none |
+| PGP integration | Ephemeral GPG keypair, sign/verify round-trip | < 5s | none |
+| MCP smoke | In-process tool registration, identity error handling | < 2s | none |
+| MCP handler | Full stack via in-process IMAP/SMTP (`testserver`) | < 3s | none |
+| IMAP/SMTP | `email.Client` against in-process servers | < 2s | `integration` |
+| Live (manual) | Real Proton Bridge, iCloud, GPG Mail | Manual | — |
 
 ### Key Rules
 
