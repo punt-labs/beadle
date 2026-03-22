@@ -368,7 +368,7 @@ way.
 Plus repo-local identity pin:
 
 ```text
-<repo>/.punt-labs/ethos/config.yaml     ← "active: claude" (overrides global)
+<repo>/.punt-labs/ethos/config.yaml     ← "agent: claude" (overrides global)
 ```
 
 **Ownership boundaries:**
@@ -388,7 +388,7 @@ exists. Beadle does not write to ethos directories (except its own extension).
 
 **Why repo-local config exists:** The global `active` file may say `jfreeman`
 (Jim is the active human). But in the beadle repo, Claude is the agent that
-operates. The repo-local `config.yaml` pins `active: claude` so beadle
+operates. The repo-local `config.yaml` pins `agent: claude` so beadle
 operates as Claude in this repo regardless of the global identity. This is
 how one machine supports a human identity globally and an agent identity
 per-repo.
