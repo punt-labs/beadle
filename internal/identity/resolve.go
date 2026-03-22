@@ -135,17 +135,21 @@ func (r *Resolver) resolveHandle() (string, error) {
 	activePath := filepath.Join(r.ethosDir, "active")
 	data, err := os.ReadFile(activePath)
 	if err != nil {
-		return "", nil //nolint: no ethos installed
+		return "", nil //nolint:nilerr // no ethos installed — missing file is expected
 	}
 	return strings.TrimSpace(string(data)), nil
 }
 
 // repoEthosConfig is the structure of .punt-labs/ethos/config.yaml.
+// The "agent" field identifies the default agent identity for the repo.
+// Ethos uses "agent" (not "active") because both a human and an agent
+// are active in every Claude Code session.
 type repoEthosConfig struct {
-	Active string `yaml:"active"`
+	Agent  string `yaml:"agent"`
+	Active string `yaml:"active"` // detect stale config using the old field name
 }
 
-// readRepoEthosConfig reads the active handle from a repo-local config.
+// readRepoEthosConfig reads the agent handle from a repo-local config.
 func readRepoEthosConfig(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -155,7 +159,10 @@ func readRepoEthosConfig(path string) (string, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return "", fmt.Errorf("parse %s: %w", path, err)
 	}
-	return cfg.Active, nil
+	if cfg.Agent == "" && cfg.Active != "" {
+		return "", fmt.Errorf("parse %s: uses deprecated 'active' field — rename to 'agent'", path)
+	}
+	return cfg.Agent, nil
 }
 
 // fromEthos builds an Identity from ethos identity + extension files.
