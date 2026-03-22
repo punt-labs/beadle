@@ -91,7 +91,12 @@ func resolveContactsPath() string {
 }
 
 func defaultContactsPath() string {
-	return filepath.Join(paths.MustDataDir(), "contacts.json")
+	beadleDir, err := paths.DataDir()
+	if err != nil {
+		slog.Error("data dir unavailable for default contacts", "error", err)
+		return "contacts.json"
+	}
+	return filepath.Join(beadleDir, "contacts.json")
 }
 
 // splitAddresses splits a comma-separated address string.
