@@ -39,22 +39,27 @@ func newResolver() (*identity.Resolver, error) {
 func resolveConfig(explicitPath string) (*email.Config, error) {
 	resolver, err := newResolver()
 	if err != nil {
+		slog.Warn("identity resolution unavailable, using explicit config", "error", err, "config", explicitPath)
 		return email.LoadConfig(explicitPath)
 	}
 	id, err := resolver.Resolve()
 	if err != nil {
+		slog.Warn("identity resolution failed, using explicit config", "error", err, "config", explicitPath)
 		return email.LoadConfig(explicitPath)
 	}
 	beadleDir, err := paths.DataDir()
 	if err != nil {
+		slog.Warn("data dir unavailable, using explicit config", "error", err, "config", explicitPath)
 		return email.LoadConfig(explicitPath)
 	}
 	idDir, err := identity.EnsureIdentityDir(beadleDir, id.Email)
 	if err != nil {
+		slog.Warn("identity dir unavailable, using explicit config", "error", err, "config", explicitPath)
 		return email.LoadConfig(explicitPath)
 	}
 	cfg, err := email.LoadConfig(filepath.Join(idDir, "email.json"))
 	if err != nil {
+		slog.Warn("identity config unavailable, using explicit config", "error", err, "config", explicitPath)
 		return email.LoadConfig(explicitPath)
 	}
 	return cfg, nil
@@ -64,25 +69,34 @@ func resolveConfig(explicitPath string) (*email.Config, error) {
 func resolveContactsPath() string {
 	resolver, err := newResolver()
 	if err != nil {
+		slog.Warn("identity resolution unavailable, using default contacts", "error", err)
 		return defaultContactsPath()
 	}
 	id, err := resolver.Resolve()
 	if err != nil {
+		slog.Warn("identity resolution failed, using default contacts", "error", err)
 		return defaultContactsPath()
 	}
 	beadleDir, err := paths.DataDir()
 	if err != nil {
+		slog.Warn("data dir unavailable, using default contacts", "error", err)
 		return defaultContactsPath()
 	}
 	idDir, err := identity.EnsureIdentityDir(beadleDir, id.Email)
 	if err != nil {
+		slog.Warn("identity dir unavailable, using default contacts", "error", err)
 		return defaultContactsPath()
 	}
 	return filepath.Join(idDir, "contacts.json")
 }
 
 func defaultContactsPath() string {
-	return filepath.Join(paths.MustDataDir(), "contacts.json")
+	beadleDir, err := paths.DataDir()
+	if err != nil {
+		slog.Error("data dir unavailable for default contacts", "error", err)
+		return "contacts.json"
+	}
+	return filepath.Join(beadleDir, "contacts.json")
 }
 
 // splitAddresses splits a comma-separated address string.

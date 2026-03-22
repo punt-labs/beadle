@@ -9,5 +9,5 @@ type Identity struct {
 	Name     string // display name ("Claude Agento")
 	Email    string // email address — directory key
 	GPGKeyID string // from beadle extension (optional)
-	Source   string // "ethos", "default", or "legacy"
+	Source   string // "ethos" or "default"
 }
