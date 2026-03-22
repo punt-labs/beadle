@@ -28,6 +28,12 @@ type Config struct {
 	FromAddress string `json:"from_address"`
 	GPGBinary   string `json:"gpg_binary"`
 	GPGSigner   string `json:"gpg_signer"`
+
+	// TestPassword bypasses the secret store for integration tests.
+	// Required because macOS Keychain is process-global — setting HOME
+	// does not prevent `security` from finding real credentials.
+	// Never set in production config files — json:"-" excludes it.
+	TestPassword string `json:"-"`
 }
 
 // DefaultConfigPath returns ~/.punt-labs/beadle/email.json.
@@ -66,8 +72,13 @@ func LoadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// IMAPPassword resolves the IMAP password via the secret store.
+// IMAPPassword resolves the IMAP password. If TestPassword is set
+// (for integration tests), it is returned directly — necessary because
+// macOS Keychain is process-global and ignores HOME overrides.
 func (c *Config) IMAPPassword() (string, error) {
+	if c.TestPassword != "" {
+		return c.TestPassword, nil
+	}
 	return secret.Get(CredIMAPPassword)
 }
 

@@ -26,9 +26,20 @@ import (
 
 const maxAttachmentSize = 25 * 1024 * 1024 // 25 MB
 
+// HandlerOption configures the MCP tool handler.
+type HandlerOption func(*handler)
+
+// WithDialer sets the IMAP dialer. Defaults to email.DefaultDialer{}.
+func WithDialer(d email.Dialer) HandlerOption {
+	return func(h *handler) { h.dialer = d }
+}
+
 // RegisterTools adds all email channel tools to the MCP server.
-func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slog.Logger) {
-	h := &handler{resolver: resolver, logger: logger}
+func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slog.Logger, opts ...HandlerOption) {
+	h := &handler{resolver: resolver, logger: logger, dialer: email.DefaultDialer{}}
+	for _, o := range opts {
+		o(h)
+	}
 
 	s.AddTool(listMessagesTool(), h.listMessages)
 	s.AddTool(readMessageTool(), h.readMessage)
@@ -51,6 +62,7 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 type handler struct {
 	resolver *identity.Resolver
 	logger   *slog.Logger
+	dialer   email.Dialer
 }
 
 // resolveIdentityAndConfig resolves the active identity and loads the
@@ -330,7 +342,7 @@ type downloadResult struct {
 // --- Tool Handlers ---
 
 func (h *handler) withClient(cfg *email.Config, fn func(*email.Client) (*mcplib.CallToolResult, error)) (*mcplib.CallToolResult, error) {
-	client, err := email.Dial(cfg, h.logger)
+	client, err := h.dialer.Dial(cfg, h.logger)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("IMAP connection failed: %v", err)), nil
 	}

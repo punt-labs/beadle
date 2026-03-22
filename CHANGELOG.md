@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Integration test layer with in-process IMAP and SMTP servers
+  (`internal/testserver`). MCP smoke tests verify tool registration and
+  identity error handling. Handler tests exercise the full stack via
+  `HandleMessage` against memory-backed mail servers. IMAP/SMTP tests
+  (build tag `integration`) cover Dial, ListFolders, ListMessages,
+  FetchMessage, MoveMessage, SMTPSend, and SMTPAvailable.
+- `email.Dialer` interface and `DefaultDialer` for test injection at the
+  `withClient` seam. `RegisterTools` accepts `WithDialer` option.
+- `make test-integration` target for running integration tests.
+
 ### Removed
 
 - Legacy `email.json` `from_address` fallback from identity resolution chain.
