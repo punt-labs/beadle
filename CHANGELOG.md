@@ -27,6 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Repo-local ethos config reads `agent:` field (was `active:`). Ethos changed
+  the contract in DES-011 because both a human and an agent are active in every
+  Claude Code session. The old field name caused silent identity resolution
+  failure — beadle fell through to fallback identity, breaking email permissions.
 - `beadle-email contact add --name="Jim" --email="jim@x.com"` now works. The
   `--flag=value` syntax was rejected by the hand-rolled parser with "unexpected
   argument."
