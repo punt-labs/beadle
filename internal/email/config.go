@@ -30,7 +30,9 @@ type Config struct {
 	GPGSigner   string `json:"gpg_signer"`
 
 	// TestPassword bypasses the secret store for integration tests.
-	// Never set in production config files — only set programmatically.
+	// Required because macOS Keychain is process-global — setting HOME
+	// does not prevent `security` from finding real credentials.
+	// Never set in production config files — json:"-" excludes it.
 	TestPassword string `json:"-"`
 }
 
@@ -71,8 +73,8 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 // IMAPPassword resolves the IMAP password. If TestPassword is set
-// (for integration tests), it is returned directly, bypassing the
-// secret store.
+// (for integration tests), it is returned directly — necessary because
+// macOS Keychain is process-global and ignores HOME overrides.
 func (c *Config) IMAPPassword() (string, error) {
 	if c.TestPassword != "" {
 		return c.TestPassword, nil

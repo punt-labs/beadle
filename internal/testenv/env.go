@@ -28,13 +28,17 @@ type Env struct {
 // New creates a test environment for the given email address.
 // It sets up ethos identity files, a beadle identity directory,
 // and a Resolver pointed at all of them.
+//
+// WARNING: Uses t.Setenv to override HOME and BEADLE_IMAP_PASSWORD.
+// This modifies process-global state and is incompatible with t.Parallel().
 func New(t testing.TB, emailAddr string) *Env {
 	t.Helper()
 
 	// Create a fake HOME so paths.DataDir() and paths.EthosDir() resolve
 	// to our temp dirs (they use os.UserHomeDir → $HOME).
-	// Also set BEADLE_IMAP_PASSWORD so credential resolution works without
-	// keychain access (which the fake HOME prevents).
+	// Set BEADLE_IMAP_PASSWORD so credential resolution works without
+	// keychain access. Needed by SMTPSend (which calls cfg.IMAPPassword()
+	// on the disk-loaded config, not through TestDialer).
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 	t.Setenv("BEADLE_IMAP_PASSWORD", "testpass")

@@ -10,17 +10,19 @@ import (
 	"github.com/punt-labs/beadle/internal/email"
 )
 
-// TestDialer is a Dialer that injects the test password before dialing.
-// This is needed because the handler loads config from disk (which can't
-// serialize TestPassword), but the test IMAP server requires it.
+// TestDialer is a Dialer that injects TestPassword before dialing.
+// Required because macOS Keychain is process-global — setting HOME or
+// BEADLE_IMAP_PASSWORD via env doesn't prevent keychain from returning
+// the real Proton Bridge password.
 type TestDialer struct {
 	Password string
 }
 
 // Dial connects to the IMAP server, injecting the test password.
 func (d TestDialer) Dial(cfg *email.Config, logger *slog.Logger) (*email.Client, error) {
-	cfg.TestPassword = d.Password
-	return email.Dial(cfg, logger)
+	cfgCopy := *cfg
+	cfgCopy.TestPassword = d.Password
+	return email.Dial(&cfgCopy, logger)
 }
 
 // Fixture provides an in-process IMAP+SMTP server pair with a
@@ -45,10 +47,26 @@ func NewFixture(t testing.TB) *Fixture {
 	imapSrv, imapAddr := NewIMAPServer(t, testUser, testPass)
 	smtpSrv, smtpAddr := NewSMTPServer(t)
 
-	imapHost, imapPortStr, _ := net.SplitHostPort(imapAddr)
-	imapPort, _ := strconv.Atoi(imapPortStr)
-	_, smtpPortStr, _ := net.SplitHostPort(smtpAddr)
-	smtpPort, _ := strconv.Atoi(smtpPortStr)
+	imapHost, imapPortStr, err := net.SplitHostPort(imapAddr)
+	if err != nil {
+		t.Fatalf("testserver: split imap addr %s: %v", imapAddr, err)
+	}
+	imapPort, err := strconv.Atoi(imapPortStr)
+	if err != nil {
+		t.Fatalf("testserver: parse imap port %s: %v", imapPortStr, err)
+	}
+	_, smtpPortStr, err := net.SplitHostPort(smtpAddr)
+	if err != nil {
+		t.Fatalf("testserver: split smtp addr %s: %v", smtpAddr, err)
+	}
+	smtpPort, err := strconv.Atoi(smtpPortStr)
+	if err != nil {
+		t.Fatalf("testserver: parse smtp port %s: %v", smtpPortStr, err)
+	}
+
+	// Set BEADLE_IMAP_PASSWORD so the secret store resolves via env var
+	// (keychain and file backends may not be available in test environments).
+	t.Setenv("BEADLE_IMAP_PASSWORD", testPass)
 
 	cfg := &email.Config{
 		IMAPHost:     imapHost,

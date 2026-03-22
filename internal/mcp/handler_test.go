@@ -223,7 +223,7 @@ func TestHandler_Contacts_CRUD(t *testing.T) {
 	r = callTool(t, s, "find_contact", map[string]any{
 		"query": "Charlie",
 	})
-	// After removal, find returns either "not found" or "No contacts."
-	assert.True(t, r.IsError || r.text() == "No contacts.",
-		"expected not-found or no-contacts, got: %s", r.text())
+	// After removal with no remaining contacts, find returns a non-error empty result.
+	assert.False(t, r.IsError)
+	assert.Equal(t, "No contacts.", r.text())
 }

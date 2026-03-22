@@ -8,7 +8,9 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"sort"
@@ -302,7 +304,7 @@ func (s *memSession) Append(mailbox string, r imap.LiteralReader, options *imap.
 	}
 
 	raw := make([]byte, r.Size())
-	if _, err := r.Read(raw); err != nil && err.Error() != "EOF" {
+	if _, err := io.ReadFull(r, raw); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 
