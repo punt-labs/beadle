@@ -1,6 +1,7 @@
 package testserver
 
 import (
+	"log/slog"
 	"net"
 	"strconv"
 	"testing"
@@ -8,6 +9,19 @@ import (
 	"github.com/emersion/go-imap/v2"
 	"github.com/punt-labs/beadle/internal/email"
 )
+
+// TestDialer is a Dialer that injects the test password before dialing.
+// This is needed because the handler loads config from disk (which can't
+// serialize TestPassword), but the test IMAP server requires it.
+type TestDialer struct {
+	Password string
+}
+
+// Dial connects to the IMAP server, injecting the test password.
+func (d TestDialer) Dial(cfg *email.Config, logger *slog.Logger) (*email.Client, error) {
+	cfg.TestPassword = d.Password
+	return email.Dial(cfg, logger)
+}
 
 // Fixture provides an in-process IMAP+SMTP server pair with a
 // pre-configured email.Config pointing at them.

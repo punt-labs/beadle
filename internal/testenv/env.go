@@ -31,8 +31,16 @@ type Env struct {
 func New(t testing.TB, emailAddr string) *Env {
 	t.Helper()
 
-	ethosDir := t.TempDir()
-	beadleDir := t.TempDir()
+	// Create a fake HOME so paths.DataDir() and paths.EthosDir() resolve
+	// to our temp dirs (they use os.UserHomeDir → $HOME).
+	// Also set BEADLE_IMAP_PASSWORD so credential resolution works without
+	// keychain access (which the fake HOME prevents).
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("BEADLE_IMAP_PASSWORD", "testpass")
+
+	ethosDir := filepath.Join(fakeHome, ".punt-labs", "ethos")
+	beadleDir := filepath.Join(fakeHome, ".punt-labs", "beadle")
 	repoDir := t.TempDir()
 
 	handle := "testuser"

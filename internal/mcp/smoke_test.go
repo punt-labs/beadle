@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -19,7 +20,7 @@ import (
 func newTestServer(t *testing.T, resolver *identity.Resolver) *server.MCPServer {
 	t.Helper()
 	s := server.NewMCPServer("beadle-email", "test", server.WithToolCapabilities(false))
-	logger := slog.New(slog.NewTextHandler(nil, nil))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	mcptools.RegisterTools(s, resolver, logger)
 	return s
 }
