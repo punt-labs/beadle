@@ -3,7 +3,9 @@
 package email_test
 
 import (
+	"io"
 	"log/slog"
+	"net"
 	"testing"
 
 	"github.com/emersion/go-imap/v2"
@@ -16,7 +18,7 @@ import (
 
 func dialFixture(t *testing.T, f *testserver.Fixture) *email.Client {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(nil, nil))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client, err := email.Dial(f.Config, logger)
 	require.NoError(t, err)
 	t.Cleanup(func() { client.Close() })
@@ -102,7 +104,7 @@ func TestMoveMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify INBOX is now empty (need a fresh client since Select changes state).
-	logger := slog.New(slog.NewTextHandler(nil, nil))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client2, err := email.Dial(f.Config, logger)
 	require.NoError(t, err)
 	defer client2.Close()
@@ -131,10 +133,15 @@ func TestSMTPAvailable_WhenUp(t *testing.T) {
 }
 
 func TestSMTPAvailable_WhenDown(t *testing.T) {
-	// Use a port that nothing is listening on.
+	// Allocate an ephemeral port, then close the listener to guarantee nothing is on it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().(*net.TCPAddr)
+	ln.Close()
+
 	cfg := &email.Config{
 		IMAPHost: "127.0.0.1",
-		SMTPPort: 19999, // unlikely to be in use
+		SMTPPort: addr.Port,
 	}
 	assert.False(t, email.SMTPAvailable(cfg))
 }

@@ -106,11 +106,12 @@ func (s *memSMTPSession) Data(r io.Reader) error {
 	if err != nil {
 		return err
 	}
+	toCopy := append([]string(nil), s.to...)
 	s.backend.mu.Lock()
 	defer s.backend.mu.Unlock()
 	s.backend.messages = append(s.backend.messages, SentMessage{
 		From: s.from,
-		To:   s.to,
+		To:   toCopy,
 		Raw:  raw,
 	})
 	return nil

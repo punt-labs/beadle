@@ -39,8 +39,8 @@ const (
 )
 
 // NewFixture starts IMAP and SMTP servers and returns a fixture
-// with Config pre-configured to connect to them. Sets BEADLE_IMAP_PASSWORD
-// in the test environment so credential resolution works.
+// with Config pre-configured to connect to them. Uses Config.TestPassword
+// for IMAP auth and sets BEADLE_IMAP_PASSWORD env for SMTP auth.
 func NewFixture(t testing.TB) *Fixture {
 	t.Helper()
 

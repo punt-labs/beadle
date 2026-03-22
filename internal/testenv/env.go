@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/punt-labs/beadle/internal/contacts"
@@ -95,7 +96,7 @@ func (e *Env) AddContact(name, addr, permissions string) {
 		Name:  name,
 		Email: addr,
 		Permissions: map[string]string{
-			e.Email: perm.String(),
+			strings.ToLower(e.Email): perm.String(),
 		},
 	}
 	_, err = store.Add(c)

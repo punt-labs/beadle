@@ -304,9 +304,11 @@ func (s *memSession) Append(mailbox string, r imap.LiteralReader, options *imap.
 	}
 
 	raw := make([]byte, r.Size())
-	if _, err := io.ReadFull(r, raw); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+	n, err := io.ReadFull(r, raw)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
+	raw = raw[:n]
 
 	uid := mb.uidNext
 	var flags []imap.Flag
@@ -645,7 +647,7 @@ func (s *memSession) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest str
 		destMb.messages = append(destMb.messages, &memMessage{
 			uid:   newUID,
 			flags: append([]imap.Flag{}, msg.flags...),
-			raw:   msg.raw,
+			raw:   append([]byte(nil), msg.raw...),
 			date:  msg.date,
 		})
 
