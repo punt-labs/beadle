@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -180,5 +179,5 @@ func readProcessTable() (map[int]processEntry, error) {
 
 // isClaude checks whether a comm value refers to a Claude Code process.
 func isClaude(comm string) bool {
-	return path.Base(comm) == "claude"
+	return filepath.Base(comm) == "claude"
 }

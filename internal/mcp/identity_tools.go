@@ -76,20 +76,20 @@ func whoamiTool() mcplib.Tool {
 }
 
 func (h *handler) whoami(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	// Resolve active identity (respects override).
+	// Snapshot default identity before checking override to avoid TOCTOU.
+	defaultID, _ := h.resolver.Resolve()
+
 	h.overrideMu.RLock()
 	override := h.identityOverride
 	h.overrideMu.RUnlock()
 
 	var id *identity.Identity
-	var err error
 	if override != nil {
 		id = override
+	} else if defaultID != nil {
+		id = defaultID
 	} else {
-		id, err = h.resolver.Resolve()
-		if err != nil {
-			return mcplib.NewToolResultError(fmt.Sprintf("identity resolution failed: %v", err)), nil
-		}
+		return mcplib.NewToolResultError("identity resolution failed: no identity configured"), nil
 	}
 
 	contactsPath, contactsErr := paths.IdentityContactsPath(id.Email)
@@ -100,7 +100,6 @@ func (h *handler) whoami(ctx context.Context, req mcplib.CallToolRequest) (*mcpl
 
 	// Show source — indicate if switched.
 	if override != nil {
-		defaultID, _ := h.resolver.Resolve()
 		defaultHandle := "unknown"
 		if defaultID != nil {
 			defaultHandle = defaultID.Handle

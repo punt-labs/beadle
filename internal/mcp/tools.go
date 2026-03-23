@@ -71,9 +71,9 @@ type handler struct {
 	resolver         *identity.Resolver
 	logger           *slog.Logger
 	dialer           email.Dialer
-	ethosDir         string             // for session roster reads (optional)
-	overrideMu       sync.RWMutex       //nolint:unused // used by identity_tools.go
-	identityOverride *identity.Identity  //nolint:unused // used by identity_tools.go
+	ethosDir         string
+	overrideMu       sync.RWMutex
+	identityOverride *identity.Identity
 }
 
 // resolveIdentityAndConfig resolves the active identity and loads the

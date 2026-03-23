@@ -131,3 +131,29 @@ func TestWalkToTopmostClaude_NestedClaude(t *testing.T) {
 	assert.Equal(t, 50, pid) // topmost
 }
 
+func TestWalkToTopmostClaude_DepthLimit(t *testing.T) {
+	// Chain of 12 processes — exceeds the 10-step safety bound.
+	// Claude is at pid=1 (depth 11), should NOT be found.
+	table := make(map[int]processEntry)
+	for i := 12; i > 1; i-- {
+		table[i] = processEntry{ppid: i - 1, comm: "bash"}
+	}
+	table[1] = processEntry{ppid: 0, comm: "claude"}
+	mockTable := func() (map[int]processEntry, error) { return table, nil }
+
+	pid := walkToTopmostClaude(12, mockTable)
+	assert.Equal(t, 0, pid) // beyond depth limit
+}
+
+func TestWalkToTopmostClaude_CycleDetection(t *testing.T) {
+	// Cycle: 100 → 50 → 100 (should terminate without infinite loop).
+	table := map[int]processEntry{
+		100: {ppid: 50, comm: "bash"},
+		50:  {ppid: 100, comm: "bash"},
+	}
+	mockTable := func() (map[int]processEntry, error) { return table, nil }
+
+	pid := walkToTopmostClaude(100, mockTable)
+	assert.Equal(t, 0, pid) // no claude found
+}
+
