@@ -4,6 +4,7 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -75,7 +76,10 @@ func ReadRoster(ethosDir string) (*Roster, error) {
 	currentPath := filepath.Join(ethosDir, "sessions", "current", strconv.Itoa(pid))
 	data, err := os.ReadFile(currentPath)
 	if err != nil {
-		return nil, nil // no session file = not in a session
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil // no session file = not in a session
+		}
+		return nil, fmt.Errorf("read session sidecar %s: %w", currentPath, err)
 	}
 
 	sessionID := strings.TrimSpace(string(data))
@@ -87,7 +91,10 @@ func ReadRoster(ethosDir string) (*Roster, error) {
 	rosterPath := filepath.Join(ethosDir, "sessions", sessionID+".yaml")
 	rosterData, err := os.ReadFile(rosterPath)
 	if err != nil {
-		return nil, nil // session file missing = stale sidecar
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil // stale sidecar pointing at removed session
+		}
+		return nil, fmt.Errorf("read session roster %s: %w", rosterPath, err)
 	}
 
 	var roster Roster

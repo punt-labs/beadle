@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -41,7 +43,9 @@ func (h *handler) switchIdentity(ctx context.Context, req mcplib.CallToolRequest
 		// Resolve the default to show the user what they're resetting to.
 		defaultID, err := h.resolver.Resolve()
 		if err != nil {
-			return textResult("identity reset to default (could not resolve default: " + err.Error() + ")")
+			return mcplib.NewToolResultError(fmt.Sprintf(
+			"identity override cleared, but default identity is broken: %v. "+
+				"Use switch_identity with a valid handle, or fix ethos config.", err)), nil
 		}
 		return textResult(fmt.Sprintf("identity reset to default: %s (%s)", defaultID.Handle, defaultID.Email))
 	}
@@ -60,7 +64,17 @@ func (h *handler) switchIdentity(ctx context.Context, req mcplib.CallToolRequest
 	h.identityOverride = id
 	h.overrideMu.Unlock()
 
-	return textResult(fmt.Sprintf("switched to %s (%s)", id.Handle, id.Email))
+	// Preflight: warn if no email config exists for the target identity.
+	msg := fmt.Sprintf("switched to %s (%s)", id.Handle, id.Email)
+	beadleDir, _ := paths.DataDir()
+	if beadleDir != "" {
+		idDir := filepath.Join(beadleDir, "identities", id.Email)
+		configPath := filepath.Join(idDir, "email.json")
+		if _, statErr := os.Stat(configPath); statErr != nil {
+			msg += fmt.Sprintf("\n\nWARNING: no email config at %s — email operations will use fallback config.", configPath)
+		}
+	}
+	return textResult(msg)
 }
 
 // --- whoami tool (moved from tools.go, enhanced with override + roster) ---
@@ -128,8 +142,11 @@ func (h *handler) whoami(ctx context.Context, req mcplib.CallToolRequest) (*mcpl
 
 	// Append session participants if available.
 	if h.ethosDir != "" {
-		roster, _ := session.ReadRoster(h.ethosDir)
-		if roster != nil && len(roster.Participants) > 0 {
+		roster, rosterErr := session.ReadRoster(h.ethosDir)
+		if rosterErr != nil {
+			h.logger.Error("read session roster", "error", rosterErr)
+			lines = append(lines, "", fmt.Sprintf("   session roster:  error: %v", rosterErr))
+		} else if roster != nil && len(roster.Participants) > 0 {
 			lines = append(lines, "", "   session participants:")
 			for _, p := range roster.Participants {
 				role := "agent"

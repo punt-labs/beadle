@@ -72,8 +72,8 @@ type handler struct {
 	logger           *slog.Logger
 	dialer           email.Dialer
 	ethosDir         string
-	overrideMu       sync.RWMutex
-	identityOverride *identity.Identity
+	overrideMu       sync.RWMutex       // guards identityOverride
+	identityOverride *identity.Identity // session-scoped: depends on process lifecycle matching session
 }
 
 // resolveIdentityAndConfig resolves the active identity and loads the
