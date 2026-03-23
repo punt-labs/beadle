@@ -17,6 +17,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `email.Dialer` interface and `DefaultDialer` for test injection at the
   `withClient` seam. `RegisterTools` accepts `WithDialer` option.
 - `make test-integration` target for running integration tests.
+- `switch_identity` MCP tool for mid-session identity switching. Pass an
+  ethos handle to operate as a different identity (e.g., switch from agent
+  to human). Requires ethos identity files. Empty handle resets to default.
+- `whoami` now shows override source when identity is switched, and lists
+  session participants from the ethos session roster when available.
+- `Resolver.ResolveHandle(handle)` for resolving arbitrary ethos handles.
+- `internal/session` package for reading the ethos session roster (process
+  tree walk + YAML sidecar).
 
 ### Removed
 
