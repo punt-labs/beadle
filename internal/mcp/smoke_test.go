@@ -102,7 +102,7 @@ func TestMCPSmoke_ToolRegistration(t *testing.T) {
 		"list_messages", "read_message", "list_folders", "send_email",
 		"verify_signature", "show_mime", "check_trust", "move_message",
 		"download_attachment", "list_contacts", "find_contact",
-		"add_contact", "remove_contact", "whoami",
+		"add_contact", "remove_contact", "whoami", "switch_identity",
 	}
 
 	for _, expected := range expectedTools {

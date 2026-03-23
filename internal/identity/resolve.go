@@ -101,6 +101,15 @@ func (r *Resolver) Resolve() (*Identity, error) {
 	return nil, fmt.Errorf("no identity found: checked ethos (%s), default-identity in %s", r.ethosDir, r.beadleDir)
 }
 
+// ResolveHandle resolves a specific ethos handle to an Identity.
+// Used by switch_identity to validate and load a named identity.
+func (r *Resolver) ResolveHandle(handle string) (*Identity, error) {
+	if err := ValidateHandle(handle); err != nil {
+		return nil, err
+	}
+	return r.fromEthos(handle)
+}
+
 // resolveHandle returns the active ethos handle, or "" if unavailable.
 // Checks repo-local config first, then global active file.
 // Returns an error if a config file exists but is corrupt (fail closed).

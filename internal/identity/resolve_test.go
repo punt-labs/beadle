@@ -202,3 +202,34 @@ func TestResolve_NoExtension(t *testing.T) {
 	assert.Equal(t, "", id.GPGKeyID)
 	assert.Equal(t, "ethos", id.Source)
 }
+
+func TestResolveHandle_Valid(t *testing.T) {
+	ethosDir := t.TempDir()
+	beadleDir := t.TempDir()
+
+	idDir := filepath.Join(ethosDir, "identities")
+	require.NoError(t, os.MkdirAll(idDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(idDir, "jfreeman.yaml"), []byte("name: Jim Freeman\nhandle: jfreeman\nemail: jim@punt-labs.com\n"), 0o640))
+
+	r := NewResolver(ethosDir, beadleDir, "")
+	id, err := r.ResolveHandle("jfreeman")
+	require.NoError(t, err)
+
+	assert.Equal(t, "jfreeman", id.Handle)
+	assert.Equal(t, "jim@punt-labs.com", id.Email)
+	assert.Equal(t, "ethos", id.Source)
+}
+
+func TestResolveHandle_PathTraversal(t *testing.T) {
+	r := NewResolver(t.TempDir(), t.TempDir(), "")
+	_, err := r.ResolveHandle("../../../etc/passwd")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "path separator")
+}
+
+func TestResolveHandle_Missing(t *testing.T) {
+	r := NewResolver(t.TempDir(), t.TempDir(), "")
+	_, err := r.ResolveHandle("nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ethos identity")
+}

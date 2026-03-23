@@ -32,12 +32,13 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		ethosDir, _ := paths.EthosDir()
 		s := server.NewMCPServer(
 			"beadle-email",
 			version,
 			server.WithToolCapabilities(false),
 		)
-		mcptools.RegisterTools(s, resolver, logger)
+		mcptools.RegisterTools(s, resolver, logger, mcptools.WithEthosDir(ethosDir))
 		logger.Info("starting beadle-email MCP server", "version", version)
 		return server.ServeStdio(s)
 	},
