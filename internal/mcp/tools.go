@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -32,6 +33,12 @@ type HandlerOption func(*handler)
 // WithDialer sets the IMAP dialer. Defaults to email.DefaultDialer{}.
 func WithDialer(d email.Dialer) HandlerOption {
 	return func(h *handler) { h.dialer = d }
+}
+
+// WithEthosDir sets the ethos directory for session roster reads.
+// If not set, whoami omits participant information.
+func WithEthosDir(dir string) HandlerOption {
+	return func(h *handler) { h.ethosDir = dir }
 }
 
 // RegisterTools adds all email channel tools to the MCP server.
@@ -57,20 +64,34 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 	s.AddTool(removeContactTool(), h.removeContact)
 
 	s.AddTool(whoamiTool(), h.whoami)
+	s.AddTool(switchIdentityTool(), h.switchIdentity)
 }
 
 type handler struct {
-	resolver *identity.Resolver
-	logger   *slog.Logger
-	dialer   email.Dialer
+	resolver         *identity.Resolver
+	logger           *slog.Logger
+	dialer           email.Dialer
+	ethosDir         string
+	overrideMu       sync.RWMutex       // guards identityOverride
+	identityOverride *identity.Identity // session-scoped: depends on process lifecycle matching session
 }
 
 // resolveIdentityAndConfig resolves the active identity and loads the
 // corresponding email config. Used by tools that don't need contacts.
 func (h *handler) resolveIdentityAndConfig() (*identity.Identity, *email.Config, string, error) {
-	id, err := h.resolver.Resolve()
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("resolve identity: %w", err)
+	h.overrideMu.RLock()
+	override := h.identityOverride
+	h.overrideMu.RUnlock()
+
+	var id *identity.Identity
+	var err error
+	if override != nil {
+		id = override
+	} else {
+		id, err = h.resolver.Resolve()
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("resolve identity: %w", err)
+		}
 	}
 
 	// Ensure identity-scoped directory exists (auto-migrate)
@@ -1105,43 +1126,6 @@ func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (
 // loadContactsIfNeeded and resolveField are now email.LoadContactsIfNeeded
 // and email.ResolveField — called directly in sendEmail above.
 
-// --- Identity Tool ---
-
-func whoamiTool() mcplib.Tool {
-	return mcplib.NewTool("whoami",
-		mcplib.WithDescription("Show the active beadle identity: email, handle, source, and contacts path. Use to diagnose permission errors."),
-	)
-}
-
-func (h *handler) whoami(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	id, err := h.resolver.Resolve()
-	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("identity resolution failed: %v", err)), nil
-	}
-
-	contactsPath, contactsErr := paths.IdentityContactsPath(id.Email)
-
-	lines := []string{
-		fmt.Sprintf("   %-16s %s", "email:", id.Email),
-		fmt.Sprintf("   %-16s %s", "source:", id.Source),
-	}
-	if id.Handle != "" {
-		lines = append(lines, fmt.Sprintf("   %-16s %s", "handle:", id.Handle))
-	}
-	if id.Name != "" {
-		lines = append(lines, fmt.Sprintf("   %-16s %s", "name:", id.Name))
-	}
-	if contactsErr != nil {
-		lines = append(lines, fmt.Sprintf("   %-16s error: %v", "contacts:", contactsErr))
-	} else {
-		store := contacts.NewStore(contactsPath)
-		if loadErr := store.Load(); loadErr != nil {
-			lines = append(lines, fmt.Sprintf("   %-16s %s (error: %v)", "contacts:", contactsPath, loadErr))
-		} else {
-			lines = append(lines, fmt.Sprintf("   %-16s %s (%d contacts)", "contacts:", contactsPath, store.Count()))
-		}
-	}
-
-	return textResult(strings.Join(lines, "\n"))
-}
+// whoamiTool and whoami are in identity_tools.go.
+// switchIdentityTool and switchIdentity are in identity_tools.go.
 
