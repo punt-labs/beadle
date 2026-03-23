@@ -50,11 +50,7 @@ func (h *handler) switchIdentity(ctx context.Context, req mcplib.CallToolRequest
 		return textResult(fmt.Sprintf("identity reset to default: %s (%s)", defaultID.Handle, defaultID.Email))
 	}
 
-	// Validate and resolve the requested handle.
-	if err := identity.ValidateHandle(handle); err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("invalid handle: %v", err)), nil
-	}
-
+	// Resolve the requested handle (validates internally).
 	id, err := h.resolver.ResolveHandle(handle)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("resolve identity %q: %v", handle, err)), nil
@@ -157,7 +153,11 @@ func (h *handler) whoami(ctx context.Context, req mcplib.CallToolRequest) (*mcpl
 				if persona == "" {
 					persona = p.AgentID
 				}
-				lines = append(lines, fmt.Sprintf("   %-16s %s (%s)", "  "+persona+":", role, "switch_identity handle="+persona))
+				hint := ""
+				if p.Persona != "" {
+					hint = " (switch_identity handle=" + p.Persona + ")"
+				}
+				lines = append(lines, fmt.Sprintf("   %-16s %s%s", "  "+persona+":", role, hint))
 			}
 		}
 	}

@@ -57,7 +57,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 
 ## Features
 
-- **15 MCP tools** --- list, read, send, move/archive, download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts), whoami, switch identity
+- **15 MCP tools** --- list, read, send, move/archive, download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts), whoami, `switch_identity`
 - **Multi-identity via ethos** --- identity resolved per-request from ethos sidecar. Repo-local config pins identity. Mid-session switching via `switch_identity` tool. Fallback to `default-identity` file
 - **Two-dimensional trust** --- transport trust (trusted/verified/untrusted/unverified) + identity permissions (rwx per contact per identity). Both must pass before autonomous action
 - **Four-level transport trust** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
