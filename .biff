@@ -1,5 +1,8 @@
+[team]
+members = ["jmf-pobox", "github-actions"]
+
 [relay]
 url = "tls://connect.ngs.global"
 
 [peers]
-repos = ["punt-labs/biff", "punt-labs/ethos", "punt-labs/lux", "punt-labs/punt-kit", "punt-labs/vox"]
+orgs = ["punt-labs"]
