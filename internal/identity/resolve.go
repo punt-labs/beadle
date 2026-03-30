@@ -27,7 +27,7 @@ type beadleExtension struct {
 type Resolver struct {
 	ethosDir  string // ~/.punt-labs/ethos
 	beadleDir string // ~/.punt-labs/beadle
-	repoDir   string // cwd (for repo-local .punt-labs/ethos/config.yaml)
+	repoDir   string // cwd (for repo-local .punt-labs/ethos.yaml)
 }
 
 // NewResolver creates a Resolver with the given directory roots.
@@ -116,7 +116,7 @@ func (r *Resolver) ResolveHandle(handle string) (*Identity, error) {
 func (r *Resolver) resolveHandle() (string, error) {
 	// Step 1: repo-local ethos config
 	if r.repoDir != "" {
-		repoConfig := filepath.Join(r.repoDir, ".punt-labs", "ethos", "config.yaml")
+		repoConfig := filepath.Join(r.repoDir, ".punt-labs", "ethos.yaml")
 		handle, err := readRepoEthosConfig(repoConfig)
 		if err == nil && handle != "" {
 			return handle, nil
@@ -139,7 +139,7 @@ func (r *Resolver) resolveHandle() (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
-// repoEthosConfig is the structure of .punt-labs/ethos/config.yaml.
+// repoEthosConfig is the structure of .punt-labs/ethos.yaml.
 // The "agent" field identifies the default agent identity for the repo.
 // Ethos uses "agent" (not "active") because both a human and an agent
 // are active in every Claude Code session.

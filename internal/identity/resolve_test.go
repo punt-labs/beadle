@@ -15,9 +15,9 @@ func TestResolve_EthosWithRepoConfig(t *testing.T) {
 	repoDir := t.TempDir()
 
 	// Set up repo-local ethos config
-	repoEthosDir := filepath.Join(repoDir, ".punt-labs", "ethos")
+	repoEthosDir := filepath.Join(repoDir, ".punt-labs")
 	require.NoError(t, os.MkdirAll(repoEthosDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(repoEthosDir, "config.yaml"), []byte("agent: claude\n"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(repoEthosDir, "ethos.yaml"), []byte("agent: claude\n"), 0o640))
 
 	// Set up ethos identity
 	idDir := filepath.Join(ethosDir, "identities")
@@ -67,9 +67,9 @@ func TestResolve_StaleActiveFieldErrors(t *testing.T) {
 	repoDir := t.TempDir()
 
 	// Repo config still using the old "active" field name
-	repoEthosDir := filepath.Join(repoDir, ".punt-labs", "ethos")
+	repoEthosDir := filepath.Join(repoDir, ".punt-labs")
 	require.NoError(t, os.MkdirAll(repoEthosDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(repoEthosDir, "config.yaml"), []byte("active: claude\n"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(repoEthosDir, "ethos.yaml"), []byte("active: claude\n"), 0o640))
 
 	r := NewResolver(ethosDir, beadleDir, repoDir)
 	_, err := r.Resolve()
@@ -83,9 +83,9 @@ func TestResolve_HandlePathTraversal(t *testing.T) {
 	repoDir := t.TempDir()
 
 	// Repo config with malicious handle
-	repoEthosDir := filepath.Join(repoDir, ".punt-labs", "ethos")
+	repoEthosDir := filepath.Join(repoDir, ".punt-labs")
 	require.NoError(t, os.MkdirAll(repoEthosDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(repoEthosDir, "config.yaml"), []byte("agent: ../../../etc/passwd\n"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(repoEthosDir, "ethos.yaml"), []byte("agent: ../../../etc/passwd\n"), 0o640))
 
 	r := NewResolver(ethosDir, beadleDir, repoDir)
 	_, err := r.Resolve()
@@ -168,9 +168,9 @@ func TestResolve_RepoConfigOverridesGlobal(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(ethosDir, "active"), []byte("jfreeman"), 0o640))
 
 	// Repo config = claude (should win)
-	repoEthosDir := filepath.Join(repoDir, ".punt-labs", "ethos")
+	repoEthosDir := filepath.Join(repoDir, ".punt-labs")
 	require.NoError(t, os.MkdirAll(repoEthosDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(repoEthosDir, "config.yaml"), []byte("agent: claude\n"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(repoEthosDir, "ethos.yaml"), []byte("agent: claude\n"), 0o640))
 
 	// Set up both identities
 	idDir := filepath.Join(ethosDir, "identities")
