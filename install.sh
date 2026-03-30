@@ -178,13 +178,40 @@ fi
 
 info "Running doctor..."
 
+doctor_rc=0
 if command -v "$BINARY" >/dev/null 2>&1; then
-  "$BINARY" doctor || true
+  "$BINARY" doctor || doctor_rc=$?
 elif [ -x "$INSTALL_DIR/$BINARY" ]; then
-  "$INSTALL_DIR/$BINARY" doctor || true
+  "$INSTALL_DIR/$BINARY" doctor || doctor_rc=$?
 fi
 
 # --- Done ---
 
-printf '\n%b%b%s is ready!%b\n\n' "$GREEN" "$BOLD" "$BINARY" "$NC"
+if [ "$doctor_rc" -eq 0 ]; then
+  printf '\n%b%b%s is ready!%b\n\n' "$GREEN" "$BOLD" "$BINARY" "$NC"
+else
+  printf '\n%b%b%s installed but doctor reported issues.%b\n\n' "$YELLOW" "$BOLD" "$BINARY" "$NC"
+  info "Next steps:"
+  printf '\n'
+  if [ "$OS" = "darwin" ]; then
+    printf '  Store your Proton Bridge password:\n'
+    printf "    security add-generic-password -s beadle -a imap-password -w '%bYOUR_BRIDGE_PASSWORD%b'\n\n" "$BOLD" "$NC"
+    printf '  Store your Resend API key (for external email):\n'
+    printf "    security add-generic-password -s beadle -a resend-api-key -w '%bYOUR_RESEND_KEY%b'\n\n" "$BOLD" "$NC"
+    printf '  Store your GPG passphrase:\n'
+    printf "    security add-generic-password -s beadle -a gpg-passphrase -w '%bYOUR_GPG_PASSPHRASE%b'\n\n" "$BOLD" "$NC"
+  else
+    printf '  Store your Proton Bridge password:\n'
+    printf '    mkdir -p ~/.punt-labs/beadle/secrets\n'
+    printf "    printf '%%s' '%bYOUR_BRIDGE_PASSWORD%b' > ~/.punt-labs/beadle/secrets/imap-password\n" "$BOLD" "$NC"
+    printf '    chmod 600 ~/.punt-labs/beadle/secrets/imap-password\n\n'
+    printf '  Store your Resend API key (for external email):\n'
+    printf "    printf '%%s' '%bYOUR_RESEND_KEY%b' > ~/.punt-labs/beadle/secrets/resend-api-key\n" "$BOLD" "$NC"
+    printf '    chmod 600 ~/.punt-labs/beadle/secrets/resend-api-key\n\n'
+    printf '  Store your GPG passphrase:\n'
+    printf "    printf '%%s' '%bYOUR_GPG_PASSPHRASE%b' > ~/.punt-labs/beadle/secrets/gpg-passphrase\n" "$BOLD" "$NC"
+    printf '    chmod 600 ~/.punt-labs/beadle/secrets/gpg-passphrase\n\n'
+  fi
+  printf '  Then verify: %s doctor\n\n' "$BINARY"
+fi
 printf 'Restart Claude Code to activate.\n\n'
