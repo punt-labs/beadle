@@ -1,5 +1,5 @@
 {
-  "name": "beadle-dev",
+  "name": "beadle",
   "description": "Autonomous agent daemon with cryptographic owner control. Email communication via Proton Bridge with PGP trust model.",
   "version": "0.8.0",
   "author": {
