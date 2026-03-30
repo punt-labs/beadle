@@ -109,7 +109,7 @@ func identityShowRun(cmd *cobra.Command, args []string) error {
 var identitySetCmd = &cobra.Command{
 	Use:   "set <handle>",
 	Short: "Set per-repo identity handle",
-	Long:  "Write .punt-labs/ethos/config.yaml with the given handle for this repo.",
+	Long:  "Write .punt-labs/ethos.yaml with the given handle for this repo.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		handle := strings.TrimSpace(args[0])
@@ -128,11 +128,11 @@ var identitySetCmd = &cobra.Command{
 		root := strings.TrimSpace(string(repoRoot))
 
 		// Write per-repo ethos config
-		dir := filepath.Join(root, ".punt-labs", "ethos")
+		dir := filepath.Join(root, ".punt-labs")
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
-		configPath := filepath.Join(dir, "config.yaml")
+		configPath := filepath.Join(dir, "ethos.yaml")
 		content := fmt.Sprintf("agent: %s\n", handle)
 		if err := os.WriteFile(configPath, []byte(content), 0o640); err != nil {
 			return fmt.Errorf("write %s: %w", configPath, err)

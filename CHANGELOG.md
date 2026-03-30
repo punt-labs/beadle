@@ -142,7 +142,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   resolved per MCP tool call — no restart needed to switch identities.
 - Identity-scoped directories (`~/.punt-labs/beadle/identities/<email>/`) for
   config, contacts, and attachments. Auto-migrates root files on first use.
-- Repo-local ethos config (`.punt-labs/ethos/config.yaml`) pins beadle's
+- Repo-local ethos config (`.punt-labs/ethos.yaml`) pins beadle's
   identity to `claude` regardless of global active identity.
 - Per-identity rwx contact permissions (DES-012). Each contact can have
   different permissions per identity: `r` (read/surface), `w` (reply),

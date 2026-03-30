@@ -368,7 +368,7 @@ way.
 Plus repo-local identity pin:
 
 ```text
-<repo>/.punt-labs/ethos/config.yaml     ← "agent: claude" (overrides global)
+<repo>/.punt-labs/ethos.yaml              ← "agent: claude" (overrides global)
 ```
 
 **Ownership boundaries:**
@@ -377,7 +377,7 @@ Plus repo-local identity pin:
 |---------|-------|------|
 | Who am I? (name, email, handle, kind) | ethos | `identities/<handle>.yaml` |
 | What's my GPG key? | beadle (via ethos extension) | `identities/<handle>.ext/beadle.yaml` |
-| Which identity for this repo? | ethos (repo-local) | `<repo>/.punt-labs/ethos/config.yaml` |
+| Which identity for this repo? | ethos (repo-local) | `<repo>/.punt-labs/ethos.yaml` |
 | How do I connect to mail? | beadle | `beadle/identities/<email>/email.json` |
 | Who do I know + permissions? | beadle | `beadle/identities/<email>/contacts.json` |
 
