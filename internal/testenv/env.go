@@ -57,9 +57,9 @@ func New(t testing.TB, emailAddr string) *Env {
 	require.NoError(t, os.WriteFile(filepath.Join(idDir, handle+".yaml"), []byte(idYAML), 0o640))
 
 	// Write repo-local ethos config.
-	repoEthosDir := filepath.Join(repoDir, ".punt-labs", "ethos")
-	require.NoError(t, os.MkdirAll(repoEthosDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(repoEthosDir, "config.yaml"), []byte("agent: "+handle+"\n"), 0o640))
+	repoPuntDir := filepath.Join(repoDir, ".punt-labs")
+	require.NoError(t, os.MkdirAll(repoPuntDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(repoPuntDir, "ethos.yaml"), []byte("agent: "+handle+"\n"), 0o640))
 
 	// Create beadle identity directory.
 	beadleIDDir := filepath.Join(beadleDir, "identities", emailAddr)
