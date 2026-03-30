@@ -156,7 +156,7 @@ PGP verification uses an isolated GNUPGHOME per operation. When no key is attach
 
 Beadle reads identity from [ethos](https://github.com/punt-labs/ethos) (sidecar pattern — file reads, no import dependency). Resolution chain:
 
-1. **Repo-local config** — `.punt-labs/ethos/config.yaml` with `agent: <handle>`
+1. **Repo-local config** — `.punt-labs/ethos.yaml` with `agent: <handle>`
 2. **Global ethos active** — `~/.punt-labs/ethos/active`
 3. **Default identity** — `~/.punt-labs/beadle/default-identity` (plain email string)
 
