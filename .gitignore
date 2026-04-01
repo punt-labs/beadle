@@ -27,7 +27,6 @@
 .claude/agents/
 
 # direnv
-.envrc
 !.claude/settings.json
 !.claude/hooks/
 
