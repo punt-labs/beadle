@@ -60,6 +60,20 @@ func (c *Client) Close() error {
 	return c.imap.Logout().Wait()
 }
 
+// Status returns the number of unseen messages in a folder using the
+// IMAP STATUS command. This is lighter than ListMessages because it
+// does not download envelopes or bodies.
+func (c *Client) Status(folder string) (uint32, error) {
+	data, err := c.imap.Status(folder, &imap.StatusOptions{NumUnseen: true}).Wait()
+	if err != nil {
+		return 0, fmt.Errorf("status %q: %w", folder, err)
+	}
+	if data.NumUnseen == nil {
+		return 0, nil
+	}
+	return *data.NumUnseen, nil
+}
+
 // ListFolders returns all available mailbox folders.
 func (c *Client) ListFolders() ([]channel.Folder, error) {
 	listCmd := c.imap.List("", "*", nil)

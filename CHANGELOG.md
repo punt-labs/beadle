@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Background inbox poller in the MCP server. The server checks INBOX via
+  IMAP STATUS on a configurable interval and fires `tools/list_changed`
+  when new mail arrives — no CronCreate or model cooperation needed.
+  Polling survives session restarts because the server reads
+  `poll_interval` from `email.json` on startup.
+- `set_poll_interval` MCP tool to configure polling (5m, 10m, 15m, 30m,
+  1h, 2h, or n to disable). Persists to `email.json`.
+- `get_poll_status` MCP tool to check poller state: interval, active,
+  last check time, unseen count.
+- `Client.Status()` lightweight IMAP STATUS method for unseen count.
+- `email.SaveConfig()` for writing config changes back to disk.
+
+### Removed
+
+- `poll-reminder.sh` UserPromptSubmit hook — replaced by server-side poller.
+- SessionStart hook polling section — no longer needed.
+- `.claude/beadle.local.md` and `.claude/beadle.poll.ts` — config moved to
+  MCP server's own `email.json`.
+
 ## [0.8.0] - 2026-03-29
 
 ### Added

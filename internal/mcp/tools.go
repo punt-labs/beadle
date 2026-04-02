@@ -41,6 +41,11 @@ func WithEthosDir(dir string) HandlerOption {
 	return func(h *handler) { h.ethosDir = dir }
 }
 
+// WithPoller sets the background inbox poller for poll tools.
+func WithPoller(p *email.Poller) HandlerOption {
+	return func(h *handler) { h.poller = p }
+}
+
 // RegisterTools adds all email channel tools to the MCP server.
 func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slog.Logger, opts ...HandlerOption) {
 	h := &handler{resolver: resolver, logger: logger, dialer: email.DefaultDialer{}}
@@ -65,6 +70,11 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 
 	s.AddTool(whoamiTool(), h.whoami)
 	s.AddTool(switchIdentityTool(), h.switchIdentity)
+
+	if h.poller != nil {
+		s.AddTool(setPollIntervalTool(), h.setPollInterval)
+		s.AddTool(getPollStatusTool(), h.getPollStatus)
+	}
 }
 
 type handler struct {
@@ -72,6 +82,7 @@ type handler struct {
 	logger           *slog.Logger
 	dialer           email.Dialer
 	ethosDir         string
+	poller           *email.Poller
 	overrideMu       sync.RWMutex       // guards identityOverride
 	identityOverride *identity.Identity // session-scoped: depends on process lifecycle matching session
 }
