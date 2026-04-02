@@ -159,6 +159,58 @@ func TestHandler_ReadMessage_Permitted(t *testing.T) {
 	assert.Contains(t, r.text(), "secret content")
 }
 
+func TestHandler_ReadMessage_MaxBodyLength(t *testing.T) {
+	longBody := "abcdefghijklmnopqrstuvwxyz" // 26 chars
+
+	tests := []struct {
+		name        string
+		maxBody     any    // nil means omitted
+		wantFull    bool
+		wantTrunc   bool
+		wantError   bool
+		wantOrigLen string // substring for truncation indicator
+	}{
+		{"omitted returns full body", nil, true, false, false, ""},
+		{"zero returns full body", float64(0), true, false, false, ""},
+		{"longer than body returns full body", float64(100), true, false, false, ""},
+		{"equal to body length returns full body", float64(26), true, false, false, ""},
+		{"shorter than body truncates", float64(10), false, true, false, "26 chars total"},
+		{"negative returns error", float64(-1), false, false, true, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, env, fix := setupHandler(t)
+			env.AddContact("Alice", "alice@test.com", "r--")
+			uid := fix.AddMessage("INBOX", "alice@test.com", "Long Email", longBody)
+
+			args := map[string]any{"message_id": fmt.Sprintf("%d", uid)}
+			if tt.maxBody != nil {
+				args["max_body_length"] = tt.maxBody
+			}
+
+			r := callTool(t, s, "read_message", args)
+
+			if tt.wantError {
+				assert.True(t, r.IsError)
+				assert.Contains(t, r.text(), "non-negative")
+				return
+			}
+			assert.False(t, r.IsError, "read failed: %s", r.text())
+
+			if tt.wantFull {
+				assert.Contains(t, r.text(), longBody)
+				assert.NotContains(t, r.text(), "[truncated")
+			}
+			if tt.wantTrunc {
+				assert.Contains(t, r.text(), "abcdefghij")
+				assert.NotContains(t, r.text(), longBody)
+				assert.Contains(t, r.text(), tt.wantOrigLen)
+			}
+		})
+	}
+}
+
 func TestHandler_ReadMessage_Denied(t *testing.T) {
 	s, _, fix := setupHandler(t)
 	// No contact added — unknown sender has no permissions.

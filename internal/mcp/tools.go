@@ -189,6 +189,9 @@ func readMessageTool() mcplib.Tool {
 			mcplib.Required(),
 			mcplib.Description("Message UID (from list_messages)"),
 		),
+		mcplib.WithNumber("max_body_length",
+			mcplib.Description("Maximum body length in characters. When set, truncates the body and appends a truncation indicator. 0 or omitted returns full body."),
+		),
 	)
 }
 
@@ -485,6 +488,18 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 				} else {
 					msg.TrustLevel = channel.Untrusted
 				}
+			}
+		}
+
+		maxBody := intParam(req, "max_body_length", 0)
+		if maxBody < 0 {
+			return mcplib.NewToolResultError("max_body_length must be non-negative"), nil
+		}
+		if maxBody > 0 {
+			runes := []rune(msg.Body)
+			if len(runes) > maxBody {
+				origLen := len(runes)
+				msg.Body = string(runes[:maxBody]) + fmt.Sprintf("\n[truncated — %d chars total]", origLen)
 			}
 		}
 
