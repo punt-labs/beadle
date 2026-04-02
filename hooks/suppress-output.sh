@@ -75,11 +75,6 @@ fi
 
 # ── list_messages ──────────────────────────────────────────────────────
 if [[ "$TOOL_NAME" == "list_messages" ]]; then
-  # Record poll timestamp for UserPromptSubmit reminder
-  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-  if [[ -n "$REPO_ROOT" ]] && [[ -d "$REPO_ROOT/.claude" ]]; then
-    date +%s > "$REPO_ROOT/.claude/beadle.poll.ts" 2>/dev/null
-  fi
   if [[ "$RESULT" == "No messages." ]]; then
     emit "$RESULT"
   else

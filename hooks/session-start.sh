@@ -121,40 +121,6 @@ else
   fi
 fi
 
-# ── Inbox polling configuration ──────────────────────────────────────
-# Config lives in the project working tree, not the plugin install dir.
-# /inbox writes .claude/beadle.local.md relative to the project root,
-# so the hook must read from the same location.
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-BEADLE_CONFIG="${PROJECT_ROOT:+${PROJECT_ROOT}/.claude/beadle.local.md}"
-INBOX_POLL="30m"  # default
-
-if [[ -n "$BEADLE_CONFIG" ]] && [[ -f "$BEADLE_CONFIG" ]]; then
-  POLL_VALUE=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$BEADLE_CONFIG" \
-    | grep '^inbox_poll:' | head -1 | sed 's/inbox_poll: *//' | sed 's/^"\(.*\)"$/\1/' | sed 's/[[:space:]]*$//' || true)
-  if [[ -n "$POLL_VALUE" ]]; then
-    INBOX_POLL="$POLL_VALUE"
-  else
-    ACTIONS+=("Found $BEADLE_CONFIG but no inbox_poll value — using default 30m")
-  fi
-fi
-
-if [[ "$INBOX_POLL" == "n" ]]; then
-  ACTIONS+=("Inbox polling disabled")
-else
-  case "$INBOX_POLL" in
-    5m)  CRON_EXPR="*/5 * * * *" ;;
-    10m) CRON_EXPR="*/10 * * * *" ;;
-    15m) CRON_EXPR="*/15 * * * *" ;;
-    30m) CRON_EXPR="*/30 * * * *" ;;
-    1h)  CRON_EXPR="7 * * * *" ;;
-    2h)  CRON_EXPR="7 */2 * * *" ;;
-    *)   CRON_EXPR="*/30 * * * *"
-         ACTIONS+=("Unknown inbox_poll value '$INBOX_POLL' in $BEADLE_CONFIG — falling back to 30m") ;;
-  esac
-  ACTIONS+=("Execute: CronCreate cron='$CRON_EXPR' prompt='/inbox' recurring=true")
-fi
-
 # ── First-run check: verify beadle-email binary is available ──────────
 if ! command -v beadle-email >/dev/null 2>&1; then
   ACTIONS+=("beadle-email binary not found on PATH")
