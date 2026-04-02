@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 
@@ -55,6 +57,9 @@ func (h *handler) setPollInterval(_ context.Context, req mcplib.CallToolRequest)
 	}
 	cfg, loadErr := email.LoadConfig(configPath)
 	if loadErr != nil {
+		if !errors.Is(loadErr, os.ErrNotExist) {
+			return mcplib.NewToolResultError(fmt.Sprintf("identity config %s: %v", configPath, loadErr)), nil
+		}
 		cfg, loadErr = email.LoadConfig(email.DefaultConfigPath())
 		if loadErr != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("load config: %v", loadErr)), nil
