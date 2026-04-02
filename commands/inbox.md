@@ -40,11 +40,15 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### No argument
 
-1. Call `list_messages` with `unread_only: true`.
-2. If unread messages exist, **process them by permission level** (see below).
-3. If no unread messages, call `list_messages` without `unread_only` to show
-   recent messages (display only, no processing).
-4. Emit the message table verbatim, then a brief summary of actions taken.
+1. Call `list_messages` with `unread_only: true` and `count: 50`.
+2. If no unread messages, call `list_messages` without `unread_only` to show
+   recent messages (display only, no processing). Emit the table and stop.
+3. If unread messages exist, **process the entire batch by permission level**
+   (see below).
+4. If more unread messages remain (the response shows "showing N of M" where
+   M > N), call `list_messages` again with `unread_only: true` and `count: 50`.
+   Repeat steps 3–4 until all unread messages are processed.
+5. Emit a single summary at the end covering all batches.
 
 ### With argument (filter)
 
