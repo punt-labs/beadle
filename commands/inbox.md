@@ -40,11 +40,21 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### No argument
 
-1. Call `list_messages` with `unread_only: true`.
-2. If unread messages exist, **process them by permission level** (see below).
+1. Initialize an empty set of **processed message IDs**.
+2. Call `list_messages` with `unread_only: true` and `count: 50`.
 3. If no unread messages, call `list_messages` without `unread_only` to show
-   recent messages (display only, no processing).
-4. Emit the message table verbatim, then a brief summary of actions taken.
+   recent messages (display only, no processing). Emit the table and stop.
+4. From the returned batch, identify messages whose IDs are **not** in the
+   processed set. If every ID in the batch is already processed, stop — there
+   are no new messages to handle.
+5. **Process only the new messages** by permission level (see below). After
+   processing each message (read, archive, reply, etc.), add its ID to the
+   processed set.
+6. Call `list_messages` again with `unread_only: true` and `count: 50`. Repeat
+   from step 4. Messages that were moved/archived will no longer appear;
+   messages that remain unread (e.g., unknown-sender messages left in inbox)
+   will be skipped because their IDs are already in the processed set.
+7. Emit a single summary at the end covering all batches.
 
 ### With argument (filter)
 

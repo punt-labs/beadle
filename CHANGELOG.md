@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   last check time, unseen count.
 - `Client.Status()` lightweight IMAP STATUS method for unseen count.
 - `email.SaveConfig()` for writing config changes back to disk.
+- `read_message`: optional `max_body_length` parameter for lightweight
+  preview. When set, truncates the body to the specified character count
+  and appends a truncation indicator with the original length.
 
 ### Removed
 
