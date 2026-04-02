@@ -487,10 +487,11 @@ reliable mechanism to make the model call a tool at session start.
 5. Claude Code sees the notification and re-lists tools, surfacing new mail
 6. MCP tools `set_poll_interval` and `get_poll_status` manage the config
 
-**Pattern:** Same as biff's notification system (`biff/docs/notification.tex`).
-Background poller detects changes, fires `tools/list_changed` from the server's
-own goroutine context. Two notification paths: "belt" (inside tool handler) and
-"suspenders" (background poller with captured session reference).
+**Pattern:** Same as biff's notification system (see `punt-labs/biff` repo,
+`docs/notification.tex`). Background poller detects changes, fires
+`tools/list_changed` from the server's own goroutine context. Two notification
+paths: "belt" (inside tool handler) and "suspenders" (background poller with
+captured session reference).
 
 **Key properties:**
 
@@ -515,7 +516,7 @@ own goroutine context. Two notification paths: "belt" (inside tool handler) and
 
 **Future:** When Anthropic's channels feature ships, upgrade from
 `tools/list_changed` to `notifications/claude/channel` for direct conversation
-injection. See `channels-architecture.tex`.
+injection. See the channels architecture design document in `claude-code-main`.
 
 ## DES-016: Contact matching by email domain pattern
 
