@@ -491,6 +491,11 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 			}
 		}
 
+		if v, ok := req.GetArguments()["max_body_length"]; ok {
+			if f, ok := v.(float64); ok && f != float64(int(f)) {
+				return mcplib.NewToolResultError(fmt.Sprintf("max_body_length must be a whole number, got %g", f)), nil
+			}
+		}
 		maxBody := intParam(req, "max_body_length", 0)
 		if maxBody < 0 {
 			return mcplib.NewToolResultError("max_body_length must be non-negative"), nil

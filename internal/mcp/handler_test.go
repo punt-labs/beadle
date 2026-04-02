@@ -168,14 +168,16 @@ func TestHandler_ReadMessage_MaxBodyLength(t *testing.T) {
 		wantFull    bool
 		wantTrunc   bool
 		wantError   bool
+		wantErrMsg  string // substring expected in error message
 		wantOrigLen string // substring for truncation indicator
 	}{
-		{"omitted returns full body", nil, true, false, false, ""},
-		{"zero returns full body", float64(0), true, false, false, ""},
-		{"longer than body returns full body", float64(100), true, false, false, ""},
-		{"equal to body length returns full body", float64(26), true, false, false, ""},
-		{"shorter than body truncates", float64(10), false, true, false, "26 chars total"},
-		{"negative returns error", float64(-1), false, false, true, ""},
+		{"omitted returns full body", nil, true, false, false, "", ""},
+		{"zero returns full body", float64(0), true, false, false, "", ""},
+		{"longer than body returns full body", float64(100), true, false, false, "", ""},
+		{"equal to body length returns full body", float64(26), true, false, false, "", ""},
+		{"shorter than body truncates", float64(10), false, true, false, "", "26 chars total"},
+		{"negative returns error", float64(-1), false, false, true, "non-negative", ""},
+		{"fractional returns error", float64(10.5), false, false, true, "whole number", ""},
 	}
 
 	for _, tt := range tests {
@@ -193,7 +195,7 @@ func TestHandler_ReadMessage_MaxBodyLength(t *testing.T) {
 
 			if tt.wantError {
 				assert.True(t, r.IsError)
-				assert.Contains(t, r.text(), "non-negative")
+				assert.Contains(t, r.text(), tt.wantErrMsg)
 				return
 			}
 			assert.False(t, r.IsError, "read failed: %s", r.text())
@@ -209,6 +211,26 @@ func TestHandler_ReadMessage_MaxBodyLength(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandler_ReadMessage_MaxBodyLength_UTF8(t *testing.T) {
+	// "café🎉" is 5 runes (c-a-f-é-🎉) but 9 bytes.
+	// Truncating to 3 runes should yield "caf", not split a multi-byte char.
+	body := "café🎉"
+
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+	uid := fix.AddMessage("INBOX", "alice@test.com", "UTF8 Email", body)
+
+	r := callTool(t, s, "read_message", map[string]any{
+		"message_id":      fmt.Sprintf("%d", uid),
+		"max_body_length": float64(3),
+	})
+
+	require.False(t, r.IsError, "read failed: %s", r.text())
+	assert.Contains(t, r.text(), "caf")
+	assert.NotContains(t, r.text(), body)
+	assert.Contains(t, r.text(), "5 chars total")
 }
 
 func TestHandler_ReadMessage_Denied(t *testing.T) {
