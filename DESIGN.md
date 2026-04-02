@@ -463,3 +463,71 @@ updated with Go/cobra guidance alongside Python/typer.
   `contact add`, etc.
 - **urfave/cli** — Lighter than cobra but less ecosystem adoption. Cobra is used
   by kubectl, docker, gh, and is the de facto Go CLI standard.
+
+## DES-015: Server-side inbox poller, not CronCreate
+
+**Status:** SETTLED (PR #84, 2026-04-01)
+
+**Decision:** Inbox polling runs as a background goroutine inside the beadle-email
+MCP server, not as a CronCreate job managed by the model.
+
+**Problem:** CronCreate jobs are session-scoped — they die when the session ends.
+The original design used a SessionStart hook to emit "Execute: CronCreate..." in
+`additionalContext`, expecting the model to re-register the cron. Tested
+2026-04-01: the model ignores these instructions. CLAUDE.md instructions (like
+biff's `/loop 2m /biff:read`) are also unreliable across sessions. There is no
+reliable mechanism to make the model call a tool at session start.
+
+**Design:** The MCP server owns the full polling lifecycle:
+
+1. `email.json` stores `poll_interval` (valid: 5m, 10m, 15m, 30m, 1h, 2h, n)
+2. On startup, the server reads the config and starts a background goroutine
+3. The goroutine calls IMAP STATUS on the configured interval
+4. When unread count increases, it fires `tools/list_changed` (MCP notification)
+5. Claude Code sees the notification and re-lists tools, surfacing new mail
+6. MCP tools `set_poll_interval` and `get_poll_status` manage the config
+
+**Pattern:** Same as biff's notification system (`biff/docs/notification.tex`).
+Background poller detects changes, fires `tools/list_changed` from the server's
+own goroutine context. Two notification paths: "belt" (inside tool handler) and
+"suspenders" (background poller with captured session reference).
+
+**Key properties:**
+
+- Polling survives session restarts — server reads config on startup
+- No model cooperation needed — server pushes notifications autonomously
+- First poll runs immediately, subsequent polls on the configured interval
+- First poll suppresses notification (avoids false positive on existing unread)
+- Failure tracking: consecutive failure count and last error in status output
+- Atomic config writes (temp + rename) prevent corruption
+- Config fallback: identity-scoped path, then default path, only on `ErrNotExist`
+
+**Rejected alternatives:**
+
+- **SessionStart hook with "Execute:" instruction** — Model ignores
+  `additionalContext` instructions. Tested and verified broken.
+- **CLAUDE.md instruction** — Model doesn't reliably act on CLAUDE.md
+  instructions at session start. Biff's `/loop` instruction fails regularly.
+- **SessionStart hook with `type: "prompt"`** — SessionStart hooks only support
+  `type: "command"`. No prompt injection at session start.
+- **CronCreate with poll-reminder fallback** — The UserPromptSubmit fallback
+  adds overhead to every user prompt and still depends on the model acting.
+
+**Future:** When Anthropic's channels feature ships, upgrade from
+`tools/list_changed` to `notifications/claude/channel` for direct conversation
+injection. See `channels-architecture.tex`.
+
+## DES-016: Contact matching by email domain pattern
+
+**Status:** PROPOSED (beadle-a7v)
+
+**Decision:** Add glob/domain-pattern matching to the contact system so a single
+contact entry can cover all messages from a domain (e.g., `*@mail.anthropic.com`).
+
+**Problem:** Anthropic uses per-message randomized sender addresses
+(`no-reply-<random>@mail.anthropic.com`). The current contact system matches by
+exact email address, so each new Anthropic message arrives from an unknown address
+and gets blocked as `---`. Adding individual addresses doesn't scale — new ones
+arrive with every message.
+
+**Not yet implemented.** Tracked in beadle-a7v.
