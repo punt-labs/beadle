@@ -1,7 +1,7 @@
 ---
 description: "Check beadle's email inbox"
 argument-hint: "[<filter text> | 5m | 10m | 15m | 30m | 1h | 2h | n | status]"
-allowed-tools: ["mcp__plugin_beadle_email__list_messages", "mcp__plugin_beadle_email__read_message", "mcp__plugin_beadle_email__move_message", "mcp__plugin_beadle_email__check_trust", "mcp__plugin_beadle_email__find_contact", "mcp__plugin_beadle_email__send_email", "mcp__plugin_beadle-dev_email__list_messages", "mcp__plugin_beadle-dev_email__read_message", "mcp__plugin_beadle-dev_email__move_message", "mcp__plugin_beadle-dev_email__check_trust", "mcp__plugin_beadle-dev_email__find_contact", "mcp__plugin_beadle-dev_email__send_email", "Write", "Read", "CronCreate", "CronDelete", "CronList"]
+allowed-tools: ["mcp__plugin_beadle_email__list_messages", "mcp__plugin_beadle_email__read_message", "mcp__plugin_beadle_email__move_message", "mcp__plugin_beadle_email__check_trust", "mcp__plugin_beadle_email__find_contact", "mcp__plugin_beadle_email__send_email", "mcp__plugin_beadle_email__set_poll_interval", "mcp__plugin_beadle_email__get_poll_status", "mcp__plugin_beadle-dev_email__list_messages", "mcp__plugin_beadle-dev_email__read_message", "mcp__plugin_beadle-dev_email__move_message", "mcp__plugin_beadle-dev_email__check_trust", "mcp__plugin_beadle-dev_email__find_contact", "mcp__plugin_beadle-dev_email__send_email", "mcp__plugin_beadle-dev_email__set_poll_interval", "mcp__plugin_beadle-dev_email__get_poll_status", "Read"]
 ---
 <!-- markdownlint-disable MD041 -->
 
@@ -25,52 +25,18 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### Polling interval (`5m`, `10m`, `15m`, `30m`, `1h`, `2h`)
 
-1. Ensure `.claude/` directory exists, then write `.claude/beadle.local.md` with
-   the new interval:
-
-   ```markdown
-   ---
-   inbox_poll: <interval>
-   ---
-   ```
-
-2. Cancel any existing beadle inbox cron by calling `CronList`, finding jobs with
-   prompt exactly equal to `/inbox`, and calling `CronDelete` on them.
-3. Create a new CronCreate job with the corresponding cron expression and `/inbox`
-   as the prompt (`recurring: true`):
-
-   | Interval | Cron |
-   |----------|------|
-   | `5m` | `*/5 * * * *` |
-   | `10m` | `*/10 * * * *` |
-   | `15m` | `*/15 * * * *` |
-   | `30m` | `*/30 * * * *` |
-   | `1h` | `7 * * * *` |
-   | `2h` | `7 */2 * * *` |
-
-4. Confirm: "Inbox polling set to `<interval>`. Cron scheduled."
+1. Call `set_poll_interval` with the interval value.
+2. Confirm: "Inbox polling set to `<interval>`."
 
 ### Disable polling (`n`)
 
-1. Ensure `.claude/` directory exists, then write `.claude/beadle.local.md` with
-   the disabled config:
-
-   ```markdown
-   ---
-   inbox_poll: n
-   ---
-   ```
-
-2. Cancel any existing beadle inbox cron: call `CronList`, find jobs whose prompt
-   is exactly `/inbox`, and call `CronDelete` on them.
-3. Confirm: "Inbox polling disabled."
+1. Call `set_poll_interval` with `interval: "n"`.
+2. Confirm: "Inbox polling disabled."
 
 ### Show status (`status`)
 
-1. Read `.claude/beadle.local.md`. If it doesn't exist or has no parseable
-   `inbox_poll` value, report "30m (default)".
-2. Call `CronList` to check if a polling cron is active.
-3. Report: current config value, whether a cron is active.
+1. Call `get_poll_status`.
+2. Report the returned values: interval, active, last check time, unseen count.
 
 ### No argument
 

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/punt-labs/beadle/internal/email"
 	mcptools "github.com/punt-labs/beadle/internal/mcp"
 	"github.com/punt-labs/beadle/internal/testenv"
 	"github.com/punt-labs/beadle/internal/testserver"
@@ -82,6 +83,31 @@ func (r toolResult) text() string {
 		return ""
 	}
 	return r.Content[0].Text
+}
+
+// setupHandlerWithPoller creates a fully wired MCP server including the
+// background poller. The poller is stopped automatically at test cleanup.
+func setupHandlerWithPoller(t *testing.T) (*server.MCPServer, *testenv.Env, *testserver.Fixture) {
+	t.Helper()
+
+	env := testenv.New(t, testEmail)
+	fix := testserver.NewFixture(t)
+	env.WriteConfig(fix.Config)
+
+	s := server.NewMCPServer("beadle-email", "test", server.WithToolCapabilities(true))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	dialer := testserver.TestDialer{Password: "testpass"}
+	poller := email.NewPoller(s, env.Resolver, logger, dialer)
+	mcptools.RegisterTools(s, env.Resolver, logger, mcptools.WithDialer(dialer), mcptools.WithPoller(poller))
+
+	callMCP(t, s, "initialize", 0, map[string]any{
+		"protocolVersion": "2024-11-05",
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
+	})
+
+	t.Cleanup(func() { poller.Stop() })
+	return s, env, fix
 }
 
 // --- Handler Tests ---
@@ -311,4 +337,44 @@ func TestHandler_SwitchIdentity_WithMailOps(t *testing.T) {
 	// The key verification is that the switch happened — check whoami.
 	r = callTool(t, s, "whoami", nil)
 	assert.Contains(t, r.text(), "jim@test.com")
+}
+
+// --- Poll Tool Tests ---
+
+func TestHandler_GetPollStatus(t *testing.T) {
+	s, _, _ := setupHandlerWithPoller(t)
+
+	r := callTool(t, s, "get_poll_status", nil)
+	assert.False(t, r.IsError, "get_poll_status failed: %s", r.text())
+	assert.Contains(t, r.text(), "disabled")
+}
+
+func TestHandler_SetPollInterval_Valid(t *testing.T) {
+	s, _, _ := setupHandlerWithPoller(t)
+
+	r := callTool(t, s, "set_poll_interval", map[string]any{"interval": "10m"})
+	assert.False(t, r.IsError, "set_poll_interval failed: %s", r.text())
+	assert.Contains(t, r.text(), "10m")
+
+	r = callTool(t, s, "get_poll_status", nil)
+	assert.False(t, r.IsError)
+	assert.Contains(t, r.text(), "10m")
+	assert.Contains(t, r.text(), "yes")
+}
+
+func TestHandler_SetPollInterval_Disable(t *testing.T) {
+	s, _, _ := setupHandlerWithPoller(t)
+
+	callTool(t, s, "set_poll_interval", map[string]any{"interval": "5m"})
+	r := callTool(t, s, "set_poll_interval", map[string]any{"interval": "n"})
+	assert.False(t, r.IsError)
+	assert.Contains(t, r.text(), "disabled")
+}
+
+func TestHandler_SetPollInterval_Invalid(t *testing.T) {
+	s, _, _ := setupHandlerWithPoller(t)
+
+	r := callTool(t, s, "set_poll_interval", map[string]any{"interval": "3m"})
+	assert.True(t, r.IsError)
+	assert.Contains(t, r.text(), "invalid")
 }

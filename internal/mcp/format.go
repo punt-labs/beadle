@@ -220,6 +220,27 @@ func formatTrustResultWithPerm(r email.TrustResult, perm string) string {
 	return s
 }
 
+// formatPollStatus formats the poller status for display.
+func formatPollStatus(st email.PollStatus) string {
+	active := "no"
+	if st.Active {
+		active = "yes"
+	}
+	interval := st.Interval
+	if interval == "" {
+		interval = "disabled"
+	}
+	pairs := [][2]string{
+		{"Interval", interval},
+		{"Active", active},
+		{"Unseen", fmt.Sprintf("%d", st.Unseen)},
+	}
+	if !st.LastCheck.IsZero() {
+		pairs = append(pairs, [2]string{"Last check", st.LastCheck.Format("15:04:05")})
+	}
+	return fmtKV(pairs)
+}
+
 // trustIcon returns a single-character trust indicator.
 func trustIcon(level channel.TrustLevel) string {
 	switch level {
