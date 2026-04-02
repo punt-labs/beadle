@@ -2,6 +2,7 @@ package email
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -129,8 +130,13 @@ func ValidPollInterval(s string) bool {
 func SaveConfig(path string, cfg *Config) error {
 	// Read existing file to preserve unknown fields.
 	existing := make(map[string]any)
-	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &existing)
+	data, readErr := os.ReadFile(path)
+	if readErr == nil {
+		if err := json.Unmarshal(data, &existing); err != nil {
+			return fmt.Errorf("existing config %s is corrupt: %w", path, err)
+		}
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return fmt.Errorf("read existing config %s: %w", path, readErr)
 	}
 
 	// Overlay known fields.
@@ -145,7 +151,7 @@ func SaveConfig(path string, cfg *Config) error {
 	if cfg.GPGSigner != "" {
 		existing["gpg_signer"] = cfg.GPGSigner
 	}
-	if cfg.PollInterval != "" {
+	if cfg.PollInterval != "" && cfg.PollInterval != "n" {
 		existing["poll_interval"] = cfg.PollInterval
 	} else {
 		delete(existing, "poll_interval")

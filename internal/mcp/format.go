@@ -238,6 +238,12 @@ func formatPollStatus(st email.PollStatus) string {
 	if !st.LastCheck.IsZero() {
 		pairs = append(pairs, [2]string{"Last check", st.LastCheck.Format("15:04:05")})
 	}
+	if st.ConsecFails > 0 {
+		pairs = append(pairs, [2]string{"Failures", fmt.Sprintf("%d", st.ConsecFails)})
+	}
+	if st.LastError != "" {
+		pairs = append(pairs, [2]string{"Last error", st.LastError})
+	}
 	return fmtKV(pairs)
 }
 

@@ -123,6 +123,53 @@ func TestSaveConfig(t *testing.T) {
 	assert.Equal(t, "", loaded.PollInterval)
 }
 
+func TestSaveConfig_CorruptExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "email.json")
+
+	// Write corrupt JSON.
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`{not json`), 0o644))
+
+	cfg := &Config{
+		IMAPHost:    "127.0.0.1",
+		IMAPPort:    1143,
+		IMAPUser:    "test@example.com",
+		SMTPPort:    1025,
+		FromAddress: "test@example.com",
+	}
+
+	err := SaveConfig(cfgPath, cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "corrupt")
+}
+
+func TestSaveConfig_NNormalizesToDeletion(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "email.json")
+
+	cfg := &Config{
+		IMAPHost:     "127.0.0.1",
+		IMAPPort:     1143,
+		IMAPUser:     "test@example.com",
+		SMTPPort:     1025,
+		FromAddress:  "test@example.com",
+		PollInterval: "10m",
+	}
+
+	// Save with a real interval first.
+	require.NoError(t, SaveConfig(cfgPath, cfg))
+	loaded, err := LoadConfig(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, "10m", loaded.PollInterval)
+
+	// Save with "n" should remove poll_interval.
+	cfg.PollInterval = "n"
+	require.NoError(t, SaveConfig(cfgPath, cfg))
+	loaded, err = LoadConfig(cfgPath)
+	require.NoError(t, err)
+	assert.Equal(t, "", loaded.PollInterval)
+}
+
 func TestCredentialMethods_Exist(t *testing.T) {
 	// Verify the credential methods exist and return either a value or a
 	// meaningful error. We don't assert specific values because the

@@ -1,7 +1,10 @@
 package email
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -14,10 +17,12 @@ import (
 
 // PollStatus is the current state of the background poller.
 type PollStatus struct {
-	Interval  string    `json:"interval"`
-	Active    bool      `json:"active"`
-	LastCheck time.Time `json:"last_check,omitempty"`
-	Unseen    uint32    `json:"unseen"`
+	Interval    string    `json:"interval"`
+	Active      bool      `json:"active"`
+	LastCheck   time.Time `json:"last_check,omitempty"`
+	Unseen      uint32    `json:"unseen"`
+	ConsecFails uint32    `json:"consecutive_failures,omitempty"`
+	LastError   string    `json:"last_error,omitempty"`
 }
 
 // Poller checks INBOX for new messages and sends tools/list_changed
@@ -28,12 +33,15 @@ type Poller struct {
 	logger   *slog.Logger
 	dialer   Dialer
 
-	mu        sync.Mutex
-	interval  time.Duration
-	raw       string // original interval string for Status()
-	lastSeen  uint32
-	lastCheck time.Time
-	stopCh    chan struct{}
+	mu          sync.Mutex
+	wg          sync.WaitGroup
+	interval    time.Duration
+	raw         string // original interval string for Status()
+	lastSeen    uint32
+	lastCheck   time.Time
+	stopCh      chan struct{}
+	consecFails uint32
+	lastError   string
 }
 
 // NewPoller creates a poller that is initially stopped.
@@ -47,30 +55,35 @@ func NewPoller(s *server.MCPServer, resolver *identity.Resolver, logger *slog.Lo
 }
 
 // Start reads the identity config and begins polling if poll_interval is set.
-func (p *Poller) Start() {
+func (p *Poller) Start() error {
 	cfg, err := p.loadConfig()
 	if err != nil {
-		p.logger.Warn("poller: load config", "error", err)
-		return
+		return fmt.Errorf("poller: load config: %w", err)
 	}
 	d, ok := cfg.PollDuration()
 	if !ok {
-		return
+		if cfg.PollInterval != "" && cfg.PollInterval != "n" {
+			return fmt.Errorf("invalid poll_interval %q in config (valid: 5m, 10m, 15m, 30m, 1h, 2h)", cfg.PollInterval)
+		}
+		return nil // disabled, not an error
 	}
 	p.mu.Lock()
 	p.interval = d
 	p.raw = cfg.PollInterval
 	p.mu.Unlock()
 	p.startLoop()
+	return nil
 }
 
-// Stop signals the polling goroutine to exit.
+// Stop signals the polling goroutine to exit and waits for it to finish.
 func (p *Poller) Stop() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.stopCh != nil {
-		close(p.stopCh)
-		p.stopCh = nil
+	ch := p.stopCh
+	p.stopCh = nil
+	p.mu.Unlock()
+	if ch != nil {
+		close(ch)
+		p.wg.Wait()
 	}
 }
 
@@ -105,10 +118,12 @@ func (p *Poller) Status() PollStatus {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return PollStatus{
-		Interval:  p.raw,
-		Active:    p.stopCh != nil,
-		LastCheck: p.lastCheck,
-		Unseen:    p.lastSeen,
+		Interval:    p.raw,
+		Active:      p.stopCh != nil,
+		LastCheck:   p.lastCheck,
+		Unseen:      p.lastSeen,
+		ConsecFails: p.consecFails,
+		LastError:   p.lastError,
 	}
 }
 
@@ -123,10 +138,14 @@ func (p *Poller) startLoop() {
 	interval := p.interval
 	p.mu.Unlock()
 
+	p.wg.Add(1)
 	go p.loop(ch, interval)
 }
 
 func (p *Poller) loop(stop chan struct{}, interval time.Duration) {
+	defer p.wg.Done()
+
+	p.poll() // immediate first check
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -143,36 +162,56 @@ func (p *Poller) loop(stop chan struct{}, interval time.Duration) {
 func (p *Poller) poll() {
 	cfg, err := p.loadConfig()
 	if err != nil {
+		p.recordFailure(fmt.Sprintf("load config: %v", err))
 		p.logger.Warn("poller: load config", "error", err)
 		return
 	}
 
 	client, err := p.dialer.Dial(cfg, p.logger)
 	if err != nil {
+		p.recordFailure(fmt.Sprintf("dial: %v", err))
 		p.logger.Warn("poller: dial", "error", err)
 		return
 	}
-	defer client.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			p.logger.Debug("poller: close", "error", err)
+		}
+	}()
 
 	unseen, err := client.Status("INBOX")
 	if err != nil {
+		p.recordFailure(fmt.Sprintf("status: %v", err))
 		p.logger.Warn("poller: status", "error", err)
 		return
 	}
 
 	p.mu.Lock()
+	first := p.lastCheck.IsZero()
 	prev := p.lastSeen
 	p.lastSeen = unseen
 	p.lastCheck = time.Now()
+	p.consecFails = 0
+	p.lastError = ""
 	p.mu.Unlock()
 
-	if unseen > prev {
+	if !first && unseen > prev {
 		p.logger.Info("poller: new mail", "unseen", unseen, "previous", prev)
 		p.server.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
 	}
 }
 
+func (p *Poller) recordFailure(msg string) {
+	p.mu.Lock()
+	p.consecFails++
+	p.lastError = msg
+	p.mu.Unlock()
+}
+
 func (p *Poller) loadConfig() (*Config, error) {
+	if p.resolver == nil {
+		return nil, fmt.Errorf("no identity resolver configured")
+	}
 	id, err := p.resolver.Resolve()
 	if err != nil {
 		return nil, err
@@ -183,9 +222,15 @@ func (p *Poller) loadConfig() (*Config, error) {
 	}
 	cfg, err := LoadConfig(idCfgPath)
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("identity config %s: %w", idCfgPath, err)
+		}
 		cfg, err = LoadConfig(DefaultConfigPath())
+		if err != nil {
+			return nil, fmt.Errorf("default config: %w", err)
+		}
 	}
-	return cfg, err
+	return cfg, nil
 }
 
 // InvalidIntervalError is returned when SetInterval receives a value

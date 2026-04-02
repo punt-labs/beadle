@@ -40,7 +40,9 @@ var serveCmd = &cobra.Command{
 		)
 		poller := email.NewPoller(s, resolver, logger, email.DefaultDialer{})
 		mcptools.RegisterTools(s, resolver, logger, mcptools.WithEthosDir(ethosDir), mcptools.WithPoller(poller))
-		poller.Start()
+		if err := poller.Start(); err != nil {
+			logger.Error("background polling failed to start", "error", err)
+		}
 		defer poller.Stop()
 		logger.Info("starting beadle-email MCP server", "version", version)
 		return server.ServeStdio(s)
