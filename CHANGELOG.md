@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `get_poll_status` MCP tool to check poller state: interval, active,
   last check time, unseen count.
 - `Client.Status()` lightweight IMAP STATUS method for unseen count.
-- `Config.SaveConfig()` for writing config changes back to disk.
+- `email.SaveConfig()` for writing config changes back to disk.
 
 ### Removed
 

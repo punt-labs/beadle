@@ -26,12 +26,12 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 ### Polling interval (`5m`, `10m`, `15m`, `30m`, `1h`, `2h`)
 
 1. Call `set_poll_interval` with the interval value.
-2. Confirm: "Inbox polling set to `<interval>`."
+2. Confirm with the tool's response text.
 
 ### Disable polling (`n`)
 
 1. Call `set_poll_interval` with `interval: "n"`.
-2. Confirm: "Inbox polling disabled."
+2. Confirm with the tool's response text.
 
 ### Show status (`status`)
 

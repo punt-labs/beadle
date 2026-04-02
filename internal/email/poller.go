@@ -63,7 +63,7 @@ func (p *Poller) Start() error {
 	d, ok := cfg.PollDuration()
 	if !ok {
 		if cfg.PollInterval != "" && cfg.PollInterval != "n" {
-			return fmt.Errorf("invalid poll_interval %q in config (valid: 5m, 10m, 15m, 30m, 1h, 2h)", cfg.PollInterval)
+			return fmt.Errorf("invalid poll_interval %q in config (valid: 5m, 10m, 15m, 30m, 1h, 2h, n=disable)", cfg.PollInterval)
 		}
 		return nil // disabled, not an error
 	}
@@ -127,12 +127,10 @@ func (p *Poller) Status() PollStatus {
 	}
 }
 
-// startLoop spawns the background goroutine. Caller must not hold p.mu.
+// startLoop spawns the background goroutine. Caller must call Stop first
+// if a loop is already running. Caller must not hold p.mu.
 func (p *Poller) startLoop() {
 	p.mu.Lock()
-	if p.stopCh != nil {
-		close(p.stopCh)
-	}
 	ch := make(chan struct{})
 	p.stopCh = ch
 	interval := p.interval

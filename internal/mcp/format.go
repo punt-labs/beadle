@@ -227,7 +227,7 @@ func formatPollStatus(st email.PollStatus) string {
 		active = "yes"
 	}
 	interval := st.Interval
-	if interval == "" {
+	if interval == "" || interval == "n" {
 		interval = "disabled"
 	}
 	pairs := [][2]string{

@@ -142,7 +142,7 @@ func TestSaveConfig_CorruptExistingFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "corrupt")
 }
 
-func TestSaveConfig_NNormalizesToDeletion(t *testing.T) {
+func TestSaveConfig_NormalizesNToDeletion(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "email.json")
 
