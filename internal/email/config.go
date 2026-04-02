@@ -125,10 +125,9 @@ func ValidPollInterval(s string) bool {
 	return ok
 }
 
-// SaveConfig writes the config back to the given path, preserving any
-// unknown fields from the original file.
+// SaveConfig updates only the poll_interval field in the config file at path,
+// leaving all other fields untouched. The write is atomic (temp file + rename).
 func SaveConfig(path string, cfg *Config) error {
-	// Read existing file to preserve unknown fields.
 	existing := make(map[string]any)
 	data, readErr := os.ReadFile(path)
 	if readErr == nil {
@@ -139,28 +138,44 @@ func SaveConfig(path string, cfg *Config) error {
 		return fmt.Errorf("read existing config %s: %w", path, readErr)
 	}
 
-	// Overlay known fields.
-	existing["imap_host"] = cfg.IMAPHost
-	existing["imap_port"] = cfg.IMAPPort
-	existing["imap_user"] = cfg.IMAPUser
-	existing["smtp_port"] = cfg.SMTPPort
-	existing["from_address"] = cfg.FromAddress
-	if cfg.GPGBinary != "" {
-		existing["gpg_binary"] = cfg.GPGBinary
-	}
-	if cfg.GPGSigner != "" {
-		existing["gpg_signer"] = cfg.GPGSigner
-	}
+	// Only update poll_interval — leave all other fields untouched.
 	if cfg.PollInterval != "" && cfg.PollInterval != "n" {
 		existing["poll_interval"] = cfg.PollInterval
 	} else {
 		delete(existing, "poll_interval")
 	}
 
-	data, err := json.MarshalIndent(existing, "", "  ")
+	out, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o640)
+	out = append(out, '\n')
+
+	// Atomic write: temp file + rename.
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "email.json.tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(out); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp config: %w", err)
+	}
+	if err := tmp.Chmod(0o640); err != nil {
+		tmp.Close()
+		return fmt.Errorf("set temp config permissions: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp config: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace config: %w", err)
+	}
+	return nil
 }

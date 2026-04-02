@@ -1,6 +1,7 @@
 package email
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -98,21 +99,26 @@ func TestSaveConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "email.json")
 
-	cfg := &Config{
-		IMAPHost:     "127.0.0.1",
-		IMAPPort:     1143,
-		IMAPUser:     "test@example.com",
-		SMTPPort:     1025,
-		FromAddress:  "test@example.com",
-		PollInterval: "10m",
-	}
+	// Write a minimal config with only imap_user.
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`{"imap_user":"test@example.com"}`+"\n"), 0o644))
 
+	cfg := &Config{PollInterval: "10m"}
 	require.NoError(t, SaveConfig(cfgPath, cfg))
 
 	loaded, err := LoadConfig(cfgPath)
 	require.NoError(t, err)
 	assert.Equal(t, "10m", loaded.PollInterval)
-	assert.Equal(t, "127.0.0.1", loaded.IMAPHost)
+	assert.Equal(t, "test@example.com", loaded.IMAPUser)
+
+	// Verify SaveConfig did not bake in LoadConfig defaults.
+	raw, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(raw, &m))
+	_, hasHost := m["imap_host"]
+	assert.False(t, hasHost, "SaveConfig must not inject imap_host default")
+	_, hasPort := m["imap_port"]
+	assert.False(t, hasPort, "SaveConfig must not inject imap_port default")
 
 	// Save with empty poll interval removes the field.
 	cfg.PollInterval = ""
@@ -130,14 +136,7 @@ func TestSaveConfig_CorruptExistingFile(t *testing.T) {
 	// Write corrupt JSON.
 	require.NoError(t, os.WriteFile(cfgPath, []byte(`{not json`), 0o644))
 
-	cfg := &Config{
-		IMAPHost:    "127.0.0.1",
-		IMAPPort:    1143,
-		IMAPUser:    "test@example.com",
-		SMTPPort:    1025,
-		FromAddress: "test@example.com",
-	}
-
+	cfg := &Config{PollInterval: "10m"}
 	err := SaveConfig(cfgPath, cfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "corrupt")
@@ -147,16 +146,10 @@ func TestSaveConfig_NNormalizesToDeletion(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "email.json")
 
-	cfg := &Config{
-		IMAPHost:     "127.0.0.1",
-		IMAPPort:     1143,
-		IMAPUser:     "test@example.com",
-		SMTPPort:     1025,
-		FromAddress:  "test@example.com",
-		PollInterval: "10m",
-	}
+	// Seed a minimal config.
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`{"imap_user":"test@example.com"}`+"\n"), 0o644))
 
-	// Save with a real interval first.
+	cfg := &Config{PollInterval: "10m"}
 	require.NoError(t, SaveConfig(cfgPath, cfg))
 	loaded, err := LoadConfig(cfgPath)
 	require.NoError(t, err)
@@ -168,6 +161,22 @@ func TestSaveConfig_NNormalizesToDeletion(t *testing.T) {
 	loaded, err = LoadConfig(cfgPath)
 	require.NoError(t, err)
 	assert.Equal(t, "", loaded.PollInterval)
+}
+
+func TestSaveConfig_NewFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "email.json")
+
+	// No existing file — SaveConfig should create it with only poll_interval.
+	cfg := &Config{PollInterval: "30m"}
+	require.NoError(t, SaveConfig(cfgPath, cfg))
+
+	raw, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(raw, &m))
+	assert.Equal(t, "30m", m["poll_interval"])
+	assert.Len(t, m, 1, "new file should contain only the poll_interval field")
 }
 
 func TestCredentialMethods_Exist(t *testing.T) {

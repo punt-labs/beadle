@@ -136,15 +136,16 @@ func (p *Poller) startLoop() {
 	ch := make(chan struct{})
 	p.stopCh = ch
 	interval := p.interval
+	p.wg.Add(1) // must precede Unlock; Stop calls wg.Wait after closing stopCh
 	p.mu.Unlock()
 
-	p.wg.Add(1)
-	go p.loop(ch, interval)
+	go func() {
+		defer p.wg.Done()
+		p.loop(ch, interval)
+	}()
 }
 
 func (p *Poller) loop(stop chan struct{}, interval time.Duration) {
-	defer p.wg.Done()
-
 	p.poll() // immediate first check
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -205,6 +206,7 @@ func (p *Poller) recordFailure(msg string) {
 	p.mu.Lock()
 	p.consecFails++
 	p.lastError = msg
+	p.lastCheck = time.Now()
 	p.mu.Unlock()
 }
 

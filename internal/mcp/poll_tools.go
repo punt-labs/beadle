@@ -3,11 +3,11 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/paths"
 )
 
 func setPollIntervalTool() mcplib.Tool {
@@ -42,13 +42,26 @@ func (h *handler) setPollInterval(_ context.Context, req mcplib.CallToolRequest)
 		), nil
 	}
 
-	// Persist to config file.
-	_, cfg, idDir, err := h.resolveIdentityAndConfig()
+	// Persist to the default identity's config — the same path the poller
+	// reads on restart. We bypass session identity overrides because the
+	// poller always runs as the default identity.
+	id, err := h.resolver.Resolve()
 	if err != nil {
-		return mcplib.NewToolResultError(err.Error()), nil
+		return mcplib.NewToolResultError(fmt.Sprintf("resolve identity: %v", err)), nil
+	}
+	configPath, err := paths.IdentityConfigPath(id.Email)
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("identity path: %v", err)), nil
+	}
+	cfg, loadErr := email.LoadConfig(configPath)
+	if loadErr != nil {
+		cfg, loadErr = email.LoadConfig(email.DefaultConfigPath())
+		if loadErr != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("load config: %v", loadErr)), nil
+		}
+		configPath = email.DefaultConfigPath()
 	}
 	cfg.PollInterval = interval
-	configPath := filepath.Join(idDir, "email.json")
 	if saveErr := email.SaveConfig(configPath, cfg); saveErr != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("save config: %v", saveErr)), nil
 	}

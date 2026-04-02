@@ -96,10 +96,13 @@ func TestPoller_FirstPollNoNotification(t *testing.T) {
 
 func TestPoller_RecordFailure(t *testing.T) {
 	p := testPoller()
+	before := time.Now()
 	p.recordFailure("dial: connection refused")
 	st := p.Status()
 	assert.Equal(t, uint32(1), st.ConsecFails)
 	assert.Equal(t, "dial: connection refused", st.LastError)
+	assert.False(t, st.LastCheck.IsZero(), "lastCheck must be set on failure")
+	assert.False(t, st.LastCheck.Before(before), "lastCheck must be >= call time")
 
 	p.recordFailure("status: timeout")
 	st = p.Status()
