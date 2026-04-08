@@ -90,6 +90,34 @@ func TestStore_AddDuplicate(t *testing.T) {
 	assert.ErrorContains(t, err, "conflicts with existing contact")
 }
 
+func TestStore_ContactsSortedAlphabetically(t *testing.T) {
+	s := NewStore(filepath.Join(t.TempDir(), "contacts.json"))
+	require.NoError(t, s.Load())
+
+	// Insert in non-alphabetical order to prove sorting is independent
+	// of insertion order. Mixed case to verify case-insensitive sort.
+	mustAdd(t, s, Contact{Name: "Zoe", Email: "zoe@test.com"})
+	mustAdd(t, s, Contact{Name: "alice", Email: "alice@test.com"})
+	mustAdd(t, s, Contact{Name: "Bob", Email: "bob@test.com"})
+	mustAdd(t, s, Contact{Name: "charlie", Email: "charlie@test.com"})
+
+	got := s.Contacts()
+	require.Len(t, got, 4)
+	assert.Equal(t, "alice", got[0].Name)
+	assert.Equal(t, "Bob", got[1].Name)
+	assert.Equal(t, "charlie", got[2].Name)
+	assert.Equal(t, "Zoe", got[3].Name)
+
+	// The on-disk order is unchanged (insertion order). Sorting only
+	// affects the slice returned to callers — write() still serializes
+	// s.contacts in insertion order.
+	s2 := NewStore(s.Path())
+	require.NoError(t, s2.Load())
+	got2 := s2.Contacts()
+	require.Len(t, got2, 4)
+	assert.Equal(t, "alice", got2[0].Name, "sort survives reload")
+}
+
 func TestStore_Remove(t *testing.T) {
 	s := NewStore(filepath.Join(t.TempDir(), "contacts.json"))
 	require.NoError(t, s.Load())
