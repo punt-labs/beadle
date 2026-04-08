@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/punt-labs/beadle/internal/paths"
@@ -51,10 +52,16 @@ func (s *Store) Load() error {
 	return nil
 }
 
-// Contacts returns a copy of the loaded contacts.
+// Contacts returns a copy of the loaded contacts, sorted alphabetically
+// by name (case-insensitive). Sorting at the storage layer means every
+// caller — list_contacts MCP tool, contact list CLI subcommand — gets
+// consistent, scannable output without each handler re-sorting.
 func (s *Store) Contacts() []Contact {
 	out := make([]Contact, len(s.contacts))
 	copy(out, s.contacts)
+	slices.SortFunc(out, func(a, b Contact) int {
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	})
 	return out
 }
 

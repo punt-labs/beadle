@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `contacts.Store.Contacts()` now returns contacts sorted alphabetically
+  by name (case-insensitive). Previously they were returned in insertion
+  order, which made `list_contacts` MCP tool output and `beadle-email
+  contact list` CLI output unpredictable as the address book grew. The
+  on-disk JSON layout is unchanged — sorting only affects the slice
+  returned to callers, so existing files do not need rewriting.
+
 ## [0.9.0] - 2026-04-01
 
 ### Added
