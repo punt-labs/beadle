@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `list_messages` output now includes the sender email address on
+  every row. A new `EMAIL` column sits between `FROM` and `DATE`,
+  showing the address beadle's permission system is keyed on. Before
+  this change, only the display name was surfaced, which hid the
+  underlying address and blocked contact bootstrap — on one Linux
+  inbox today, 285 messages from a single relay
+  (`notifications@github.com`) rendered as 7 distinct display names
+  with no way to discover they were all from the same sender without
+  calling `read_message` and reading the permission-denied error text.
+  The EMAIL column is never truncated; when the display name plus
+  email would exceed the 80-column budget, the display name is
+  ellipsis-truncated instead. Subject redaction for senders without
+  read permission is unchanged. beadle-0he.
 - `beadle-email doctor` no longer flags a missing `gpg-passphrase`
   credential as a failure when the configured signing key has no
   passphrase. Doctor now probes the key with
