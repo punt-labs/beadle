@@ -1,18 +1,22 @@
 // Package secret resolves credentials from OS credential stores or files.
 //
 // Resolution priority:
-//  1. OS credential store (macOS Keychain via `security` CLI)
+//  1. OS credential store
+//     - macOS: Keychain via `security` CLI
+//     - Linux: `pass` (primary) then `secret-tool` (fallback), both as
+//       subprocesses. See keychain_linux.go for the rationale.
 //  2. Secret file (~/.punt-labs/beadle/secrets/<name>, mode 600)
 //  3. Environment variable (BEADLE_<NAME>)
 //
-// v0.1.1 will add Linux libsecret (`secret-tool`) as a keychain backend.
+// Each platform file (keychain_darwin.go, keychain_linux.go) provides
+// keychainAvailable, keychainGet, and keychainBackendNames so the
+// resolution logic in this file stays platform-agnostic.
 package secret
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/punt-labs/beadle/internal/paths"
@@ -43,17 +47,12 @@ func Get(name string) (string, error) {
 	return "", fmt.Errorf("credential %q not found (checked: keychain, file, env %s)", name, envKey)
 }
 
-// Available reports which credential backends are available.
+// Available reports which credential backends are available on this
+// host, in resolution order. Each platform file contributes its own
+// keychainBackendNames; the file and environment backends are always
+// present.
 func Available() []string {
-	var backends []string
-	if keychainAvailable() {
-		switch runtime.GOOS {
-		case "darwin":
-			backends = append(backends, "macOS Keychain")
-		case "linux":
-			backends = append(backends, "libsecret")
-		}
-	}
+	backends := keychainBackendNames()
 	backends = append(backends, "file (~/.punt-labs/beadle/secrets/)")
 	backends = append(backends, "environment variable")
 	return backends

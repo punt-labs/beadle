@@ -532,3 +532,100 @@ and gets blocked as `---`. Adding individual addresses doesn't scale — new one
 arrive with every message.
 
 **Not yet implemented.** Tracked in beadle-a7v.
+
+## DES-017: Linux keychain backend — pass primary, secret-tool fallback
+
+**Status:** SETTLED (beadle-9t8)
+
+**Decision:** On Linux, the keychain resolution layer tries `pass`
+(`pass show beadle/<name>`) first, then falls back to `secret-tool`
+(`secret-tool lookup service beadle account <name>`). If neither binary
+is installed, the resolution chain continues to the file backend and
+environment variable as before.
+
+**Why pass first:**
+
+- **GPG-encrypted at rest with the user's own key.** `pass` is a thin
+  wrapper over `gpg`: every entry is encrypted to the keys listed in
+  `~/.password-store/.gpg-id`. The same trust anchor as beadle's own
+  PGP signing identity. `secret-tool` delegates to libsecret which
+  delegates to the session keyring (GNOME Keyring or KDE Wallet);
+  the at-rest storage format and unlock ceremony are opaque to the
+  user.
+- **Matches Proton Bridge's vault backend on Linux.** When running
+  Bridge as the unsandboxed .deb (see setup-guide.md), Bridge itself
+  uses `pass` to store its account credentials when available. A
+  developer who already has `pass` set up for Bridge gets beadle
+  credentials in the same store, with the same unlock ceremony,
+  without a second credential manager.
+- **Cross-machine portability.** `pass` stores live in a plain
+  directory tree (`~/.password-store/`) that can be synced via git,
+  backed up as a tarball, or inspected without tooling. The libsecret
+  backing store is a SQLite database in `~/.local/share/keyrings/`
+  that is not portable without running its daemon.
+
+**Why secret-tool as fallback, not primary:**
+
+- `secret-tool` is pre-installed on Ubuntu GNOME desktops and the
+  Secret Service API is the freedesktop.org standard, so a developer
+  without `pass` still has a working keychain path.
+- Fallback (not absence) means the test `keychainAvailable()` returns
+  true whenever either binary is present, and `Available()` reports
+  both so doctor and status commands are honest about what is wired.
+
+**Namespace:**
+
+- pass: `beadle/<name>` (e.g. `beadle/imap-password`)
+- secret-tool: service=`beadle`, account=`<name>` (matches the Darwin
+  `security` convention exactly, so users coming from macOS do not
+  need to relearn the namespace)
+
+**Resolution order inside `keychainGet`:**
+
+1. Call `passRunner(name)`. If it returns a non-empty value with no
+   error, return that value.
+2. Else call `secretToolRunner(name)`. Same check.
+3. Else return the last error seen (or a synthesized "no Linux
+   keychain backend available" when both runners returned nil/empty
+   without error). The caller in `secret.Get()` treats any error as
+   "try the next backend in the resolution chain" and falls through
+   to the file backend.
+
+**Rejected alternatives:**
+
+- **secret-tool only.** Simpler code path, but forces developers who
+  already use `pass` (and Punt Labs conventions favor `pass`) to
+  maintain a second credential manager just for beadle.
+- **pass only.** Excludes the default GNOME desktop experience and
+  forces every Linux user to install and initialize `pass` before
+  beadle-email has any OS keychain integration.
+- **D-Bus libsecret library binding.** Would avoid the subprocess
+  cost and give better error granularity, but introduces a cgo/D-Bus
+  dependency for a single code path that currently averages one
+  keychain read per tool invocation. Not worth the dependency weight.
+- **`claude plugin` style runner config file.** Out of scope — the
+  existing Darwin pattern is a single hard-coded subprocess call and
+  the Linux implementation matches it for consistency.
+
+**Test strategy:** The runners are package-level vars
+(`passRunner`, `secretToolRunner`) so unit tests swap in fakes and
+exercise the priority-and-fallback logic without invoking real
+subprocesses. Integration tests against real `pass` and `secret-tool`
+binaries with a sandboxed fixture are future work (tracked in the
+cross-cutting hardening bead beadle-2nk, which needs similar seams
+for install.sh failure detection).
+
+**Testing limitations (explicit):** This PR verifies the runner
+priority logic and the "not installed" error paths. The following
+behaviors were NOT directly verified with real subprocesses:
+
+- `pass show` on a locked GPG keyring and its pinentry interaction
+  with a stdio MCP server parent (may hang on a daemon host with no
+  GUI session).
+- `secret-tool lookup` on a locked GNOME keyring.
+- Round-trip store-and-retrieve against a real `pass` or
+  `secret-tool` binary.
+
+The mocked tests are sufficient to prove the dispatch logic. The
+empirical behaviors above get verified the first time a developer
+runs `install.sh` on a Linux machine with these backends configured.

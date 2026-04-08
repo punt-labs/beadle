@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Linux keychain backend: `internal/secret/keychain_linux.go` now
+  resolves credentials via `pass` (primary) and `secret-tool`
+  (libsecret / GNOME Keyring, fallback), replacing the v0.1.1-era
+  stub that returned empty/false for everything. If both are
+  installed, `pass` wins (GPG-encrypted at rest, matches Proton
+  Bridge vault). Namespace: pass `beadle/<name>`, secret-tool
+  `service=beadle account=<name>`. See DES-017 for the rationale
+  and rejected alternatives. Closes beadle-9t8.
+- `Available()` now reports the specific Linux backends present
+  on the host (e.g. `["pass", "secret-tool", "file (…)",
+  "environment variable"]`) instead of a hard-coded `"libsecret"`
+  label that never fired.
+
+### Changed
+
+- `secret.Available()` delegates to per-platform
+  `keychainBackendNames()` so each OS file contributes its own
+  list. Removes the `runtime.GOOS` switch in `secret.go`.
+
 ### Fixed
 
 - `contacts.Store.Contacts()` now returns contacts sorted alphabetically

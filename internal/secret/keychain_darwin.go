@@ -14,6 +14,17 @@ func keychainAvailable() bool {
 	return err == nil
 }
 
+// keychainBackendNames returns the human-readable labels for the
+// macOS keychain backends that are present on the host. The Darwin
+// build has exactly one: the system Keychain, accessed via the
+// `security` CLI.
+func keychainBackendNames() []string {
+	if keychainAvailable() {
+		return []string{"macOS Keychain"}
+	}
+	return nil
+}
+
 // keychainGet reads a credential from macOS Keychain.
 func keychainGet(name string) (string, error) {
 	cmd := exec.Command("security", "find-generic-password",
