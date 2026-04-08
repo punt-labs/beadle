@@ -238,12 +238,18 @@ requires fetching the raw message bytes and running \texttt{gpg}:
   envValues : CREDNAME \pfun BODY
 \end{schema}
 
-Credentials are resolved by name.  The keychain maps to
-OS-specific stores: macOS Keychain (\texttt{security} CLI) on
-Darwin, libsecret (\texttt{secret-tool} CLI) on Linux.  File
-credentials live in \texttt{\~{}/.config/beadle/<name>} with mode
-600.  Environment variables follow the pattern
-\texttt{BEADLE\_<NAME>}.
+Credentials are resolved by name.  The keychain backend maps to
+OS-specific stores.  On Darwin, the macOS Keychain via the
+\texttt{security} CLI, keyed by (service=\texttt{beadle},
+account=\texttt{<name>}).  On Linux, a two-stage lookup: first
+\texttt{pass} (\texttt{pass show beadle/<name>}), which keeps
+secrets GPG-encrypted with the user's own key and matches the
+Proton Bridge vault backend; then \texttt{secret-tool} (libsecret
+/ GNOME Keyring), keyed by the same (service, account) pair as
+Darwin for portability.  If both Linux binaries are present,
+\texttt{pass} wins.  File credentials live in
+\texttt{\~{}/.punt-labs/beadle/secrets/<name>} with mode 600.
+Environment variables follow the pattern \texttt{BEADLE\_<NAME>}.
 
 \begin{schema}{ResolveCredential}
   \Xi CredentialStore \\
