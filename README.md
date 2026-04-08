@@ -106,17 +106,27 @@ Available when installed as a Claude Code plugin.
 <details>
 <summary>Credential setup</summary>
 
-Beadle resolves credentials at runtime through a priority chain: macOS Keychain (macOS) or libsecret (Linux) → secret file → environment variable.
+Beadle resolves credentials at runtime through a priority chain: OS keychain → secret file → environment variable. On Linux, the keychain layer tries `pass` first, then `secret-tool` (libsecret / GNOME Keyring). On macOS, it uses the system Keychain.
 
 ```bash
-# macOS Keychain (recommended)
+# macOS Keychain (macOS)
 security add-generic-password -s beadle -a imap-password -w 'your-bridge-password'
 security add-generic-password -s beadle -a resend-api-key -w 'your-resend-key'
 security add-generic-password -s beadle -a gpg-passphrase -w 'your-gpg-passphrase'
 
+# pass (Linux, recommended — GPG-encrypted at rest with your own key)
+pass insert beadle/imap-password    # prompts for the value, hides input
+pass insert beadle/resend-api-key
+pass insert beadle/gpg-passphrase
+
+# secret-tool (Linux, fallback — GNOME Keyring via libsecret)
+secret-tool store --label='beadle imap-password' service beadle account imap-password
+secret-tool store --label='beadle resend-api-key' service beadle account resend-api-key
+secret-tool store --label='beadle gpg-passphrase' service beadle account gpg-passphrase
+
 # Or secret files (~/.punt-labs/beadle/secrets/<name>, mode 600)
 mkdir -p ~/.punt-labs/beadle/secrets
-echo -n 'your-bridge-password' > ~/.punt-labs/beadle/secrets/imap-password
+printf '%s' 'your-bridge-password' > ~/.punt-labs/beadle/secrets/imap-password
 chmod 600 ~/.punt-labs/beadle/secrets/imap-password
 
 # Or environment variables
