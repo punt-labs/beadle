@@ -142,6 +142,11 @@ if ! ssh -n -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=5 -T
 fi
 
 PLUGIN_INSTALLED=0
+# Uninstall first so re-running install.sh actually upgrades. `claude plugin
+# install` is a no-op when the plugin is already cached at any version, so
+# without this, users stay on whatever version they first installed forever.
+# Pattern: biff/install.sh, quarry/install.sh, vox/install.sh.
+claude plugin uninstall "beadle@$MARKETPLACE_NAME" < /dev/null 2>/dev/null || true
 if env $HTTPS_ENV claude plugin install "beadle@$MARKETPLACE_NAME" --scope user < /dev/null 2>/dev/null; then
   ok "beadle plugin installed"
   PLUGIN_INSTALLED=1
