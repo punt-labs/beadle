@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `beadle-email doctor` no longer flags a missing `gpg-passphrase`
+  credential as a failure when the configured signing key has no
+  passphrase. Doctor now probes the key with
+  `gpg --batch --pinentry-mode=error --passphrase '' --dry-run --sign`
+  after the `gpg_signing_key` check passes. Three-way classification:
+  - Key needs passphrase, credential stored → `[+] gpg_passphrase`
+  - Key needs passphrase, credential missing → `[!] gpg_passphrase
+    credential "gpg-passphrase" not found`
+  - Key has no passphrase → `[+] gpg_passphrase not required (<signer>
+    has no passphrase — filesystem access grants signing authority)`.
+    The detail text surfaces the posture concern so the unprotected
+    state is visible, not silenced, but it does not fail doctor.
+  New helper: `pgp.KeyRequiresPassphrase(gpgBinary, signer)`. beadle-cbo.
+
 ## [0.10.1] - 2026-04-08
 
 ### Fixed
