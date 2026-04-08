@@ -17,16 +17,28 @@ func textResult(s string) (*mcplib.CallToolResult, error) {
 	return mcplib.NewToolResultText(s), nil
 }
 
+// maxDisplayNameRunes caps the FROM column so a long display name does
+// not squeeze the SUBJECT column down to its minimum width. The EMAIL
+// column is never truncated — it is the identifier beadle's permission
+// system is keyed on (beadle-0he).
+const maxDisplayNameRunes = 20
+
 // formatMessages formats a list of message summaries as a table.
 // total is the total number of messages matching the query criteria.
+//
+// Every row surfaces the sender's display name and email address so
+// the operator can identify unknown senders and decide whether to add
+// them to the contact book. The EMAIL column is always populated, even
+// when the sender has no read permission and the subject is redacted.
 func formatMessages(msgs []channel.MessageSummary, total int) string {
 	if len(msgs) == 0 {
 		return "No messages."
 	}
 	cols := []column{
-		{header: "R", minWidth: 1},  // read status: ● unread, space read
+		{header: "R", minWidth: 1}, // read status: ● unread, space read
 		{header: "ID", minWidth: 2},
 		{header: "FROM", minWidth: 10},
+		{header: "EMAIL", minWidth: 24},
 		{header: "DATE", minWidth: 12},
 		{header: "T", minWidth: 1}, // trust: ✓ trusted, + verified, ? unverified, ✗ untrusted
 		{header: "SUBJECT", minWidth: 10, variable: true},
@@ -37,10 +49,12 @@ func formatMessages(msgs []channel.MessageSummary, total int) string {
 		if m.Unread {
 			marker = "●"
 		}
+		name, addr := splitSender(m.From)
 		rows[i] = []string{
 			marker,
 			m.ID,
-			email.ExtractDisplayName(m.From),
+			truncateRunes(name, maxDisplayNameRunes),
+			addr,
 			m.Date.Format("Jan 02 15:04"),
 			trustIcon(m.TrustLevel),
 			m.Subject,
@@ -48,6 +62,23 @@ func formatMessages(msgs []channel.MessageSummary, total int) string {
 	}
 	table := formatTable(cols, rows)
 	return fmt.Sprintf("showing %d of %d messages\n%s", len(msgs), total, table)
+}
+
+// splitSender returns the display name and email address for a raw
+// From header value. The display name is empty when the header carries
+// only a bare address, so the FROM column does not repeat the email.
+// When the header is unparseable the email may be empty and the name
+// falls back to the trimmed raw value (via ExtractDisplayName).
+func splitSender(from string) (name, addr string) {
+	addr = email.ExtractEmailAddress(from)
+	name = email.ExtractDisplayName(from)
+	// ExtractDisplayName falls back to the address when no distinct
+	// name is present; collapse that to empty so we do not duplicate
+	// content across the FROM and EMAIL columns.
+	if name == addr {
+		name = ""
+	}
+	return name, addr
 }
 
 // formatMessage formats a full message for display.
