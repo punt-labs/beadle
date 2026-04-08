@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `.claude-plugin/hooks/hooks.json` SessionStart entry declared
+  `"matcher": ""` (empty string), which Claude Code rejects as an
+  invalid matcher. Result: beadle's SessionStart hook has never fired
+  across any install — no top-level commands deployed to
+  `~/.claude/commands/`, no permission rules written to
+  `~/.claude/settings.json`, no session-start `additionalContext`
+  emitted. Every other Punt Labs plugin (biff, quarry, ethos,
+  dungeon, vox, lux) either omits the `matcher` field or uses a
+  specific value (`startup`, `resume|compact`). beadle was the only
+  outlier. Fix: remove the `"matcher": ""` line. The
+  `session-start.sh` script itself is correct — verified by running
+  it manually with `CLAUDE_PLUGIN_ROOT` set, after which it deploys
+  all 4 commands and writes all 6 permission rules on first try.
+  beadle-1aj.
+
 ## [0.10.0] - 2026-04-08
 
 ### Added
