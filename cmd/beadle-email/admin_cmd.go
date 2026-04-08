@@ -15,6 +15,7 @@ import (
 	"github.com/punt-labs/beadle/internal/email"
 	mcptools "github.com/punt-labs/beadle/internal/mcp"
 	"github.com/punt-labs/beadle/internal/paths"
+	"github.com/punt-labs/beadle/internal/pgp"
 	"github.com/punt-labs/beadle/internal/secret"
 )
 
@@ -120,16 +121,45 @@ var doctorCmd = &cobra.Command{
 			}
 
 			gpgKeyCmd := exec.Command(cfg.GPGBinary, "--list-keys", cfg.GPGSigner)
-			if err := gpgKeyCmd.Run(); err != nil {
+			keyExists := gpgKeyCmd.Run() == nil
+			if !keyExists {
 				checks = append(checks, check{"gpg_signing_key", "FAIL", fmt.Sprintf("no key for %s", cfg.GPGSigner)})
 			} else {
 				checks = append(checks, check{"gpg_signing_key", "OK", cfg.GPGSigner})
 			}
 
-			if _, err := cfg.GPGPassphrase(); err != nil {
-				checks = append(checks, check{"gpg_passphrase", "FAIL", err.Error()})
-			} else {
-				checks = append(checks, check{"gpg_passphrase", "OK", ""})
+			// gpg_passphrase is conditional on whether the key actually
+			// needs one. Probe the key protection state only if the key
+			// exists — otherwise the probe fails indistinguishably and
+			// falls back to the legacy "secret required" behavior so at
+			// least the detail text points at the right fix.
+			switch {
+			case !keyExists:
+				// Can't probe a missing key. Leave the historical
+				// behavior: check for the stored credential and report.
+				if _, err := cfg.GPGPassphrase(); err != nil {
+					checks = append(checks, check{"gpg_passphrase", "FAIL", err.Error()})
+				} else {
+					checks = append(checks, check{"gpg_passphrase", "OK", ""})
+				}
+			default:
+				needsPassphrase, _ := pgp.KeyRequiresPassphrase(cfg.GPGBinary, cfg.GPGSigner)
+				switch {
+				case !needsPassphrase:
+					// Key is unprotected. Pass the check but surface the
+					// posture concern in the detail so a reader sees it.
+					// beadle-72e tracks whether we keep this posture or
+					// rotate to a protected key.
+					checks = append(checks, check{"gpg_passphrase", "OK",
+						fmt.Sprintf("not required (%s has no passphrase — filesystem access grants signing authority)", cfg.GPGSigner)})
+				default:
+					// Key needs a passphrase — the stored secret must exist.
+					if _, err := cfg.GPGPassphrase(); err != nil {
+						checks = append(checks, check{"gpg_passphrase", "FAIL", err.Error()})
+					} else {
+						checks = append(checks, check{"gpg_passphrase", "OK", ""})
+					}
+				}
 			}
 
 			if email.SMTPAvailable(cfg) {
