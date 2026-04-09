@@ -1,15 +1,93 @@
 package mcp
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// makeRequest builds a CallToolRequest from the given arguments map.
+func makeRequest(t *testing.T, args map[string]any) mcplib.CallToolRequest {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"params": map[string]any{
+			"name":      "test",
+			"arguments": args,
+		},
+	})
+	require.NoError(t, err)
+	var req mcplib.CallToolRequest
+	require.NoError(t, json.Unmarshal(raw, &req))
+	return req
+}
+
+func TestIntParam(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     map[string]any
+		key      string
+		fallback int
+		want     int
+		wantErr  string
+	}{
+		{
+			name:     "missing key returns fallback",
+			args:     map[string]any{},
+			key:      "count",
+			fallback: 10,
+			want:     10,
+		},
+		{
+			name:     "whole float64 returns int",
+			args:     map[string]any{"count": float64(5)},
+			key:      "count",
+			fallback: 0,
+			want:     5,
+		},
+		{
+			name:    "fractional float64 returns error",
+			args:    map[string]any{"count": float64(10.5)},
+			key:     "count",
+			fallback: 0,
+			wantErr: "count",
+		},
+		{
+			name:    "negative fractional float64 returns error",
+			args:    map[string]any{"count": float64(-2.1)},
+			key:     "count",
+			fallback: 0,
+			wantErr: "count",
+		},
+		{
+			name:    "string value returns error",
+			args:    map[string]any{"count": "five"},
+			key:     "count",
+			fallback: 0,
+			wantErr: "count",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := makeRequest(t, tc.args)
+			got, err := intParam(req, tc.key, tc.fallback)
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
 
 func TestSenderPermission(t *testing.T) {
 	// Create an empty store (nonexistent file, no contacts) to test unknown-sender defaults
