@@ -1,5 +1,5 @@
 // Package contacts provides address book storage and lookup for Beadle.
-// Contact resolution enables name-based addressing: "/mail jim" resolves
+// Contact resolution enables name-based addressing: "/mail sam" resolves
 // to the stored email address without a separate MCP roundtrip.
 package contacts
 

@@ -98,20 +98,20 @@ func TestResolve_EthosGlobalActive(t *testing.T) {
 	beadleDir := t.TempDir()
 
 	// Set up global active file (no repo config)
-	require.NoError(t, os.WriteFile(filepath.Join(ethosDir, "active"), []byte("jfreeman\n"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(ethosDir, "active"), []byte("sam\n"), 0o640))
 
 	// Set up ethos identity
 	idDir := filepath.Join(ethosDir, "identities")
 	require.NoError(t, os.MkdirAll(idDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(idDir, "jfreeman.yaml"), []byte("name: Jim Freeman\nhandle: jfreeman\nemail: jim@punt-labs.com\n"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(idDir, "sam.yaml"), []byte("name: Sam Jackson\nhandle: sam\nemail: sam@example.com\n"), 0o640))
 
 	r := NewResolver(ethosDir, beadleDir, "")
 	id, err := r.Resolve()
 	require.NoError(t, err)
 
-	assert.Equal(t, "jfreeman", id.Handle)
-	assert.Equal(t, "Jim Freeman", id.Name)
-	assert.Equal(t, "jim@punt-labs.com", id.Email)
+	assert.Equal(t, "sam", id.Handle)
+	assert.Equal(t, "Sam Jackson", id.Name)
+	assert.Equal(t, "sam@example.com", id.Email)
 	assert.Equal(t, "", id.GPGKeyID)
 	assert.Equal(t, "ethos", id.Source)
 }
@@ -164,8 +164,8 @@ func TestResolve_RepoConfigOverridesGlobal(t *testing.T) {
 	beadleDir := t.TempDir()
 	repoDir := t.TempDir()
 
-	// Global active = jfreeman
-	require.NoError(t, os.WriteFile(filepath.Join(ethosDir, "active"), []byte("jfreeman"), 0o640))
+	// Global active = sam
+	require.NoError(t, os.WriteFile(filepath.Join(ethosDir, "active"), []byte("sam"), 0o640))
 
 	// Repo config = claude (should win)
 	repoEthosDir := filepath.Join(repoDir, ".punt-labs")
@@ -176,7 +176,7 @@ func TestResolve_RepoConfigOverridesGlobal(t *testing.T) {
 	idDir := filepath.Join(ethosDir, "identities")
 	require.NoError(t, os.MkdirAll(idDir, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(idDir, "claude.yaml"), []byte("name: Claude\nhandle: claude\nemail: claude@punt-labs.com\n"), 0o640))
-	require.NoError(t, os.WriteFile(filepath.Join(idDir, "jfreeman.yaml"), []byte("name: Jim\nhandle: jfreeman\nemail: jim@punt-labs.com\n"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(idDir, "sam.yaml"), []byte("name: Sam\nhandle: sam\nemail: sam@example.com\n"), 0o640))
 
 	r := NewResolver(ethosDir, beadleDir, repoDir)
 	id, err := r.Resolve()
@@ -209,14 +209,14 @@ func TestResolveHandle_Valid(t *testing.T) {
 
 	idDir := filepath.Join(ethosDir, "identities")
 	require.NoError(t, os.MkdirAll(idDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(idDir, "jfreeman.yaml"), []byte("name: Jim Freeman\nhandle: jfreeman\nemail: jim@punt-labs.com\n"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(idDir, "sam.yaml"), []byte("name: Sam Jackson\nhandle: sam\nemail: sam@example.com\n"), 0o640))
 
 	r := NewResolver(ethosDir, beadleDir, "")
-	id, err := r.ResolveHandle("jfreeman")
+	id, err := r.ResolveHandle("sam")
 	require.NoError(t, err)
 
-	assert.Equal(t, "jfreeman", id.Handle)
-	assert.Equal(t, "jim@punt-labs.com", id.Email)
+	assert.Equal(t, "sam", id.Handle)
+	assert.Equal(t, "sam@example.com", id.Email)
 	assert.Equal(t, "ethos", id.Source)
 }
 

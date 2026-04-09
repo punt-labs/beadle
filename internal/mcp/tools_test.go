@@ -46,7 +46,7 @@ func TestSenderPermission_WithContacts(t *testing.T) {
 	dir := t.TempDir()
 	contactsPath := filepath.Join(dir, "contacts.json")
 	data := `[
-		{"name":"Jim","email":"jim@punt-labs.com","permissions":{"claude@punt-labs.com":"rwx"}},
+		{"name":"Sam","email":"sam@example.com","permissions":{"claude@punt-labs.com":"rwx"}},
 		{"name":"Vendor","email":"vendor@example.com","permissions":{"claude@punt-labs.com":"r--"}}
 	]`
 	require.NoError(t, os.WriteFile(contactsPath, []byte(data), 0o600))
@@ -56,7 +56,7 @@ func TestSenderPermission_WithContacts(t *testing.T) {
 	id := &identity.Identity{Email: "claude@punt-labs.com"}
 
 	t.Run("rwx contact has read", func(t *testing.T) {
-		perm, _ := senderPermission(store, id, "jim@punt-labs.com")
+		perm, _ := senderPermission(store, id, "sam@example.com")
 		assert.True(t, perm.Read)
 		assert.True(t, perm.Write)
 	})

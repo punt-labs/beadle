@@ -14,7 +14,7 @@ func TestFormatTable_Basic(t *testing.T) {
 		{header: "PERM", minWidth: 3},
 	}
 	rows := [][]string{
-		{"Jim", "jim@punt-labs.com", "rwx"},
+		{"Sam", "sam@example.com", "rwx"},
 		{"Vendor", "vendor@example.com", "r--"},
 	}
 	got := formatTable(cols, rows)
@@ -34,8 +34,8 @@ func TestFormatTable_Basic(t *testing.T) {
 	}
 
 	// Content present
-	assert.Contains(t, got, "Jim")
-	assert.Contains(t, got, "jim@punt-labs.com")
+	assert.Contains(t, got, "Sam")
+	assert.Contains(t, got, "sam@example.com")
 	assert.Contains(t, got, "rwx")
 }
 
@@ -73,7 +73,7 @@ func TestPad(t *testing.T) {
 
 func TestFmtKV(t *testing.T) {
 	got := fmtKV([][2]string{
-		{"From", "jim@punt-labs.com"},
+		{"From", "sam@example.com"},
 		{"To", "claude@punt-labs.com"},
 	})
 	assert.Contains(t, got, "From:")

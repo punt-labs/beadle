@@ -296,7 +296,7 @@ on first Claude Code launch. If identity resolution fails, check:
 
 ```bash
 cat ~/.punt-labs/ethos/active
-# Should contain your handle (e.g., "jfreeman" or "claude")
+# Should contain your handle (e.g., "sam" or "claude")
 
 ls ~/.punt-labs/ethos/identities/
 # Should contain <handle>.yaml
