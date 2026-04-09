@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/punt-labs/beadle/internal/paths"
 )
@@ -122,6 +124,54 @@ func (s *Store) Remove(name string) error {
 // Find delegates to the package-level Find using the loaded contacts.
 func (s *Store) Find(query string) []Contact {
 	return Find(s.contacts, query)
+}
+
+// FindByAddress returns the contact that best matches the given sender
+// address. Lookup precedence:
+//
+//  1. Exact case-insensitive match on a non-pattern contact Email — first
+//     hit wins.
+//  2. Among pattern contacts whose Email matches via path.Match, the
+//     longest pattern string wins (rune count). Ties go to the contact
+//     added first.
+//  3. No match returns (Contact{}, false).
+func (s *Store) FindByAddress(addr string) (Contact, bool) {
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	if addr == "" {
+		return Contact{}, false
+	}
+
+	var (
+		bestPattern Contact
+		bestLen     int
+		haveBest    bool
+	)
+	for _, c := range s.contacts {
+		if c.Email == "" {
+			continue
+		}
+		pat := strings.ToLower(c.Email)
+		if !c.IsPattern() {
+			if pat == addr {
+				return c, true
+			}
+			continue
+		}
+		ok, err := path.Match(pat, addr)
+		if err != nil || !ok {
+			continue
+		}
+		n := utf8.RuneCountInString(c.Email)
+		if !haveBest || n > bestLen {
+			bestPattern = c
+			bestLen = n
+			haveBest = true
+		}
+	}
+	if haveBest {
+		return bestPattern, true
+	}
+	return Contact{}, false
 }
 
 // ResolveAddresses delegates to the package-level ResolveAddresses.

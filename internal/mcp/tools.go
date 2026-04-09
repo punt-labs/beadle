@@ -312,14 +312,14 @@ func findContactTool() mcplib.Tool {
 
 func addContactTool() mcplib.Tool {
 	return mcplib.NewTool("add_contact",
-		mcplib.WithDescription("Add a contact to the address book. Name and email are required. Names and aliases must be unique. Permissions control what beadle can do with this contact for the active identity."),
+		mcplib.WithDescription("Add a contact to the address book. Name and email are required. Names and aliases must be unique. Permissions control what beadle can do with this contact for the active identity. The email field accepts a glob pattern (e.g. *@mail.anthropic.com) to cover rotating sender addresses within a domain; pattern contacts may not grant write or execute — allowed permissions are r-- (read-only) or --- (blocked)."),
 		mcplib.WithString("name",
 			mcplib.Required(),
 			mcplib.Description("Contact display name (unique key)"),
 		),
 		mcplib.WithString("email",
 			mcplib.Required(),
-			mcplib.Description("Email address"),
+			mcplib.Description("Exact address (e.g. alice@example.com) or glob pattern (e.g. *@mail.anthropic.com). Patterns use path.Match syntax and may not grant write or execute — r-- or --- only."),
 		),
 		mcplib.WithArray("aliases",
 			mcplib.Description("Alternative names for lookup (e.g., nicknames)"),
@@ -332,7 +332,7 @@ func addContactTool() mcplib.Tool {
 			mcplib.Description("Free-text notes"),
 		),
 		mcplib.WithString("permissions",
-			mcplib.Description("rwx permission string for active identity (e.g., 'rwx', 'rw-', 'r--'). Default: ---"),
+			mcplib.Description("rwx permission string for active identity (e.g., 'rwx', 'rw-', 'r--'). Default: ---. Pattern contacts may not include 'w' or 'x' — use 'r--' or '---'."),
 		),
 	)
 }
@@ -1014,17 +1014,12 @@ func senderPermission(store *contacts.Store, id *identity.Identity, from string)
 	return contacts.CheckPermission(match, id.Email), senderEmail
 }
 
-// findByEmail returns the first contact whose Email field matches addr
-// (case-insensitive). This is stricter than store.Find, which also matches
-// on Name and Alias — preventing a contact whose name happens to be an
-// email address from granting unintended permissions.
+// findByEmail returns the contact that matches addr. Exact non-pattern
+// matches beat glob patterns; among pattern matches, the longest pattern
+// wins. Delegates to Store.FindByAddress — see its doc comment for the
+// full precedence rules.
 func findByEmail(store *contacts.Store, addr string) (contacts.Contact, bool) {
-	for _, c := range store.Find(addr) {
-		if strings.EqualFold(c.Email, addr) {
-			return c, true
-		}
-	}
-	return contacts.Contact{}, false
+	return store.FindByAddress(addr)
 }
 
 // --- Contact Handlers ---
@@ -1120,6 +1115,14 @@ func (h *handler) addContact(_ context.Context, req mcplib.CallToolRequest) (*mc
 		c.Permissions = map[string]string{
 			strings.ToLower(id.Email): permStr,
 		}
+	}
+
+	// Validate before handing off to the store so pattern-only rules
+	// (e.g. patterns are restricted to r--) surface from the handler
+	// with the request context. store.Add validates again; the duplication
+	// is defense in depth.
+	if err := contacts.Validate(c); err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
 	}
 
 	normalized, err := store.Add(c)
