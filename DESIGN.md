@@ -653,10 +653,10 @@ that gives way to satisfy them.
 [ruler: 12345678901234567890123456789012345678901234567890123456789012345678901234567890]
 ▶    R  FROM                                   DATE    T  SUBJECT               
 319  ●  Copilot <notifications@github.com>     Apr 08  ?  Re: [punt-labs/beadle…
-320  ●  J Freeman <notifications@github.com>   Apr 08  ?  Re: [punt-labs/beadle…
+320  ●  Pat Singh <notifications@github.com>   Apr 08  ?  Re: [punt-labs/beadle…
 322  ●  cursor[bo… <notifications@github.com>  Apr 08  ?  Re: [punt-labs/beadle…
 335  ●  vercel[bo… <notifications@github.com>  Apr 08  ?  Re: [punt-labs/public…
-340  ●  Jim Freeman <jim@punt-labs.com>        Apr 08  ✓  Re: [punt-labs/punt-k…
+340  ●  Sam Jackson <sam@example.co.uk>        Apr 08  ✓  Re: [punt-labs/punt-k…
   8     Claude Agento <claude@punt-labs.com>   Apr 07  ✓  doctor fix landed     
   7     Alice Chen <alice@example.com>         Apr 06  ?  lunch thursday?       
 ```
@@ -697,18 +697,17 @@ Total: 3 + 2 + 1 + 2 + 37 + 2 + 6 + 2 + 1 + 2 + 22 = 80.
 5. For `notifications@github.com` (24 chars), the wrapped form
    `<notifications@github.com>` is 26 chars, leaving **10 chars** for
    the display name after the separating space. `Copilot` (7),
-   `J Freeman` (9), `Jim Freeman` (11→`Jim Freema…`), and `Alice Chen`
-   (10) fit. `cursor[bot]`, `vercel[bot]`, `claude[bot]` (all 11
-   chars) truncate to `cursor[bo…`, `vercel[bo…`, `claude[bo…`,
-   losing the trailing `]`. This is the deliberate trade-off: the
-   `[bot]` suffix is recoverable from context, the email address is
-   not.
+   `Pat Singh` (9), and `Alice Chen` (10) fit. `cursor[bot]`,
+   `vercel[bot]`, `claude[bot]` (all 11 chars) truncate to
+   `cursor[bo…`, `vercel[bo…`, `claude[bo…`, losing the trailing
+   `]`. This is the deliberate trade-off: the `[bot]` suffix is
+   recoverable from context, the email address is not.
 6. For shorter emails (e.g. `claude@punt-labs.com` at 20 chars), the
    wrapped form is 22 chars, leaving 14 chars for the display name.
    `Claude Agento` (13) fits without truncation.
 7. **The z34 `(via <domain>)` annotation is removed.** With the full
    email address visible inside FROM, a row like
-   `J Freeman <notifications@github.com>` already shows the actual
+   `Pat Singh <notifications@github.com>` already shows the actual
    sender domain — no annotation is needed to disambiguate. The
    annotation introduced unnecessary FROM-cell width and is replaced
    by the email itself.
@@ -797,9 +796,9 @@ width, not just substring presence. Specifically:
    short emails, long emails (24+ chars), long names, bot names, no
    display name, multibyte trust/read glyphs.
 2. A regression test for the 0he+z34 width defect: rendering a
-   message with `J Freeman <notifications@github.com>` produces a row
-   where the bare email substring is fully present in the FROM cell
-   (no truncation of the email).
+   message with `Pat Singh <notifications@github.com>` produces a
+   row where the bare email substring is fully present in the FROM
+   cell (no truncation of the email).
 3. A test for bare-email senders that asserts the rendered FROM cell
    is `email@example.com` (no leading angle bracket) and not
    `<email@example.com>`.

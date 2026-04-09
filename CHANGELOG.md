@@ -8,37 +8,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.10.2] - 2026-04-08
 
+### Changed
+
+- `list_messages` output has been redesigned to fit the 80-column row
+  budget while surfacing the full sender email address on every row.
+  The new 5-column layout is a 3-character right-aligned ID row
+  prefix, a single `FROM` column carrying `Name <email>` in RFC 5322
+  form (width 37), a 6-character `DATE` column showing `Apr 08` (no
+  time, no year), a 1-character trust glyph `T`, and a variable
+  `SUBJECT` column (22 characters in the typical case). Display
+  names are truncated when necessary so the email address stays
+  visible in full — permission enforcement keys on the raw address,
+  and the operator must be able to read it. Bot names on 24-character
+  relay domains (e.g. `cursor[bot] <notifications@github.com>`)
+  truncate to `cursor[bo… <notifications@github.com>` so the email
+  stays intact. Every rendered row is exactly 80 runes wide, enforced
+  by a row-width assertion helper in the test suite.
+
+  Two earlier iterations on this branch are superseded by this
+  layout and did not ship to users: a standalone `EMAIL` column
+  between `FROM` and `DATE`, and a `(via <domain>)` annotation on
+  the `FROM` cell for notification relays. Both are unnecessary now
+  that the full email address is visible inside `FROM` — a row like
+  `Pat Singh <notifications@github.com>` shows the actual sender
+  domain without an annotation. See `DESIGN.md` § DES-018 for the
+  byte-accurate mockup, slot widths, FROM column rules, and the
+  complete test requirements. beadle-z34, beadle-0he.
+
 ### Fixed
 
-- `list_messages` now annotates the `FROM` column with `(via <domain>)`
-  whenever a sender's display name does not correspond to the email
-  address identity. Before this change, a row like
-  `J Freeman  notifications@github.com  ...` let a skimming reader (or
-  agent) attribute the message to J Freeman, when the real sender was
-  GitHub. The annotation closes the same attentional gap for display-
-  name spoof attempts: `Jim Freeman <attacker@evil.example>` now
-  renders as `Jim Freeman (via evil)` instead of just `Jim Freeman`.
-  Detection is a hybrid heuristic, no hardcoded relay list: the name
-  must share a token prefix (≥2 chars) with the email's local-part or
-  domain labels, or the local-part must be a known automation address
-  (`noreply`, `notifications`, `alerts`, `mailer-daemon`, `*-bot`,
-  `*[bot]`). Ordinary senders (`Alice Chen <alice@example.com>`,
-  `jim <jim@example.com>`) are not annotated. The `EMAIL` column is
-  untouched — permission enforcement still keys on the raw address.
-  beadle-z34.
-- `list_messages` output now includes the sender email address on
-  every row. A new `EMAIL` column sits between `FROM` and `DATE`,
-  showing the address beadle's permission system is keyed on. Before
-  this change, only the display name was surfaced, which hid the
-  underlying address and blocked contact bootstrap — on one Linux
-  inbox today, 285 messages from a single relay
-  (`notifications@github.com`) rendered as 7 distinct display names
-  with no way to discover they were all from the same sender without
-  calling `read_message` and reading the permission-denied error text.
-  The EMAIL column is never truncated; when the display name plus
-  email would exceed the 80-column budget, the display name is
-  ellipsis-truncated instead. Subject redaction for senders without
-  read permission is unchanged. beadle-0he.
 - `beadle-email doctor` no longer flags a missing `gpg-passphrase`
   credential as a failure when the configured signing key has no
   passphrase. Doctor now probes the key with
