@@ -146,6 +146,14 @@ func TestHandler_ListMessages(t *testing.T) {
 	assert.Contains(t, r.text(), "Second Message")
 }
 
+func TestHandler_ListMessages_CountWrongType(t *testing.T) {
+	s, _, _ := setupHandler(t)
+	// Pass count as a string — intParam must return an error, not silently use fallback.
+	r := callTool(t, s, "list_messages", map[string]any{"count": "500"})
+	assert.True(t, r.IsError, "wrong-type count must produce an error result")
+	assert.Contains(t, r.text(), "count", "error message should name the parameter")
+}
+
 func TestHandler_ReadMessage_Permitted(t *testing.T) {
 	s, env, fix := setupHandler(t)
 	env.AddContact("Alice", "alice@test.com", "r--")
@@ -178,6 +186,7 @@ func TestHandler_ReadMessage_MaxBodyLength(t *testing.T) {
 		{"shorter than body truncates", float64(10), false, true, false, "", "26 chars total"},
 		{"negative returns error", float64(-1), false, false, true, "non-negative", ""},
 		{"fractional returns error", float64(10.5), false, false, true, "whole number", ""},
+		{"string type returns error", "big", false, false, true, "max_body_length", ""},
 	}
 
 	for _, tt := range tests {
