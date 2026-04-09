@@ -118,11 +118,15 @@ func formatTable(cols []column, rows [][]string) string {
 //
 // The prefix is followed by the standard colSep before the first
 // column, matching formatTable. Variable-column budget is computed
-// against (tableWidth - prefixWidth - len(colSep) - fixedTotal -
-// sepTotal), where sepTotal counts separators between data columns.
+// against (tableWidth - prefixWidth - fixedTotal - sepTotal), where
+// sepTotal includes every colSep emitted on the row, including the
+// separator between the prefix block and the first data column.
 //
 // Caller invariant: each entry in prefixes must already be exactly
-// prefixWidth runes wide. This function does not pad prefixes.
+// prefixWidth runes wide AND len(prefixes) must equal len(rows). The
+// function panics on a length mismatch (programmer bug per beadle
+// CLAUDE.md "Panics are for programmer bugs only"); it does not pad
+// or extend prefixes.
 //
 // Budget math is parallel to formatTable; both functions enforce the
 // same 80-char tableWidth. See DESIGN.md § DES-018.
@@ -134,6 +138,9 @@ func formatTableWithPrefixes(
 ) string {
 	if len(rows) == 0 {
 		return ""
+	}
+	if len(prefixes) != len(rows) {
+		panic(fmt.Sprintf("formatTableWithPrefixes: len(prefixes)=%d != len(rows)=%d", len(prefixes), len(rows)))
 	}
 	n := len(cols)
 

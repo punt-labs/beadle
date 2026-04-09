@@ -96,8 +96,9 @@ func splitSender(from string) (name, addr string) {
 // formatFromCell renders the FROM cell for a single message. The cell
 // holds either a bare email (no display name) or "Name <email>", with
 // the display name truncated so the whole cell fits in maxWidth runes.
-// Email is never truncated: if the wrapped form would not fit, the
-// function returns the email alone and the cell overflows maxWidth.
+// Email is never truncated: if the wrapped " <addr>" form would not
+// fit, the function returns the email alone. The cell only overflows
+// maxWidth when the address itself is longer than maxWidth.
 // See DES-018 § "FROM column rules".
 //
 // All length math is rune-count; multibyte glyphs count as 1. This is
