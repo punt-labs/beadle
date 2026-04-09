@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-09
+
 ### Added
 
 - Contact matching supports glob patterns in the `email` field. A
