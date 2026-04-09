@@ -312,14 +312,14 @@ func findContactTool() mcplib.Tool {
 
 func addContactTool() mcplib.Tool {
 	return mcplib.NewTool("add_contact",
-		mcplib.WithDescription("Add a contact to the address book. Name and email are required. Names and aliases must be unique. Permissions control what beadle can do with this contact for the active identity. The email field accepts a glob pattern (e.g. *@mail.anthropic.com) to cover rotating sender addresses within a domain; pattern contacts are restricted to r-- and cannot grant write or execute."),
+		mcplib.WithDescription("Add a contact to the address book. Name and email are required. Names and aliases must be unique. Permissions control what beadle can do with this contact for the active identity. The email field accepts a glob pattern (e.g. *@mail.anthropic.com) to cover rotating sender addresses within a domain; pattern contacts may not grant write or execute — allowed permissions are r-- (read-only) or --- (blocked)."),
 		mcplib.WithString("name",
 			mcplib.Required(),
 			mcplib.Description("Contact display name (unique key)"),
 		),
 		mcplib.WithString("email",
 			mcplib.Required(),
-			mcplib.Description("Exact address (e.g. alice@example.com) or glob pattern (e.g. *@mail.anthropic.com). Patterns use path.Match syntax and are restricted to r-- permission only."),
+			mcplib.Description("Exact address (e.g. alice@example.com) or glob pattern (e.g. *@mail.anthropic.com). Patterns use path.Match syntax and may not grant write or execute — r-- or --- only."),
 		),
 		mcplib.WithArray("aliases",
 			mcplib.Description("Alternative names for lookup (e.g., nicknames)"),
@@ -332,7 +332,7 @@ func addContactTool() mcplib.Tool {
 			mcplib.Description("Free-text notes"),
 		),
 		mcplib.WithString("permissions",
-			mcplib.Description("rwx permission string for active identity (e.g., 'rwx', 'rw-', 'r--'). Default: ---. Pattern contacts must be r--."),
+			mcplib.Description("rwx permission string for active identity (e.g., 'rwx', 'rw-', 'r--'). Default: ---. Pattern contacts may not include 'w' or 'x' — use 'r--' or '---'."),
 		),
 	)
 }

@@ -30,9 +30,15 @@ type Contact struct {
 }
 
 // IsPattern reports whether Email contains glob metacharacters and should
-// be matched via path.Match instead of exact comparison.
+// be matched via path.Match instead of exact comparison. The three
+// metacharacters path.Match recognises are '*' (any sequence), '?' (any
+// single char), and '[' (start of a character class). All three are
+// checked here so that classifying a contact as "pattern" matches the
+// set of strings path.Match will treat specially — otherwise a contact
+// like "[ab]@example.com" would evade pattern validation and the r--
+// constraint while still getting pattern matching at lookup time.
 func (c Contact) IsPattern() bool {
-	return strings.ContainsAny(c.Email, "*?")
+	return strings.ContainsAny(c.Email, "*?[")
 }
 
 // Validate checks that required fields are present and well-formed.

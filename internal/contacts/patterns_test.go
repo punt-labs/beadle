@@ -20,6 +20,8 @@ func TestContact_IsPattern(t *testing.T) {
 		{"empty", "", false},
 		{"no at sign", "alice", false},
 		{"star in domain", "alice@*.example.com", true},
+		{"character class in local", "[ab]c@example.com", true},
+		{"character class in domain", "foo@[ab].example.com", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -133,15 +135,21 @@ func TestFindByAddress_LongestPatternWins(t *testing.T) {
 }
 
 func TestFindByAddress_TiesBreakByStoreOrder(t *testing.T) {
-	// Two patterns of equal length that both match; the first-added wins.
+	// Two patterns of EQUAL length (14 runes each) that both match
+	// "alice@example.com". The store-order tie-break must return the
+	// first-added contact.
+	//
+	//   "a*@example.com" — 'a' matches 'a', '*' matches "lice"
+	//   "*e@example.com" — '*' matches "alic", 'e' matches 'e'
+	//
+	// Both are length 14 and both match; insertion order breaks the tie.
 	store := newStoreFromList(t, []Contact{
-		{Name: "First", Email: "*@example.com", Permissions: map[string]string{"claude@punt-labs.com": "r--"}},
-		{Name: "Second", Email: "a*@example.com", Permissions: map[string]string{"claude@punt-labs.com": "r--"}},
+		{Name: "First", Email: "a*@example.com", Permissions: map[string]string{"claude@punt-labs.com": "r--"}},
+		{Name: "Second", Email: "*e@example.com", Permissions: map[string]string{"claude@punt-labs.com": "r--"}},
 	})
-	// "a*@example.com" is longer (len 14 vs 13), so Second wins for "alice@example.com".
 	c, ok := store.FindByAddress("alice@example.com")
 	require.True(t, ok)
-	assert.Equal(t, "Second", c.Name)
+	assert.Equal(t, "First", c.Name)
 }
 
 func TestFindByAddress_NoMatch(t *testing.T) {
