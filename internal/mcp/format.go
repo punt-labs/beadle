@@ -196,7 +196,7 @@ func domainLabels(domain string) []string {
 	parts := strings.Split(domain, ".")
 	out := parts[:0]
 	for _, p := range parts {
-		p = strings.TrimSpace(p)
+		p = strings.ToLower(strings.TrimSpace(p))
 		if p != "" {
 			out = append(out, p)
 		}
