@@ -184,7 +184,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the contract in DES-011 because both a human and an agent are active in every
   Claude Code session. The old field name caused silent identity resolution
   failure — beadle fell through to fallback identity, breaking email permissions.
-- `beadle-email contact add --name="Jim" --email="jim@x.com"` now works. The
+- `beadle-email contact add --name="Sam" --email="sam@x.com"` now works. The
   `--flag=value` syntax was rejected by the hand-rolled parser with "unexpected
   argument."
 - Unknown flags now show cobra's auto-generated usage with all valid flags,
@@ -298,7 +298,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - CLI parity for email operations: `list`, `read`, `send`, `move`, `folders`
   subcommands calling the same internal functions as MCP tools. Contact
-  name resolution works in CLI send (`--to jim` resolves to stored email).
+  name resolution works in CLI send (`--to sam` resolves to stored email).
 - Global CLI flags: `--json`/`-j` for JSON output, `--verbose`/`-v` for
   debug logging, `--quiet`/`-q` for errors only. `-v` changed from
   `--version` to `--verbose` per punt-kit standard.
@@ -315,7 +315,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Address book with name-based recipient resolution. 4 new MCP tools
   (`list_contacts`, `find_contact`, `add_contact`, `remove_contact`) and
   matching CLI subcommands (`beadle-email contact list/add/remove/find`).
-  `send_email` resolves names inline — `/mail jim` works in a single
+  `send_email` resolves names inline — `/mail sam` works in a single
   roundtrip. Contacts stored at `~/.punt-labs/beadle/contacts.json` with
   GPG key ID and alias support.
 - Filesystem consolidation: all runtime data now under `~/.punt-labs/beadle/`.

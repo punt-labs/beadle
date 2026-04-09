@@ -20,11 +20,11 @@ func TestReadRoster_Valid(t *testing.T) {
 	rosterYAML := `session: test-session-123
 started: "2026-03-22T05:30:47Z"
 participants:
-  - agent_id: jfreeman
-    persona: jfreeman
+  - agent_id: sam
+    persona: sam
   - agent_id: "12345"
     persona: claude
-    parent: jfreeman
+    parent: sam
 `
 	require.NoError(t, os.WriteFile(filepath.Join(sessDir, "test-session-123.yaml"), []byte(rosterYAML), 0o640))
 
@@ -39,9 +39,9 @@ participants:
 
 	assert.Equal(t, "test-session-123", roster.Session)
 	assert.Len(t, roster.Participants, 2)
-	assert.Equal(t, "jfreeman", roster.Participants[0].Persona)
+	assert.Equal(t, "sam", roster.Participants[0].Persona)
 	assert.Equal(t, "claude", roster.Participants[1].Persona)
-	assert.Equal(t, "jfreeman", roster.Participants[1].Parent)
+	assert.Equal(t, "sam", roster.Participants[1].Parent)
 }
 
 func TestReadRoster_NoSession(t *testing.T) {
@@ -60,22 +60,22 @@ func TestReadRoster_EmptyDir(t *testing.T) {
 func TestHumanParticipants(t *testing.T) {
 	roster := &Roster{
 		Participants: []Participant{
-			{AgentID: "jfreeman", Persona: "jfreeman"},
-			{AgentID: "12345", Persona: "claude", Parent: "jfreeman"},
+			{AgentID: "sam", Persona: "sam"},
+			{AgentID: "12345", Persona: "claude", Parent: "sam"},
 		},
 	}
 
 	humans := roster.HumanParticipants()
 	require.Len(t, humans, 1)
-	assert.Equal(t, "jfreeman", humans[0].Persona)
+	assert.Equal(t, "sam", humans[0].Persona)
 }
 
 func TestAgentParticipants(t *testing.T) {
 	roster := &Roster{
 		Participants: []Participant{
-			{AgentID: "jfreeman", Persona: "jfreeman"},
-			{AgentID: "12345", Persona: "claude", Parent: "jfreeman"},
-			{AgentID: "67890", Persona: "helper", Parent: "jfreeman"},
+			{AgentID: "sam", Persona: "sam"},
+			{AgentID: "12345", Persona: "claude", Parent: "sam"},
+			{AgentID: "67890", Persona: "helper", Parent: "sam"},
 		},
 	}
 
@@ -86,15 +86,15 @@ func TestAgentParticipants(t *testing.T) {
 }
 
 func TestParticipant_IsHuman(t *testing.T) {
-	assert.True(t, Participant{AgentID: "jfreeman"}.IsHuman())
-	assert.False(t, Participant{AgentID: "12345", Parent: "jfreeman"}.IsHuman())
+	assert.True(t, Participant{AgentID: "sam"}.IsHuman())
+	assert.False(t, Participant{AgentID: "12345", Parent: "sam"}.IsHuman())
 }
 
 func TestWalkToTopmostClaude(t *testing.T) {
 	// Mock process table: pid=100 → ppid=50 (claude) → ppid=1 (init)
 	table := map[int]processEntry{
 		100: {ppid: 50, comm: "/usr/local/bin/beadle-email"},
-		50:  {ppid: 10, comm: "/Users/jfreeman/.claude/local/claude"},
+		50:  {ppid: 10, comm: "/Users/sam/.claude/local/claude"},
 		10:  {ppid: 1, comm: "/sbin/launchd"},
 		1:   {ppid: 0, comm: "launchd"},
 	}

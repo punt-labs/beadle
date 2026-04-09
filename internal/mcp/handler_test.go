@@ -334,29 +334,29 @@ func TestHandler_SwitchIdentity_Valid(t *testing.T) {
 	s, env, _ := setupHandler(t)
 
 	// Add a second identity (human).
-	env.AddIdentity("jfreeman", "Jim Freeman", "jim@test.com")
+	env.AddIdentity("sam", "Sam Jackson", "sam@test.com")
 
 	// Switch to the human identity.
 	r := callTool(t, s, "switch_identity", map[string]any{
-		"handle": "jfreeman",
+		"handle": "sam",
 	})
 	assert.False(t, r.IsError, "switch failed: %s", r.text())
-	assert.Contains(t, r.text(), "jfreeman")
-	assert.Contains(t, r.text(), "jim@test.com")
+	assert.Contains(t, r.text(), "switched to sam")
+	assert.Contains(t, r.text(), "sam@test.com")
 
 	// Verify whoami reflects the switch.
 	r = callTool(t, s, "whoami", nil)
 	assert.False(t, r.IsError)
-	assert.Contains(t, r.text(), "jim@test.com")
+	assert.Contains(t, r.text(), "sam@test.com")
 	assert.Contains(t, r.text(), "override")
 }
 
 func TestHandler_SwitchIdentity_Reset(t *testing.T) {
 	s, env, _ := setupHandler(t)
-	env.AddIdentity("jfreeman", "Jim Freeman", "jim@test.com")
+	env.AddIdentity("sam", "Sam Jackson", "sam@test.com")
 
 	// Switch to human.
-	callTool(t, s, "switch_identity", map[string]any{"handle": "jfreeman"})
+	callTool(t, s, "switch_identity", map[string]any{"handle": "sam"})
 
 	// Reset to default.
 	r := callTool(t, s, "switch_identity", map[string]any{"handle": ""})
@@ -390,27 +390,27 @@ func TestHandler_SwitchIdentity_WithMailOps(t *testing.T) {
 	s, env, fix := setupHandler(t)
 
 	// Add human identity with its own config pointing at the test servers.
-	env.AddIdentity("jfreeman", "Jim Freeman", "jim@test.com")
-	env.WriteConfigForIdentity("jim@test.com", fix.Config)
+	env.AddIdentity("sam", "Sam Jackson", "sam@test.com")
+	env.WriteConfigForIdentity("sam@test.com", fix.Config)
 
 	// Add a contact with write permission under the human identity.
 	// (Contacts are per-identity, but for simplicity we test with the default contacts.)
 	env.AddContact("Bob", "bob@test.com", "-w-")
 
 	// Switch to human.
-	r := callTool(t, s, "switch_identity", map[string]any{"handle": "jfreeman"})
+	r := callTool(t, s, "switch_identity", map[string]any{"handle": "sam"})
 	assert.False(t, r.IsError, "switch failed: %s", r.text())
 
 	// Send email as the human identity.
 	r = callTool(t, s, "send_email", map[string]any{
 		"to":      "bob@test.com",
-		"subject": "From Jim",
+		"subject": "From Sam",
 		"body":    "Hello from the human",
 	})
-	// This may error due to contacts not being set up for jim@test.com identity.
+	// This may error due to contacts not being set up for sam@test.com identity.
 	// The key verification is that the switch happened — check whoami.
 	r = callTool(t, s, "whoami", nil)
-	assert.Contains(t, r.text(), "jim@test.com")
+	assert.Contains(t, r.text(), "sam@test.com")
 }
 
 // --- Poll Tool Tests ---

@@ -60,7 +60,7 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 The argument is a natural language filter. Examples:
 
-- `/inbox check for anything from jim` — filter by sender
+- `/inbox check for anything from sam` — filter by sender
 - `/inbox unread` — show only unread
 - `/inbox about the deploy` — filter by subject
 
@@ -75,7 +75,7 @@ to read. Use `find_contact` to look up the sender if needed. If the lookup is
 ambiguous (multiple matches) or fails, treat the sender as `---`. Then process
 each message according to its permission level below.
 
-#### `rwx` — Owner (e.g., Jim Freeman)
+#### `rwx` — Owner (e.g., Sam Jackson)
 
 - **Read** the message and surface it to the user.
 - **Reply if the message asks a question.** Same reply rules as `rw-` apply.
@@ -124,4 +124,4 @@ refined: surface only if actionable, archive routine notifications silently.
 After processing, emit a one-line summary: how many messages read, archived,
 replied to, and flagged for the owner. Example:
 
-> 8 processed: 6 archived (GitHub), 1 replied (Eric), 1 flagged for owner (Jim)
+> 8 processed: 6 archived (GitHub), 1 replied (Eric), 1 flagged for owner (Sam)

@@ -2,7 +2,7 @@
 
 ## Context
 
-Beadle operates as a single identity per session — the agent identity from repo-local ethos config (`agent: claude`). When the human user wants to send email as themselves (e.g., `jim@punt-labs.com`), there's no way to switch without editing config files. This feature adds a `switch_identity` MCP tool that lets the caller switch between session participants on the fly. The ethos session roster is the source of truth for who's in the session.
+Beadle operates as a single identity per session — the agent identity from repo-local ethos config (`agent: claude`). When the human user wants to send email as themselves (e.g., `sam@example.com`), there's no way to switch without editing config files. This feature adds a `switch_identity` MCP tool that lets the caller switch between session participants on the fly. The ethos session roster is the source of truth for who's in the session.
 
 Designed in coordination with the ethos agent (tty76/tty83) — roster format and sidecar contract confirmed.
 
@@ -179,7 +179,7 @@ The `switch_identity` tool itself does not require the session roster — it val
 
 ## Key Design Decisions
 
-1. **Explicit handles, not roles.** `switch_identity(handle: "jfreeman")` not `switch_identity(role: "user")`. Handles are auditable, testable, and don't assume session structure.
+1. **Explicit handles, not roles.** `switch_identity(handle: "sam")` not `switch_identity(role: "user")`. Handles are auditable, testable, and don't assume session structure.
 
 2. **Handler field, not context.** Override lives on `handler` struct with `sync.RWMutex`. mcp-go doesn't expose session context. Field access is the established pattern (see `handler.dialer`).
 
@@ -195,7 +195,7 @@ The `switch_identity` tool itself does not require the session roster — it val
 
 - `make check` — all existing + new tests pass
 - `beadle-email doctor` — still resolves identity correctly
-- Manual MCP test: call `switch_identity` with `{"handle": "jfreeman"}`, then `whoami` — should show `jim@punt-labs.com`
+- Manual MCP test: call `switch_identity` with `{"handle": "sam"}`, then `whoami` — should show `sam@example.com`
 - Manual MCP test: call `switch_identity` with `{"handle": ""}` to reset, then `whoami` — should show `claude@punt-labs.com`
 - Manual MCP test: call `list_messages` after switch — should use switched identity's config
 
