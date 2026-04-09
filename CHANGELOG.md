@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `list_messages` now annotates the `FROM` column with `(via <domain>)`
+  whenever a sender's display name does not correspond to the email
+  address identity. Before this change, a row like
+  `J Freeman  notifications@github.com  ...` let a skimming reader (or
+  agent) attribute the message to J Freeman, when the real sender was
+  GitHub. The annotation closes the same attentional gap for display-
+  name spoof attempts: `Jim Freeman <attacker@evil.example>` now
+  renders as `Jim Freeman (via evil)` instead of just `Jim Freeman`.
+  Detection is a hybrid heuristic, no hardcoded relay list: the name
+  must share a token prefix (≥2 chars) with the email's local-part or
+  domain labels, or the local-part must be a known automation address
+  (`noreply`, `notifications`, `alerts`, `mailer-daemon`, `*-bot`,
+  `*[bot]`). Ordinary senders (`Alice Chen <alice@example.com>`,
+  `jim <jim@example.com>`) are not annotated. The `EMAIL` column is
+  untouched — permission enforcement still keys on the raw address.
+  beadle-z34.
 - `list_messages` output now includes the sender email address on
   every row. A new `EMAIL` column sits between `FROM` and `DATE`,
   showing the address beadle's permission system is keyed on. Before
