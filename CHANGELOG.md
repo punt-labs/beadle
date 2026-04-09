@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Contact matching supports glob patterns in the `email` field. A
+  single entry like `*@mail.anthropic.com` with `r--` covers rotating
+  sender addresses (e.g. `no-reply-abc123@mail.anthropic.com`) that
+  previously missed exact-match lookup and fell through to the
+  default `---` redaction. Patterns are restricted to `r--`
+  permission only — full `rwx` grants require an exact address. Exact
+  contacts always take precedence over patterns; among matching
+  patterns, the longest pattern wins. See `DESIGN.md` § DES-019 for
+  the full precedence rules and rationale. beadle-a7v.
+
 ## [0.10.2] - 2026-04-08
 
 ### Changed
