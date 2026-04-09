@@ -208,13 +208,13 @@ func TestFormatMessages_FullInboxOfGithubRelays(t *testing.T) {
 	msgs := []channel.MessageSummary{
 		{ID: "319", From: "Copilot <notifications@github.com>", Date: when,
 			Subject: "Re: [punt-labs/beadle] 1", TrustLevel: channel.Unverified, Unread: true},
-		{ID: "320", From: "J Freeman <notifications@github.com>", Date: when,
+		{ID: "320", From: "Pat Singh <notifications@github.com>", Date: when,
 			Subject: "Re: [punt-labs/beadle] 2", TrustLevel: channel.Unverified, Unread: true},
 		{ID: "322", From: "cursor[bot] <notifications@github.com>", Date: when,
 			Subject: "Re: [punt-labs/beadle] 3", TrustLevel: channel.Unverified, Unread: true},
 		{ID: "335", From: "vercel[bot] <notifications@github.com>", Date: when,
 			Subject: "Re: [punt-labs/public] 4", TrustLevel: channel.Unverified, Unread: true},
-		{ID: "340", From: "Jim Freeman <jim@punt-labs.com>", Date: when,
+		{ID: "340", From: "Sam Jackson <sam@example.co.uk>", Date: when,
 			Subject: "Re: [punt-labs/punt-kit] 5", TrustLevel: channel.Trusted, Unread: true},
 		{ID: "8", From: "Claude Agento <claude@punt-labs.com>", Date: older,
 			Subject: "doctor fix landed", TrustLevel: channel.Trusted},
@@ -235,7 +235,7 @@ func TestFormatMessages_RedactedSubjectStillSurfacesEmail(t *testing.T) {
 	when := time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC)
 	msgs := []channel.MessageSummary{{
 		ID:         "20",
-		From:       "J Freeman <notifications@github.com>",
+		From:       "Pat Singh <notifications@github.com>",
 		Date:       when,
 		Subject:    "[redacted — no read permission]",
 		TrustLevel: channel.Unverified,
