@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `install.sh` no longer silently swallows plugin uninstall failures. On a
+  fresh machine (plugin not installed) uninstall is skipped entirely. On an
+  upgrade, if `claude plugin uninstall` exits non-zero the script now prints an
+  actionable error to stderr and exits 1 rather than continuing and leaving the
+  user on the old version. beadle-2nk.
+
 ## [0.11.0] - 2026-04-09
 
 ### Added

@@ -146,8 +146,28 @@ PLUGIN_INSTALLED=0
 # install` is a no-op when the plugin is already cached at any version, so
 # without this, users stay on whatever version they first installed forever.
 # Pattern: biff/install.sh, quarry/install.sh, vox/install.sh.
-claude plugin uninstall "beadle@$MARKETPLACE_NAME" < /dev/null 2>/dev/null || true
-if env $HTTPS_ENV claude plugin install "beadle@$MARKETPLACE_NAME" --scope user < /dev/null 2>/dev/null; then
+#
+# Detection: query the plugin list before attempting uninstall. Skipping
+# uninstall on a fresh machine avoids a spurious failure path; surfacing
+# uninstall failures on upgrades lets the user act rather than silently
+# staying pinned to the old version.
+PLUGIN_IS_INSTALLED=0
+if claude plugin list < /dev/null 2>/dev/null | grep -q "beadle"; then
+  PLUGIN_IS_INSTALLED=1
+fi
+
+if [ "$PLUGIN_IS_INSTALLED" = "1" ]; then
+  if ! claude plugin uninstall "beadle@$MARKETPLACE_NAME" < /dev/null; then
+    printf 'error: failed to uninstall existing beadle plugin\n' >&2
+    printf 'Manual remediation:\n' >&2
+    printf '  claude plugin uninstall beadle@%s\n' "$MARKETPLACE_NAME" >&2
+    printf 'If that also fails, remove the plugin directory manually and re-run install.sh.\n' >&2
+    exit 1
+  fi
+  ok "existing plugin uninstalled"
+fi
+
+if env $HTTPS_ENV claude plugin install "beadle@$MARKETPLACE_NAME" --scope user < /dev/null; then
   ok "beadle plugin installed"
   PLUGIN_INSTALLED=1
 else
