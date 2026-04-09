@@ -21,12 +21,12 @@ func switchIdentityTool() mcplib.Tool {
 	return mcplib.NewTool("switch_identity",
 		mcplib.WithDescription(
 			"Switch the active beadle identity for this session. "+
-				"Pass an ethos handle (e.g. 'jfreeman') to operate as that identity, "+
+				"Pass an ethos handle (e.g. 'sam') to operate as that identity, "+
 				"or pass an empty string to reset to the default agent identity. "+
 				"Requires ethos identity files. Use whoami to see available identities.",
 		),
 		mcplib.WithString("handle",
-			mcplib.Description("Ethos handle to switch to (e.g. 'jfreeman'). Empty string resets to default."),
+			mcplib.Description("Ethos handle to switch to (e.g. 'sam'). Empty string resets to default."),
 		),
 	)
 }

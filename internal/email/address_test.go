@@ -13,13 +13,13 @@ func TestExtractEmailAddress(t *testing.T) {
 		want  string
 	}{
 		{"bare email", "user@example.com", "user@example.com"},
-		{"RFC 5322", "Jim Freeman <jim@punt-labs.com>", "jim@punt-labs.com"},
-		{"quoted display name", `"Jim Freeman" <jim@punt-labs.com>`, "jim@punt-labs.com"},
+		{"RFC 5322", "Sam Jackson <sam@example.com>", "sam@example.com"},
+		{"quoted display name", `"Sam Jackson" <sam@example.com>`, "sam@example.com"},
 		{"bot brackets", "github-actions[bot] <notifications@github.com>", "notifications@github.com"},
 		{"empty", "", ""},
 		{"whitespace only", "   ", ""},
 		{"no at sign", "not-an-email", ""},
-		{"angle brackets only", "<jim@punt-labs.com>", "jim@punt-labs.com"},
+		{"angle brackets only", "<sam@example.com>", "sam@example.com"},
 		{"spaces around", "  user@example.com  ", "user@example.com"},
 	}
 	for _, tc := range tests {
@@ -36,12 +36,12 @@ func TestExtractDisplayName(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"RFC 5322", "Jim Freeman <jim@punt-labs.com>", "Jim Freeman"},
-		{"quoted", `"Jim Freeman" <jim@punt-labs.com>`, "Jim Freeman"},
+		{"RFC 5322", "Sam Jackson <sam@example.com>", "Sam Jackson"},
+		{"quoted", `"Sam Jackson" <sam@example.com>`, "Sam Jackson"},
 		{"bare email", "user@example.com", "user@example.com"},
 		{"bot brackets", "github-actions[bot] <notifications@github.com>", "github-actions[bot]"},
 		{"empty", "", ""},
-		{"angle only", "<jim@punt-labs.com>", "jim@punt-labs.com"},
+		{"angle only", "<sam@example.com>", "sam@example.com"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

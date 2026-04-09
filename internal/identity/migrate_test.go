@@ -26,7 +26,7 @@ func TestEnsureIdentityDir_MigratesRootFiles(t *testing.T) {
 
 	// Create root files
 	require.NoError(t, os.WriteFile(filepath.Join(beadleDir, "email.json"), []byte(`{"imap_host":"127.0.0.1"}`), 0o640))
-	require.NoError(t, os.WriteFile(filepath.Join(beadleDir, "contacts.json"), []byte(`[{"name":"Jim"}]`), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(beadleDir, "contacts.json"), []byte(`[{"name":"Sam"}]`), 0o640))
 
 	dir, err := EnsureIdentityDir(beadleDir, "test@example.com")
 	require.NoError(t, err)
@@ -38,7 +38,7 @@ func TestEnsureIdentityDir_MigratesRootFiles(t *testing.T) {
 
 	data, err = os.ReadFile(filepath.Join(dir, "contacts.json"))
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "Jim")
+	assert.Contains(t, string(data), "Sam")
 
 	// Root files should still exist (copy, not move)
 	_, err = os.Stat(filepath.Join(beadleDir, "email.json"))

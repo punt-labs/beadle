@@ -191,7 +191,7 @@ pair using the Unix rwx model.
 - **Identity** — who beadle is operating as. Owned by ethos, not beadle
   (see DES-013). Beadle reads `email`, `name`, `handle` from the ethos
   identity YAML. Today: `claude@punt-labs.com`. Future:
-  `jim@punt-labs.com`, `builds@punt-labs.com`, etc.
+  `sam@example.com`, `builds@punt-labs.com`, etc.
 
 - **Contact** — who beadle is interacting with. Stored in the address book with
   name, email, aliases, GPG key ID, notes, and a permissions map.
@@ -212,7 +212,7 @@ Example for identity `claude@punt-labs.com`:
 
 | Contact | Permissions | Effect |
 |---------|------------|--------|
-| Jim Freeman | `rwx` | Full authority — read, reply, execute tasks |
+| Sam Jackson | `rwx` | Full authority — read, reply, execute tasks |
 | Eric | `rw-` | Read and reply, but not execute instructions |
 | Vendor X | `r--` | Read only, surface to owner for action |
 | Unknown sender | `---` | Default: no permissions (whitelist) |
@@ -224,8 +224,8 @@ unverified message from an `rwx` contact should NOT be executed (identity claim
 not verified). An authenticated message from an `r--` contact should NOT trigger
 autonomous action (sender lacks authority).
 
-**No inheritance between identities.** Jim may grant Eric `rwx` on
-`jim@punt-labs.com` but only `rw-` on `claude@punt-labs.com`. Each cell in the
+**No inheritance between identities.** Sam may grant Eric `rwx` on
+`sam@example.com` but only `rw-` on `claude@punt-labs.com`. Each cell in the
 matrix is explicit. No implicit propagation.
 
 **Default permissions:** Contacts without explicit permissions for an identity
@@ -335,7 +335,7 @@ way.
       email.json          # IMAP/SMTP config for this identity
       contacts.json       # contacts + permissions for this identity
       attachments/        # downloaded attachments
-    jim@punt-labs.com/
+    sam@example.com/
       email.json
       contacts.json
       attachments/
@@ -347,11 +347,11 @@ way.
 ```text
 ~/.punt-labs/
 ├── ethos/                              ← ethos owns this tree
-│   ├── active                          ← global active handle ("jfreeman")
+│   ├── active                          ← global active handle ("sam")
 │   ├── sessions/                       ← session roster data
 │   └── identities/
-│       ├── jfreeman.yaml               ← Jim's persona (kind: human)
-│       ├── jfreeman.ext/               ← extensions for Jim
+│       ├── sam.yaml                    ← Sam's persona (kind: human)
+│       ├── sam.ext/                    ← extensions for Sam
 │       ├── claude.yaml                 ← Claude's persona (kind: agent)
 │       └── claude.ext/
 │           └── beadle.yaml             ← beadle extension (gpg_key_id)
@@ -386,8 +386,8 @@ YAML. Beadle uses that email to locate its own scoped directory under
 `~/.punt-labs/beadle/identities/<email>/`. Ethos does not know that directory
 exists. Beadle does not write to ethos directories (except its own extension).
 
-**Why repo-local config exists:** The global `active` file may say `jfreeman`
-(Jim is the active human). But in the beadle repo, Claude is the agent that
+**Why repo-local config exists:** The global `active` file may say `sam`
+(Sam is the active human). But in the beadle repo, Claude is the agent that
 operates. The repo-local `config.yaml` pins `agent: claude` so beadle
 operates as Claude in this repo regardless of the global identity. This is
 how one machine supports a human identity globally and an agent identity
@@ -406,7 +406,7 @@ internally and expose relevant data through beadle's own tool responses.
 
 **Ethos is a peer identity system.** The same schema describes humans and
 agents — only a `kind` field distinguishes them. There is no "owner" concept
-in ethos. Ownership and authority relationships (e.g., "Jim owns Claude") are
+in ethos. Ownership and authority relationships (e.g., "Sam owns Claude") are
 application-level policy that belongs in the consuming application (beadle),
 not in the identity layer (ethos). Beadle previously encoded `owner_email` in
 the ethos extension; this was removed in PR #46 because it violated this

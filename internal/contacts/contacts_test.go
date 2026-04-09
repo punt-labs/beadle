@@ -19,11 +19,11 @@ func TestValidate(t *testing.T) {
 		contact Contact
 		wantErr string
 	}{
-		{"valid", Contact{Name: "Jim", Email: "jim@test.com"}, ""},
-		{"missing name", Contact{Email: "jim@test.com"}, "name is required"},
-		{"blank name", Contact{Name: "  ", Email: "jim@test.com"}, "name is required"},
-		{"missing email", Contact{Name: "Jim"}, "email is required"},
-		{"no at sign", Contact{Name: "Jim", Email: "not-an-email"}, "must contain @"},
+		{"valid", Contact{Name: "Sam", Email: "sam@test.com"}, ""},
+		{"missing name", Contact{Email: "sam@test.com"}, "name is required"},
+		{"blank name", Contact{Name: "  ", Email: "sam@test.com"}, "name is required"},
+		{"missing email", Contact{Name: "Sam"}, "email is required"},
+		{"no at sign", Contact{Name: "Sam", Email: "not-an-email"}, "must contain @"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
