@@ -520,7 +520,8 @@ injection. See the channels architecture design document in `claude-code-main`.
 
 ## DES-016: Contact matching by email domain pattern
 
-**Status:** PROPOSED (beadle-a7v)
+**Status:** SETTLED (beadle-a7v). Superseded by **DES-019**, which carries
+the shipped design, the precedence rules, and the r-- safety constraint.
 
 **Decision:** Add glob/domain-pattern matching to the contact system so a single
 contact entry can cover all messages from a domain (e.g., `*@mail.anthropic.com`).
@@ -531,7 +532,7 @@ exact email address, so each new Anthropic message arrives from an unknown addre
 and gets blocked as `---`. Adding individual addresses doesn't scale — new ones
 arrive with every message.
 
-**Not yet implemented.** Tracked in beadle-a7v.
+**See DES-019** for the implemented design.
 
 ## DES-017: Linux keychain backend — pass primary, secret-tool fallback
 
@@ -841,3 +842,98 @@ width, not just substring presence. Specifically:
    operator runs in a non-English locale, the month abbreviation
    should follow Go's `time` package localization. Out of scope for
    this spec.
+
+## DES-019: Domain-pattern contact matching (r-- only)
+
+**Status:** SETTLED (beadle-a7v). Supersedes DES-016.
+
+**Decision:** The `Contact.Email` field is dual-purpose. If the value
+contains `*` or `?`, it is a glob pattern matched by `path.Match`;
+otherwise it is an exact address. A single contact like
+`*@mail.anthropic.com` with `r--` grants read to every sender whose
+address satisfies the pattern, which solves the rotating-sender problem
+for services like Anthropic, GitHub notifications, Amazon SES, and
+SendGrid.
+
+Pattern contacts are restricted to `r--`. Any permission string containing
+`w` or `x` is rejected at `Validate` time and at the `add_contact` handler
+with the error `pattern contacts may only grant read permission (r--), got
+%q`. Full `rwx` grants still require an exact address.
+
+**Why r-- only:** Granting write or execute to a whole domain is unsafe.
+Any sender capable of submitting from that domain — including anyone who
+spoofs the `From:` header at an upstream relay that does not enforce DMARC
+alignment — would inherit reply or command authority. Read is the
+maximum defensible grant for a glob. Exact addresses remain the only way
+to grant write or execute because exact-match is scoped to a single
+identity the operator has vetted.
+
+**Lookup precedence:** `Store.FindByAddress(addr)` implements this:
+
+1. Exact case-insensitive match on a non-pattern contact wins — first hit.
+   A specific `attacker@mail.anthropic.com` with `---` beats a permissive
+   `*@mail.anthropic.com` with `r--`, so the operator can blocklist a
+   single rotating sender without revoking the whole domain.
+2. Among pattern contacts whose `Email` matches `path.Match(pattern, addr)`,
+   the longest pattern (rune count via `utf8.RuneCountInString`) wins.
+   Since the variable part is always `*`, longer patterns carry more
+   literal characters and are therefore more specific. Ties go to the
+   contact added first.
+3. No match returns `(Contact{}, false)`. The caller (`senderPermission`)
+   treats that as unknown sender and falls through to the default `---`.
+
+**Worked examples:**
+
+| Store contents                                            | Lookup                              | Match                          |
+|-----------------------------------------------------------|-------------------------------------|--------------------------------|
+| `*@mail.anthropic.com` r--, `attacker@mail.anthropic.com` --- | `attacker@mail.anthropic.com` | `attacker@…` (exact beats pattern) |
+| `*@mail.anthropic.com` r--                                | `no-reply-abc123@mail.anthropic.com` | pattern — grants r--           |
+| `*@vercel.app` r--, `*@ci.vercel.app` r--                 | `sam@ci.vercel.app`                 | `*@ci.vercel.app` (longer)     |
+| `*@MAIL.ANTHROPIC.COM` r--                                | `no-reply@mail.anthropic.com`       | pattern — case-insensitive     |
+
+**Matcher:** `path.Match` from the standard library. It supports `*`
+(any sequence), `?` (single char), and `[set]` brackets. No path-separator
+semantics apply here since email addresses contain no `/`. Malformed
+patterns like `[abc*@example.com` are rejected at `Validate` time by
+probing the pattern against a throwaway string; a bad pattern surfaces
+as `invalid pattern syntax: %w` rather than lying dormant until lookup.
+
+**Schema invariants:** The `contacts.json` on-disk format is unchanged —
+`Email` is still a string. No migration code is needed. A pattern entry is
+indistinguishable from an exact entry at rest; the `IsPattern()` method
+classifies it at read time by scanning for `*` or `?`. Existing exact
+contacts continue to work without change.
+
+**Why no caching:** Contact lookup happens once per message during
+`list_messages`. A contact book with fewer than 100 entries runs pattern
+iteration in microseconds. Cached lookups would add invalidation
+complexity for a cost that does not show up in any profile.
+
+**Why not a separate `Patterns` field:** A separate field would double
+every code path that reads contacts (the store, the CLI, the MCP tools,
+the `list_contacts` formatter) without changing behavior. Reusing `Email`
+with a pure-function classifier keeps the data model and the on-disk
+format unchanged.
+
+**Rejected alternatives:**
+
+- **Regex matching.** More expressive but dangerous — untrusted patterns
+  could cause catastrophic backtracking. `path.Match` is linear and bounded.
+- **Third-party glob library.** `path.Match` in the standard library covers
+  everything email addresses need. Adding a dependency for no capability gain
+  is tech debt.
+- **Allowing rwx on patterns "if the user really wants it".** The CEO
+  directive on 2026-04-09 was explicit: `rwx` for a pattern is never safe.
+  The code enforces the rule so the operator cannot unknowingly grant
+  reply authority to a whole domain.
+
+**What this does not change:**
+
+- Existing exact-address contacts. Their behavior, storage, and
+  permission semantics are untouched.
+- The `CheckPermission(c, identityEmail)` function. Pattern enforcement
+  happens at `Validate` time, so any stored contact is already safe to
+  pass through the normal permission lookup.
+- The `contacts.json` file format. Old files load unchanged.
+- The redaction rule. Unknown senders still get `---` and still see their
+  subjects redacted in `list_messages`.

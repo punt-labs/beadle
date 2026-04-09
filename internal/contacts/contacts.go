@@ -5,10 +5,21 @@ package contacts
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
 // Contact represents a person in the address book.
+//
+// The Email field is dual-purpose:
+//   - An exact address like "alice@example.com" matches that address only.
+//   - A glob pattern like "*@mail.anthropic.com" matches any sender whose
+//     address satisfies path.Match against the pattern. Patterns are
+//     detected by the presence of "*" or "?" in Email.
+//
+// Pattern contacts are restricted to read-only permission (r--). Granting
+// write or execute to a whole domain would let any sender spoofing that
+// domain inherit reply or command authority. Validate enforces this rule.
 type Contact struct {
 	Name        string            `json:"name"`
 	Email       string            `json:"email"`
@@ -18,7 +29,15 @@ type Contact struct {
 	Permissions map[string]string `json:"permissions,omitempty"` // identity_email → "rwx"
 }
 
+// IsPattern reports whether Email contains glob metacharacters and should
+// be matched via path.Match instead of exact comparison.
+func (c Contact) IsPattern() bool {
+	return strings.ContainsAny(c.Email, "*?")
+}
+
 // Validate checks that required fields are present and well-formed.
+// For pattern contacts, Validate also rejects any permission containing
+// write or execute, and verifies that the pattern itself parses.
 func Validate(c Contact) error {
 	if strings.TrimSpace(c.Name) == "" {
 		return fmt.Errorf("name is required")
@@ -28,6 +47,18 @@ func Validate(c Contact) error {
 	}
 	if !strings.Contains(c.Email, "@") {
 		return fmt.Errorf("email %q must contain @", c.Email)
+	}
+	if c.IsPattern() {
+		// path.Match rejects malformed patterns like "[abc" at match time;
+		// probe against a throwaway string so the error surfaces at add time.
+		if _, err := path.Match(c.Email, "probe"); err != nil {
+			return fmt.Errorf("invalid pattern syntax: %w", err)
+		}
+		for _, perm := range c.Permissions {
+			if strings.ContainsAny(perm, "wWxX") {
+				return fmt.Errorf("pattern contacts may only grant read permission (r--), got %q", perm)
+			}
+		}
 	}
 	return nil
 }

@@ -328,6 +328,74 @@ func TestHandler_Contacts_CRUD(t *testing.T) {
 	assert.Equal(t, "No contacts.", r.text())
 }
 
+// --- Pattern Contact Tests ---
+
+func TestHandler_AddContact_PatternRejectsRWX(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "add_contact", map[string]any{
+		"name":        "Anthropic Mail",
+		"email":       "*@mail.anthropic.com",
+		"permissions": "rwx",
+	})
+	assert.True(t, r.IsError)
+	assert.Contains(t, r.text(), "pattern contacts may only grant read")
+}
+
+func TestHandler_AddContact_PatternRejectsRW(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "add_contact", map[string]any{
+		"name":        "Anthropic Mail",
+		"email":       "*@mail.anthropic.com",
+		"permissions": "rw-",
+	})
+	assert.True(t, r.IsError)
+	assert.Contains(t, r.text(), "pattern contacts may only grant read")
+}
+
+func TestHandler_AddContact_PatternAcceptsReadOnly(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "add_contact", map[string]any{
+		"name":        "Anthropic Mail",
+		"email":       "*@mail.anthropic.com",
+		"permissions": "r--",
+	})
+	assert.False(t, r.IsError, "add failed: %s", r.text())
+
+	r = callTool(t, s, "find_contact", map[string]any{
+		"query": "*@mail.anthropic.com",
+	})
+	assert.False(t, r.IsError)
+	assert.Contains(t, r.text(), "Anthropic Mail")
+}
+
+func TestHandler_ListMessages_PatternPermissionSurfacesSubject(t *testing.T) {
+	s, env, fix := setupHandler(t)
+
+	env.AddContact("Anthropic Mail", "*@mail.anthropic.com", "r--")
+	fix.AddMessage("INBOX", "no-reply-xyz@mail.anthropic.com", "Status Update", "body")
+
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10})
+	assert.False(t, r.IsError, "list failed: %s", r.text())
+	assert.Contains(t, r.text(), "Status Update")
+	assert.NotContains(t, r.text(), "redacted")
+}
+
+func TestHandler_ListMessages_UnmatchedSenderRedacted(t *testing.T) {
+	s, env, fix := setupHandler(t)
+
+	// Pattern only covers a different domain; this rotating sender has no grant.
+	env.AddContact("Anthropic Mail", "*@mail.anthropic.com", "r--")
+	fix.AddMessage("INBOX", "no-reply@other.com", "Leaky Subject", "body")
+
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10})
+	assert.False(t, r.IsError, "list failed: %s", r.text())
+	assert.NotContains(t, r.text(), "Leaky Subject")
+	assert.Contains(t, r.text(), "redacted")
+}
+
 // --- Identity Switching Tests ---
 
 func TestHandler_SwitchIdentity_Valid(t *testing.T) {
