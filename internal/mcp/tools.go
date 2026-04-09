@@ -392,7 +392,10 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 	}
 
 	folder := stringParam(req, "folder", "INBOX")
-	count := intParam(req, "count", 10)
+	count, err := intParam(req, "count", 10)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
 	unreadOnly := boolParam(req, "unread_only")
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
@@ -496,7 +499,10 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 				return mcplib.NewToolResultError(fmt.Sprintf("max_body_length must be a whole number, got %g", f)), nil
 			}
 		}
-		maxBody := intParam(req, "max_body_length", 0)
+		maxBody, err := intParam(req, "max_body_length", 0)
+		if err != nil {
+			return mcplib.NewToolResultError(err.Error()), nil
+		}
 		if maxBody < 0 {
 			return mcplib.NewToolResultError("max_body_length must be non-negative"), nil
 		}
@@ -781,7 +787,10 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 	if err != nil {
 		return mcplib.NewToolResultError("message_id is required"), nil
 	}
-	partIndex := intParam(req, "part_index", -1)
+	partIndex, err := intParam(req, "part_index", -1)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
 	if partIndex < 0 {
 		return mcplib.NewToolResultError("part_index is required"), nil
 	}
@@ -974,17 +983,19 @@ func stringParam(req mcplib.CallToolRequest, key, fallback string) string {
 	return fallback
 }
 
-func intParam(req mcplib.CallToolRequest, key string, fallback int) int {
+func intParam(req mcplib.CallToolRequest, key string, fallback int) (int, error) {
 	args := req.GetArguments()
-	if v, ok := args[key]; ok {
-		switch n := v.(type) {
-		case float64:
-			return int(n)
-		case int:
-			return n
-		}
+	v, ok := args[key]
+	if !ok {
+		return fallback, nil
 	}
-	return fallback
+	switch n := v.(type) {
+	case float64:
+		return int(n), nil
+	case int:
+		return n, nil
+	}
+	return 0, fmt.Errorf("%s: expected number, got %T", key, v)
 }
 
 func boolParam(req mcplib.CallToolRequest, key string) bool {
