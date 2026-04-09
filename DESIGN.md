@@ -629,3 +629,216 @@ behaviors were NOT directly verified with real subprocesses:
 The mocked tests are sufficient to prove the dispatch logic. The
 empirical behaviors above get verified the first time a developer
 runs `install.sh` on a Linux machine with these backends configured.
+
+## DES-018: list_messages output format — single FROM column, ID as row prefix
+
+**Status:** PROPOSED 2026-04-08. Replaces the post-0he/post-z34 format
+that overflowed the 80-column budget and crushed SUBJECT to a 10-char
+stub. Supersedes the EMAIL column from beadle-0he and the "(via X)"
+relay annotation from beadle-z34.
+
+**Decision:** Render `list_messages` as a 5-column table with a
+3-character right-aligned ID slot in the row prefix position. The
+sender display name and full email address are merged into a single
+FROM column in the form `Name <email>`. The DATE column is compressed
+to date-only (`Apr 08`, 6 chars). The trust glyph stays in its own
+1-char column. The SUBJECT column is variable and absorbs the
+remaining width. The 80-character row budget and the 3-character `▶`
+indentation are both hard constraints; FROM is the elastic column
+that gives way to satisfy them.
+
+**Layout:**
+
+```text
+[ruler: 12345678901234567890123456789012345678901234567890123456789012345678901234567890]
+▶    R  FROM                                   DATE    T  SUBJECT               
+319  ●  Copilot <notifications@github.com>     Apr 08  ?  Re: [punt-labs/beadle…
+320  ●  J Freeman <notifications@github.com>   Apr 08  ?  Re: [punt-labs/beadle…
+322  ●  cursor[bo… <notifications@github.com>  Apr 08  ?  Re: [punt-labs/beadle…
+335  ●  vercel[bo… <notifications@github.com>  Apr 08  ?  Re: [punt-labs/public…
+340  ●  Jim Freeman <jim@punt-labs.com>        Apr 08  ✓  Re: [punt-labs/punt-k…
+  8     Claude Agento <claude@punt-labs.com>   Apr 07  ✓  doctor fix landed     
+  7     Alice Chen <alice@example.com>         Apr 06  ?  lunch thursday?       
+```
+
+**Slot widths and positions** (row width = 80 chars exactly):
+
+| Slot | Char positions | Width | Content |
+|------|---------------|-------|---------|
+| ID | 1–3 | 3 | Right-aligned beadle message ID. Header position 1 contains `▶`; positions 2–3 are blank. |
+| sep | 4–5 | 2 | Standard column separator. |
+| R | 6 | 1 | Read marker: `●` for unread, space for read. |
+| sep | 7–8 | 2 | |
+| FROM | 9–45 | 37 | `Name <email>` form. |
+| sep | 46–47 | 2 | |
+| DATE | 48–53 | 6 | `Apr 08` format. |
+| sep | 54–55 | 2 | |
+| T | 56 | 1 | Trust glyph. |
+| sep | 57–58 | 2 | |
+| SUBJECT | 59–80 | 22 | Variable, takes the remaining budget. |
+
+Total: 3 + 2 + 1 + 2 + 37 + 2 + 6 + 2 + 1 + 2 + 22 = 80.
+
+**FROM column rules:**
+
+1. **Format with display name:** `<displayname> <<email>>` —
+   for example `Copilot <notifications@github.com>`.
+2. **Format without display name:** bare email, no angle brackets —
+   `ops@vendor.example`. The angle bracket form is reserved for the
+   name + email combination.
+3. **Email is never truncated.** Permission enforcement keys on the
+   raw address; the operator must read it in full to make trust
+   decisions.
+4. **Display-name truncation:** when the rendered cell
+   `name + " <" + email + ">"` exceeds 37 chars, the display name is
+   truncated with a trailing ellipsis. The name cap is
+   `37 − len(email) − 3` where 3 covers the space, the opening angle
+   bracket, and the closing angle bracket.
+5. For `notifications@github.com` (24 chars), the wrapped form
+   `<notifications@github.com>` is 26 chars, leaving **10 chars** for
+   the display name after the separating space. `Copilot` (7),
+   `J Freeman` (9), `Jim Freeman` (11→`Jim Freema…`), and `Alice Chen`
+   (10) fit. `cursor[bot]`, `vercel[bot]`, `claude[bot]` (all 11
+   chars) truncate to `cursor[bo…`, `vercel[bo…`, `claude[bo…`,
+   losing the trailing `]`. This is the deliberate trade-off: the
+   `[bot]` suffix is recoverable from context, the email address is
+   not.
+6. For shorter emails (e.g. `claude@punt-labs.com` at 20 chars), the
+   wrapped form is 22 chars, leaving 14 chars for the display name.
+   `Claude Agento` (13) fits without truncation.
+7. **The z34 `(via <domain>)` annotation is removed.** With the full
+   email address visible inside FROM, a row like
+   `J Freeman <notifications@github.com>` already shows the actual
+   sender domain — no annotation is needed to disambiguate. The
+   annotation introduced unnecessary FROM-cell width and is replaced
+   by the email itself.
+
+**ID slot rules:**
+
+1. ID is **not** a column with a header. It is a 3-character
+   right-aligned row prefix. The header row puts `▶` at position 1
+   with positions 2 and 3 blank.
+2. Width grows beyond 3 when message IDs reach 4+ digits. The growth
+   shifts every column right by the extra width and shrinks SUBJECT
+   correspondingly. SUBJECT minWidth is 10; if growth would push
+   SUBJECT below 10 the table widens past `tableWidth`.
+3. Right-alignment puts shorter IDs flush-right in the slot
+   (`"  8"`, `" 42"`, `"319"`).
+
+**DATE format:**
+
+- `Apr 08` — three-letter month, space, zero-padded day. Width = 6.
+- No year. Inboxes are short-lived and the year context is not
+  useful.
+- No time-of-day. List view is day-precision; for finer time the
+  operator opens `read_message`, which still displays the full
+  `Date:` header.
+
+**Trust glyph values (T column):**
+
+| Glyph | Level |
+|-------|-------|
+| `✓` | trusted (Proton↔Proton internal E2E) |
+| `+` | verified (external with valid PGP signature) |
+| `?` | unverified (external, no signature) |
+| `✗` | untrusted (external, invalid PGP signature) |
+
+**Read marker values (R column):**
+
+| Glyph | State |
+|-------|-------|
+| `●` | unread |
+| (space) | read |
+
+**SUBJECT column rules:**
+
+- Variable-width column. Default width 22 with the 80-char row
+  budget. The column takes whatever budget remains after every
+  fixed-width slot.
+- Truncated with a trailing ellipsis when content exceeds the cap.
+  At width 22, `"Re: [punt-labs/beadle] fix(mcp): ..."` renders as
+  `"Re: [punt-labs/beadle…"`. The closing `]` is replaced by the
+  ellipsis; the operator sees the repo name (`beadle`) which is the
+  load-bearing identifier in PR notification subjects.
+
+**Width budget enforcement:**
+
+`tableWidth` in `internal/mcp/table.go` stays at 80. FROM is the
+elastic column: when the math forces a tradeoff, FROM gives way
+before any other column. Concretely, this spec sets FROM = 37 (one
+char narrower than would have been ideal) so that SUBJECT = 22 fits
+within the 80-char budget. The 80-char convention is a hard
+constraint shared with biff and every other beadle table.
+
+**What this spec removes:**
+
+- The EMAIL column added by beadle-0he. Email moves into FROM.
+- The `(via <domain>)` annotation added by beadle-z34. Redundant once
+  the full email address is visible.
+- The 12-character `Apr 08 17:19` DATE format. Replaced by 6-char
+  date-only.
+- The ID column header. ID becomes a row prefix.
+
+**What this spec preserves:**
+
+- The 3-character `▶` indentation marker on header rows and matching
+  3-character indent slot on data rows (occupied by the ID).
+- The 2-character column separator convention.
+- The trust glyph on every row.
+- Every operator-facing field that was visible before 0he/z34.
+
+**Test requirements:**
+
+Every test added for this format must assert against rendered row
+width, not just substring presence. Specifically:
+
+1. A test that asserts every rendered row in `formatMessages` output
+   is exactly `tableWidth` characters wide on representative inputs:
+   short emails, long emails (24+ chars), long names, bot names, no
+   display name, multibyte trust/read glyphs.
+2. A regression test for the 0he+z34 width defect: rendering a
+   message with `J Freeman <notifications@github.com>` produces a row
+   where the bare email substring is fully present in the FROM cell
+   (no truncation of the email).
+3. A test for bare-email senders that asserts the rendered FROM cell
+   is `email@example.com` (no leading angle bracket) and not
+   `<email@example.com>`.
+4. A test for the `Re: [punt-labs/beadle]…` truncation behavior
+   verifying SUBJECT renders the closing `]` before the ellipsis at
+   the spec'd width.
+5. A test for ID growth: when a message ID is 4 digits, the row
+   prefix expands to 4 characters and SUBJECT shrinks by 1.
+
+**Implementation notes:**
+
+- The ID is currently a regular column in `formatMessages` (with
+  minWidth 2, header `"ID"`). Convert it to a row-prefix slot. The
+  table renderer in `internal/mcp/table.go` will need a new
+  `idPrefix` per-row mechanism, or `formatMessages` will need to
+  build its own header/row strings instead of going through
+  `formatTable`.
+- The EMAIL column is removed from the column list. The `splitSender`
+  helper that produces `(name, addr)` is still used internally; the
+  rendering now combines them via a new `formatFromCell` rule that
+  outputs `Name <email>` instead of just `Name`.
+- The `formatFromCell` helper from beadle-z34 (which currently emits
+  the `(via X)` annotation) is replaced with a new helper that emits
+  the `Name <email>` form with name truncation.
+- All beadle-z34 helpers (`isRelay`, `relayDomainLabel`,
+  `isAutomationLocal`, `isBotName`, `tokenize`, `domainLabels`,
+  `splitAddress`) become unused and should be deleted along with
+  their tests.
+- `formatMessages_test.go` and `format_relay_test.go` need rewriting
+  against the new format. The 0he and z34 tests that validated the
+  EMAIL column and the `(via X)` annotation are no longer applicable.
+
+**Open questions:**
+
+1. **ID growth past 3 digits.** beadle's current message IDs are
+   3-digit. When the inbox accumulates past 999 IDs, the prefix grows
+   to 4 and SUBJECT shrinks to 21. The spec is forward-compatible;
+   no mitigation needed today.
+2. **Locale-aware DATE.** `Apr 08` is hardcoded English. If the
+   operator runs in a non-English locale, the month abbreviation
+   should follow Go's `time` package localization. Out of scope for
+   this spec.
