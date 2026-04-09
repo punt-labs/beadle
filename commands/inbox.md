@@ -41,9 +41,11 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 ### No argument
 
 1. Initialize an empty set of **processed message IDs**.
-2. Call `list_messages` with `unread_only: true` and `count: 50`.
+2. Call `list_messages` with `unread_only: true` and `count: 50`. **If unread
+   messages are returned, emit the table immediately** before any processing
+   begins.
 3. If no unread messages, call `list_messages` without `unread_only` to show
-   recent messages (display only, no processing). Emit the table and stop.
+   recent messages and emit that table. Stop — nothing to process.
 4. From the returned batch, identify messages whose IDs are **not** in the
    processed set. If every ID in the batch is already processed, stop — there
    are no new messages to handle.
@@ -60,7 +62,7 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 The argument is a natural language filter. Examples:
 
-- `/inbox check for anything from sam` — filter by sender
+- `/inbox check for anything from the vendor` — filter by sender
 - `/inbox unread` — show only unread
 - `/inbox about the deploy` — filter by subject
 
@@ -75,7 +77,7 @@ to read. Use `find_contact` to look up the sender if needed. If the lookup is
 ambiguous (multiple matches) or fails, treat the sender as `---`. Then process
 each message according to its permission level below.
 
-#### `rwx` — Owner (e.g., Sam Jackson)
+#### `rwx` — Owner (e.g., the repo owner)
 
 - **Read** the message and surface it to the user.
 - **Reply if the message asks a question.** Same reply rules as `rw-` apply.
@@ -124,4 +126,4 @@ refined: surface only if actionable, archive routine notifications silently.
 After processing, emit a one-line summary: how many messages read, archived,
 replied to, and flagged for the owner. Example:
 
-> 8 processed: 6 archived (GitHub), 1 replied (Eric), 1 flagged for owner (Sam)
+> 8 processed: 6 archived (notification senders), 1 replied (trusted contact), 1 flagged for owner
