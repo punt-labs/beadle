@@ -322,6 +322,21 @@ func TestFormatFromCell_LongEmailOverflows(t *testing.T) {
 		"long email deliberately overflows the cell")
 }
 
+func TestFormatMessages_EmptyFrom(t *testing.T) {
+	when := time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC)
+	msgs := []channel.MessageSummary{{
+		ID:         "99",
+		From:       "",
+		Date:       when,
+		Subject:    "hello",
+		TrustLevel: channel.Unverified,
+	}}
+	got := formatMessages(msgs, 1)
+	assert.Contains(t, got, "99", "row should render without panic")
+	assert.Contains(t, got, "hello", "subject should render")
+	assertAllRowsExactWidth(t, got, 80)
+}
+
 func TestFormatDateCell_Zero_BlankCell(t *testing.T) {
 	got := formatDateCell(time.Time{})
 	assert.Equal(t, "      ", got, "zero time must render as 6 spaces")
