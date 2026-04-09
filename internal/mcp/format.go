@@ -17,11 +17,18 @@ func textResult(s string) (*mcplib.CallToolResult, error) {
 	return mcplib.NewToolResultText(s), nil
 }
 
-// maxDisplayNameRunes caps the FROM column so a long display name does
-// not squeeze the SUBJECT column down to its minimum width. The EMAIL
-// column is never truncated — it is the identifier beadle's permission
-// system is keyed on (beadle-0he).
-const maxDisplayNameRunes = 20
+// maxDisplayNameRunes caps the display-name portion of the FROM cell so
+// a long name does not squeeze the SUBJECT column down to its minimum
+// width. The EMAIL column is never truncated — it is the identifier
+// beadle's permission system is keyed on (beadle-0he).
+//
+// maxRelayLabelRunes caps the domain label inside a "(via X)" relay
+// annotation so an unusually long primary label cannot blow the FROM
+// cell out by itself (beadle-z34).
+const (
+	maxDisplayNameRunes = 20
+	maxRelayLabelRunes  = 12
+)
 
 // formatMessages formats a list of message summaries as a table.
 // total is the total number of messages matching the query criteria.
@@ -53,7 +60,7 @@ func formatMessages(msgs []channel.MessageSummary, total int) string {
 		rows[i] = []string{
 			marker,
 			m.ID,
-			truncateRunes(name, maxDisplayNameRunes),
+			formatFromCell(name, addr),
 			addr,
 			m.Date.Format("Jan 02 15:04"),
 			trustIcon(m.TrustLevel),
@@ -79,6 +86,181 @@ func splitSender(from string) (name, addr string) {
 		name = ""
 	}
 	return name, addr
+}
+
+// formatFromCell returns the text rendered in the FROM column. For an
+// ordinary sender whose display name corresponds to the email address
+// identity, the cell is just the truncated name. When the display name
+// does not correspond to the email identity — the notification-relay
+// and display-name-spoof cases — the cell is annotated as
+// "<name> (via <domain>)" so a skimming reader cannot misattribute the
+// message to the named person (beadle-z34).
+func formatFromCell(name, addr string) string {
+	short := truncateRunes(name, maxDisplayNameRunes)
+	if name == "" || addr == "" {
+		return short
+	}
+	if !isRelay(name, addr) {
+		return short
+	}
+	label := relayDomainLabel(addr)
+	if label == "" {
+		return short
+	}
+	return short + " (via " + label + ")"
+}
+
+// isRelay reports whether the display name identity fails to correspond
+// to the email address. The check is deliberately conservative: a name
+// is considered to correspond to the address when any alphabetic name
+// token of length >= 2 shares a prefix with any local-part token or
+// domain label. This keeps "Alice Chen <alice@example.com>",
+// "jim <jim@example.com>", and "Jim Freeman <jim@punt-labs.com>" out of
+// the relay bucket, while catching "J Freeman <notifications@github.com>"
+// and display-name spoofs.
+//
+// A small set of automation local-parts ("noreply", "notifications",
+// "alerts", ...) and the "[bot]" / "-bot" suffix are always treated as
+// relays even when token overlap would otherwise match, because their
+// purpose is to carry other parties' identities.
+func isRelay(name, addr string) bool {
+	if name == "" {
+		return false
+	}
+	local, domain := splitAddress(addr)
+	if local == "" || domain == "" {
+		return false
+	}
+	if isAutomationLocal(local) || isBotName(name) {
+		return true
+	}
+	nameTokens := tokenize(name)
+	if len(nameTokens) == 0 {
+		return false
+	}
+	addrTokens := append(tokenize(local), domainLabels(domain)...)
+	for _, nt := range nameTokens {
+		if len(nt) < 2 {
+			continue
+		}
+		for _, at := range addrTokens {
+			if len(at) < 2 {
+				continue
+			}
+			if strings.HasPrefix(nt, at) || strings.HasPrefix(at, nt) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// relayDomainLabel returns the primary label of addr's domain, capped
+// at maxRelayLabelRunes. For "notifications@github.com" this is
+// "github"; for "bot@ci.vercel.app" this is "vercel". Returns "" when
+// the domain cannot be parsed.
+func relayDomainLabel(addr string) string {
+	_, domain := splitAddress(addr)
+	labels := domainLabels(domain)
+	if len(labels) == 0 {
+		return ""
+	}
+	// For 2-label domains ("github.com") use the first label.
+	// For 3+-label domains ("ci.vercel.app") use the second-to-last
+	// label — the registrable name, not the subdomain or TLD.
+	var label string
+	switch {
+	case len(labels) >= 2:
+		label = labels[len(labels)-2]
+	default:
+		label = labels[0]
+	}
+	return truncateRunes(label, maxRelayLabelRunes)
+}
+
+// splitAddress returns the local-part and domain of an email address.
+// Both parts are lowercased. Empty strings are returned on malformed
+// input.
+func splitAddress(addr string) (local, domain string) {
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	at := strings.LastIndex(addr, "@")
+	if at <= 0 || at == len(addr)-1 {
+		return "", ""
+	}
+	return addr[:at], addr[at+1:]
+}
+
+// domainLabels returns the lowercased dot-separated labels of a domain,
+// with empty labels dropped.
+func domainLabels(domain string) []string {
+	parts := strings.Split(domain, ".")
+	out := parts[:0]
+	for _, p := range parts {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// tokenize splits s into lowercased alphabetic tokens. Digits and
+// punctuation act as separators. Single-character tokens are kept —
+// the caller decides whether to use them.
+func tokenize(s string) []string {
+	s = strings.ToLower(s)
+	var out []string
+	var cur strings.Builder
+	flush := func() {
+		if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, r := range s {
+		if r >= 'a' && r <= 'z' {
+			cur.WriteRune(r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return out
+}
+
+// isAutomationLocal reports whether local is one of the well-known
+// automation local-parts that carry other parties' identities. The set
+// is narrow and explicit: every entry is a local-part string (not a
+// prefix match) that we have observed on real notification traffic or
+// that RFC 2142 / common practice reserves for non-human senders.
+func isAutomationLocal(local string) bool {
+	switch local {
+	case "noreply", "no-reply", "donotreply", "do-not-reply",
+		"notifications", "notification",
+		"alerts", "alert",
+		"updates", "update",
+		"mailer-daemon", "postmaster":
+		return true
+	}
+	// "*-bot" and "*[bot]" suffixes on the local-part itself.
+	if strings.HasSuffix(local, "-bot") || strings.HasSuffix(local, "[bot]") {
+		return true
+	}
+	return false
+}
+
+// isBotName reports whether the display name itself carries a "[bot]"
+// marker or "bot" suffix. GitHub, Dependabot, Renovate, and similar
+// automation consistently tag their display names this way.
+func isBotName(name string) bool {
+	n := strings.ToLower(name)
+	if strings.Contains(n, "[bot]") {
+		return true
+	}
+	if strings.HasSuffix(n, " bot") || strings.HasSuffix(n, "-bot") {
+		return true
+	}
+	return false
 }
 
 // formatMessage formats a full message for display.
