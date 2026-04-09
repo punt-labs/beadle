@@ -341,7 +341,7 @@ func TestHandler_SwitchIdentity_Valid(t *testing.T) {
 		"handle": "sam",
 	})
 	assert.False(t, r.IsError, "switch failed: %s", r.text())
-	assert.Contains(t, r.text(), "sam")
+	assert.Contains(t, r.text(), "switched to sam")
 	assert.Contains(t, r.text(), "sam@test.com")
 
 	// Verify whoami reflects the switch.
