@@ -130,9 +130,13 @@
       "Bash(socat:*)",
       "Edit(.env)",
       "Write(.env)",
+      "Read(.env)",
       "Edit(.envrc)",
       "Write(.envrc)",
-      "Bash(direnv allow:*)"
+      "Read(.envrc)",
+      "Bash(direnv allow:*)",
+      "Bash(cat .env:*)",
+      "Bash(cat .envrc:*)"
     ]
   }
 }
