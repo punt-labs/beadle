@@ -154,6 +154,14 @@ func TestHandler_ListMessages_CountWrongType(t *testing.T) {
 	assert.Contains(t, r.text(), "count", "error message should name the parameter")
 }
 
+func TestHandler_ListMessages_CountFractional(t *testing.T) {
+	s, _, _ := setupHandler(t)
+	// A fractional count must be rejected before dialing IMAP.
+	r := callTool(t, s, "list_messages", map[string]any{"count": float64(10.5)})
+	assert.True(t, r.IsError, "fractional count must produce an error result")
+	assert.Contains(t, r.text(), "count", "error message should name the parameter")
+}
+
 func TestHandler_ReadMessage_Permitted(t *testing.T) {
 	s, env, fix := setupHandler(t)
 	env.AddContact("Alice", "alice@test.com", "r--")

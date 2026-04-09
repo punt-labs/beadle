@@ -459,6 +459,14 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
 	}
 
+	maxBody, err := intParam(req, "max_body_length", 0)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	if maxBody < 0 {
+		return mcplib.NewToolResultError("max_body_length must be non-negative"), nil
+	}
+
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		msg, err := c.FetchMessage(folder, uint32(uid))
 		if err != nil {
@@ -494,18 +502,6 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 			}
 		}
 
-		if v, ok := req.GetArguments()["max_body_length"]; ok {
-			if f, ok := v.(float64); ok && f != float64(int(f)) {
-				return mcplib.NewToolResultError(fmt.Sprintf("max_body_length must be a whole number, got %g", f)), nil
-			}
-		}
-		maxBody, err := intParam(req, "max_body_length", 0)
-		if err != nil {
-			return mcplib.NewToolResultError(err.Error()), nil
-		}
-		if maxBody < 0 {
-			return mcplib.NewToolResultError("max_body_length must be non-negative"), nil
-		}
 		if maxBody > 0 {
 			runes := []rune(msg.Body)
 			if len(runes) > maxBody {
@@ -991,6 +987,9 @@ func intParam(req mcplib.CallToolRequest, key string, fallback int) (int, error)
 	}
 	switch n := v.(type) {
 	case float64:
+		if n != float64(int(n)) {
+			return 0, fmt.Errorf("%s: expected a whole number, got %g", key, n)
+		}
 		return int(n), nil
 	case int:
 		return n, nil
