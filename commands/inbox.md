@@ -41,9 +41,9 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 ### No argument
 
 1. Initialize an empty set of **processed message IDs**.
-2. Call `list_messages` with `unread_only: true` and `count: 50`. **Emit the
-   returned table immediately** — always show it to the user before any
-   processing begins.
+2. Call `list_messages` with `unread_only: true` and `count: 50`. **If unread
+   messages are returned, emit the table immediately** before any processing
+   begins.
 3. If no unread messages, call `list_messages` without `unread_only` to show
    recent messages and emit that table. Stop — nothing to process.
 4. From the returned batch, identify messages whose IDs are **not** in the
@@ -62,7 +62,7 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 The argument is a natural language filter. Examples:
 
-- `/inbox check for anything from alice` — filter by sender
+- `/inbox check for anything from the vendor` — filter by sender
 - `/inbox unread` — show only unread
 - `/inbox about the deploy` — filter by subject
 
