@@ -943,7 +943,7 @@ format unchanged.
 **Status:** PROPOSED (beadle-72e)
 
 **Decision:** Beadle rejects any GPG key as a signing key if it has no
-expiration date. `checkKeyExpiry` runs before every signing operation and
+expiration date. `CheckKeyExpiry` runs before every signing operation and
 returns an error if the key is non-expiring. The signing path fails fast;
 no partial signing occurs.
 
@@ -1009,7 +1009,7 @@ key has fewer than 30 days remaining.
 
    ```bash
    gpg --list-keys --with-colons claude@punt-labs.com
-   # pub field 7 must be a non-zero Unix timestamp
+   # pub field 7 (1-indexed) / field 6 (0-indexed) must be a non-zero Unix timestamp
    ```
 
 3. **Export the public key** and distribute to correspondents who

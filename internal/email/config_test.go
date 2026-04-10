@@ -258,3 +258,23 @@ func TestSMTPPassword_TestPasswordOverride(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "test-secret", pw)
 }
+
+func TestSMTPEffectiveHost_FallsBackToIMAPHost(t *testing.T) {
+	cfg := &Config{IMAPHost: "bridge.example.com"}
+	assert.Equal(t, "bridge.example.com", cfg.SMTPEffectiveHost())
+}
+
+func TestSMTPEffectiveHost_UsesExplicitSMTPHost(t *testing.T) {
+	cfg := &Config{IMAPHost: "imap.example.com", SMTPHost: "smtp.example.com"}
+	assert.Equal(t, "smtp.example.com", cfg.SMTPEffectiveHost())
+}
+
+func TestSMTPEffectiveUser_FallsBackToIMAPUser(t *testing.T) {
+	cfg := &Config{IMAPUser: "user@example.com"}
+	assert.Equal(t, "user@example.com", cfg.SMTPEffectiveUser())
+}
+
+func TestSMTPEffectiveUser_UsesExplicitSMTPUser(t *testing.T) {
+	cfg := &Config{IMAPUser: "imap@example.com", SMTPUser: "smtp@example.com"}
+	assert.Equal(t, "smtp@example.com", cfg.SMTPEffectiveUser())
+}

@@ -123,6 +123,24 @@ func (c *Config) GPGPassphrase() (string, error) {
 	return secret.Get(CredGPGPassphrase)
 }
 
+// SMTPEffectiveHost returns SMTPHost if set, falling back to IMAPHost.
+// Callers that build Config directly without LoadConfig should use this
+// instead of SMTPHost to ensure the IMAP fallback is honored.
+func (c *Config) SMTPEffectiveHost() string {
+	if c.SMTPHost != "" {
+		return c.SMTPHost
+	}
+	return c.IMAPHost
+}
+
+// SMTPEffectiveUser returns SMTPUser if set, falling back to IMAPUser.
+func (c *Config) SMTPEffectiveUser() string {
+	if c.SMTPUser != "" {
+		return c.SMTPUser
+	}
+	return c.IMAPUser
+}
+
 // validPollIntervals enumerates allowed poll_interval values.
 var validPollIntervals = map[string]time.Duration{
 	"5m":  5 * time.Minute,

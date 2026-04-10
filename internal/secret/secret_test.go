@@ -43,10 +43,12 @@ func TestGet_BadPermissionsFile_NotErrNotFound(t *testing.T) {
 
 	cfgDir := filepath.Join(dir, ".punt-labs", "beadle", "secrets")
 	require.NoError(t, os.MkdirAll(cfgDir, 0700))
-	credPath := filepath.Join(cfgDir, "smtp-password")
+	// Use a name that cannot exist in any real OS keychain.
+	const credName = "__test_bad_perms_beadle__"
+	credPath := filepath.Join(cfgDir, credName)
 	require.NoError(t, os.WriteFile(credPath, []byte("s3cret\n"), 0644))
 
-	_, err := Get("smtp-password")
+	_, err := Get(credName)
 	require.Error(t, err)
 	// Must NOT be ErrNotFound — the file exists but has bad permissions.
 	assert.False(t, errors.Is(err, ErrNotFound), "bad-permissions error should not wrap ErrNotFound")

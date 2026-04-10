@@ -17,6 +17,7 @@ func CheckKeyExpiry(gpgBinary, keyID string) error {
 	cmd := exec.Command(gpgBinary,
 		"--batch", "--no-tty",
 		"--list-keys", "--with-colons",
+		"--",
 		keyID,
 	)
 	var stdout, stderr bytes.Buffer
