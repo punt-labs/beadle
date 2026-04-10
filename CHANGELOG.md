@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `smtp_host` and `smtp_user` config fields in `email.json`. When omitted,
+  both default to the corresponding IMAP values, preserving backward
+  compatibility with existing configs. Allows IMAP and SMTP to be served
+  by different hosts (required for standard IMAP/SMTP deployments without
+  Proton Bridge). beadle-0ut.
+- `SMTPPassword()` credential method. Resolves the `smtp-password` secret
+  first; falls back to `IMAPPassword()` when absent, so single-password
+  setups require no config change. beadle-0ut.
+- GPG key expiry enforcement: `CheckKeyExpiry` validates that a signing key
+  has a non-zero expiration date before any sign operation proceeds. Keys
+  without an expiry date are rejected with an error. beadle-72e.
+
+### Fixed
+
+- `smtp.go` was using `cfg.IMAPHost` and `cfg.IMAPUser` for all SMTP
+  connections. Now uses `cfg.SMTPHost`, `cfg.SMTPUser`, and
+  `cfg.SMTPPassword()`. beadle-0ut.
+- `secret.Get` previously swallowed credential file permission errors
+  (e.g., wrong mode on `~/.punt-labs/beadle/secrets/smtp-password`) by
+  silently falling through to the next backend. Permission errors are now
+  returned directly with a diagnostic message. A new `secret.ErrNotFound`
+  sentinel distinguishes "credential absent" from "credential inaccessible".
+  beadle-0ut.
+
 ## [0.11.2] - 2026-04-10
 
 ### Fixed

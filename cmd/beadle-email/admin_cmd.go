@@ -163,9 +163,9 @@ var doctorCmd = &cobra.Command{
 			}
 
 			if email.SMTPAvailable(cfg) {
-				checks = append(checks, check{"smtp", "OK", fmt.Sprintf("%s:%d", cfg.IMAPHost, cfg.SMTPPort)})
+				checks = append(checks, check{"smtp", "OK", fmt.Sprintf("%s:%d", cfg.SMTPEffectiveHost(), cfg.SMTPPort)})
 			} else {
-				checks = append(checks, check{"smtp", "WARN", fmt.Sprintf("Proton Bridge SMTP not reachable at %s:%d — will use Resend fallback", cfg.IMAPHost, cfg.SMTPPort)})
+				checks = append(checks, check{"smtp", "WARN", fmt.Sprintf("Proton Bridge SMTP not reachable at %s:%d — will use Resend fallback", cfg.SMTPEffectiveHost(), cfg.SMTPPort)})
 			}
 		}
 
@@ -264,6 +264,8 @@ var statusCmd = &cobra.Command{
 			"imap_host":      cfg.IMAPHost,
 			"imap_port":      fmt.Sprintf("%d", cfg.IMAPPort),
 			"imap_user":      cfg.IMAPUser,
+			"smtp_host":      cfg.SMTPEffectiveHost(),
+			"smtp_user":      cfg.SMTPEffectiveUser(),
 			"smtp_port":      fmt.Sprintf("%d", cfg.SMTPPort),
 			"from_address":   cfg.FromAddress,
 			"gpg_binary":     cfg.GPGBinary,

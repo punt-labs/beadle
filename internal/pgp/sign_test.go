@@ -28,7 +28,7 @@ Key-Length: 2048
 Name-Real: Sign Test
 Name-Email: signtest@example.com
 Passphrase: ` + passphrase + `
-Expire-Date: 0
+Expire-Date: 1y
 %commit
 `
 	cmd := exec.Command(gpgBin, append(base, "--gen-key")...)
@@ -73,7 +73,7 @@ Key-Type: RSA
 Key-Length: 2048
 Name-Real: No Pass
 Name-Email: nopass@example.com
-Expire-Date: 0
+Expire-Date: 1y
 %commit
 `
 	cmd := exec.Command(gpgBin, append(base, "--gen-key")...)
@@ -102,6 +102,37 @@ func TestRandomBoundary(t *testing.T) {
 	}
 }
 
+func TestSign_NonExpiringKeyRejected(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+
+	home := shortGPGHome(t)
+	base := []string{"--homedir", home, "--batch", "--no-tty"}
+
+	// Generate a key with no expiry — CheckKeyExpiry should block Sign().
+	genScript := `%no-protection
+Key-Type: RSA
+Key-Length: 2048
+Name-Real: No Expiry
+Name-Email: noexpiry@example.com
+Expire-Date: 0
+%commit
+`
+	cmd := exec.Command(gpgBin, append(base, "--gen-key")...)
+	cmd.Stdin = bytes.NewBufferString(genScript)
+	cmd.Stderr = os.Stderr
+	require.NoError(t, cmd.Run())
+
+	t.Setenv("GNUPGHOME", home)
+
+	_, err = Sign(gpgBin, "noexpiry@example.com", "",
+		"to@example.com", "Subject", "Body")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "signing key rejected")
+}
+
 func TestDetachSign_TempFileCleanup(t *testing.T) {
 	gpgBin, err := exec.LookPath("gpg")
 	if err != nil {
@@ -114,12 +145,13 @@ func TestDetachSign_TempFileCleanup(t *testing.T) {
 	t.Setenv("GNUPGHOME", home)
 
 	// Count temp files before
-	before, _ := filepath.Glob("/tmp/beadle-pp-*")
+	pattern := filepath.Join(os.TempDir(), "beadle-pp-*")
+	before, _ := filepath.Glob(pattern)
 
 	_, err = detachSign(gpgBin, "cleanup@example.com", "", []byte("test data"))
 	require.NoError(t, err)
 
 	// Count temp files after — should not have leaked
-	after, _ := filepath.Glob("/tmp/beadle-pp-*")
+	after, _ := filepath.Glob(pattern)
 	assert.Equal(t, len(before), len(after), "passphrase temp file leaked")
 }

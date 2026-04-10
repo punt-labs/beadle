@@ -14,6 +14,7 @@
 package secret
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +22,9 @@ import (
 
 	"github.com/punt-labs/beadle/internal/paths"
 )
+
+// ErrNotFound is returned when a credential is absent from all backends.
+var ErrNotFound = errors.New("credential not found")
 
 // Get resolves a named credential through the priority chain.
 // Name must not contain path separators to prevent path traversal.
@@ -33,9 +37,14 @@ func Get(name string) (string, error) {
 		return val, nil
 	}
 
-	// 2. Secret file
-	if val, err := fileGet(name); err == nil && val != "" {
+	// 2. Secret file — propagate errors other than "not present"
+	val, fileErr := fileGet(name)
+	if fileErr == nil && val != "" {
 		return val, nil
+	}
+	if fileErr != nil && !errors.Is(fileErr, os.ErrNotExist) {
+		// File exists but is inaccessible (permissions, I/O, etc.) — do not fall through.
+		return "", fmt.Errorf("read credential %q: %w", name, fileErr)
 	}
 
 	// 3. Environment variable
@@ -44,7 +53,8 @@ func Get(name string) (string, error) {
 		return val, nil
 	}
 
-	return "", fmt.Errorf("credential %q not found (checked: keychain, file, env %s)", name, envKey)
+	return "", fmt.Errorf("credential %q not found (checked: keychain, file, env %s): %w",
+		name, envKey, ErrNotFound)
 }
 
 // Available reports which credential backends are available on this
