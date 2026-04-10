@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-04-10
+
 ### Fixed
 
 - `/inbox` now emits the `list_messages` table before processing unread
