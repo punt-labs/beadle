@@ -1,5 +1,5 @@
 [team]
-members = ["jmf-pobox", "github-actions"]
+members = ["jmf-pobox", "github-actions", "claude-puntlabs"]
 
 [relay]
 url = "tls://connect.ngs.global"
