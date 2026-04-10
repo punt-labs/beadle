@@ -179,6 +179,59 @@ func TestSaveConfig_NewFile(t *testing.T) {
 	assert.Len(t, m, 1, "new file should contain only the poll_interval field")
 }
 
+func TestLoadConfig_SMTPDefaults(t *testing.T) {
+	tests := []struct {
+		name         string
+		json         string
+		wantSMTPHost string
+		wantSMTPUser string
+	}{
+		{
+			name: "defaults to IMAP values when smtp fields absent",
+			json: `{"imap_host":"bridge.example.com","imap_user":"user@example.com","from_address":"user@example.com"}`,
+			wantSMTPHost: "bridge.example.com",
+			wantSMTPUser: "user@example.com",
+		},
+		{
+			name: "explicit smtp_host overrides imap_host default",
+			json: `{"imap_host":"imap.example.com","smtp_host":"smtp.example.com","imap_user":"user@example.com","from_address":"user@example.com"}`,
+			wantSMTPHost: "smtp.example.com",
+			wantSMTPUser: "user@example.com",
+		},
+		{
+			name: "explicit smtp_user overrides imap_user default",
+			json: `{"imap_host":"bridge.example.com","imap_user":"imap@example.com","smtp_user":"smtp@example.com","from_address":"user@example.com"}`,
+			wantSMTPHost: "bridge.example.com",
+			wantSMTPUser: "smtp@example.com",
+		},
+		{
+			name: "both smtp fields explicit",
+			json: `{"imap_host":"imap.example.com","imap_user":"imap@example.com","smtp_host":"smtp.example.com","smtp_user":"smtp@example.com","from_address":"user@example.com"}`,
+			wantSMTPHost: "smtp.example.com",
+			wantSMTPUser: "smtp@example.com",
+		},
+		{
+			name: "imap_host absent uses 127.0.0.1 default for smtp too",
+			json: `{"imap_user":"user@example.com","from_address":"user@example.com"}`,
+			wantSMTPHost: "127.0.0.1",
+			wantSMTPUser: "user@example.com",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "email.json")
+			require.NoError(t, os.WriteFile(cfgPath, []byte(tt.json), 0644))
+
+			cfg, err := LoadConfig(cfgPath)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.wantSMTPHost, cfg.SMTPHost)
+			assert.Equal(t, tt.wantSMTPUser, cfg.SMTPUser)
+		})
+	}
+}
+
 func TestCredentialMethods_Exist(t *testing.T) {
 	// Verify the credential methods exist and return either a value or a
 	// meaningful error. We don't assert specific values because the
@@ -186,6 +239,7 @@ func TestCredentialMethods_Exist(t *testing.T) {
 	cfg := &Config{}
 
 	_, imapErr := cfg.IMAPPassword()
+	_, smtpErr := cfg.SMTPPassword()
 	_, resendErr := cfg.ResendAPIKey()
 	_, gpgErr := cfg.GPGPassphrase()
 
@@ -193,6 +247,14 @@ func TestCredentialMethods_Exist(t *testing.T) {
 	// "credential not found" errors. Either outcome is correct —
 	// the methods are wired up and don't panic.
 	_ = imapErr
+	_ = smtpErr
 	_ = resendErr
 	_ = gpgErr
+}
+
+func TestSMTPPassword_TestPasswordOverride(t *testing.T) {
+	cfg := &Config{TestPassword: "test-secret"}
+	pw, err := cfg.SMTPPassword()
+	require.NoError(t, err)
+	assert.Equal(t, "test-secret", pw)
 }

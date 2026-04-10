@@ -15,9 +15,9 @@ import (
 // The same credentials used for IMAP work for SMTP.
 // Recipients includes all envelope recipients (to + cc + bcc).
 func SMTPSend(cfg *Config, from string, recipients []string, raw []byte) error {
-	addr := net.JoinHostPort(cfg.IMAPHost, strconv.Itoa(cfg.SMTPPort))
+	addr := net.JoinHostPort(cfg.SMTPHost, strconv.Itoa(cfg.SMTPPort))
 
-	password, err := cfg.IMAPPassword()
+	password, err := cfg.SMTPPassword()
 	if err != nil {
 		return fmt.Errorf("read smtp password: %w", err)
 	}
@@ -27,7 +27,7 @@ func SMTPSend(cfg *Config, from string, recipients []string, raw []byte) error {
 		return fmt.Errorf("dial smtp %s: %w", addr, err)
 	}
 
-	c, err := smtp.NewClient(conn, cfg.IMAPHost)
+	c, err := smtp.NewClient(conn, cfg.SMTPHost)
 	if err != nil {
 		conn.Close()
 		return fmt.Errorf("smtp client %s: %w", addr, err)
@@ -35,12 +35,12 @@ func SMTPSend(cfg *Config, from string, recipients []string, raw []byte) error {
 	defer c.Close()
 
 	if err := c.StartTLS(&tls.Config{
-		InsecureSkipVerify: isLoopback(cfg.IMAPHost), //nolint:gosec // Proton Bridge uses self-signed certs on localhost
+		InsecureSkipVerify: isLoopback(cfg.SMTPHost), //nolint:gosec // Proton Bridge uses self-signed certs on localhost
 	}); err != nil {
 		return fmt.Errorf("smtp starttls: %w", err)
 	}
 
-	auth := smtp.PlainAuth("", cfg.IMAPUser, password, cfg.IMAPHost)
+	auth := smtp.PlainAuth("", cfg.SMTPUser, password, cfg.SMTPHost)
 	if err := c.Auth(auth); err != nil {
 		return fmt.Errorf("smtp auth: %w", err)
 	}
@@ -73,7 +73,7 @@ func SMTPSend(cfg *Config, from string, recipients []string, raw []byte) error {
 
 // SMTPAvailable checks if Proton Bridge SMTP is reachable.
 func SMTPAvailable(cfg *Config) bool {
-	addr := net.JoinHostPort(cfg.IMAPHost, strconv.Itoa(cfg.SMTPPort))
+	addr := net.JoinHostPort(cfg.SMTPHost, strconv.Itoa(cfg.SMTPPort))
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		return false

@@ -15,6 +15,7 @@ import (
 // Credential names used with the secret resolver.
 const (
 	CredIMAPPassword  = "imap-password"
+	CredSMTPPassword  = "smtp-password"
 	CredResendAPIKey  = "resend-api-key"
 	CredGPGPassphrase = "gpg-passphrase"
 )
@@ -26,7 +27,9 @@ type Config struct {
 	IMAPHost    string `json:"imap_host"`
 	IMAPPort    int    `json:"imap_port"`
 	IMAPUser    string `json:"imap_user"`
+	SMTPHost    string `json:"smtp_host"`
 	SMTPPort    int    `json:"smtp_port"`
+	SMTPUser    string `json:"smtp_user"`
 	FromAddress string `json:"from_address"`
 	GPGBinary    string `json:"gpg_binary"`
 	GPGSigner    string `json:"gpg_signer"`
@@ -62,8 +65,14 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.IMAPPort == 0 {
 		cfg.IMAPPort = 1143
 	}
+	if cfg.SMTPHost == "" {
+		cfg.SMTPHost = cfg.IMAPHost
+	}
 	if cfg.SMTPPort == 0 {
 		cfg.SMTPPort = 1025
+	}
+	if cfg.SMTPUser == "" {
+		cfg.SMTPUser = cfg.IMAPUser
 	}
 	if cfg.GPGBinary == "" {
 		cfg.GPGBinary = "gpg"
@@ -83,6 +92,25 @@ func (c *Config) IMAPPassword() (string, error) {
 		return c.TestPassword, nil
 	}
 	return secret.Get(CredIMAPPassword)
+}
+
+// SMTPPassword resolves the SMTP password. It first tries the "smtp-password"
+// credential; if not found, falls back to IMAPPassword. If TestPassword is set
+// (for integration tests), it is returned directly.
+// Non-ErrNotFound errors (e.g. bad permissions) are returned immediately
+// rather than silently falling through to the IMAP password.
+func (c *Config) SMTPPassword() (string, error) {
+	if c.TestPassword != "" {
+		return c.TestPassword, nil
+	}
+	pw, err := secret.Get(CredSMTPPassword)
+	if err == nil {
+		return pw, nil
+	}
+	if errors.Is(err, secret.ErrNotFound) {
+		return c.IMAPPassword()
+	}
+	return "", fmt.Errorf("read smtp-password: %w", err)
 }
 
 // ResendAPIKey resolves the Resend API key via the secret store.
