@@ -57,7 +57,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 
 ## Features
 
-- **15 MCP tools** --- list, read, send, move/archive, download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts), whoami, `switch_identity`
+- **17 MCP tools** --- list, read, send, move/archive, download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts), whoami, `switch_identity`, inbox polling (set interval, get status)
 - **Multi-identity via ethos** --- identity resolved per-request from ethos sidecar. Repo-local config pins identity. Mid-session switching via `switch_identity` tool. Fallback to `default-identity` file
 - **Two-dimensional trust** --- transport trust (trusted/verified/untrusted/unverified) + identity permissions (rwx per contact per identity). Both must pass before autonomous action
 - **Four-level transport trust** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
@@ -85,7 +85,10 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 | `find_contact` | Look up a contact by name, email, or alias. Shows effective permissions. |
 | `add_contact` | Add a contact (name, email, aliases, GPG key ID, permissions). |
 | `remove_contact` | Remove a contact by name. |
+| `whoami` | Return the active identity (email, display name, ethos handle). |
 | `switch_identity` | Switch the active identity for this session. Pass an ethos handle or empty to reset. |
+| `set_poll_interval` | Set automatic inbox polling interval (5m, 10m, 15m, 30m, 1h, 2h) or disable (`n`). |
+| `get_poll_status` | Return current polling configuration: interval, active state, last check time, unseen count. |
 
 ## Commands
 
@@ -99,7 +102,7 @@ Available when installed as a Claude Code plugin.
 | `/inbox status` | Show current polling configuration. |
 | `/mail` | Mail something to the owner or a specific recipient. |
 | `/send` | Send via any channel (email today, Signal later). |
-| `/contacts` | Manage address book (list, add, remove, find). |
+| `/contacts` | Manage address book (list, add with permissions, remove, find). |
 
 ## Setup
 
