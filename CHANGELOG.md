@@ -8,11 +8,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `/inbox` now emits the `list_messages` table before processing unread
+  messages. Previously the table was only shown in the no-unread fallback,
+  making `/inbox` appear to silently skip the listing.
 - `install.sh` no longer silently swallows plugin uninstall failures. On a
   fresh machine (plugin not installed) uninstall is skipped entirely. On an
   upgrade, if `claude plugin uninstall` exits non-zero the script now prints an
   actionable error to stderr and exits 1 rather than continuing and leaving the
   user on the old version. beadle-2nk.
+- `intParam` now returns an error when the argument is present but has the
+  wrong type (e.g. string instead of number). Previously it silently returned
+  the fallback value. Affects `count`, `max_body_length`, and `part_index`.
+  beadle-1l3.
+- `intParam` rejects fractional `float64` values (e.g. `count: 10.5`) instead
+  of silently truncating to `10`.
+- `max_body_length` validation in `readMessage` moved before `withClient` so
+  type and range errors fail fast without an IMAP round-trip.
+
+### Changed
+
+- `/inbox` skill removed hardcoded personal names from examples; all behavior
+  is permission-driven via `find_contact`/`check_trust`.
+- `/contacts add` flow now prompts for permissions (was silently omitted).
+  Hint text updated to `[list | add <name> <email> [permissions] | ...]`.
+- README: MCP tool count corrected from 15 to 17; added `whoami`,
+  `set_poll_interval`, `get_poll_status` to the tools table.
+- `.biff` team members now includes `claude-puntlabs` for inter-agent
+  routing.
+
+### Added
+
+- `TestFormatMessages_EmptyFrom` — pins the empty-From rendering path with
+  an 80-rune width assertion. beadle-2x8.
 
 ## [0.11.0] - 2026-04-09
 
