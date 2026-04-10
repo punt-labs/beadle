@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `/inbox <interval>` now creates a CronCreate loop job in addition to setting
+  the MCP server poll interval. Previously, the MCP poller ran but only sent
+  `tools/list_changed` notifications — nothing autonomously invoked `/inbox`,
+  so mail was never processed unless the user was interactive. beadle-by4.
+- `/inbox n` now deletes the CronCreate loop job when polling is disabled.
+- Session-start: `/inbox` with no argument now checks `get_poll_status` and
+  recreates the CronCreate job if polling is active but no loop job exists,
+  restoring autonomous operation after a Claude Code restart.
+
 ## [0.11.1] - 2026-04-10
 
 ### Fixed
