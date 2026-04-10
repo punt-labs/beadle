@@ -25,7 +25,8 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### Polling interval (`5m`, `10m`, `15m`, `30m`, `1h`, `2h`)
 
-1. Call `set_poll_interval` with the interval value.
+1. Call `set_poll_interval` with the interval value. If it returns an error, report the error and
+   stop — do not touch the cron job.
 2. Delete any existing `/inbox` auto-poll cron job (see "Managing the cron job" below).
 3. Create a new CronCreate job with `description: "/inbox auto-poll"`, `recurring: true`, the cron
    expression for the interval, and `prompt: "/inbox"`. Cron expressions: `5m` → `*/5 * * * *`,
@@ -35,7 +36,8 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### Disable polling (`n`)
 
-1. Call `set_poll_interval` with `interval: "n"`.
+1. Call `set_poll_interval` with `interval: "n"`. If it returns an error, report the error and
+   stop — do not touch the cron job.
 2. Delete any existing `/inbox` auto-poll cron job (see "Managing the cron job" below).
 3. Confirm with the `set_poll_interval` response text.
 
@@ -51,9 +53,11 @@ To delete an existing auto-poll cron job: call `CronList`, find any job with des
 
 ### No argument
 
-Before running the normal flow, call `get_poll_status`. If `Active: true` and no CronList job with
-description `/inbox auto-poll` exists, recreate the cron job using the interval from `get_poll_status`
-and the cron expression table above. This restores the autonomous loop after a session restart.
+Before running the normal flow, call `get_poll_status`. If polling is configured (that is, the
+returned interval is not `n` / not `disabled`) and no CronList job with description `/inbox auto-poll`
+exists, recreate the cron job using the interval from `get_poll_status` and the cron expression table
+above. Only skip cron recreation when polling is explicitly disabled. This restores the autonomous loop
+after a session restart, including cases where polling is configured but `Active` is currently false.
 
 1. Initialize an empty set of **processed message IDs**.
 2. Call `list_messages` with `unread_only: true` and `count: 50`. **If unread

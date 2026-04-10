@@ -128,8 +128,10 @@
       "Bash(ncat:*)",
       "Bash(telnet:*)",
       "Bash(socat:*)",
+      "Read(.env)",
       "Edit(.env)",
       "Write(.env)",
+      "Read(.envrc)",
       "Edit(.envrc)",
       "Write(.envrc)",
       "Bash(direnv allow:*)"
