@@ -34,7 +34,7 @@ Key-Type: RSA
 Key-Length: 2048
 Name-Real: %s
 Name-Email: %s
-Expire-Date: 0
+Expire-Date: 1y
 %%commit
 `, name, email)
 

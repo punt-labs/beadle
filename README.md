@@ -146,7 +146,9 @@ cat > ~/.punt-labs/beadle/email.json << 'EOF'
   "imap_host": "127.0.0.1",
   "imap_port": 1143,
   "imap_user": "you@example.com",
+  "smtp_host": "127.0.0.1",
   "smtp_port": 1025,
+  "smtp_user": "you@example.com",
   "from_address": "you@example.com"
 }
 EOF

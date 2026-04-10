@@ -937,3 +937,130 @@ format unchanged.
 - The `contacts.json` file format. Old files load unchanged.
 - The redaction rule. Unknown senders still get `---` and still see their
   subjects redacted in `list_messages`.
+
+## DES-020: GPG signing keys must have an expiration date
+
+**Status:** PROPOSED (beadle-72e)
+
+**Decision:** Beadle rejects any GPG key as a signing key if it has no
+expiration date. `CheckKeyExpiry` runs before every signing operation and
+returns an error if the key is non-expiring. The signing path fails fast;
+no partial signing occurs.
+
+**Why:** A non-expiring key is a permanent credential with no automatic
+revocation timeline. If the key is compromised, the attacker has unlimited
+time to forge instructions. An expiring key bounds the damage window and
+creates a periodic review forcing function. This invariant is stated in
+CLAUDE.md under "Design Invariants" and is now enforced in code, not just
+documentation.
+
+**Detection:** `gpg --list-keys --with-colons <keyID>` emits
+colon-delimited output. The `pub` record's field 6 (0-indexed) is the
+expiry as a Unix timestamp. An empty field or literal `0` means no
+expiry. `CheckKeyExpiry` parses this field and returns an error when
+absent or zero.
+
+**Rejected alternatives:**
+
+- **Log a warning, proceed anyway.** Reduces signing security to
+  advisory-only. The invariant must be enforced; a warning that is ignored
+  is not an invariant.
+- **Enforce at key registration time only.** An operator could generate a
+  non-expiring key and load it without going through a registration
+  step. Pre-signing checks are the only guaranteed enforcement point.
+- **Check key validity (not just expiry).** A broader validity check
+  (`gpg --status-fd` looking for `VALIDSIG`) would catch expired,
+  revoked, and untrusted keys. The narrower expiry-only check is
+  sufficient here: revoked keys already fail signing outright; the
+  invariant specifically targets the "valid but non-expiring" case that
+  would otherwise pass silently.
+
+## DES-021: GPG key rotation procedure
+
+**Status:** PROPOSED (beadle-72e)
+
+**Decision:** The key rotation procedure for beadle signing keys is
+defined here as the authoritative reference. All agents operating as a
+beadle identity must follow this procedure when their signing key nears
+expiry.
+
+**Target expiry policy:** Signing keys expire in 1 year. Rotate when the
+key has fewer than 30 days remaining.
+
+**Rotation procedure:**
+
+1. **Generate the new key** on the machine that will use it:
+
+   ```bash
+   gpg --batch --gen-key <<EOF
+   %no-protection
+   Key-Type: ed25519
+   Key-Usage: sign
+   Subkey-Type: cv25519
+   Subkey-Usage: encrypt
+   Name-Real: Claude Agento
+   Name-Email: claude@punt-labs.com
+   Expire-Date: 1y
+   %commit
+   EOF
+   ```
+
+2. **Verify the key has an expiry date:**
+
+   ```bash
+   gpg --list-keys --with-colons claude@punt-labs.com
+   # pub field 7 (1-indexed) / field 6 (0-indexed) must be a non-zero Unix timestamp
+   ```
+
+3. **Export the public key** and distribute to correspondents who
+   verify beadle signatures:
+
+   ```bash
+   gpg --armor --export claude@punt-labs.com > claude-pubkey.asc
+   ```
+
+4. **Update the ethos extension** with the new key ID:
+
+   ```bash
+   ethos ext set claude beadle gpg_key_id <NEW_KEY_ID>
+   ```
+
+5. **Update beadle config** (`~/.punt-labs/beadle/identities/claude@punt-labs.com/email.json`):
+   set `gpg_signer` to the new key ID.
+
+6. **Revoke and remove the old key** from the local keyring:
+
+   ```bash
+   gpg --gen-revoke <OLD_KEY_ID> > old-key-revocation.asc
+   gpg --import old-key-revocation.asc
+   gpg --delete-secret-and-public-key <OLD_KEY_ID>
+   ```
+
+7. **Verify beadle signs with the new key** by sending a signed test
+   message and running `verify_signature` on the received copy.
+
+**Operational note for `claude@punt-labs.com`:** The current signing key
+must have an expiration date to satisfy the DES-020 invariant. If the
+existing key is non-expiring, run step 6 first (revoke + delete old key)
+then steps 1–5 to generate a compliant replacement.
+
+**Why ed25519:** Compact, fast, immune to the parameter-choice
+vulnerabilities that affect ECDSA (Sony PS3 attack). Standard choice for
+new signing keys as of 2024.
+
+**Why `%no-protection` in batch mode:** Batch key generation on a
+headless daemon host has no pinentry. The private key is protected by
+filesystem permissions (`mode 600`, owned by the agent user) and the
+OS keychain (for export operations). Adding a passphrase would require
+human intervention or storing the passphrase in a file — equivalent
+protection at worse UX.
+
+**Rejected alternatives:**
+
+- **Extend expiry instead of rotating.** `gpg --quick-set-expire` can push
+  the expiry date forward without generating a new key. Simpler, but
+  carries forward any key material that may have been exposed. A full
+  rotation is a harder security boundary.
+- **Hardware security key (YubiKey/OpenPGP card).** The correct long-term
+  answer for high-value signing keys. Out of scope for a daemon that must
+  operate unattended — hardware tokens require physical presence for signing.

@@ -1,6 +1,7 @@
 package secret
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,6 +34,24 @@ func TestFileGet_UnsafePerms(t *testing.T) {
 
 	_, err := fileGet("world-readable")
 	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsafe permissions")
+}
+
+func TestGet_BadPermissionsFile_NotErrNotFound(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	cfgDir := filepath.Join(dir, ".punt-labs", "beadle", "secrets")
+	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+	// Use a name that cannot exist in any real OS keychain.
+	const credName = "__test_bad_perms_beadle__"
+	credPath := filepath.Join(cfgDir, credName)
+	require.NoError(t, os.WriteFile(credPath, []byte("s3cret\n"), 0644))
+
+	_, err := Get(credName)
+	require.Error(t, err)
+	// Must NOT be ErrNotFound — the file exists but has bad permissions.
+	assert.False(t, errors.Is(err, ErrNotFound), "bad-permissions error should not wrap ErrNotFound")
 	assert.Contains(t, err.Error(), "unsafe permissions")
 }
 
