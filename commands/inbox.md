@@ -1,7 +1,7 @@
 ---
 description: "Check beadle's email inbox"
 argument-hint: "[<filter text> | 5m | 10m | 15m | 30m | 1h | 2h | n | status]"
-allowed-tools: ["mcp__plugin_beadle_email__list_messages", "mcp__plugin_beadle_email__read_message", "mcp__plugin_beadle_email__move_message", "mcp__plugin_beadle_email__check_trust", "mcp__plugin_beadle_email__find_contact", "mcp__plugin_beadle_email__send_email", "mcp__plugin_beadle_email__set_poll_interval", "mcp__plugin_beadle_email__get_poll_status", "mcp__plugin_beadle-dev_email__list_messages", "mcp__plugin_beadle-dev_email__read_message", "mcp__plugin_beadle-dev_email__move_message", "mcp__plugin_beadle-dev_email__check_trust", "mcp__plugin_beadle-dev_email__find_contact", "mcp__plugin_beadle-dev_email__send_email", "mcp__plugin_beadle-dev_email__set_poll_interval", "mcp__plugin_beadle-dev_email__get_poll_status", "Read"]
+allowed-tools: ["mcp__plugin_beadle_email__list_messages", "mcp__plugin_beadle_email__read_message", "mcp__plugin_beadle_email__move_message", "mcp__plugin_beadle_email__check_trust", "mcp__plugin_beadle_email__find_contact", "mcp__plugin_beadle_email__send_email", "mcp__plugin_beadle_email__set_poll_interval", "mcp__plugin_beadle_email__get_poll_status", "mcp__plugin_beadle-dev_email__list_messages", "mcp__plugin_beadle-dev_email__read_message", "mcp__plugin_beadle-dev_email__move_message", "mcp__plugin_beadle-dev_email__check_trust", "mcp__plugin_beadle-dev_email__find_contact", "mcp__plugin_beadle-dev_email__send_email", "mcp__plugin_beadle-dev_email__set_poll_interval", "mcp__plugin_beadle-dev_email__get_poll_status", "Read", "CronCreate", "CronList", "CronDelete"]
 ---
 <!-- markdownlint-disable MD041 -->
 
@@ -25,20 +25,39 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### Polling interval (`5m`, `10m`, `15m`, `30m`, `1h`, `2h`)
 
-1. Call `set_poll_interval` with the interval value.
-2. Confirm with the tool's response text.
+1. Call `set_poll_interval` with the interval value. If it returns an error, report the error and
+   stop — do not touch the cron job.
+2. Delete any existing `/inbox` auto-poll cron job (see "Managing the cron job" below).
+3. Create a new CronCreate job with `description: "/inbox auto-poll"`, `recurring: true`, the cron
+   expression for the interval, and `prompt: "/inbox"`. Cron expressions: `5m` → `*/5 * * * *`,
+   `10m` → `*/10 * * * *`, `15m` → `*/15 * * * *`, `30m` → `*/30 * * * *`, `1h` → `0 * * * *`,
+   `2h` → `0 */2 * * *`.
+4. Confirm with the `set_poll_interval` response text and report the cron job ID.
 
 ### Disable polling (`n`)
 
-1. Call `set_poll_interval` with `interval: "n"`.
-2. Confirm with the tool's response text.
+1. Call `set_poll_interval` with `interval: "n"`. If it returns an error, report the error and
+   stop — do not touch the cron job.
+2. Delete any existing `/inbox` auto-poll cron job (see "Managing the cron job" below).
+3. Confirm with the `set_poll_interval` response text.
 
 ### Show status (`status`)
 
 1. Call `get_poll_status`.
 2. Report the returned values: interval, active, last check time, unseen count.
 
+### Managing the cron job
+
+To delete an existing auto-poll cron job: call `CronList`, find any job with description
+`/inbox auto-poll`, call `CronDelete` for each matching ID.
+
 ### No argument
+
+Before running the normal flow, call `get_poll_status`. If polling is configured (that is, the
+returned interval is not `n` / not `disabled`) and no CronList job with description `/inbox auto-poll`
+exists, recreate the cron job using the interval from `get_poll_status` and the cron expression table
+above. Only skip cron recreation when polling is explicitly disabled. This restores the autonomous loop
+after a session restart, including cases where polling is configured but `Active` is currently false.
 
 1. Initialize an empty set of **processed message IDs**.
 2. Call `list_messages` with `unread_only: true` and `count: 50`. **If unread
