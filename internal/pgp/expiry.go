@@ -31,24 +31,35 @@ func CheckKeyExpiry(gpgBinary, keyID string) error {
 	return parseColonExpiry(stdout.String(), keyID)
 }
 
-// parseColonExpiry inspects gpg --with-colons output for a pub record and
+// parseColonExpiry inspects gpg --with-colons output for pub records and
 // checks whether the expiry field (column 6, 0-indexed) is non-empty and
-// non-zero. Returns an error if the key has no expiry.
+// non-zero. Returns an error if any matching key has no expiry, if no pub
+// record is found, or if more than one pub record matches (ambiguous keyID).
 func parseColonExpiry(output, keyID string) error {
+	pubCount := 0
+
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Split(line, ":")
 		if len(fields) < 7 {
 			continue
 		}
-		recType := fields[0]
-		if recType != "pub" {
+		if fields[0] != "pub" {
 			continue
 		}
+
+		pubCount++
 		expiry := fields[6]
 		if expiry == "" || expiry == "0" {
 			return fmt.Errorf("key %q has no expiration date: non-expiring signing keys are not permitted", keyID)
 		}
-		return nil
 	}
-	return fmt.Errorf("key %q not found in gpg output", keyID)
+
+	if pubCount == 0 {
+		return fmt.Errorf("key %q not found in gpg output", keyID)
+	}
+	if pubCount > 1 {
+		return fmt.Errorf("key %q is ambiguous: matched %d public keys; use a unique key identifier (fingerprint)", keyID, pubCount)
+	}
+
+	return nil
 }

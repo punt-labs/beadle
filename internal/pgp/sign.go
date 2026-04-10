@@ -77,7 +77,7 @@ func detachSign(gpgBinary, signer, passphrase string, data []byte) ([]byte, erro
 	// Write passphrase to a temp file (mode 600) so gpg can read it
 	// via --passphrase-file. This avoids --passphrase (visible in ps)
 	// and the stdin conflict with --passphrase-fd 0.
-	f, err := os.CreateTemp("/tmp", "beadle-pp-*")
+	f, err := os.CreateTemp("", "beadle-pp-*")
 	if err != nil {
 		return nil, fmt.Errorf("create passphrase file: %w", err)
 	}

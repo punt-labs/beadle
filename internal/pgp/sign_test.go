@@ -145,12 +145,13 @@ func TestDetachSign_TempFileCleanup(t *testing.T) {
 	t.Setenv("GNUPGHOME", home)
 
 	// Count temp files before
-	before, _ := filepath.Glob("/tmp/beadle-pp-*")
+	pattern := filepath.Join(os.TempDir(), "beadle-pp-*")
+	before, _ := filepath.Glob(pattern)
 
 	_, err = detachSign(gpgBin, "cleanup@example.com", "", []byte("test data"))
 	require.NoError(t, err)
 
 	// Count temp files after — should not have leaked
-	after, _ := filepath.Glob("/tmp/beadle-pp-*")
+	after, _ := filepath.Glob(pattern)
 	assert.Equal(t, len(before), len(after), "passphrase temp file leaked")
 }

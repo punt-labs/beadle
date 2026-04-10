@@ -111,6 +111,15 @@ func TestParseColonExpiry(t *testing.T) {
 			wantErr: true,
 			errMsg:  "not found",
 		},
+		{
+			// Two pub records with the same email — keyID is ambiguous.
+			name: "multiple pub records",
+			output: "pub:u:2048:1:AAAAAA:1234567890:1893456000::u:::scESC:::\n" +
+				"pub:u:2048:1:BBBBBB:1234567890:1893456000::u:::scESC:::\n",
+			keyID:   "test@example.com",
+			wantErr: true,
+			errMsg:  "ambiguous",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
