@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Outbound PGP signing: when `gpg_signer` is configured in `email.json`,
+  all outbound email via SMTP is signed as PGP/MIME (`multipart/signed`,
+  RFC 3156). The signing key must have an expiration date (design invariant).
+  Resend API fallback is blocked when signing is configured -- PGP signatures
+  require raw MIME transport. (beadle-atz)
+
 ## [0.11.3] - 2026-04-11
 
 ### Changed

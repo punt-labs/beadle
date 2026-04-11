@@ -47,8 +47,8 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, "127.0.0.1", cfg.IMAPHost)         // default
 	assert.Equal(t, 1143, cfg.IMAPPort)                  // default
 	assert.Equal(t, 1025, cfg.SMTPPort)                   // default
-	assert.Equal(t, "gpg", cfg.GPGBinary)                // default
-	assert.Equal(t, "test@example.com", cfg.GPGSigner)  // defaults to FromAddress
+	assert.Equal(t, "gpg", cfg.GPGBinary)   // default
+	assert.Equal(t, "", cfg.GPGSigner)      // empty = signing disabled
 }
 
 func TestLoadConfig_FileNotFound(t *testing.T) {
