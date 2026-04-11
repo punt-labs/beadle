@@ -69,7 +69,7 @@ ok "$OS/$ARCH"
 
 # --- Step 3: Download binary ---
 
-info "Downloading $BINARY..."
+info "Downloading $BINARY v$VERSION..."
 
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/v${VERSION}/$ASSET"
 CHECKSUMS_URL="https://github.com/$REPO/releases/download/v${VERSION}/checksums.txt"
@@ -213,7 +213,7 @@ fi
 # --- Done ---
 
 if [ "$doctor_rc" -eq 0 ]; then
-  printf '\n%b%b%s is ready!%b\n\n' "$GREEN" "$BOLD" "$BINARY" "$NC"
+  printf '\n%b%b%s v%s is ready!%b\n\n' "$GREEN" "$BOLD" "$BINARY" "$VERSION" "$NC"
 else
   printf '\n%b%b%s installed but doctor reported issues.%b\n\n' "$YELLOW" "$BOLD" "$BINARY" "$NC"
   info "Next steps:"
