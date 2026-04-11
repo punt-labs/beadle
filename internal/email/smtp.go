@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// SMTPSend delivers a raw RFC 822 message through Proton Bridge's SMTP server.
+// SMTPSend delivers a raw RFC 822 message via SMTP. Uses implicit TLS for
+// port 465, STARTTLS otherwise.
 //
-// Proton Bridge SMTP uses STARTTLS with a self-signed certificate on localhost.
 // SMTP authentication uses smtp_user and smtp_password when configured,
 // falling back to IMAP credentials for backward compatibility.
 // Recipients includes all envelope recipients (to + cc + bcc).
@@ -24,23 +24,44 @@ func SMTPSend(cfg *Config, from string, recipients []string, raw []byte) error {
 		return fmt.Errorf("read smtp password: %w", err)
 	}
 
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
-	if err != nil {
-		return fmt.Errorf("dial smtp %s: %w", addr, err)
+	tlsCfg := &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: isLoopback(host), //nolint:gosec // Proton Bridge uses self-signed certs on localhost
 	}
 
-	c, err := smtp.NewClient(conn, host)
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("smtp client %s: %w", addr, err)
+	var c *smtp.Client
+
+	if cfg.SMTPPort == 465 {
+		// Implicit TLS (SMTPS)
+		conn, dialErr := tls.DialWithDialer(
+			&net.Dialer{Timeout: 10 * time.Second},
+			"tcp", addr, tlsCfg,
+		)
+		if dialErr != nil {
+			return fmt.Errorf("dial smtps %s: %w", addr, dialErr)
+		}
+		c, err = smtp.NewClient(conn, host)
+		if err != nil {
+			conn.Close()
+			return fmt.Errorf("smtp client %s: %w", addr, err)
+		}
+	} else {
+		// STARTTLS — Proton Bridge on localhost, or explicit config
+		conn, dialErr := net.DialTimeout("tcp", addr, 10*time.Second)
+		if dialErr != nil {
+			return fmt.Errorf("dial smtp %s: %w", addr, dialErr)
+		}
+		c, err = smtp.NewClient(conn, host)
+		if err != nil {
+			conn.Close()
+			return fmt.Errorf("smtp client %s: %w", addr, err)
+		}
+		if err := c.StartTLS(tlsCfg); err != nil {
+			c.Close()
+			return fmt.Errorf("smtp starttls: %w", err)
+		}
 	}
 	defer c.Close()
-
-	if err := c.StartTLS(&tls.Config{
-		InsecureSkipVerify: isLoopback(host), //nolint:gosec // Proton Bridge uses self-signed certs on localhost
-	}); err != nil {
-		return fmt.Errorf("smtp starttls: %w", err)
-	}
 
 	auth := smtp.PlainAuth("", cfg.SMTPEffectiveUser(), password, host)
 	if err := c.Auth(auth); err != nil {

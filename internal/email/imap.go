@@ -23,21 +23,38 @@ type Client struct {
 	logger *slog.Logger
 }
 
-// Dial connects to the IMAP server with STARTTLS and logs in.
+// Dial connects to the IMAP server. Uses implicit TLS for port 993,
+// STARTTLS otherwise.
 func Dial(cfg *Config, logger *slog.Logger) (*Client, error) {
 	addr := net.JoinHostPort(cfg.IMAPHost, strconv.Itoa(cfg.IMAPPort))
 
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", addr, err)
+	tlsCfg := &tls.Config{
+		ServerName:         cfg.IMAPHost,
+		InsecureSkipVerify: isLoopback(cfg.IMAPHost), //nolint:gosec // Proton Bridge uses self-signed certs on localhost
 	}
 
-	c, err := imapclient.NewStartTLS(conn, &imapclient.Options{
-		TLSConfig: &tls.Config{InsecureSkipVerify: isLoopback(cfg.IMAPHost)}, //nolint:gosec // Proton Bridge uses self-signed certs on localhost
-	})
+	opts := &imapclient.Options{TLSConfig: tlsCfg}
+
+	var c *imapclient.Client
+	var err error
+
+	if cfg.IMAPPort == 993 {
+		// Implicit TLS (IMAPS) — standard for Fastmail, Gmail, etc.
+		c, err = imapclient.DialTLS(addr, opts)
+	} else {
+		// STARTTLS — Proton Bridge on localhost, or explicit config
+		var conn net.Conn
+		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
+		if err != nil {
+			return nil, fmt.Errorf("dial %s: %w", addr, err)
+		}
+		c, err = imapclient.NewStartTLS(conn, opts)
+		if err != nil {
+			conn.Close()
+		}
+	}
 	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("starttls %s: %w", addr, err)
+		return nil, fmt.Errorf("imap connect %s: %w", addr, err)
 	}
 
 	password, err := cfg.IMAPPassword()
