@@ -12,6 +12,8 @@ import (
 	"net/textproto"
 	"strings"
 	"time"
+
+	"github.com/punt-labs/beadle/internal/pgp"
 )
 
 // OutboundAttachment represents a file to attach to an outgoing email.
@@ -100,6 +102,135 @@ func ComposeRaw(from string, to, cc []string, subject, textBody string, attachme
 	}
 
 	return msg.Bytes(), nil
+}
+
+// ComposeSignedRaw builds a PGP/MIME signed RFC 822 message (RFC 3156).
+// The body (text/plain or multipart/mixed with attachments) is signed with
+// gpg --detach-sign, then wrapped in a multipart/signed envelope.
+func ComposeSignedRaw(from string, to, cc []string, subject, textBody string, attachments []OutboundAttachment, gpgBinary, signer, passphrase string) ([]byte, error) {
+	allAddrs := make([]string, 0, len(to)+len(cc))
+	allAddrs = append(allAddrs, to...)
+	allAddrs = append(allAddrs, cc...)
+	for _, field := range append([]string{from, subject}, allAddrs...) {
+		if strings.ContainsAny(field, "\r\n") {
+			return nil, fmt.Errorf("header field contains CR/LF")
+		}
+	}
+
+	// Canonicalize to CRLF (RFC 3156 requires canonical line endings in signed parts).
+	textBody = strings.ReplaceAll(textBody, "\r\n", "\n")
+	textBody = strings.ReplaceAll(textBody, "\n", "\r\n")
+
+	// Build the body part that will be signed.
+	var bodyPart []byte
+	if len(attachments) == 0 {
+		bodyPart = []byte("Content-Type: text/plain; charset=utf-8\r\n" +
+			"Content-Transfer-Encoding: 7bit\r\n" +
+			"\r\n" +
+			textBody + "\r\n")
+	} else {
+		bp, err := buildMixedBodyPart(textBody, attachments)
+		if err != nil {
+			return nil, err
+		}
+		bodyPart = bp
+	}
+
+	sig, err := pgp.DetachSignBody(gpgBinary, signer, passphrase, bodyPart)
+	if err != nil {
+		return nil, fmt.Errorf("sign body: %w", err)
+	}
+
+	boundary, err := pgp.RandomBoundary()
+	if err != nil {
+		return nil, fmt.Errorf("generate boundary: %w", err)
+	}
+
+	var msg bytes.Buffer
+	fmt.Fprintf(&msg, "From: %s\r\n", from)
+	fmt.Fprintf(&msg, "To: %s\r\n", strings.Join(to, ", "))
+	if len(cc) > 0 {
+		fmt.Fprintf(&msg, "Cc: %s\r\n", strings.Join(cc, ", "))
+	}
+	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
+	fmt.Fprintf(&msg, "MIME-Version: 1.0\r\n")
+	fmt.Fprintf(&msg, "Content-Type: multipart/signed; boundary=%q; micalg=pgp-sha256; protocol=\"application/pgp-signature\"\r\n", boundary)
+	fmt.Fprintf(&msg, "\r\n")
+	fmt.Fprintf(&msg, "--%s\r\n", boundary)
+	msg.Write(bodyPart)
+	fmt.Fprintf(&msg, "\r\n--%s\r\n", boundary)
+	fmt.Fprintf(&msg, "Content-Type: application/pgp-signature; name=\"signature.asc\"\r\n")
+	fmt.Fprintf(&msg, "Content-Disposition: attachment; filename=\"signature.asc\"\r\n")
+	fmt.Fprintf(&msg, "\r\n")
+	msg.Write(bytes.TrimSpace(sig))
+	fmt.Fprintf(&msg, "\r\n--%s--\r\n", boundary)
+
+	return msg.Bytes(), nil
+}
+
+// buildMixedBodyPart assembles a complete multipart/mixed MIME part (including
+// its Content-Type header and all boundaries) for use as the signed body in a
+// multipart/signed envelope.
+func buildMixedBodyPart(textBody string, attachments []OutboundAttachment) ([]byte, error) {
+	// Canonicalize to CRLF (RFC 3156 requires canonical line endings in signed parts).
+	textBody = strings.ReplaceAll(textBody, "\r\n", "\n")
+	textBody = strings.ReplaceAll(textBody, "\n", "\r\n")
+
+	for _, att := range attachments {
+		for _, field := range []string{att.ContentType, att.Filename} {
+			if strings.ContainsAny(field, "\r\n") {
+				return nil, fmt.Errorf("attachment header field contains CR/LF")
+			}
+		}
+	}
+
+	// We need to control the exact bytes, so we build the multipart by hand
+	// using a multipart.Writer into a sub-buffer, then prepend the Content-Type.
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+
+	ct := mime.FormatMediaType("multipart/mixed", map[string]string{"boundary": mw.Boundary()})
+	header := fmt.Sprintf("Content-Type: %s\r\n\r\n", ct)
+
+	// Text part
+	textHeader := make(textproto.MIMEHeader)
+	textHeader.Set("Content-Type", "text/plain; charset=utf-8")
+	tw, err := mw.CreatePart(textHeader)
+	if err != nil {
+		return nil, fmt.Errorf("create text part: %w", err)
+	}
+	fmt.Fprintf(tw, "%s\r\n", textBody)
+
+	// Attachment parts
+	for _, att := range attachments {
+		attHeader := make(textproto.MIMEHeader)
+		attHeader.Set("Content-Type", att.ContentType)
+		attHeader.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": att.Filename}))
+		attHeader.Set("Content-Transfer-Encoding", "base64")
+
+		aw, createErr := mw.CreatePart(attHeader)
+		if createErr != nil {
+			return nil, fmt.Errorf("create attachment part %q: %w", att.Filename, createErr)
+		}
+		encoded := base64.StdEncoding.EncodeToString(att.Data)
+		for i := 0; i < len(encoded); i += 76 {
+			end := i + 76
+			if end > len(encoded) {
+				end = len(encoded)
+			}
+			fmt.Fprintf(aw, "%s\r\n", encoded[i:end])
+		}
+	}
+
+	if err := mw.Close(); err != nil {
+		return nil, fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	// Concatenate header + body to form the complete MIME part.
+	var result bytes.Buffer
+	result.WriteString(header)
+	result.Write(body.Bytes())
+	return result.Bytes(), nil
 }
 
 // ResendAttachment is a file attachment in the Resend API format.
