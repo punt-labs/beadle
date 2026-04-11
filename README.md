@@ -53,7 +53,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 <summary>Prerequisites</summary>
 
 - An IMAP server for reading (Proton Bridge on localhost, Fastmail, Gmail IMAP, etc.)
-- An SMTP server for sending (Proton Bridge, or any SMTP with STARTTLS/TLS support)
+- An SMTP server for sending (Proton Bridge, or any SMTP with STARTTLS support; implicit TLS/SMTPS on port 465 is not yet supported)
 - [GPG](https://gnupg.org/) for signature verification
 - (Optional) [Resend](https://resend.com) API key for fallback sending
 
@@ -161,12 +161,12 @@ cat > ~/.punt-labs/beadle/email.json << 'EOF'
 EOF
 ```
 
-**External SMTP (Fastmail, Gmail, etc.):**
+**External IMAP + SMTP (Fastmail, Gmail, etc.):**
 
 ```json
 {
   "imap_host": "imap.fastmail.com",
-  "imap_port": 993,
+  "imap_port": 143,
   "imap_user": "you@fastmail.com",
   "smtp_host": "smtp.fastmail.com",
   "smtp_port": 587,
