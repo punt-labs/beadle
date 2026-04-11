@@ -22,6 +22,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `/inbox <interval>` (`5m`/`10m`/`15m`/`30m`/`1h`/`2h`) now creates a durable
+  `CronCreate` job that survives session restarts, and cleanup reliably finds
+  existing auto-poll jobs by prompt match instead of a nonexistent `description`
+  field. Fixes a regression from #123 where the autonomous inbox loop silently
+  failed to take effect. (beadle-07h)
 - `smtp.go` was using `cfg.IMAPHost` and `cfg.IMAPUser` for all SMTP
   connections. Now uses `cfg.SMTPHost`, `cfg.SMTPUser`, and
   `cfg.SMTPPassword()`. beadle-0ut.
