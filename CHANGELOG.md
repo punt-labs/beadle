@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Implicit TLS support for IMAP (port 993) and SMTP (port 465). Standard
+  email providers (Fastmail, Gmail, Migadu) use implicit TLS by default.
+  Port-based auto-detection: 993 → IMAPS, 465 → SMTPS, others → STARTTLS.
+  SMTP STARTTLS now sets ServerName for proper certificate verification
+  with non-loopback hosts. (beadle-zle)
 - Outbound PGP signing: when `gpg_signer` is configured in `email.json`,
   all outbound email via SMTP is signed as PGP/MIME (`multipart/signed`,
   RFC 3156). The signing key must have an expiration date (design invariant).
