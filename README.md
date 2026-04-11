@@ -33,7 +33,7 @@ Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts 
 <summary>Inspect before running</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/c104e15/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/8e0968a/install.sh -o install.sh
 cat install.sh
 sh install.sh
 ```
