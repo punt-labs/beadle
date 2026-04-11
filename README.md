@@ -4,6 +4,8 @@
 
 [![License](https://img.shields.io/github/license/punt-labs/beadle)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/beadle/test.yml?label=CI)](https://github.com/punt-labs/beadle/actions/workflows/test.yml)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Go Report Card](https://goreportcard.com/badge/github.com/punt-labs/beadle)](https://goreportcard.com/report/github.com/punt-labs/beadle)
 [![Working Backwards](https://img.shields.io/badge/Working_Backwards-hypothesis-lightgrey)](./prfaq.pdf)
 
 Beadle runs on your machine as a background daemon. Every action requires a GPG-signed instruction from the owner, every command declares its permissions upfront, and the audit log is tamperproof. The daemon executes no action without a GPG-signed instruction from the owner; no authority is implicit.
@@ -19,6 +21,8 @@ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/c104e15/install.sh
 ```
 
 Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts to install the Claude Code plugin (MCP tools + slash commands + hooks). If plugin installation fails, the script falls back to registering the standalone MCP server (no slash commands or hooks). Runs `doctor` to check your setup. Restart Claude Code after install. If you previously registered `beadle-email` as a standalone MCP server via `claude mcp add`, remove it first with `claude mcp remove beadle-email` to avoid duplicate registrations.
+
+**Plugin install** provides MCP tools, slash commands (`/inbox`, `/mail`, `/send`, `/contacts`), and hooks (two-channel display, automatic session setup). **Standalone MCP** provides only MCP tools --- no slash commands or hooks.
 
 <details>
 <summary>Inspect before running</summary>
@@ -48,9 +52,9 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 <details>
 <summary>Prerequisites</summary>
 
-- [Proton Bridge](https://proton.me/mail/bridge) running on localhost (IMAP 1143, SMTP 1025)
+- An IMAP server for reading (Proton Bridge on localhost, Fastmail, Gmail IMAP, etc.)
+- An SMTP server for sending (Proton Bridge, or any SMTP with STARTTLS support; implicit TLS/SMTPS on port 465 is not yet supported)
 - [GPG](https://gnupg.org/) for signature verification
-- A Proton Mail account configured in Bridge
 - (Optional) [Resend](https://resend.com) API key for fallback sending
 
 </details>
@@ -137,7 +141,9 @@ export BEADLE_IMAP_PASSWORD='your-bridge-password'
 export BEADLE_RESEND_API_KEY='your-resend-key'
 ```
 
-Create the configuration file (`~/.punt-labs/beadle/email.json`) with your connection parameters:
+Create the configuration file (`~/.punt-labs/beadle/email.json`) with your connection parameters.
+
+**Proton Bridge (localhost):**
 
 ```bash
 mkdir -p ~/.punt-labs/beadle
@@ -149,9 +155,25 @@ cat > ~/.punt-labs/beadle/email.json << 'EOF'
   "smtp_host": "127.0.0.1",
   "smtp_port": 1025,
   "smtp_user": "you@example.com",
-  "from_address": "you@example.com"
+  "from_address": "you@example.com",
+  "poll_interval": "30m"
 }
 EOF
+```
+
+**External IMAP + SMTP (Fastmail, Gmail, etc.):**
+
+```json
+{
+  "imap_host": "imap.fastmail.com",
+  "imap_port": 143,
+  "imap_user": "you@fastmail.com",
+  "smtp_host": "smtp.fastmail.com",
+  "smtp_port": 587,
+  "smtp_user": "you@fastmail.com",
+  "from_address": "you@fastmail.com",
+  "poll_interval": "10m"
+}
 ```
 
 </details>
@@ -207,7 +229,7 @@ beadle-email identity                                   # Show active identity
 beadle-email identity set <handle>                      # Set per-repo identity
 beadle-email version                                    # Print version
 
-# Global flags (work with any subcommand)
+# Global flags (supported by most subcommands; not: install, uninstall, version)
 beadle-email --json list                                # JSON output
 beadle-email --verbose doctor                           # Debug logging
 beadle-email --quiet send --to ...                      # Errors only
