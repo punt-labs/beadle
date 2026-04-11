@@ -117,6 +117,10 @@ func ComposeSignedRaw(from string, to, cc []string, subject, textBody string, at
 		}
 	}
 
+	// Canonicalize to CRLF (RFC 3156 requires canonical line endings in signed parts).
+	textBody = strings.ReplaceAll(textBody, "\r\n", "\n")
+	textBody = strings.ReplaceAll(textBody, "\n", "\r\n")
+
 	// Build the body part that will be signed.
 	var bodyPart []byte
 	if len(attachments) == 0 {
@@ -168,6 +172,10 @@ func ComposeSignedRaw(from string, to, cc []string, subject, textBody string, at
 // its Content-Type header and all boundaries) for use as the signed body in a
 // multipart/signed envelope.
 func buildMixedBodyPart(textBody string, attachments []OutboundAttachment) ([]byte, error) {
+	// Canonicalize to CRLF (RFC 3156 requires canonical line endings in signed parts).
+	textBody = strings.ReplaceAll(textBody, "\r\n", "\n")
+	textBody = strings.ReplaceAll(textBody, "\n", "\r\n")
+
 	for _, att := range attachments {
 		for _, field := range []string{att.ContentType, att.Filename} {
 			if strings.ContainsAny(field, "\r\n") {

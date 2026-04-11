@@ -115,15 +115,17 @@ var doctorCmd = &cobra.Command{
 				checks = append(checks, check{"resend_api_key", "OK", ""})
 			}
 
+			gpgAvailable := false
 			gpgPath, err := exec.LookPath(cfg.GPGBinary)
 			if err != nil {
 				checks = append(checks, check{"gpg", "FAIL", fmt.Sprintf("%s not found", cfg.GPGBinary)})
 			} else {
+				gpgAvailable = true
 				checks = append(checks, check{"gpg", "OK", gpgPath})
 			}
 
-			// Signing checks only run when gpg_signer is configured.
-			if cfg.GPGSigner != "" {
+			// Signing checks only run when gpg_signer is configured AND gpg is available.
+			if cfg.GPGSigner != "" && gpgAvailable {
 				gpgKeyCmd := exec.Command(cfg.GPGBinary, "--list-keys", cfg.GPGSigner)
 				keyExists := gpgKeyCmd.Run() == nil
 				if !keyExists {
@@ -132,11 +134,6 @@ var doctorCmd = &cobra.Command{
 					checks = append(checks, check{"gpg_signing_key", "OK", cfg.GPGSigner})
 				}
 
-				// gpg_passphrase is conditional on whether the key actually
-				// needs one. Probe the key protection state only if the key
-				// exists — otherwise the probe fails indistinguishably and
-				// falls back to the legacy "secret required" behavior so at
-				// least the detail text points at the right fix.
 				switch {
 				case !keyExists:
 					if _, err := cfg.GPGPassphrase(); err != nil {
@@ -158,6 +155,8 @@ var doctorCmd = &cobra.Command{
 						}
 					}
 				}
+			} else if cfg.GPGSigner != "" {
+				checks = append(checks, check{"gpg_signing_key", "FAIL", fmt.Sprintf("cannot check signing key: gpg binary %q not found", cfg.GPGBinary)})
 			} else {
 				checks = append(checks, check{"gpg_signing_key", "OK", "signing disabled (gpg_signer not configured)"})
 			}

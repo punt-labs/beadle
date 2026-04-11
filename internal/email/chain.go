@@ -80,6 +80,9 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 
 		if err := SMTPSend(cfg, cfg.FromAddress, allRecipients, raw); err != nil {
 			logger.Warn("smtp send failed, falling back to resend", "err", err)
+			if signing {
+				return nil, fmt.Errorf("smtp send failed: %w; resend fallback blocked for signed mail", err)
+			}
 		} else {
 			return &SendResult{
 				Status:      "sent",
