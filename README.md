@@ -10,14 +10,19 @@
 
 Beadle runs on your machine as a background daemon. Every action requires a GPG-signed instruction from the owner, every command declares its permissions upfront, and the audit log is tamperproof. The daemon executes no action without a GPG-signed instruction from the owner; no authority is implicit.
 
-The first shipping component is `beadle-email` — an MCP server providing email communication tools over Proton Bridge with a four-level PGP trust model. Written in Go.
+The first shipping component is `beadle-email` — an MCP server that lets you pair with Claude via email. Written in Go.
+
+**Pair with Claude via email.** Beadle gives Claude Code a real email address — outbound and inbound, with cryptographic trust at every layer.
+
+- **Claude emails you.** Session summaries, build reports, deploy notifications — anything Claude produces can be mailed to you or your team. No webhook plumbing, no Slack integration. Just email.
+- **You email Claude.** Send instructions, ask questions, or forward context from your phone. Beadle's four-level PGP trust model and per-contact permissions (`rwx`) control exactly what Claude can read, reply to, and act on — nothing is implicit.
 
 **Platforms:** macOS, Linux
 
 ## Quick Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/c104e15/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/8e0968a/install.sh | sh
 ```
 
 Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts to install the Claude Code plugin (MCP tools + slash commands + hooks). If plugin installation fails, the script falls back to registering the standalone MCP server (no slash commands or hooks). Runs `doctor` to check your setup. Restart Claude Code after install. If you previously registered `beadle-email` as a standalone MCP server via `claude mcp add`, remove it first with `claude mcp remove beadle-email` to avoid duplicate registrations.
@@ -28,7 +33,7 @@ Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts 
 <summary>Inspect before running</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/c104e15/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/8e0968a/install.sh -o install.sh
 cat install.sh
 sh install.sh
 ```

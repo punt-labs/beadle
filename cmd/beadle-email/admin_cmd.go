@@ -77,6 +77,8 @@ var doctorCmd = &cobra.Command{
 
 		var checks []check
 
+		checks = append(checks, check{"version", "OK", version})
+
 		// Check identity resolution
 		resolver, resolverErr := newResolver()
 		if resolverErr != nil {
