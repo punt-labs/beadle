@@ -35,7 +35,7 @@ func Sign(gpgBinary, signer, passphrase, to, subject, textBody string) (*SignedM
 		return nil, fmt.Errorf("signing key rejected: %w", err)
 	}
 
-	boundary, err := randomBoundary()
+	boundary, err := RandomBoundary()
 	if err != nil {
 		return nil, fmt.Errorf("generate boundary: %w", err)
 	}
@@ -69,6 +69,15 @@ func Sign(gpgBinary, signer, passphrase, to, subject, textBody string) (*SignedM
 	fmt.Fprintf(&msg, "\r\n--%s--\r\n", boundary)
 
 	return &SignedMessage{Raw: msg.Bytes(), Boundary: boundary}, nil
+}
+
+// DetachSignBody creates an ASCII-armored detached PGP signature for data.
+// Rejects keys without an expiration date.
+func DetachSignBody(gpgBinary, signer, passphrase string, data []byte) ([]byte, error) {
+	if err := CheckKeyExpiry(gpgBinary, signer); err != nil {
+		return nil, fmt.Errorf("signing key rejected: %w", err)
+	}
+	return detachSign(gpgBinary, signer, passphrase, data)
 }
 
 // detachSign runs gpg --detach-sign --armor, passing the passphrase via
@@ -109,7 +118,8 @@ func detachSign(gpgBinary, signer, passphrase string, data []byte) ([]byte, erro
 	return stdout.Bytes(), nil
 }
 
-func randomBoundary() (string, error) {
+// RandomBoundary generates a random MIME boundary string.
+func RandomBoundary() (string, error) {
 	var buf [16]byte
 	chars := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	for i := range buf {

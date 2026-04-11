@@ -77,9 +77,8 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.GPGBinary == "" {
 		cfg.GPGBinary = "gpg"
 	}
-	if cfg.GPGSigner == "" {
-		cfg.GPGSigner = cfg.FromAddress
-	}
+	// GPGSigner is intentionally not defaulted. When empty, outbound
+	// signing is disabled and doctor skips signing-key checks.
 
 	return &cfg, nil
 }

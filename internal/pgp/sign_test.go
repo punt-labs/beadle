@@ -94,7 +94,7 @@ Expire-Date: 1y
 func TestRandomBoundary(t *testing.T) {
 	seen := make(map[string]bool)
 	for range 100 {
-		b, err := randomBoundary()
+		b, err := RandomBoundary()
 		require.NoError(t, err)
 		assert.True(t, len(b) > 16, "boundary too short: %s", b)
 		assert.False(t, seen[b], "duplicate boundary: %s", b)
