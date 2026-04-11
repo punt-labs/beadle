@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - README: updated prerequisites to reflect non-Bridge SMTP support, added
   external SMTP config example, documented CLI global flag support scope,
   added plugin vs standalone distinction in Quick Start, added Go and
-  Go Report Card (A+) badges. (beadle-95l)
+  Go Report Card badges. (beadle-95l)
 
 ### Added
 
