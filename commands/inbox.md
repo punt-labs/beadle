@@ -27,18 +27,32 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 1. Call `set_poll_interval` with the interval value. If it returns an error, report the error and
    stop — do not touch the cron job.
-2. Delete any existing `/inbox` auto-poll cron job (see "Managing the cron job" below).
-3. Create a new CronCreate job with `description: "/inbox auto-poll"`, `recurring: true`, the cron
-   expression for the interval, and `prompt: "/inbox"`. Cron expressions: `5m` → `*/5 * * * *`,
-   `10m` → `*/10 * * * *`, `15m` → `*/15 * * * *`, `30m` → `*/30 * * * *`, `1h` → `0 * * * *`,
-   `2h` → `0 */2 * * *`.
-4. Confirm with the `set_poll_interval` response text and report the cron job ID.
+2. Delete every existing `/inbox` auto-poll cron job (see "Managing the cron job" below). This must
+   happen **before** creating the new job, so two back-to-back `/inbox 10m` calls leave exactly one
+   cron job, not two.
+3. Create a new cron job:
+
+   ```text
+   CronCreate(
+     cron: "*/10 * * * *",    // from the table below, matching the requested interval
+     recurring: true,
+     durable: true,           // persists across session restarts
+     prompt: "/inbox"
+   )
+   ```
+
+   Cron expressions: `5m` → `*/5 * * * *`, `10m` → `*/10 * * * *`, `15m` → `*/15 * * * *`,
+   `30m` → `*/30 * * * *`, `1h` → `0 * * * *`, `2h` → `0 */2 * * *`. All auto-poll jobs must set
+   `durable: true` — without it, the cron dies on session exit and the autonomous loop silently
+   stops.
+4. Report a single confirmation line combining the `set_poll_interval` response and the new cron
+   job ID. Example: `polling set to 10m; cron job 12c9c370 created (durable, fires */10 * * * *)`.
 
 ### Disable polling (`n`)
 
 1. Call `set_poll_interval` with `interval: "n"`. If it returns an error, report the error and
    stop — do not touch the cron job.
-2. Delete any existing `/inbox` auto-poll cron job (see "Managing the cron job" below).
+2. Delete every existing `/inbox` auto-poll cron job (see "Managing the cron job" below).
 3. Confirm with the `set_poll_interval` response text.
 
 ### Show status (`status`)
@@ -48,16 +62,27 @@ If none of the above match, treat the argument as a **filter** (existing behavio
 
 ### Managing the cron job
 
-To delete an existing auto-poll cron job: call `CronList`, find any job with description
-`/inbox auto-poll`, call `CronDelete` for each matching ID.
+To delete existing auto-poll cron jobs:
+
+1. Call `CronList`.
+2. For every line whose prompt suffix is exactly `: /inbox` — that is, the text after the final
+   colon-space separator is the literal string `/inbox`, with no trailing space and no argument —
+   extract the job ID (the first whitespace-separated token on the line).
+3. Call `CronDelete` for each matching ID.
+
+Lines whose prompt is `/inbox <something>` (an argument-bearing invocation, not the bare auto-poll
+job) must not be deleted. Match on the exact `: /inbox` suffix only.
 
 ### No argument
 
-Before running the normal flow, call `get_poll_status`. If polling is configured (that is, the
-returned interval is not `n` / not `disabled`) and no CronList job with description `/inbox auto-poll`
-exists, recreate the cron job using the interval from `get_poll_status` and the cron expression table
-above. Only skip cron recreation when polling is explicitly disabled. This restores the autonomous loop
-after a session restart, including cases where polling is configured but `Active` is currently false.
+Before running the normal flow, call `get_poll_status` and `CronList`. If polling is configured
+(the returned interval is not `n` / not `disabled`) and no `CronList` job matches the cleanup rule
+above, recreate the cron job using the interval from `get_poll_status` and the cron expression
+table, with `durable: true`.
+
+This clause is only needed for users upgrading from a version where the cron was session-only and
+did not persist. With `durable: true`, the job is written to `.claude/scheduled_tasks.json` and
+auto-resumes on the next session start — normally there is nothing to recreate.
 
 1. Initialize an empty set of **processed message IDs**.
 2. Call `list_messages` with `unread_only: true` and `count: 50`. **If unread
