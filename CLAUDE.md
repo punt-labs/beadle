@@ -10,7 +10,7 @@ identity is managed by ethos (`ethos show claude`):
 - **Voice:** elevenlabs/helmut
 - **Kind:** agent
 - **Writing style:** concise, precise, direct
-- **Owner:** Sam Jackson (`sam`, `sam@example.com`)
+- **Owner:** Jim Freeman (`jim`, `jim@punt-labs.com`)
 
 Beadle is your email system. You read, send, and manage email as
 `claude@punt-labs.com`. When ethos multi-identity ships (beadle-3um),
@@ -141,6 +141,29 @@ Resolved at runtime by name through a priority chain:
 
 Config file (`~/.punt-labs/beadle/email.json`) stores only connection parameters, never secrets.
 
+### Fastmail Test Config
+
+Fastmail SMTP preserves `multipart/signed` envelopes (verified 2026-04-11). Proton Bridge and Resend/SES do not. For PGP signing tests, switch to Fastmail SMTP:
+
+```bash
+# Switch to Fastmail SMTP
+cp ~/.punt-labs/beadle/identities/claude@punt-labs.com/email.json.fastmail-test \
+   ~/.punt-labs/beadle/identities/claude@punt-labs.com/email.json
+pass show beadle/fastmail-app-password | pass insert -f -e beadle/smtp-password
+
+# Restore prod (Proton Bridge)
+# email.json: smtp_host=127.0.0.1, smtp_port=1025, smtp_user=claude@punt-labs.com
+pass show beadle/imap-password | pass insert -f -e beadle/smtp-password
+```
+
+Saved artifacts:
+
+- `~/.punt-labs/beadle/identities/claude@punt-labs.com/email.json.fastmail-test` — Fastmail SMTP config (`smtp.fastmail.com:465`, user `claude_puntlabs@pobox.com`)
+- `pass beadle/fastmail-app-password` — Fastmail app password
+- `pass beadle/resend-api-key` — Resend API key
+
+Note: sending as `claude@punt-labs.com` via Fastmail requires adding `punt-labs.com` as a verified sending identity in Fastmail (DNS TXT record). The test used `from_address: claude_puntlabs@pobox.com` to bypass this.
+
 ### Design Invariants
 
 - **Zero agent authority.** Every action requires a GPG-signed instruction from the owner. The daemon has no independent decision-making.
@@ -206,6 +229,100 @@ bd create --title="..." --type=task   # Create issue
 bd sync                     # Sync with git remote
 ```
 
+## Delegation with Missions
+
+All code delegation uses ethos missions (`/mission` skill). Missions are typed contracts between a leader (claude) and a worker (bwk, mdm, djb, adb) that enforce write-set admission, frozen evaluators, bounded rounds, and append-only event logs.
+
+### When to use missions
+
+- Any bounded task with clear success criteria, a known set of files, and design ambiguity that benefits from write-set enforcement.
+- Sized for 1-3 rounds of one worker plus one evaluator.
+
+Do NOT use missions for: exploratory research, work you do yourself, epics that need decomposition first (decompose into multiple missions), or review-cycle fix rounds (Copilot/Bugbot findings are mechanical — tight scope, no design ambiguity, 1 round. Use bare `Agent()` calls for fix rounds).
+
+### Workflow
+
+1. **Scaffold**: `/mission` skill scaffolds the contract YAML from conversation context.
+2. **Confirm**: present the contract to the user (or decide as leader). Edit any field before creation.
+3. **Create**: `ethos mission create --file .tmp/missions/<name>.yaml` — returns a mission ID.
+4. **Spawn**: `Agent(subagent_type=<worker>, run_in_background=true)` with a prompt that points at the mission ID. The worker reads the contract via `ethos mission show <id>` as its first action.
+5. **Track**: `ethos mission show <id>`, `ethos mission log <id>`, `ethos mission results <id>`.
+6. **Review**: read the result artifact. Pass → `ethos mission close <id>`. Continue → `ethos mission reflect <id> --file <path>` then `ethos mission advance <id>`. Fail → `ethos mission close <id> --status failed`.
+
+### Contract schema (required fields)
+
+```yaml
+leader: claude
+worker: bwk                    # bwk|mdm|adb|djb
+evaluator:
+  handle: mdm                  # must differ from worker, no shared role
+inputs:
+  bead: beadle-xyz             # optional bead link
+write_set:                     # repo-relative paths, at least one
+  - internal/email/smtp.go
+  - internal/email/smtp_test.go
+success_criteria:              # at least one verifiable criterion
+  - implicit TLS connects to smtp.fastmail.com:465
+  - make check passes
+budget:
+  rounds: 2                    # 1-10
+  reflection_after_each: true  # leader reflects after each round
+```
+
+### Worker prompt template
+
+```text
+Mission <id> is yours. Read it first: `ethos mission show <id>`.
+The contract names the write set, success criteria, and budget.
+Only write to files listed in the write set. After your work for
+this round, submit a result artifact:
+`ethos mission result <id> --file <path>`. See
+`ethos mission result --help` for the YAML shape. Do not commit,
+push, or merge — return results to me.
+```
+
+Note: write-set admission is advisory — the leader verifies compliance during review, not the runtime. Workers should treat the write-set as a constraint, but the system does not block writes outside it.
+
+### Evaluator defaults
+
+| Task type | Worker | Evaluator |
+|-----------|--------|-----------|
+| Go internals / library design | `bwk` | `mdm` |
+| CLI / command design | `mdm` | `bwk` |
+| Security / PGP / crypto | `bwk` | `djb` |
+| Infrastructure / CI | `adb` | `bwk` |
+
+Worker and evaluator must be distinct handles with no shared role.
+
+### Task tracking and parallelism
+
+For multi-phase features, create a TaskCreate list with all missions up front and wire dependencies via `addBlockedBy`. Launch independent missions in parallel — two `Agent()` calls, both `run_in_background: true`. The task list is the source of truth for what's done, what's in flight, and what's blocked.
+
+### Scratch files
+
+Mission contract YAMLs go in `.tmp/missions/`. Result artifact YAMLs go in `.tmp/missions/results/`.
+
+## Biff Coordination
+
+Biff is the team messaging system. Use it for presence, coordination, and async communication.
+
+- `/plan <summary>` — set what you're working on (visible to `/who` and `/finger`)
+- `/who` — check who's active before destructive git operations or cross-repo work
+- `/read` — check inbox for messages from other agents
+- `/write @<agent> <message>` — send a direct message
+- `/wall <message>` — broadcast to all active agents
+
+Start every session with `/loop 5m /biff:read` to poll for incoming messages. Set `/plan` before starting any bead work.
+
+## Ethos Integration
+
+Identity is managed by ethos. The SessionStart hook resolves identity from `.punt-labs/ethos.yaml` (agent field), loads personality and writing style, and injects them into context. PreCompact re-injects the persona before context compression.
+
+- **Team submodule**: `.punt-labs/ethos/` — shared identity registry across all Punt Labs projects
+- **Identity resolution**: repo-local `.punt-labs/ethos.yaml` → global `~/.punt-labs/ethos/active` → `~/.punt-labs/beadle/default-identity`
+- **Extensions**: `~/.punt-labs/ethos/identities/claude.ext/beadle.yaml` stores beadle-specific config (GPG key ID, contact permissions) outside ethos's schema
+- **Sub-agent matching**: `subagent_type` in Agent() calls matches ethos identity handles (bwk, mdm, djb, adb) — loads the agent definition from `.claude/agents/<handle>.md` with full personality, writing style, and tool restrictions
+
 ## Development Workflow
 
 ### Branch Discipline
@@ -214,17 +331,15 @@ All code changes go on feature branches. Never commit directly to main. **Pushin
 
 **Pre-PR review.** Before creating a GitHub PR, run the `code-reviewer` and `silent-failure-hunter` agents in parallel on the diff. Address any issues they find before opening the PR. This catches problems before they reach Copilot/Bugbot, reducing review cycles.
 
-**Use worktrees by default.** Before creating a branch, check `/who` for other active sessions. If other sessions are active, use a worktree to avoid interfering with their working tree. If no other sessions are active, a regular branch is fine.
+**Regular branches by default.** For single-worker feature delivery (the normal case), work directly on the feature branch — do not use `isolation: worktree`. Worktree isolation creates a separate branch (`worktree-agent-<id>`), not the leader's branch, and requires explicit cherry-pick/merge to land commits. Use worktrees only when `/who` shows other active sessions that could conflict with your working tree, or for exploratory scratch work.
 
 ```bash
-# Default: worktree (safe when other sessions are active)
-# Use the EnterWorktree tool, then work normally inside the worktree
-
-# Alternative: regular branch (only when /who shows no other sessions)
+# Default: regular branch
 git checkout -b feat/short-description main
-```
 
-**One worktree per agent, many PRs within it.** Branch freely inside a worktree — each PR gets its own branch, not its own worktree.
+# Worktree: only when other sessions are active in this repo
+# Use the EnterWorktree tool, then work normally inside the worktree
+```
 
 | Prefix | Use |
 |--------|-----|
@@ -268,7 +383,7 @@ Every PR must update the docs it affects. If a PR changes user-facing behavior a
 
 ### Micro-Commits
 
-- One logical change per commit. 1-5 files, under 100 lines.
+- One logical change per commit. Prefer small commits, but a single refactor touching 10 files is still one logical change — don't split artificially.
 - Quality gates pass before every commit.
 - Commit message format: `type(scope): description`
 
@@ -281,9 +396,19 @@ Every PR must update the docs it affects. If a PR changes user-facing behavior a
 | `docs:` | Documentation |
 | `chore:` | Build, dependencies, CI |
 
+### Pre-PR Checklist
+
+- [ ] **CHANGELOG entry included in the PR diff** under `## [Unreleased]`
+- [ ] **README updated** if user-facing behavior changed (new commands, flags, config)
+- [ ] **prfaq.tex updated** if the change shifts product direction or validates/invalidates a risk
+- [ ] **Quality gates pass** — `make check` (go vet, staticcheck, markdownlint, go test -race)
+- [ ] **install.sh SHA updated** if releasing — Quick Start URL must point to the release commit
+
 ### Release Workflow
 
-1. **Bump version** in `cmd/beadle-email/main.go`
+Use `/punt:auto release` when available. Manual fallback:
+
+1. **Bump version** in `.claude-plugin/plugin.json` and `install.sh`
 2. **Move `[Unreleased]`** entries in `CHANGELOG.md` to new version section
 3. **Run all quality gates**: `make check`
 4. **Build locally**: `make dist` (cross-compiles binaries + generates `dist/checksums.txt`)
@@ -291,6 +416,7 @@ Every PR must update the docs it affects. If a PR changes user-facing behavior a
 6. **Tag**: `git tag vX.Y.Z`
 7. **Push**: `git push origin main vX.Y.Z`
 8. **GitHub release**: `gh release create vX.Y.Z --title "vX.Y.Z" --notes-file - dist/*`
+9. **Update README install SHA** — change the pinned commit in Quick Start URLs to the release commit. This is a post-release PR (the SHA doesn't exist until after tagging).
 
 ### Distribution
 
