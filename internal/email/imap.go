@@ -14,6 +14,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapclient"
 
 	"github.com/punt-labs/beadle/internal/channel"
+	"github.com/punt-labs/beadle/internal/pgp"
 )
 
 // Client wraps an IMAP connection to Proton Bridge.
@@ -292,6 +293,16 @@ func (c *Client) parseMessage(buf *imapclient.FetchMessageBuffer, raw []byte) (*
 	to := ""
 	if len(env.To) > 0 {
 		to = formatAddress(env.To[0])
+	}
+
+	// Decrypt PGP/MIME encrypted messages before parsing MIME content.
+	// The decrypted plaintext may itself be a full MIME message
+	// (multipart/signed, multipart/mixed, etc.).
+	if pgp.IsEncrypted(raw) && c.cfg.GPGSigner != "" {
+		passphrase, _ := c.cfg.GPGPassphrase()
+		if result, err := pgp.Decrypt(c.cfg.GPGBinary, passphrase, raw); err == nil {
+			raw = result.Plaintext
+		}
 	}
 
 	body, attachments, headers := ParseMIME(raw)

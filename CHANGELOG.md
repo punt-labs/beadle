@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Inbound PGP decryption: `read_message` automatically decrypts messages
+  encrypted to the agent's GPG key (`multipart/encrypted`, RFC 3156).
+  Decrypted content is parsed recursively for nested MIME (text, attachments,
+  inner signatures). Encrypted+signed messages go through the normal
+  verification path after decryption. (beadle-ksk)
 - Implicit TLS support for IMAP (port 993) and SMTP (port 465). Standard
   email providers (Fastmail, Gmail, Migadu) use implicit TLS by default.
   Port-based auto-detection: 993 → IMAPS, 465 → SMTPS, others → STARTTLS.
