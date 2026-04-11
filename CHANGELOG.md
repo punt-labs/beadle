@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- README: updated prerequisites to reflect non-Bridge SMTP support, added
+  external SMTP config example, documented CLI global flag support scope,
+  added plugin vs standalone distinction in Quick Start, added Go badge.
+  (beadle-95l)
+
 ### Added
 
 - `smtp_host` and `smtp_user` config fields in `email.json`. When omitted,
