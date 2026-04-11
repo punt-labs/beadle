@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `read_message` now extracts text from nested multipart structures
+  (e.g., `multipart/signed` wrapping `multipart/alternative`). Previously
+  returned "(no text body)" for any message where text/plain was deeper
+  than one MIME level. Fixes unreadable GPG Mail replies. (beadle-qoa)
+
 ### Added
 
 - Inbound PGP decryption: `read_message` automatically decrypts messages

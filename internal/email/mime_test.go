@@ -96,6 +96,111 @@ func TestExtractPart_MultipartOutOfRange(t *testing.T) {
 	assert.Contains(t, err.Error(), "out of range")
 }
 
+func TestParseMIME_NestedMultipartAlternative(t *testing.T) {
+	// multipart/signed wrapping multipart/alternative (text + HTML) + signature
+	raw := []byte("From: jim@example.com\r\n" +
+		"Subject: Signed reply\r\n" +
+		"Content-Type: multipart/signed; boundary=SIG; micalg=pgp-sha256; protocol=\"application/pgp-signature\"\r\n" +
+		"\r\n" +
+		"--SIG\r\n" +
+		"Content-Type: multipart/alternative; boundary=ALT\r\n" +
+		"\r\n" +
+		"--ALT\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Hello from GPG Mail\r\n" +
+		"--ALT\r\n" +
+		"Content-Type: text/html\r\n" +
+		"\r\n" +
+		"<p>Hello from GPG Mail</p>\r\n" +
+		"--ALT--\r\n" +
+		"--SIG\r\n" +
+		"Content-Type: application/pgp-signature\r\n" +
+		"\r\n" +
+		"-----BEGIN PGP SIGNATURE-----\r\nfake\r\n-----END PGP SIGNATURE-----\r\n" +
+		"--SIG--\r\n")
+
+	body, attachments, headers := ParseMIME(raw)
+
+	assert.Equal(t, "Hello from GPG Mail", body)
+	assert.Empty(t, attachments)
+	assert.Equal(t, "jim@example.com", headers["From"])
+}
+
+func TestParseMIME_NestedMultipartMixed(t *testing.T) {
+	// multipart/signed wrapping multipart/mixed (text + attachment) + signature
+	raw := []byte("From: jim@example.com\r\n" +
+		"Subject: Signed with attachment\r\n" +
+		"Content-Type: multipart/signed; boundary=SIG; micalg=pgp-sha256; protocol=\"application/pgp-signature\"\r\n" +
+		"\r\n" +
+		"--SIG\r\n" +
+		"Content-Type: multipart/mixed; boundary=MIX\r\n" +
+		"\r\n" +
+		"--MIX\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"See attached report\r\n" +
+		"--MIX\r\n" +
+		"Content-Type: application/pdf\r\n" +
+		"Content-Disposition: attachment; filename=\"report.pdf\"\r\n" +
+		"\r\n" +
+		"fake-pdf-data\r\n" +
+		"--MIX--\r\n" +
+		"--SIG\r\n" +
+		"Content-Type: application/pgp-signature\r\n" +
+		"\r\n" +
+		"-----BEGIN PGP SIGNATURE-----\r\nfake\r\n-----END PGP SIGNATURE-----\r\n" +
+		"--SIG--\r\n")
+
+	body, attachments, _ := ParseMIME(raw)
+
+	assert.Equal(t, "See attached report", body)
+	assert.Len(t, attachments, 1)
+	assert.Equal(t, "report.pdf", attachments[0].Filename)
+	assert.Equal(t, "application/pdf", attachments[0].ContentType)
+}
+
+func TestParseMIME_TripleNested(t *testing.T) {
+	// multipart/signed → multipart/mixed → multipart/alternative + attachment + signature
+	raw := []byte("From: jim@example.com\r\n" +
+		"Subject: Triple nested\r\n" +
+		"Content-Type: multipart/signed; boundary=SIG; micalg=pgp-sha256; protocol=\"application/pgp-signature\"\r\n" +
+		"\r\n" +
+		"--SIG\r\n" +
+		"Content-Type: multipart/mixed; boundary=MIX\r\n" +
+		"\r\n" +
+		"--MIX\r\n" +
+		"Content-Type: multipart/alternative; boundary=ALT\r\n" +
+		"\r\n" +
+		"--ALT\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"Deep text body\r\n" +
+		"--ALT\r\n" +
+		"Content-Type: text/html\r\n" +
+		"\r\n" +
+		"<p>Deep text body</p>\r\n" +
+		"--ALT--\r\n" +
+		"--MIX\r\n" +
+		"Content-Type: image/png\r\n" +
+		"Content-Disposition: attachment; filename=\"screenshot.png\"\r\n" +
+		"\r\n" +
+		"fake-png-data\r\n" +
+		"--MIX--\r\n" +
+		"--SIG\r\n" +
+		"Content-Type: application/pgp-signature\r\n" +
+		"\r\n" +
+		"-----BEGIN PGP SIGNATURE-----\r\nfake\r\n-----END PGP SIGNATURE-----\r\n" +
+		"--SIG--\r\n")
+
+	body, attachments, _ := ParseMIME(raw)
+
+	assert.Equal(t, "Deep text body", body)
+	assert.Len(t, attachments, 1)
+	assert.Equal(t, "screenshot.png", attachments[0].Filename)
+	assert.Equal(t, "image/png", attachments[0].ContentType)
+}
+
 func TestTruncate(t *testing.T) {
 	assert.Equal(t, "abc", truncate("abc", 10))
 	assert.Equal(t, "ab...", truncate("abcdef", 2))
