@@ -72,7 +72,21 @@ func ParseMIME(raw []byte) (body string, attachments []channel.Attachment, heade
 	}
 
 	var plainBody, htmlBody string
+	walkParts(mr, &plainBody, &htmlBody, &attachments)
 
+	if plainBody != "" {
+		body = plainBody
+	} else if htmlBody != "" {
+		body = htmlBody
+	} else {
+		body = "(no text body)"
+	}
+
+	return body, attachments, headers
+}
+
+// walkParts recursively extracts text body and attachments from a multipart entity.
+func walkParts(mr message.MultipartReader, plainBody, htmlBody *string, attachments *[]channel.Attachment) {
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
@@ -86,9 +100,15 @@ func ParseMIME(raw []byte) (body string, attachments []channel.Attachment, heade
 		disp, params, _ := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
 		filename := params["filename"]
 
+		// Recurse into nested multipart before reading the body.
+		if nested := part.MultipartReader(); nested != nil {
+			walkParts(nested, plainBody, htmlBody, attachments)
+			continue
+		}
+
 		partData, err := io.ReadAll(part.Body)
 		if err != nil {
-			attachments = append(attachments, channel.Attachment{
+			*attachments = append(*attachments, channel.Attachment{
 				Filename:    filename,
 				ContentType: partCT + " (read error)",
 				Size:        0,
@@ -98,33 +118,20 @@ func ParseMIME(raw []byte) (body string, attachments []channel.Attachment, heade
 
 		switch {
 		case disp == "attachment":
-			attachments = append(attachments, channel.Attachment{
+			*attachments = append(*attachments, channel.Attachment{
 				Filename:    filename,
 				ContentType: partCT,
 				Size:        len(partData),
 			})
-		case partCT == "text/plain" && plainBody == "":
-			plainBody = string(partData)
-		case partCT == "text/html" && htmlBody == "":
-			htmlBody = string(partData)
+		case partCT == "text/plain" && *plainBody == "":
+			*plainBody = string(partData)
+		case partCT == "text/html" && *htmlBody == "":
+			*htmlBody = string(partData)
 		case partCT == "application/pgp-signature",
 			partCT == "application/pgp-keys":
 			// Skip — handled by trust/PGP verification
-		default:
-			// Includes nested multipart — for v0.1 the top-level
-			// walk handles common cases
 		}
 	}
-
-	if plainBody != "" {
-		body = plainBody
-	} else if htmlBody != "" {
-		body = htmlBody
-	} else {
-		body = "(no text body)"
-	}
-
-	return body, attachments, headers
 }
 
 // ParseMIMEStructure returns a detailed breakdown of all MIME parts.
