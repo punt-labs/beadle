@@ -19,6 +19,7 @@
 .claude/beadle.poll.ts
 .claude/projects/
 .claude/worktrees/
+.claude/scheduled_tasks.json
 .claude/scheduled_tasks.lock
 
 # direnv
