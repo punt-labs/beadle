@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -71,6 +72,13 @@ func TestIntParam(t *testing.T) {
 			key:     "count",
 			fallback: 0,
 			wantErr: "count",
+		},
+		{
+			name:    "float64 outside int32 range returns error",
+			args:    map[string]any{"count": math.MaxFloat64},
+			key:     "count",
+			fallback: 0,
+			wantErr: "out of int32 range",
 		},
 	}
 
