@@ -233,6 +233,102 @@ func buildMixedBodyPart(textBody string, attachments []OutboundAttachment) ([]by
 	return result.Bytes(), nil
 }
 
+// ComposeEncryptedSignedRaw builds a PGP/MIME encrypted+signed message (RFC 3156).
+// Signs the body first, then encrypts the signed body to the recipient keys.
+// The result is a multipart/encrypted envelope containing the signed message.
+func ComposeEncryptedSignedRaw(from string, to, cc []string, subject, textBody string,
+	attachments []OutboundAttachment, gpgBinary, signer, passphrase string,
+	recipientKeyIDs []string) ([]byte, error) {
+
+	allAddrs := make([]string, 0, len(to)+len(cc))
+	allAddrs = append(allAddrs, to...)
+	allAddrs = append(allAddrs, cc...)
+	for _, field := range append([]string{from, subject}, allAddrs...) {
+		if strings.ContainsAny(field, "\r\n") {
+			return nil, fmt.Errorf("header field contains CR/LF")
+		}
+	}
+
+	// Canonicalize to CRLF (RFC 3156 requires canonical line endings in signed parts).
+	textBody = strings.ReplaceAll(textBody, "\r\n", "\n")
+	textBody = strings.ReplaceAll(textBody, "\n", "\r\n")
+
+	// Build the body part that will be signed.
+	var bodyPart []byte
+	if len(attachments) == 0 {
+		bodyPart = []byte("Content-Type: text/plain; charset=utf-8\r\n" +
+			"Content-Transfer-Encoding: 7bit\r\n" +
+			"\r\n" +
+			textBody + "\r\n")
+	} else {
+		bp, err := buildMixedBodyPart(textBody, attachments)
+		if err != nil {
+			return nil, err
+		}
+		bodyPart = bp
+	}
+
+	sig, err := pgp.DetachSignBody(gpgBinary, signer, passphrase, bodyPart)
+	if err != nil {
+		return nil, fmt.Errorf("sign body: %w", err)
+	}
+
+	signBoundary, err := pgp.RandomBoundary()
+	if err != nil {
+		return nil, fmt.Errorf("generate sign boundary: %w", err)
+	}
+
+	// Assemble the inner multipart/signed part.
+	var signedPart bytes.Buffer
+	fmt.Fprintf(&signedPart, "Content-Type: multipart/signed; boundary=%q; micalg=pgp-sha256; protocol=\"application/pgp-signature\"\r\n", signBoundary)
+	fmt.Fprintf(&signedPart, "\r\n")
+	fmt.Fprintf(&signedPart, "--%s\r\n", signBoundary)
+	signedPart.Write(bodyPart)
+	fmt.Fprintf(&signedPart, "\r\n--%s\r\n", signBoundary)
+	fmt.Fprintf(&signedPart, "Content-Type: application/pgp-signature; name=\"signature.asc\"\r\n")
+	fmt.Fprintf(&signedPart, "Content-Disposition: attachment; filename=\"signature.asc\"\r\n")
+	fmt.Fprintf(&signedPart, "\r\n")
+	signedPart.Write(bytes.TrimSpace(sig))
+	fmt.Fprintf(&signedPart, "\r\n--%s--\r\n", signBoundary)
+
+	// Encrypt the signed body to all recipient keys (+ self if signer is set).
+	ciphertext, err := pgp.Encrypt(gpgBinary, recipientKeyIDs, signer, signedPart.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("encrypt signed body: %w", err)
+	}
+
+	encBoundary, err := pgp.RandomBoundary()
+	if err != nil {
+		return nil, fmt.Errorf("generate encrypt boundary: %w", err)
+	}
+
+	// Assemble the outer RFC 822 message with multipart/encrypted envelope.
+	var msg bytes.Buffer
+	fmt.Fprintf(&msg, "From: %s\r\n", from)
+	fmt.Fprintf(&msg, "To: %s\r\n", strings.Join(to, ", "))
+	if len(cc) > 0 {
+		fmt.Fprintf(&msg, "Cc: %s\r\n", strings.Join(cc, ", "))
+	}
+	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
+	fmt.Fprintf(&msg, "MIME-Version: 1.0\r\n")
+	fmt.Fprintf(&msg, "Content-Type: multipart/encrypted; boundary=%q; protocol=\"application/pgp-encrypted\"\r\n", encBoundary)
+	fmt.Fprintf(&msg, "\r\n")
+	fmt.Fprintf(&msg, "--%s\r\n", encBoundary)
+	fmt.Fprintf(&msg, "Content-Type: application/pgp-encrypted\r\n")
+	fmt.Fprintf(&msg, "Content-Description: PGP/MIME version identification\r\n")
+	fmt.Fprintf(&msg, "\r\n")
+	fmt.Fprintf(&msg, "Version: 1\r\n")
+	fmt.Fprintf(&msg, "\r\n")
+	fmt.Fprintf(&msg, "--%s\r\n", encBoundary)
+	fmt.Fprintf(&msg, "Content-Type: application/octet-stream; name=\"encrypted.asc\"\r\n")
+	fmt.Fprintf(&msg, "Content-Disposition: inline; filename=\"encrypted.asc\"\r\n")
+	fmt.Fprintf(&msg, "\r\n")
+	msg.Write(bytes.TrimSpace(ciphertext))
+	fmt.Fprintf(&msg, "\r\n--%s--\r\n", encBoundary)
+
+	return msg.Bytes(), nil
+}
+
 // ResendAttachment is a file attachment in the Resend API format.
 type ResendAttachment struct {
 	Filename string `json:"filename"`
@@ -306,4 +402,3 @@ func Send(cfg *Config, req SendRequest) (*SendResponse, error) {
 
 	return &result, nil
 }
-
