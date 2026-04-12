@@ -2,7 +2,7 @@
 
 # ---- Build stage ----
 # Pin by digest in production builds. Tag used here for development.
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 # Version injected from Makefile (git describe). Falls back to "dev"
 # when not provided. .git is excluded via .dockerignore, so git
