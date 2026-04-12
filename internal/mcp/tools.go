@@ -5,9 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"io"
 	"log/slog"
+	"math"
 	"mime"
 	"os"
 	"path/filepath"
@@ -148,7 +148,6 @@ func (h *handler) resolveContext() (*identity.Identity, *email.Config, *contacts
 
 	return id, cfg, store, nil
 }
-
 
 // verifyResult is the typed response for the verify_signature tool.
 type verifyResult struct {
@@ -606,17 +605,40 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
 
-	// Sender chain: Proton Bridge SMTP → Resend plain
-	//
-	// PGP signing of outbound mail requires a transport that preserves raw MIME
-	// (multipart/signed envelopes). Neither Proton Bridge (strips MIME) nor
-	// Resend (no raw MIME API) supports this. Tracked in beadle-atz: Amazon SES
-	// will be added as the PGP-signing transport in a future release.
-	result, sendErr := email.TrySendChain(cfg, h.logger, to, cc, bcc, subject, body, html, attachments)
+	// Collect GPG key IDs for recipients that have them.
+	var recipientKeyIDs []string
+	var missingKeyAddrs []string
+	for _, addr := range allRecipients {
+		recipientEmail := email.ExtractEmailAddress(addr)
+		if recipientEmail == "" {
+			continue
+		}
+		match, ok := findByEmail(store, recipientEmail)
+		if ok && match.GPGKeyID != "" {
+			recipientKeyIDs = append(recipientKeyIDs, match.GPGKeyID)
+		} else {
+			missingKeyAddrs = append(missingKeyAddrs, recipientEmail)
+		}
+	}
+
+	// Encrypt only when ALL recipients have GPG keys.
+	var encryptKeyIDs []string
+	var encryptionWarning string
+	if len(recipientKeyIDs) > 0 && len(missingKeyAddrs) == 0 {
+		encryptKeyIDs = recipientKeyIDs
+	} else if len(recipientKeyIDs) > 0 && len(missingKeyAddrs) > 0 {
+		encryptionWarning = fmt.Sprintf("encryption skipped: not all recipients have GPG keys (missing: %s)", strings.Join(missingKeyAddrs, ", "))
+	}
+
+	result, sendErr := email.TrySendChain(cfg, h.logger, to, cc, bcc, subject, body, html, attachments, encryptKeyIDs)
 	if sendErr != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("send email: %v", sendErr)), nil
 	}
-	return textResult(formatSendResult(result))
+	out := formatSendResult(result)
+	if encryptionWarning != "" {
+		out += "\n" + encryptionWarning
+	}
+	return textResult(out)
 }
 
 // trySendChain is now email.TrySendChain — called directly above.
@@ -1176,4 +1198,3 @@ func (h *handler) removeContact(_ context.Context, req mcplib.CallToolRequest) (
 
 // whoamiTool and whoami are in identity_tools.go.
 // switchIdentityTool and switchIdentity are in identity_tools.go.
-

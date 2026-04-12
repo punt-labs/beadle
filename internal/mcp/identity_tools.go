@@ -44,8 +44,8 @@ func (h *handler) switchIdentity(ctx context.Context, req mcplib.CallToolRequest
 		defaultID, err := h.resolver.Resolve()
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf(
-			"identity override cleared, but default identity is broken: %v. "+
-				"Use switch_identity with a valid handle, or fix ethos config.", err)), nil
+				"identity override cleared, but default identity is broken: %v. "+
+					"Use switch_identity with a valid handle, or fix ethos config.", err)), nil
 		}
 		return textResult(fmt.Sprintf("identity reset to default: %s (%s)", defaultID.Handle, defaultID.Email))
 	}

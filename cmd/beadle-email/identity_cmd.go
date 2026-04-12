@@ -159,4 +159,3 @@ var identitySetCmd = &cobra.Command{
 		return nil
 	},
 }
-

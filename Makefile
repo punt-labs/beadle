@@ -6,7 +6,8 @@ LDFLAGS := -X main.version=$(VERSION)
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-lint: ## Lint (go vet + staticcheck)
+lint: ## Lint (gofmt + go vet + staticcheck)
+	@test -z "$$(gofmt -s -l ./cmd/ ./internal/ 2>/dev/null)" || { echo "gofmt -s: these files need formatting:"; gofmt -s -l ./cmd/ ./internal/; exit 1; }
 	go vet ./...
 	$(shell go env GOPATH)/bin/staticcheck ./...
 
@@ -21,8 +22,8 @@ test-integration: ## Run integration tests (in-process IMAP/SMTP)
 
 check: lint docs test ## Run all quality gates
 
-format: ## Format code
-	gofmt -w .
+format: ## Format code (with simplify)
+	gofmt -s -w ./cmd/ ./internal/
 
 build: ## Build binary
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o beadle-email ./cmd/beadle-email/

@@ -24,13 +24,13 @@ const (
 // Credentials are not stored here — they are resolved at runtime via the
 // secret package (OS keychain → file → env var).
 type Config struct {
-	IMAPHost    string `json:"imap_host"`
-	IMAPPort    int    `json:"imap_port"`
-	IMAPUser    string `json:"imap_user"`
-	SMTPHost    string `json:"smtp_host"`
-	SMTPPort    int    `json:"smtp_port"`
-	SMTPUser    string `json:"smtp_user"`
-	FromAddress string `json:"from_address"`
+	IMAPHost     string `json:"imap_host"`
+	IMAPPort     int    `json:"imap_port"`
+	IMAPUser     string `json:"imap_user"`
+	SMTPHost     string `json:"smtp_host"`
+	SMTPPort     int    `json:"smtp_port"`
+	SMTPUser     string `json:"smtp_user"`
+	FromAddress  string `json:"from_address"`
 	GPGBinary    string `json:"gpg_binary"`
 	GPGSigner    string `json:"gpg_signer"`
 	PollInterval string `json:"poll_interval,omitempty"`

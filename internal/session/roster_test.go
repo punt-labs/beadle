@@ -156,4 +156,3 @@ func TestWalkToTopmostClaude_CycleDetection(t *testing.T) {
 	pid := walkToTopmostClaude(100, mockTable)
 	assert.Equal(t, 0, pid) // no claude found
 }
-

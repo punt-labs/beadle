@@ -180,7 +180,7 @@ func TestHandler_ReadMessage_MaxBodyLength(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		maxBody     any    // nil means omitted
+		maxBody     any // nil means omitted
 		wantFull    bool
 		wantTrunc   bool
 		wantError   bool

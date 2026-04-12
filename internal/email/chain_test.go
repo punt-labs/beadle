@@ -23,8 +23,27 @@ func TestTrySendChain_SignedBlocksResendFallback(t *testing.T) {
 	_, err := TrySendChain(cfg, logger,
 		[]string{"to@example.com"}, nil, nil,
 		"Subject", "Body", "",
-		nil,
+		nil, nil,
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pgp-signed email requires SMTP")
+}
+
+func TestTrySendChain_EncryptionRequiresSigning(t *testing.T) {
+	cfg := &Config{
+		FromAddress: "test@example.com",
+		IMAPHost:    "127.0.0.1",
+		SMTPPort:    0,
+		GPGBinary:   "gpg",
+		// GPGSigner intentionally empty — signing not configured.
+	}
+
+	logger := slog.Default()
+	_, err := TrySendChain(cfg, logger,
+		[]string{"to@example.com"}, nil, nil,
+		"Subject", "Body", "",
+		nil, []string{"ABCD1234"},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "encryption requires signing")
 }

@@ -258,7 +258,7 @@ var sendCmd = &cobra.Command{
 			return err
 		}
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
-		result, err := email.TrySendChain(cfg, logger, to, cc, bcc, sendSubject, sendBody, "", nil)
+		result, err := email.TrySendChain(cfg, logger, to, cc, bcc, sendSubject, sendBody, "", nil, nil)
 		if err != nil {
 			return fmt.Errorf("send: %w", err)
 		}

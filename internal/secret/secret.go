@@ -4,7 +4,7 @@
 //  1. OS credential store
 //     - macOS: Keychain via `security` CLI
 //     - Linux: `pass` (primary) then `secret-tool` (fallback), both as
-//       subprocesses. See keychain_linux.go for the rationale.
+//     subprocesses. See keychain_linux.go for the rationale.
 //  2. Secret file (~/.punt-labs/beadle/secrets/<name>, mode 600)
 //  3. Environment variable (BEADLE_<NAME>)
 //
