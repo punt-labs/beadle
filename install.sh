@@ -15,7 +15,7 @@ ok()   { printf '  %b✓%b %s\n' "$GREEN" "$NC" "$1"; }
 warn() { printf '  %b!%b %s\n' "$YELLOW" "$NC" "$1"; }
 fail() { printf '  %b✗%b %s\n' "$YELLOW" "$NC" "$1"; exit 1; }
 
-VERSION="0.11.3"
+VERSION="0.12.0"
 REPO="punt-labs/beadle"
 BINARY="beadle-email"
 INSTALL_DIR="$HOME/.local/bin"
