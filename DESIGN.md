@@ -568,11 +568,46 @@ has no MCP spec mechanism to bridge.
   session-scoping problem; it does not solve detection (no `tools/list_changed`
   between ticks).
 
-**Future:** When Anthropic's channels feature ships, the detection layer can
-upgrade from `tools/list_changed` to `notifications/claude/channel` for direct
-conversation injection — which would bridge the detection-to-processing gap
-and potentially eliminate the CronCreate layer. See the channels architecture
-design document in `claude-code-main`.
+**Future — channels (eliminates the CronCreate layer):**
+
+Claude Code's channels feature (`notifications/claude/channel`) lets an MCP
+server push messages directly into the conversation queue as real prompts at
+`priority: 'next'`. When channels ships for general use, beadle-email's
+poller can fire a channel notification instead of `tools/list_changed`:
+
+```text
+notifications/claude/channel { content: "3 new messages. Process with /inbox." }
+```
+
+Claude Code picks this up between turns and acts on it — no CronCreate
+needed. This collapses the two-layer design to one layer with perfect sync.
+
+Channels is currently experimental and heavily gated (build flag, GrowthBook
+gate, OAuth, managed policy, marketplace allowlist). Not available for
+general use yet. When it ships, beadle-email should declare
+`experimental['claude/channel']` in its MCP capabilities and upgrade the
+poller to emit channel notifications. The CronCreate layer becomes
+unnecessary. See `42-channels-architecture.tex` for the full protocol.
+
+**Future — Docker sandbox (atomic launch):**
+
+In the Docker sandbox model, beadle-email is the long-running daemon and
+Claude Code is launched into it via:
+
+```text
+sbx run claude --prompt-file .beadle/startup.md
+```
+
+Where `startup.md` contains:
+
+```text
+/loop 5m /inbox 5m
+```
+
+This sets both layers atomically in one prompt: `/loop` creates the durable
+CronCreate job, its immediate first execution runs `/inbox 5m` which sets
+the server-side poll interval. No sync gap because both layers are configured
+in the same turn. See beadle-vyv for the full orchestrator design.
 
 ## DES-016: Contact matching by email domain pattern
 

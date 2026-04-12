@@ -141,19 +141,38 @@ mcp-proxy --version
 + **No custom auth code in beadle**: Sandbox isolation + mcp-proxy's existing
   token auth handle it. Zero auth middleware to write or maintain.
 
+## Deployment Modes and Polling Sync
+
+The two-layer polling design (DES-015) requires detection + processing.
+How they stay in sync depends on deployment mode.
+
+| Mode | Detection | Processing | Sync |
+|------|-----------|------------|------|
+| Bare metal (today) | Server poller | Durable CronCreate via `/loop` | Best effort (7-day expiry) |
+| Bare metal + channels | Server poller | Channel notification → prompt queue | Perfect (one layer) |
+| Docker sandbox | Server poller | Prompt file: `/loop 5m /inbox 5m` | Perfect (atomic launch) |
+
+**Channels** (`notifications/claude/channel`) let the MCP server push
+messages directly into Claude Code's prompt queue. When the poller detects
+new mail, it fires a channel notification instead of `tools/list_changed`.
+Claude Code acts on it as a real prompt. No CronCreate needed. Currently
+experimental and gated. See `42-channels-architecture.tex`.
+
+**Docker sandbox launch**: `sbx run claude --prompt-file .beadle/startup.md`
+where `startup.md` contains `/loop 5m /inbox 5m`. Sets both layers
+atomically in one turn.
+
 ## Registration (after build)
 
 ```bash
-# Sandbox deployment
-sbx run claude   # inside sandbox, beadle-email serve --transport ws
+# Sandbox deployment (macOS)
+# startup.md contains: /loop 5m /inbox 5m
+sbx run claude --prompt-file .beadle/startup.md
 
-# Traditional Docker deployment
+# Traditional Docker deployment (Linux)
 docker compose up -d
 claude mcp add -s user beadle-email mcp-proxy ws://localhost:8420/mcp
-
-# With mcp-proxy token (non-sandbox)
-MCP_PROXY_TOKEN=<token> claude mcp add -s user beadle-email \
-  mcp-proxy ws://localhost:8420/mcp
+# Then in Claude Code: /loop 5m /inbox 5m
 ```
 
 ## Open Items
@@ -163,3 +182,6 @@ MCP_PROXY_TOKEN=<token> claude mcp add -s user beadle-email \
 + Proton Bridge sidecar container is documented but not recommended. Host
   Bridge is the primary topology.
 + Per-repo message filtering via `session_key` is future work (not in o1w scope).
++ Channels feature (eliminates CronCreate layer) is experimental, heavily
+  gated. Track Anthropic's rollout. beadle-email should declare
+  `experimental['claude/channel']` when available. See beadle-vyv.
