@@ -15,10 +15,10 @@ import (
 // DecryptResult holds the outcome of PGP decryption.
 type DecryptResult struct {
 	Plaintext []byte `json:"plaintext"`        // Decrypted content (may be a full MIME message)
-	KeyID     string `json:"key_id,omitempty"`  // Recipient key used for decryption
-	Signed    bool   `json:"signed"`            // Whether the decrypted content was also signed
-	Signer    string `json:"signer,omitempty"`  // Signer identity if signed
-	Output    string `json:"output"`            // gpg stderr output
+	KeyID     string `json:"key_id,omitempty"` // Recipient key used for decryption
+	Signed    bool   `json:"signed"`           // Whether the decrypted content was also signed
+	Signer    string `json:"signer,omitempty"` // Signer identity if signed
+	Output    string `json:"output"`           // gpg stderr output
 }
 
 // Decrypt decrypts a PGP/MIME encrypted message (RFC 3156).

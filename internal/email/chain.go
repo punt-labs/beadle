@@ -16,6 +16,7 @@ type SendResult struct {
 	Status      string `json:"status"`
 	Method      string `json:"method"`
 	Signed      bool   `json:"signed"`
+	Encrypted   bool   `json:"encrypted"`
 	ID          string `json:"id,omitempty"`
 	From        string `json:"from"`
 	To          string `json:"to"`
@@ -30,9 +31,11 @@ type SendResult struct {
 // 2. Resend API (fallback)
 //
 // When cfg.GPGSigner is non-empty, all outbound SMTP is PGP-signed (RFC 3156).
+// When recipientKeyIDs is non-empty and signing is enabled, the message is
+// signed then encrypted (RFC 3156 multipart/encrypted).
 // Resend fallback is blocked when signing is configured because Resend cannot
 // preserve raw MIME.
-func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment) (*SendResult, error) {
+func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment, recipientKeyIDs []string) (*SendResult, error) {
 	// Validate BCC addresses for CR/LF injection.
 	for _, addr := range bcc {
 		if strings.ContainsAny(addr, "\r\n") {
@@ -49,6 +52,11 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 	ccStr := strings.Join(cc, ", ")
 
 	signing := cfg.GPGSigner != ""
+	encrypting := len(recipientKeyIDs) > 0
+
+	if encrypting && !signing {
+		return nil, fmt.Errorf("encryption requires signing to be configured (gpg_signer)")
+	}
 
 	// Resolve passphrase once if signing is enabled.
 	var passphrase string
@@ -69,9 +77,12 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 		var raw []byte
 		var composeErr error
 
-		if signing {
+		switch {
+		case encrypting:
+			raw, composeErr = ComposeEncryptedSignedRaw(cfg.FromAddress, to, cc, subject, body, attachments, cfg.GPGBinary, cfg.GPGSigner, passphrase, recipientKeyIDs)
+		case signing:
 			raw, composeErr = ComposeSignedRaw(cfg.FromAddress, to, cc, subject, body, attachments, cfg.GPGBinary, cfg.GPGSigner, passphrase)
-		} else {
+		default:
 			raw, composeErr = ComposeRaw(cfg.FromAddress, to, cc, subject, body, attachments)
 		}
 		if composeErr != nil {
@@ -80,7 +91,7 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 
 		if err := SMTPSend(cfg, cfg.FromAddress, allRecipients, raw); err != nil {
 			logger.Warn("smtp send failed, falling back to resend", "err", err)
-			if signing {
+			if signing || encrypting {
 				return nil, fmt.Errorf("smtp send failed: %w; resend fallback blocked for signed mail", err)
 			}
 		} else {
@@ -88,6 +99,7 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 				Status:      "sent",
 				Method:      "smtp",
 				Signed:      signing,
+				Encrypted:   encrypting,
 				From:        cfg.FromAddress,
 				To:          toStr,
 				Cc:          ccStr,

@@ -23,6 +23,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Outbound PGP encryption: when all recipients have a `gpg_key_id` in the
+  contact book, `send_email` encrypts the message to their keys (RFC 3156
+  `multipart/encrypted`). Messages are signed first, then encrypted
+  (sign-then-encrypt). Falls back to signed-only when any recipient lacks
+  a GPG key. (beadle-oep)
 - Inbound PGP decryption: `read_message` automatically decrypts messages
   encrypted to the agent's GPG key (`multipart/encrypted`, RFC 3156).
   Decrypted content is parsed recursively for nested MIME (text, attachments,

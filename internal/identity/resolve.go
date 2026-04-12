@@ -45,6 +45,7 @@ func NewResolver(ethosDir, beadleDir, repoDir string) *Resolver {
 //  3. Handle → ethos identity YAML → email, name
 //  4. Handle → beadle extension → gpg_key_id (optional)
 //  5. Beadle default-identity file → email (no handle)
+//
 // ValidateHandle rejects handles containing path separators or parent
 // directory references to prevent path traversal attacks.
 func ValidateHandle(handle string) error {
@@ -226,4 +227,3 @@ func (r *Resolver) fromDefault() (*Identity, error) {
 		Source: "default",
 	}, nil
 }
-

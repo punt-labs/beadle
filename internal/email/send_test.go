@@ -466,3 +466,108 @@ func TestComposeSignedRaw_HeaderInjection(t *testing.T) {
 		})
 	}
 }
+
+func TestComposeEncryptedSignedRaw_RoundTrip(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+
+	home := gpgHome(t)
+	gpgGenKey(t, gpgBin, home, "Sender", "sender@example.com")
+	gpgGenKey(t, gpgBin, home, "Recipient", "recipient@example.com")
+	t.Setenv("GNUPGHOME", home)
+
+	raw, err := ComposeEncryptedSignedRaw(
+		"sender@example.com",
+		[]string{"recipient@example.com"},
+		nil,
+		"Encrypted Subject",
+		"Hello, this message is encrypted and signed.",
+		nil,
+		gpgBin, "sender@example.com", "",
+		[]string{"recipient@example.com"},
+	)
+	require.NoError(t, err)
+
+	// Verify outer structure is multipart/encrypted.
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+
+	ct := msg.Header.Get("Content-Type")
+	mediaType, _, err := mime.ParseMediaType(ct)
+	require.NoError(t, err)
+	assert.Equal(t, "multipart/encrypted", mediaType)
+
+	// Decrypt with the recipient key.
+	result, err := pgp.Decrypt(gpgBin, "", raw)
+	require.NoError(t, err)
+
+	// The decrypted content should be a multipart/signed message.
+	assert.Contains(t, string(result.Plaintext), "multipart/signed")
+	assert.Contains(t, string(result.Plaintext), "Hello, this message is encrypted and signed.")
+}
+
+func TestComposeEncryptedSignedRaw_WithAttachments(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+
+	home := gpgHome(t)
+	gpgGenKey(t, gpgBin, home, "Sender", "sender@example.com")
+	gpgGenKey(t, gpgBin, home, "Recipient", "recipient@example.com")
+	t.Setenv("GNUPGHOME", home)
+
+	atts := []OutboundAttachment{{
+		Filename:    "report.pdf",
+		ContentType: "application/pdf",
+		Data:        []byte("fake-pdf-content"),
+	}}
+
+	raw, err := ComposeEncryptedSignedRaw(
+		"sender@example.com",
+		[]string{"recipient@example.com"},
+		nil,
+		"Encrypted with Attachment",
+		"See attached.",
+		atts,
+		gpgBin, "sender@example.com", "",
+		[]string{"recipient@example.com"},
+	)
+	require.NoError(t, err)
+
+	// Decrypt and verify the inner signed body contains the attachment.
+	result, err := pgp.Decrypt(gpgBin, "", raw)
+	require.NoError(t, err)
+	assert.Contains(t, string(result.Plaintext), "multipart/signed")
+	assert.Contains(t, string(result.Plaintext), "multipart/mixed")
+}
+
+func TestComposeEncryptedSignedRaw_HeaderInjection(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+
+	tests := []struct {
+		name    string
+		from    string
+		to      []string
+		subject string
+	}{
+		{"from CR", "a\r@b.com", []string{"c@d.com"}, "Hi"},
+		{"to LF", "a@b.com", []string{"c\n@d.com"}, "Hi"},
+		{"subject CRLF", "a@b.com", []string{"c@d.com"}, "Hi\r\nBcc: evil@evil.com"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ComposeEncryptedSignedRaw(tc.from, tc.to, nil, tc.subject, "body", nil,
+				gpgBin, "signer@example.com", "",
+				[]string{"ABCD1234"})
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "CR/LF")
+		})
+	}
+}

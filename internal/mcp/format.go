@@ -202,6 +202,11 @@ func formatSendResult(r *email.SendResult) string {
 	if r.Cc != "" {
 		s += fmt.Sprintf(" cc:%s", r.Cc)
 	}
+	if r.Encrypted {
+		s += " [encrypted+signed]"
+	} else if r.Signed {
+		s += " [signed]"
+	}
 	return s
 }
 
