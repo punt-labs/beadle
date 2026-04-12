@@ -306,13 +306,14 @@ Mission contract YAMLs go in `.tmp/missions/`. Result artifact YAMLs go in `.tmp
 
 Biff is the team messaging system. Use it for presence, coordination, and async communication.
 
+- `/tty <name>` — name this session (visible in `/who` and `/finger` TTY column)
 - `/plan <summary>` — set what you're working on (visible to `/who` and `/finger`)
 - `/who` — check who's active before destructive git operations or cross-repo work
 - `/read` — check inbox for messages from other agents
 - `/write @<agent> <message>` — send a direct message
 - `/wall <message>` — broadcast to all active agents
 
-Start every session with `/loop 5m /biff:read` to poll for incoming messages. Set `/plan` before starting any bead work.
+Start every session with `/tty beadle` to register the session, `/plan` to declare your work, and `/loop 5m /biff:read` to poll for incoming messages. All three before any bead work.
 
 ## Ethos Integration
 
