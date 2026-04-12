@@ -1,8 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build stage ----
-# Pin by digest -- replace placeholder digests at build time with
-# current values from: docker pull golang:1.24-bookworm && docker inspect --format='{{.RepoDigests}}'
+# Pin by digest in production builds. Tag used here for development.
 FROM golang:1.24-bookworm AS builder
 
 # Version injected from Makefile (git describe). Falls back to "dev"
@@ -20,8 +19,7 @@ RUN CGO_ENABLED=0 GOOS=linux \
     -o /beadle-email ./cmd/beadle-email/
 
 # ---- Runtime stage ----
-# Pin by digest -- replace placeholder digests at build time with
-# current values from: docker pull debian:bookworm-slim && docker inspect --format='{{.RepoDigests}}'
+# Pin by digest in production builds. Tag used here for development.
 FROM debian:bookworm-slim
 
 RUN apt-get update && \
@@ -30,9 +28,9 @@ RUN apt-get update && \
       ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Create unprivileged user
-RUN groupadd -r beadle && \
-    useradd -r -g beadle -m -d /home/beadle -s /bin/false beadle
+# Create unprivileged user with explicit UID/GID for tmpfs alignment
+RUN groupadd -g 1000 beadle && \
+    useradd -u 1000 -g beadle -m -d /home/beadle -s /bin/false beadle
 
 # Create required directory structure
 RUN mkdir -p /home/beadle/.punt-labs/beadle/identities \

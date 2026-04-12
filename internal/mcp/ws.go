@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/mark3labs/mcp-go/server"
@@ -36,6 +39,8 @@ func NewWSServer(s *server.MCPServer, version string, logger *slog.Logger) *WSSe
 		version: version,
 		logger:  logger,
 		upgrader: websocket.Upgrader{
+			// Sandbox isolation prevents browser access. For traditional
+			// Docker, mcp-proxy authenticates via MCP_PROXY_TOKEN on upgrade.
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
@@ -49,7 +54,12 @@ func (ws *WSServer) ListenAndServe(ctx context.Context, port int) error {
 	mux.HandleFunc("/health", ws.HandleHealth)
 
 	addr := net.JoinHostPort("0.0.0.0", strconv.Itoa(port))
-	srv := &http.Server{Addr: addr, Handler: mux}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -114,6 +124,7 @@ func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// StdioServer expects newline-delimited JSON.
+			msg = bytes.TrimRight(msg, "\r\n")
 			msg = append(msg, '\n')
 			if _, err := clientWriter.Write(msg); err != nil {
 				cancel()
@@ -122,22 +133,25 @@ func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Goroutine 2: read MCP responses from serverReader, write to WebSocket.
+	// Goroutine 2: read NDJSON lines from serverReader, write to WebSocket.
+	// StdioServer writes newline-delimited JSON; each line is one message.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		buf := make([]byte, 64*1024)
-		for {
-			n, err := serverReader.Read(buf)
-			if err != nil {
-				cancel()
-				return
+		scanner := bufio.NewScanner(serverReader)
+		scanner.Buffer(make([]byte, 64*1024), 64*1024)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
 			}
-			if err := conn.WriteMessage(websocket.TextMessage, buf[:n]); err != nil {
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteMessage(websocket.TextMessage, line); err != nil {
 				cancel()
 				return
 			}
 		}
+		cancel()
 	}()
 
 	// Run the MCP session. Listen blocks until EOF or context cancel.

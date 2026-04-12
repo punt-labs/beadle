@@ -1402,8 +1402,10 @@ Claude Code <--stdio--> mcp-proxy <--WebSocket--> [Container: beadle-email]
 
 **Transport:** WebSocket at `/mcp` on port 8420 (`--transport ws --port 8420`).
 mcp-proxy bridges stdio (Claude Code side) to WebSocket (container side).
-N:1 multi-session supported via `?session_key=<pid>`. stdio remains the
-default for local (non-Docker) installs.
+N:1 multi-session supported via `?session_key=<pid>` (accepted on the
+WebSocket upgrade URL but not yet used for routing — reserved for future
+per-repo message filtering). stdio remains the default for local
+(non-Docker) installs.
 
 **Base image:** `debian:bookworm-slim` + gnupg + ca-certificates. ~80 MB.
 Non-root user (beadle, UID 1000). Read-only rootfs. All capabilities dropped.
