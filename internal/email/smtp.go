@@ -26,7 +26,7 @@ func SMTPSend(cfg *Config, from string, recipients []string, raw []byte) error {
 
 	tlsCfg := &tls.Config{
 		ServerName:         host,
-		InsecureSkipVerify: isLoopback(host), //nolint:gosec // Proton Bridge uses self-signed certs on localhost
+		InsecureSkipVerify: cfg.TLSSkipVerify || isLoopback(host), //nolint:gosec // Proton Bridge uses self-signed certs on localhost or behind Docker host networking
 	}
 
 	var c *smtp.Client

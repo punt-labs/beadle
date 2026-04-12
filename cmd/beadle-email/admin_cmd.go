@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
@@ -21,10 +24,15 @@ import (
 
 // --- serve ---
 
+var (
+	serveTransport string
+	servePort      int
+)
+
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start MCP server",
-	Long:  "Start the beadle-email MCP server on stdio transport.",
+	Long:  "Start the beadle-email MCP server. Transport: stdio (default) or ws (WebSocket).",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 			Level: g.slogLevel(),
@@ -45,9 +53,31 @@ var serveCmd = &cobra.Command{
 			logger.Error("background polling failed to start", "error", err)
 		}
 		defer poller.Stop()
-		logger.Info("starting beadle-email MCP server", "version", version)
-		return server.ServeStdio(s)
+		logger.Info("starting beadle-email MCP server", "version", version, "transport", serveTransport)
+
+		switch serveTransport {
+		case "stdio":
+			return server.ServeStdio(s)
+		case "ws":
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+			go func() {
+				<-sigCh
+				cancel()
+			}()
+			ws := mcptools.NewWSServer(s, version, logger)
+			return ws.ListenAndServe(ctx, servePort)
+		default:
+			return fmt.Errorf("unknown transport %q (expected stdio or ws)", serveTransport)
+		}
 	},
+}
+
+func init() {
+	serveCmd.Flags().StringVar(&serveTransport, "transport", "stdio", "Transport: stdio or ws")
+	serveCmd.Flags().IntVar(&servePort, "port", 8420, "WebSocket server port (ws transport only)")
 }
 
 // --- version ---

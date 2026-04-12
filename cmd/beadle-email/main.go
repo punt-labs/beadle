@@ -47,6 +47,7 @@ func init() {
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(identityCmd)
+	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 

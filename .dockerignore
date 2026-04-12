@@ -1,0 +1,13 @@
+.git
+.tmp
+.beads
+.claude
+.punt-labs
+dist
+coverage.out
+*.pdf
+.envrc
+.envrc.local
+.biff.local
+node_modules
+docker-compose.yml

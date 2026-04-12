@@ -278,3 +278,38 @@ func TestSMTPEffectiveUser_UsesExplicitSMTPUser(t *testing.T) {
 	cfg := &Config{IMAPUser: "imap@example.com", SMTPUser: "smtp@example.com"}
 	assert.Equal(t, "smtp@example.com", cfg.SMTPEffectiveUser())
 }
+
+func TestLoadConfig_TLSSkipVerify(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want bool
+	}{
+		{
+			name: "absent defaults to false",
+			json: `{"imap_user":"u@example.com"}`,
+			want: false,
+		},
+		{
+			name: "explicit true",
+			json: `{"imap_user":"u@example.com","tls_skip_verify":true}`,
+			want: true,
+		},
+		{
+			name: "explicit false",
+			json: `{"imap_user":"u@example.com","tls_skip_verify":false}`,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgPath := filepath.Join(dir, "email.json")
+			require.NoError(t, os.WriteFile(cfgPath, []byte(tt.json), 0644))
+
+			cfg, err := LoadConfig(cfgPath)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.TLSSkipVerify)
+		})
+	}
+}
