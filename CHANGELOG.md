@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `SendResult.Method` now reports `"smtp"` instead of hardcoded
+  `"proton-bridge-smtp"` for all SMTP sends. Reflects that the SMTP host
+  can be Fastmail, Gmail, or any other server since `smtp_host` was added
+  in v0.11.3. (beadle-j25)
+- `intParam` uses `math.Trunc(n) != n` for the fractional check instead of
+  `n != float64(int(n))`, which is implementation-defined outside the int
+  range per the Go spec. Adds explicit int32 bounds guard before
+  conversion. (beadle-1tk)
 - `read_message` now extracts text from nested multipart structures
   (e.g., `multipart/signed` wrapping `multipart/alternative`). Previously
   returned "(no text body)" for any message where text/plain was deeper
