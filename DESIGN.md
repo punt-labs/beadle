@@ -71,8 +71,11 @@ Mail did not auto-verify because the MIME structure was wrong.
 **Root cause:** Proton Bridge re-processes all outbound messages through its own
 encryption pipeline, disassembling and reassembling MIME structure.
 
-**Workaround:** Amazon SES `SendRawEmail` preserves raw MIME. Tracked in
-beadle-atz. Requires SPF/DKIM DNS changes for punt-labs.com.
+**Workaround:** Fastmail SMTP (port 465, implicit TLS) preserves raw MIME
+including `multipart/signed` envelopes. Verified 2026-04-11: GPG Mail on
+macOS shows green "Signed" checkmark on messages sent via Fastmail SMTP.
+Amazon SES `SendRawEmail` was the original workaround candidate but was
+never tested. See DES-022 for the shipping outbound signing architecture.
 
 ## DES-006: Resend does not support raw MIME
 
@@ -80,9 +83,13 @@ beadle-atz. Requires SPF/DKIM DNS changes for punt-labs.com.
 
 **Evidence:** Tested 2026-03-13. Resend's POST /emails endpoint only accepts
 structured fields (from, to, subject, text, html). There is no `raw` field.
-The API docs confirm no raw MIME support.
+The API docs confirm no raw MIME support. Additionally tested 2026-04-11:
+Resend uses Amazon SES as its backend, which also strips `multipart/signed`
+envelopes even when raw MIME is provided through SES's `SendRawEmail` API.
 
-**Impact:** Resend is fallback-only for unsigned plain text delivery.
+**Impact:** Resend is fallback-only for unsigned plain text delivery. When
+`gpg_signer` is configured, `TrySendChain` blocks the Resend fallback
+entirely — see DES-022.
 
 ## DES-007: Sender chain — SMTP primary, Resend fallback
 
@@ -1064,3 +1071,228 @@ protection at worse UX.
 - **Hardware security key (YubiKey/OpenPGP card).** The correct long-term
   answer for high-value signing keys. Out of scope for a daemon that must
   operate unattended — hardware tokens require physical presence for signing.
+
+## DES-022: Outbound PGP signing via SMTP with MIME-preserving transport
+
+**Status:** SETTLED (beadle-atz, PR #132, 2026-04-11)
+
+**Decision:** All outbound email is PGP-signed (RFC 3156 `multipart/signed`)
+when `gpg_signer` is configured in `email.json`. Signing is opt-in: when
+`gpg_signer` is empty (the default), messages are sent unsigned. The signing
+path requires a MIME-preserving SMTP transport; the Resend API fallback is
+blocked when signing is enabled.
+
+**Architecture:**
+
+1. `ComposeSignedRaw()` builds the body part (text/plain, or multipart/mixed
+   when attachments are present), canonicalizes line endings to CRLF (RFC 3156
+   requirement), calls `pgp.DetachSignBody()` to create a detached signature,
+   and wraps both in a `multipart/signed` envelope with full RFC 822 headers.
+2. `DetachSignBody()` is a public wrapper around `detachSign()` that enforces
+   the DES-020 key-expiry invariant before signing. The passphrase is passed
+   to gpg via a mode-600 temp file to avoid `ps` exposure.
+3. `TrySendChain()` checks `cfg.GPGSigner != ""`, resolves the passphrase
+   (tolerating `secret.ErrNotFound` for unprotected keys), calls
+   `ComposeSignedRaw` for the SMTP path, and blocks the Resend fallback.
+   If SMTP fails and signing is enabled, the SMTP error is returned
+   directly — no silent downgrade to unsigned delivery.
+
+**CRLF canonicalization:** RFC 3156 requires the signed body part to use
+canonical CRLF line endings. `ComposeSignedRaw` and `buildMixedBodyPart` both
+normalize `textBody` via two-pass replacement: `\r\n` → `\n` → `\r\n`. This
+handles mixed-ending input without double-converting.
+
+**Transport requirement:** PGP-signed messages must transit via an SMTP
+server that preserves raw MIME structure. Proton Bridge and Resend/SES both
+strip `multipart/signed` envelopes (DES-005, DES-006). Fastmail SMTP
+(port 465, implicit TLS) preserves `multipart/signed` — verified 2026-04-11
+with GPG Mail green "Signed" checkmark on the recipient side.
+
+**Rejected alternatives:**
+
+- **Silent unsigned fallback via Resend when SMTP fails.** Trades
+  cryptographic integrity for delivery reliability. An unsigned message that
+  appears signed (because the config says to sign) is worse than a delivery
+  failure. The operator expects signed mail; failing visibly is the correct
+  behavior.
+- **Inline PGP signing (clearsign).** Simpler to implement (no MIME
+  manipulation) but not recognized by modern mail clients. GPG Mail, Outlook
+  S/MIME, and Thunderbird all expect `multipart/signed` (RFC 3156).
+- **Sign at the MCP tool layer instead of the transport layer.** Would
+  require every MCP tool that sends email to know about signing. Placing it
+  in `TrySendChain` makes signing transparent to all callers.
+- **Default signing to on.** The original implementation defaulted
+  `GPGSigner` to `FromAddress`, making signing implicit. Changed to opt-in
+  (empty default) because signing requires a working GPG key with an expiry
+  date, a passphrase in the credential store, and a MIME-preserving SMTP
+  transport. Failing on every send for an unconfigured user is worse than
+  sending unsigned until they opt in.
+
+## DES-023: Port-based TLS auto-detection for IMAP and SMTP
+
+**Status:** SETTLED (beadle-zle, PR #133, 2026-04-11)
+
+**Decision:** IMAP and SMTP connections auto-detect the TLS mode based on
+the configured port number. No explicit `tls_mode` config field is needed.
+
+| Port | Protocol | TLS Mode | Implementation |
+|------|----------|----------|----------------|
+| 993 | IMAP | Implicit TLS (IMAPS) | `imapclient.DialTLS()` |
+| 465 | SMTP | Implicit TLS (SMTPS) | `tls.DialWithDialer()` + `smtp.NewClient()` |
+| Other | IMAP | STARTTLS | `net.DialTimeout()` + `imapclient.NewStartTLS()` |
+| Other | SMTP | STARTTLS | `net.DialTimeout()` + `smtp.NewClient()` + `c.StartTLS()` |
+
+**Why port-based:** RFC 8314 (2018) recommends implicit TLS on ports 993
+(IMAPS) and 465 (SMTPS) as the preferred connection method. STARTTLS on
+ports 143/587 is the legacy approach. Every standard email provider
+(Fastmail, Gmail, Migadu, iCloud) uses implicit TLS on 993/465. Proton
+Bridge uses STARTTLS on non-standard localhost ports. Port-based detection
+handles both cases without user configuration.
+
+**ServerName:** Both IMAP and SMTP set `tls.Config.ServerName` to the
+configured host. For loopback addresses (127.0.0.1, ::1, localhost),
+`InsecureSkipVerify` is set to true because Proton Bridge uses self-signed
+certificates on localhost.
+
+**Why not an explicit `tls_mode` config field:**
+
+- Port numbers are already in the config. Adding a `tls_mode` field creates
+  a redundant knob that can contradict the port.
+- The mapping from port to TLS mode is an industry convention codified in
+  RFC 8314. No standard email provider uses a non-standard combination.
+- If a future provider uses an unusual combination, `tls_mode` can be added
+  as an override without breaking the default behavior.
+
+**Rejected alternatives:**
+
+- **Always STARTTLS.** Breaks standard email providers on port 993/465 —
+  they expect TLS from the first byte, not a plaintext upgrade.
+- **Always implicit TLS.** Breaks Proton Bridge on localhost, which speaks
+  STARTTLS on non-standard ports.
+- **Explicit `tls_mode: "starttls" | "implicit" | "none"`.** Unnecessary
+  complexity for the default case. Would be the only config field that
+  duplicates information already encoded in the port number.
+
+## DES-024: Inbound PGP decryption uses system keyring
+
+**Status:** PROPOSED (beadle-ksk, PR #134, 2026-04-11). Pending security
+review discussion — deferred by CEO.
+
+**Decision:** `pgp.Decrypt()` runs `gpg --decrypt` using the default
+GNUPGHOME (system keyring), not an isolated temporary keyring. This is a
+deliberate departure from DES-003, which uses isolated GNUPGHOME for
+verification.
+
+**Why the asymmetry with verification:**
+
+- **Verification** (DES-003) imports only *public* keys into a temp dir.
+  Public keys are safe to copy — no secret material is exposed.
+- **Decryption** requires the agent's *private* key. Copying a private key
+  into a temp directory would expose it in a second filesystem location,
+  doubling the attack surface. The system keyring (`~/.gnupg`) is the
+  canonical location for the private key, protected by filesystem permissions
+  and (optionally) a passphrase.
+
+**Integration point:** `parseMessage()` in `imap.go` checks
+`pgp.IsEncrypted(raw)` and `cfg.GPGSigner != ""` before attempting
+decryption. The `GPGSigner` check gates decryption on having a configured
+signing identity — a proxy for "this agent has PGP credentials."
+
+**Silent fallback:** If decryption fails (wrong key, missing passphrase,
+corrupted ciphertext), the error is silently discarded and the original
+encrypted bytes are passed through to `ParseMIME`. The user sees the raw
+PGP ciphertext instead of the decrypted body. This trades visibility for
+robustness — a decryption failure should not prevent reading other messages
+in the same inbox scan.
+
+**RFC 3156 payload extraction:** `extractEncryptedPayload()` uses a dual
+strategy: raw byte splitting on MIME boundary markers first, with
+`mime/multipart` parsing as a fallback. The raw-split approach handles edge
+cases where `mime/multipart` has already consumed the body reader. The
+second MIME part (index 1) contains the ciphertext per RFC 3156.
+
+**Passphrase handling:** Same temp-file pattern as `detachSign()` — the
+passphrase is written to a mode-600 temp file and passed via
+`--passphrase-file` to avoid `ps` exposure. The file is removed via `defer`.
+
+**Test coverage:** 6 tests covering round-trip decrypt, encrypt+sign,
+wrong-key failure, non-encrypted rejection, `IsEncrypted` classification,
+and temp-file cleanup verification.
+
+**Open question:** The CEO flagged the system keyring decision for post-
+testing security review. The alternative — an isolated GNUPGHOME with the
+private key imported per-operation — would provide hermetic isolation but
+requires either copying the private key (exposure) or symlinking
+`~/.gnupg/private-keys-v1.d/` (fragile, gpg-agent socket path issues).
+Neither option is clearly better. This ADR will move to SETTLED or be
+revised after the deferred discussion.
+
+**Rejected alternatives:**
+
+- **Isolated GNUPGHOME with key import.** Would require copying the private
+  key to a temp directory per decryption operation. Doubles the locations
+  where the private key exists on disk. The security benefit (hermetic
+  isolation) is outweighed by the exposure risk.
+- **Error on decryption failure.** Would prevent `read_message` from
+  returning any content for encrypted messages when decryption fails.
+  The `/inbox` processing loop would break on the first undecryptable message.
+  Silent fallback is the safer operational choice.
+- **Decrypt in list_messages (like DES-002 for verification).** Decryption
+  is expensive (subprocess + key material access) and would add latency to
+  every inbox scan. Only `read_message` decrypts — listing shows encrypted
+  messages as `unverified` trust level.
+
+## DES-025: Recursive MIME parsing for nested multipart
+
+**Status:** SETTLED (beadle-qoa, PR #135, 2026-04-11)
+
+**Decision:** `ParseMIME` uses a recursive `walkParts()` helper that
+descends into nested multipart containers via `part.MultipartReader()`.
+
+**Problem:** The original `ParseMIME` used flat iteration over the top-level
+multipart reader. Messages with nested multipart structures — common in
+PGP-signed email — returned "(no text body)" because the text/plain part
+was one or more levels deeper than the iterator reached.
+
+**Real-world trigger:** GPG Mail on macOS sends replies as:
+
+```text
+multipart/signed
+├── multipart/alternative
+│   ├── text/plain          ← actual body (depth 2)
+│   └── text/html
+└── application/pgp-signature
+```
+
+The flat iterator saw `multipart/alternative` as a leaf part, could not read
+it as text, and returned "(no text body)".
+
+**Solution:** `walkParts(mr, &plainBody, &htmlBody, &attachments)` checks
+each part for `part.MultipartReader()`. If non-nil, it recurses into the
+nested reader before continuing. Leaf parts (text/plain, text/html,
+attachments) are accumulated via pointer parameters across recursive calls.
+First text/plain wins; first text/html wins; PGP signatures are skipped.
+
+**Recursion strategy:** Depth-first traversal using Go's call stack. No
+explicit depth limit — MIME nesting deeper than 5 levels is pathological
+and not observed in real mail. The `go-message` library's `MultipartReader()`
+returns nil for non-multipart parts, providing the natural recursion base
+case.
+
+**Test coverage:** Three nested structures tested:
+
+| Test | Structure | Depth |
+|------|-----------|-------|
+| `TestParseMIME_NestedMultipartAlternative` | signed → alternative → text + html | 2 |
+| `TestParseMIME_NestedMultipartMixed` | signed → mixed → text + attachment | 2 |
+| `TestParseMIME_TripleNested` | signed → mixed → alternative + attachment | 3 |
+
+All three verify correct text extraction and attachment discovery at depth.
+
+**What this does not change:**
+
+- `ParseMIMEStructure` and `ExtractPart` still use flat iteration. These
+  diagnostic tools show the raw MIME structure; recursive flattening would
+  lose the structural information they exist to expose.
+- Trust classification. `ClassifyTrust` reads the top-level Content-Type
+  header for signature detection, which is unaffected by body parsing depth.
