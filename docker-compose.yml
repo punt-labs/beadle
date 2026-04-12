@@ -1,0 +1,74 @@
+# docker-compose.yml -- beadle-email daemon
+#
+# Reference compose for traditional Docker (non-sandbox) deployments.
+#
+# Two variants:
+#   A) Standard IMAP/SMTP (Fastmail, Gmail, Migadu) -- default
+#   B) Proton Bridge sidecar -- uncomment the bridge service
+#
+# Usage:
+#   1. Create config at ./config/claude@punt-labs.com/email.json
+#   2. Create secrets at ./secrets/ (imap-password, smtp-password, etc.)
+#   3. Import GPG keys into ./gpg/ keyring
+#   4. docker compose up -d
+#   5. Register with Claude Code:
+#      claude mcp add -s user beadle-email mcp-proxy ws://localhost:8420/mcp
+#
+# Multi-session: multiple Claude Code sessions each register the
+# same mcp-proxy command. Each gets its own mcp-proxy process,
+# all connecting to the same beadle-email daemon via WebSocket.
+
+services:
+  beadle-email:
+    image: ghcr.io/punt-labs/beadle-email:latest
+    container_name: beadle-email
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8420:8420"
+    volumes:
+      # Identity config, contacts, attachments (read-write)
+      - beadle-data:/home/beadle/.punt-labs/beadle
+      # GPG keyring source (read-only -- entrypoint copies to tmpfs)
+      - ./gpg:/mnt/gpg-source:ro
+      # Secrets (read-only bind mount)
+      - ./secrets:/home/beadle/.punt-labs/beadle/secrets:ro
+      # Ethos identities (read-only, for identity resolution)
+      - ./ethos:/home/beadle/.punt-labs/ethos:ro
+    environment:
+      - BEADLE_DEFAULT_IDENTITY=claude@punt-labs.com
+      # Required for non-sandbox deployments (compose publishes port).
+      # Clients must set MCP_PROXY_TOKEN to this value.
+      # Generate: openssl rand -hex 32
+      # - MCP_PROXY_TOKEN=<your-token-here>
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M
+      - /home/beadle/.gnupg:size=16M,uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+
+  # --- Proton Bridge sidecar (variant B) ---
+  # Uncomment for Proton Mail. Bridge listens on its internal
+  # ports; beadle-email connects via the shared "mail" network.
+  # Set email.json: imap_host=bridge, imap_port=1143,
+  # smtp_host=bridge, smtp_port=1025
+  #
+  # bridge:
+  #   image: shenxn/protonmail-bridge:latest
+  #   container_name: proton-bridge
+  #   restart: unless-stopped
+  #   volumes:
+  #     - bridge-data:/root/.config/protonmail
+  #     - bridge-gnupg:/root/.gnupg
+  #   networks:
+  #     - mail
+  #   # Initial login (one-time):
+  #   #   docker exec -it proton-bridge bridge --cli
+  #   #   > login
+
+volumes:
+  beadle-data:
+  # bridge-data:
+  # bridge-gnupg:

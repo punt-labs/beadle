@@ -1380,3 +1380,78 @@ All three verify correct text extraction and attachment discovery at depth.
   lose the structural information they exist to expose.
 - Trust classification. `ClassifyTrust` reads the top-level Content-Type
   header for signature detection, which is unaffected by body parsing depth.
+
+## DES-026: Docker containerization — WebSocket + mcp-proxy + sandbox
+
+**Status:** SETTLED (beadle-o1w, 2026-04-12). Design reviewed through 3
+security rounds (adb architecture, djb evaluation).
+
+**Decision:** beadle-email ships as a Docker image
+(`ghcr.io/punt-labs/beadle-email`) with a WebSocket transport. Claude Code
+connects via mcp-proxy. The image targets both Docker Sandbox (macOS, microVM
+isolation) and traditional Docker (Linux, container isolation).
+
+**Architecture:**
+
+```text
+Claude Code <--stdio--> mcp-proxy <--WebSocket--> [Container: beadle-email]
+                                                          |
+                                                          +-- IMAP --> mail server
+                                                          +-- SMTP --> mail server
+```
+
+**Transport:** WebSocket at `/mcp` on port 8420 (`--transport ws --port 8420`).
+mcp-proxy bridges stdio (Claude Code side) to WebSocket (container side).
+N:1 multi-session supported via `?session_key=<pid>` (accepted on the
+WebSocket upgrade URL but not yet used for routing — reserved for future
+per-repo message filtering). stdio remains the default for local
+(non-Docker) installs.
+
+**Base image:** `debian:bookworm-slim` + gnupg + ca-certificates. ~80 MB.
+Non-root user (beadle, UID 1000). Read-only rootfs. All capabilities dropped.
+
+**GPG keyring:** Host keyring mounted read-only at `/mnt/gpg-source`.
+Entrypoint script copies to tmpfs-backed `~/.gnupg` at startup. Private key
+material exists only in memory — destroyed on container stop.
+
+**Credentials:** Secret files mounted read-only at
+`~/.punt-labs/beadle/secrets/`. Existing `secret.Get` chain works unchanged
+(keychain fails gracefully in Docker, file backend succeeds). Env var
+fallback for convenience.
+
+**TLS for Proton Bridge:** `tls_skip_verify: true` in `email.json` for
+Bridge's self-signed certs via `host.docker.internal`. The `isLoopback()`
+function is NOT extended to match `host.docker.internal` — that hostname
+resolves via DNS, which is a mutable trust boundary. Explicit config field
+instead (security review FINDING-7).
+
+**Health check:** Built-in `beadle-email health --port 8420` subcommand.
+No wget in the image.
+
+**Security model (8 threats):**
+
+| # | Threat | Residual |
+|---|--------|----------|
+| 1 | Secret exposure via docker inspect | Low |
+| 2 | GPG private key (tmpfs only) | High |
+| 3 | Secret file permission bypass | Low |
+| 4 | Container escape via gpg subprocess | Low |
+| 5 | Network exposure (sandbox: none; Docker: mcp-proxy token) | Low/Medium |
+| 6 | mcp-proxy as trusted computing base | Low |
+| 7 | Image supply chain (digest-pinned) | Low |
+| 8 | Persistent compromise via writable data volume | Medium |
+
+**Rejected alternatives:**
+
+- **Streamable HTTP** — Requires custom bearer token + CSRF defense in beadle.
+  Sandbox isolation eliminates this need. WebSocket is bidirectional (server
+  push for inbox notifications) and matches quarry's pattern.
+- **stdio via docker exec** — Requires docker CLI on host, conflicts with
+  health checks, prevents multi-session.
+- **Alpine base** — musl libc + gnupg has socket and pinentry issues.
+- **Proton Bridge in same container** — 500+ MB, Qt dependencies, complex
+  entrypoint. Bridge runs on host instead.
+- **`isLoopback()` extension for host.docker.internal** — DNS-dependent
+  trust decision. Explicit `tls_skip_verify` config instead.
+
+**Full design document:** `.tmp/missions/results/o1w-docker-design.yaml`

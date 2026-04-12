@@ -23,6 +23,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- WebSocket transport: `beadle-email serve --transport ws --port 8420` starts
+  a WebSocket server for Docker and mcp-proxy deployments. Each connection
+  gets its own MCP session. 16 MB message size limit. (beadle-o1w)
+- Health subcommand: `beadle-email health --port 8420` for Docker HEALTHCHECK.
+  HTTP GET to /health, exits 0 on 200, 1 otherwise. (beadle-o1w)
+- `tls_skip_verify` config field: when true, skips TLS certificate verification
+  for IMAP and SMTP connections. Required for Proton Bridge via
+  host.docker.internal in Docker deployments. (beadle-o1w)
+- Docker image: `ghcr.io/punt-labs/beadle-email` based on debian:bookworm-slim
+  with gnupg. GPG keyring copied from read-only mount to tmpfs at startup
+  (private keys exist only in memory). Makefile `docker` and `docker-push`
+  targets. (beadle-o1w)
 - Outbound PGP encryption: when all recipients have a `gpg_key_id` in the
   contact book, `send_email` encrypts the message to their keys (RFC 3156
   `multipart/encrypted`). Messages are signed first, then encrypted
