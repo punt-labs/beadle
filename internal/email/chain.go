@@ -86,7 +86,7 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 		} else {
 			return &SendResult{
 				Status:      "sent",
-				Method:      "proton-bridge-smtp",
+				Method:      "smtp",
 				Signed:      signing,
 				From:        cfg.FromAddress,
 				To:          toStr,

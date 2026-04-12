@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"io"
 	"log/slog"
 	"mime"
@@ -987,8 +988,11 @@ func intParam(req mcplib.CallToolRequest, key string, fallback int) (int, error)
 	}
 	switch n := v.(type) {
 	case float64:
-		if n != float64(int(n)) {
+		if math.Trunc(n) != n {
 			return 0, fmt.Errorf("%s: expected a whole number, got %g", key, n)
+		}
+		if n < math.MinInt32 || n > math.MaxInt32 {
+			return 0, fmt.Errorf("%s: value %g out of int32 range", key, n)
 		}
 		return int(n), nil
 	case int:
