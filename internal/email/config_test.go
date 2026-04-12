@@ -44,11 +44,11 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	cfg, err := LoadConfig(cfgPath)
 	require.NoError(t, err)
 
-	assert.Equal(t, "127.0.0.1", cfg.IMAPHost)         // default
-	assert.Equal(t, 1143, cfg.IMAPPort)                  // default
-	assert.Equal(t, 1025, cfg.SMTPPort)                   // default
-	assert.Equal(t, "gpg", cfg.GPGBinary)   // default
-	assert.Equal(t, "", cfg.GPGSigner)      // empty = signing disabled
+	assert.Equal(t, "127.0.0.1", cfg.IMAPHost) // default
+	assert.Equal(t, 1143, cfg.IMAPPort)        // default
+	assert.Equal(t, 1025, cfg.SMTPPort)        // default
+	assert.Equal(t, "gpg", cfg.GPGBinary)      // default
+	assert.Equal(t, "", cfg.GPGSigner)         // empty = signing disabled
 }
 
 func TestLoadConfig_FileNotFound(t *testing.T) {
@@ -187,32 +187,32 @@ func TestLoadConfig_SMTPDefaults(t *testing.T) {
 		wantSMTPUser string
 	}{
 		{
-			name: "defaults to IMAP values when smtp fields absent",
-			json: `{"imap_host":"bridge.example.com","imap_user":"user@example.com","from_address":"user@example.com"}`,
+			name:         "defaults to IMAP values when smtp fields absent",
+			json:         `{"imap_host":"bridge.example.com","imap_user":"user@example.com","from_address":"user@example.com"}`,
 			wantSMTPHost: "bridge.example.com",
 			wantSMTPUser: "user@example.com",
 		},
 		{
-			name: "explicit smtp_host overrides imap_host default",
-			json: `{"imap_host":"imap.example.com","smtp_host":"smtp.example.com","imap_user":"user@example.com","from_address":"user@example.com"}`,
+			name:         "explicit smtp_host overrides imap_host default",
+			json:         `{"imap_host":"imap.example.com","smtp_host":"smtp.example.com","imap_user":"user@example.com","from_address":"user@example.com"}`,
 			wantSMTPHost: "smtp.example.com",
 			wantSMTPUser: "user@example.com",
 		},
 		{
-			name: "explicit smtp_user overrides imap_user default",
-			json: `{"imap_host":"bridge.example.com","imap_user":"imap@example.com","smtp_user":"smtp@example.com","from_address":"user@example.com"}`,
+			name:         "explicit smtp_user overrides imap_user default",
+			json:         `{"imap_host":"bridge.example.com","imap_user":"imap@example.com","smtp_user":"smtp@example.com","from_address":"user@example.com"}`,
 			wantSMTPHost: "bridge.example.com",
 			wantSMTPUser: "smtp@example.com",
 		},
 		{
-			name: "both smtp fields explicit",
-			json: `{"imap_host":"imap.example.com","imap_user":"imap@example.com","smtp_host":"smtp.example.com","smtp_user":"smtp@example.com","from_address":"user@example.com"}`,
+			name:         "both smtp fields explicit",
+			json:         `{"imap_host":"imap.example.com","imap_user":"imap@example.com","smtp_host":"smtp.example.com","smtp_user":"smtp@example.com","from_address":"user@example.com"}`,
 			wantSMTPHost: "smtp.example.com",
 			wantSMTPUser: "smtp@example.com",
 		},
 		{
-			name: "imap_host absent uses 127.0.0.1 default for smtp too",
-			json: `{"imap_user":"user@example.com","from_address":"user@example.com"}`,
+			name:         "imap_host absent uses 127.0.0.1 default for smtp too",
+			json:         `{"imap_user":"user@example.com","from_address":"user@example.com"}`,
 			wantSMTPHost: "127.0.0.1",
 			wantSMTPUser: "user@example.com",
 		},

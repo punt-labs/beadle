@@ -40,8 +40,8 @@ type Message struct {
 
 // Folder is a mailbox/channel folder.
 type Folder struct {
-	Name       string `json:"name"`
-	NumMessages int   `json:"num_messages,omitempty"`
+	Name        string `json:"name"`
+	NumMessages int    `json:"num_messages,omitempty"`
 }
 
 // MessageSummary is a lightweight listing entry.

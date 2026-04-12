@@ -11,7 +11,7 @@ import (
 func TestClassifyTrust_ProtonInternal(t *testing.T) {
 	headers := map[string]string{
 		"X-Pm-Content-Encryption": "end-to-end",
-		"X-Pm-Origin":            "internal",
+		"X-Pm-Origin":             "internal",
 	}
 	result := ClassifyTrustDetailed(headers, nil)
 
@@ -24,7 +24,7 @@ func TestClassifyTrust_ProtonInternal(t *testing.T) {
 func TestClassifyTrust_ExternalNoSig(t *testing.T) {
 	headers := map[string]string{
 		"X-Pm-Content-Encryption": "on-delivery",
-		"X-Pm-Origin":            "external",
+		"X-Pm-Origin":             "external",
 	}
 	result := ClassifyTrustDetailed(headers, nil)
 

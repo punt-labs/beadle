@@ -19,10 +19,10 @@ import (
 // VerifyResult holds the outcome of a PGP signature verification.
 type VerifyResult struct {
 	Valid       bool   `json:"valid"`
-	KeyID      string `json:"key_id,omitempty"`
-	Signer     string `json:"signer,omitempty"`
-	Output     string `json:"output"`
-	KeyImported bool  `json:"key_imported"`
+	KeyID       string `json:"key_id,omitempty"`
+	Signer      string `json:"signer,omitempty"`
+	Output      string `json:"output"`
+	KeyImported bool   `json:"key_imported"`
 }
 
 // Verify checks the PGP signature on a raw RFC822 message.
