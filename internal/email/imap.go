@@ -31,7 +31,7 @@ func Dial(cfg *Config, logger *slog.Logger) (*Client, error) {
 
 	tlsCfg := &tls.Config{
 		ServerName:         cfg.IMAPHost,
-		InsecureSkipVerify: isLoopback(cfg.IMAPHost), //nolint:gosec // Proton Bridge uses self-signed certs on localhost
+		InsecureSkipVerify: cfg.TLSSkipVerify || isLoopback(cfg.IMAPHost), //nolint:gosec // Proton Bridge uses self-signed certs on localhost or behind Docker host networking
 	}
 
 	opts := &imapclient.Options{TLSConfig: tlsCfg}
