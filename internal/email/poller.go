@@ -194,6 +194,8 @@ func (p *Poller) poll() {
 	p.lastError = ""
 	p.mu.Unlock()
 
+	p.logger.Info("poller: tick", "unseen", unseen, "previous", prev, "first", first)
+
 	if !first && unseen > prev {
 		newCount := unseen - prev
 		p.logger.Info("poller: new mail", "unseen", unseen, "previous", prev)
