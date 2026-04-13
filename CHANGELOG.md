@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Channels support: beadle-email declares `experimental['claude/channel']`
+  capability. When the poller detects new mail, it fires
+  `notifications/claude/channel` to push a prompt directly into Claude
+  Code's conversation queue. Sessions with channels enabled process inbox
+  autonomously without CronCreate. Requires `--channels plugin:beadle@punt-labs`
+  on Claude Code launch. (beadle-9rb)
+
+### Changed
+
+- Upgraded mcp-go from v0.45.0 to v0.46.0 (adds `WithExperimental` for
+  capability declaration).
+
 ## [0.12.0] - 2026-04-12
 
 ### Fixed
