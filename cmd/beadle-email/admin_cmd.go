@@ -357,11 +357,11 @@ func openServeLogFile() (*os.File, string, error) {
 		return nil, "", err
 	}
 	logDir := filepath.Join(dir, "logs")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
 		return nil, "", fmt.Errorf("create log dir %s: %w", logDir, err)
 	}
 	path := filepath.Join(logDir, "beadle-email.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, "", fmt.Errorf("open %s: %w", path, err)
 	}

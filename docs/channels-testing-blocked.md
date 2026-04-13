@@ -2,7 +2,23 @@
 
 Status: **BLOCKED** as of 2026-04-13.
 Bead: beadle-9rb
-Related release: v0.14.0 (plugin manifest fix, `"channels": [{"server": "email"}]`).
+Current release: v0.14.1.
+
+## Current state
+
+As of v0.14.1, the plugin manifest **does not** declare a channels entry.
+This was removed to stop the "channel cannot register" startup warning for
+users whose organizations have channels disabled. The server-side code is
+otherwise intact and ready to re-enable:
+
+- MCP server declares `claude/channel` capability.
+- Poller fires `notifications/claude/channel` on new mail.
+- Re-enable is a one-line manifest addition:
+  `"channels": [{"server": "email"}]` in `.claude-plugin/plugin.json`.
+
+v0.14.0 shipped with the channels manifest enabled, but the Claude Code
+client-side gate blocked activation. This doc records what was tried at
+that version before the manifest was disabled in v0.14.1.
 
 ## Goal
 
@@ -12,7 +28,8 @@ payload into the running session as an unprompted prompt.
 
 ## What works (server side, verified)
 
-- Plugin manifest: `"channels": [{"server": "email"}]` (array form, fixed in v0.14.0).
+- Plugin manifest (when enabled): `"channels": [{"server": "email"}]` — array
+  form, required by Claude Code schema. Currently disabled in v0.14.1.
 - MCP server declares channel capability:
   `server.WithExperimental(map[string]any{"claude/channel": map[string]any{}})`.
 - Poller fires both notifications on `unseen > prev`:
