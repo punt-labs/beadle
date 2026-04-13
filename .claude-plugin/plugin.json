@@ -15,9 +15,9 @@
       ]
     }
   },
-  "channels": {
-    "email": {
+  "channels": [
+    {
       "server": "email"
     }
-  }
+  ]
 }
