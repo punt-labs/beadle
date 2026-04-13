@@ -14,5 +14,10 @@
         "serve"
       ]
     }
+  },
+  "channels": {
+    "email": {
+      "server": "email"
+    }
   }
 }

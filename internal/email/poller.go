@@ -195,8 +195,23 @@ func (p *Poller) poll() {
 	p.mu.Unlock()
 
 	if !first && unseen > prev {
+		newCount := unseen - prev
 		p.logger.Info("poller: new mail", "unseen", unseen, "previous", prev)
 		p.server.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
+		p.logger.Info("poller: sent tools/list_changed notification")
+		// Channel notification: push directly into Claude Code's prompt queue.
+		// Sessions with channels enabled will process this as a real turn.
+		// Sessions without channels ignore unknown notifications.
+		channelParams := map[string]any{
+			"content": fmt.Sprintf("%d new message(s) in inbox. Check with /inbox.", newCount),
+			"meta": map[string]string{
+				"source": "beadle-email",
+				"type":   "inbox_alert",
+			},
+		}
+		p.logger.Info("poller: sending channel notification", "content", channelParams["content"])
+		p.server.SendNotificationToAllClients("notifications/claude/channel", channelParams)
+		p.logger.Info("poller: channel notification sent")
 	}
 }
 
