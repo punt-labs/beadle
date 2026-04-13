@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-04-13
+
+### Changed
+
+- Removed `channels` declaration from plugin manifest. The MCP server still
+  declares the `claude/channel` capability and the poller still fires
+  `notifications/claude/channel` on new mail, but the plugin no longer
+  advertises itself as a channel provider to Claude Code. Users whose
+  organizations have channels disabled will no longer see a "channel
+  cannot register" warning at startup. Re-enable by adding `"channels":
+  [{"server": "email"}]` back to `.claude-plugin/plugin.json`. Tracking
+  the client-side gate blocker in `docs/channels-testing-blocked.md`.
+  (beadle-9rb)
+
+### Added
+
+- File-based logging for `beadle-email serve` at
+  `~/.punt-labs/beadle/logs/beadle-email.log` (tee'd alongside stderr,
+  append mode). Poller emits an INFO `"poller: tick"` line per poll
+  with `unseen`, `previous`, and `first` fields for diagnostics.
+
 ## [0.14.0] - 2026-04-12
 
 ## [0.13.0] - 2026-04-12
