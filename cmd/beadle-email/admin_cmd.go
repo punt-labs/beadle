@@ -46,6 +46,9 @@ var serveCmd = &cobra.Command{
 			"beadle-email",
 			version,
 			server.WithToolCapabilities(true),
+			server.WithExperimental(map[string]any{
+				"claude/channel": map[string]any{},
+			}),
 		)
 		poller := email.NewPoller(s, resolver, logger, email.DefaultDialer{})
 		mcptools.RegisterTools(s, resolver, logger, mcptools.WithEthosDir(ethosDir), mcptools.WithPoller(poller))
