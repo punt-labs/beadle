@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -34,9 +36,20 @@ var serveCmd = &cobra.Command{
 	Short: "Start MCP server",
 	Long:  "Start the beadle-email MCP server. Transport: stdio (default) or ws (WebSocket).",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		logWriter, logPath, logErr := openServeLogFile()
+		var w io.Writer = os.Stderr
+		if logWriter != nil {
+			w = io.MultiWriter(os.Stderr, logWriter)
+			defer logWriter.Close()
+		}
+		logger := slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
 			Level: g.slogLevel(),
 		}))
+		if logErr != nil {
+			logger.Warn("file logging disabled", "error", logErr)
+		} else {
+			logger.Info("file logging enabled", "path", logPath)
+		}
 		resolver, err := newResolver()
 		if err != nil {
 			return err
@@ -333,4 +346,24 @@ var statusCmd = &cobra.Command{
 
 func init() {
 	statusCmd.Flags().StringVarP(&statusConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
+}
+
+// openServeLogFile opens ~/.punt-labs/beadle/logs/beadle-email.log for append.
+// Returns the file, its path, and any error. On error, caller should fall back
+// to stderr-only logging.
+func openServeLogFile() (*os.File, string, error) {
+	dir, err := paths.DataDir()
+	if err != nil {
+		return nil, "", err
+	}
+	logDir := filepath.Join(dir, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return nil, "", fmt.Errorf("create log dir %s: %w", logDir, err)
+	}
+	path := filepath.Join(logDir, "beadle-email.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, "", fmt.Errorf("open %s: %w", path, err)
+	}
+	return f, path, nil
 }
