@@ -4,6 +4,7 @@ package daemon
 import (
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
@@ -17,22 +18,27 @@ type MissionCreator interface {
 }
 
 // MailHandler processes new mail notifications from the poller.
-// For each unread message, it checks the sender's x-bit permission
-// and creates an ethos mission if authorized.
+// For each unread message, it checks the sender's x-bit permission,
+// creates an ethos mission, and spawns a Claude Code worker to execute it.
 type MailHandler struct {
-	resolver *identity.Resolver
-	dialer   email.Dialer
-	missions MissionCreator
-	logger   *slog.Logger
+	resolver  *identity.Resolver
+	dialer    email.Dialer
+	missions  MissionCreator
+	spawner   *WorkerSpawner
+	templates *MissionTemplate
+	logger    *slog.Logger
 }
 
-// NewMailHandler creates a MailHandler.
-func NewMailHandler(resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, logger *slog.Logger) *MailHandler {
+// NewMailHandler creates a MailHandler. If spawner or templates is nil,
+// mission creation still works but no worker is spawned.
+func NewMailHandler(resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner *WorkerSpawner, templates *MissionTemplate, logger *slog.Logger) *MailHandler {
 	return &MailHandler{
-		resolver: resolver,
-		dialer:   dialer,
-		missions: missions,
-		logger:   logger,
+		resolver:  resolver,
+		dialer:    dialer,
+		missions:  missions,
+		spawner:   spawner,
+		templates: templates,
+		logger:    logger,
 	}
 }
 
@@ -113,7 +119,41 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 			continue
 		}
 		h.logger.Info("mission created", "mission", missionID, "from", addr, "subject", msg.Subject)
+
+		if h.spawner != nil && h.templates != nil {
+			go h.spawnWorker(missionID)
+		}
 	}
+}
+
+func (h *MailHandler) spawnWorker(missionID string) {
+	mcpPath, err := h.templates.BuildMCPConfig()
+	if err != nil {
+		h.logger.Error("build mcp config", "mission", missionID, "error", err)
+		return
+	}
+
+	promptPath, err := h.templates.BuildSystemPrompt(missionID)
+	if err != nil {
+		os.Remove(mcpPath)
+		h.logger.Error("build system prompt", "mission", missionID, "error", err)
+		return
+	}
+
+	result, err := h.spawner.Run(missionID, mcpPath, promptPath)
+	// Clean up temp files after subprocess exits.
+	os.Remove(mcpPath)
+	os.Remove(promptPath)
+
+	if err != nil {
+		h.logger.Error("spawn worker", "mission", missionID, "error", err)
+		return
+	}
+	h.logger.Info("worker completed",
+		"mission", missionID,
+		"session", result.SessionID,
+		"isError", result.IsError,
+		"exitCode", result.ExitCode)
 }
 
 func (h *MailHandler) loadConfig(identityEmail string) (*email.Config, error) {
