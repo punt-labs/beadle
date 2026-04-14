@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
+	"github.com/punt-labs/beadle/internal/secret"
 )
 
 var version = "dev"
@@ -61,7 +63,22 @@ var runCmd = &cobra.Command{
 			TmpDir: missionsTmpDir,
 		}
 
-		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		// Resolve API key: keychain → file → BEADLE_ANTHROPIC_API_KEY env.
+		var apiKey string
+		var apiSource string
+		apiKey, secretErr := secret.Get("anthropic-api-key")
+		if secretErr == nil {
+			apiSource = "beadle secret"
+		} else if errors.Is(secretErr, secret.ErrNotFound) {
+			// Not in any beadle backend — fall back to standard Claude env var.
+			apiKey = os.Getenv("ANTHROPIC_API_KEY")
+			if apiKey != "" {
+				apiSource = "ANTHROPIC_API_KEY env"
+			}
+		} else {
+			// Non-ErrNotFound error (e.g., unsafe file perms) — fail closed.
+			logger.Error("secret backend error for anthropic-api-key, worker spawning disabled", "error", secretErr)
+		}
 		var spawner *daemon.WorkerSpawner
 		var templates *daemon.MissionTemplate
 		if apiKey != "" {
@@ -72,9 +89,9 @@ var runCmd = &cobra.Command{
 			templates = &daemon.MissionTemplate{
 				TmpDir: missionsTmpDir,
 			}
-			logger.Info("worker spawning enabled")
-		} else {
-			logger.Warn("ANTHROPIC_API_KEY not set, worker spawning disabled")
+			logger.Info("worker spawning enabled", "source", apiSource)
+		} else if secretErr == nil || errors.Is(secretErr, secret.ErrNotFound) {
+			logger.Warn("worker spawning disabled: no API key found (checked: secret backends, ANTHROPIC_API_KEY env)")
 		}
 
 		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger)
