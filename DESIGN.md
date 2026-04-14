@@ -1455,3 +1455,180 @@ No wget in the image.
   trust decision. Explicit `tls_skip_verify` config instead.
 
 **Full design document:** `.tmp/missions/results/o1w-docker-design.yaml`
+
+## DES-027: Orchestrator — daemon spawns Claude Code workers via print mode
+
+**Status:** PROPOSED (beadle-vyv, 2026-04-13).
+
+**Decision:** Beadle's orchestrator is a Go daemon that spawns ephemeral
+Claude Code sessions in print mode (`claude -p`) to execute ethos missions
+triggered by email. The daemon owns detection, classification, authorization
+(x-bit), mission lifecycle, and pipeline orchestration. Claude Code owns
+execution.
+
+**Why a daemon, not channels or CronCreate:** Channels (beadle-9rb) is blocked
+on the Claude Code client gate as of 2026-04-13 (see
+`docs/channels-testing-blocked.md`). CronCreate depends on a human having
+Claude Code open. Neither path delivers autonomous, always-on inbox processing.
+A standalone daemon does.
+
+**Spawn mechanism:**
+
+```text
+beadle-daemon (Go, always-on)
+    |
+    +-- polls INBOX via existing Poller (detection)
+    |
+    +-- checks x-bit authorization gate
+    |    (Phase 1: all emails from x-bit contacts are instructions)
+    |
+    +-- ethos mission create --file contract.yaml
+    |
+    +-- exec.Command("claude", "-p",
+    |       "--bare",
+    |       "--mcp-config", missionMCP,
+    |       "--append-system-prompt-file", missionPrompt,
+    |       "--output-format", "json",
+    |       "--max-turns", "50",
+    |       "--max-budget-usd", "5.00",
+    |       "--permission-mode", "auto",
+    |       "--allowedTools", "Bash,Read,Edit,Write,Glob,Grep,Agent",
+    |       "Execute mission " + missionID)
+    |
+    +-- parse JSON output {result, session_id, ...}
+    |
+    +-- ethos mission results <id> --json
+    |
+    +-- verify ethos result artifact exists
+    |       +-- missing → treat mission as incomplete
+    |       +-- present → ethos mission close <id>
+```
+
+**`--bare` mode is mandatory.** Bare mode skips hooks, plugins, MCP servers,
+CLAUDE.md, and auto memory. The daemon provides exactly the context each
+mission needs via `--mcp-config` and `--append-system-prompt-file`. No
+ambient state from the host leaks into the worker session. This is both a
+security property (worker sees only what the daemon authorizes) and a
+reproducibility property (same inputs → same behavior on any machine).
+
+**Authentication:** `ANTHROPIC_API_KEY` for API-billed usage, or a long-lived
+OAuth token generated via `claude setup-token` for subscription billing.
+Stored in beadle's secret store (`~/.punt-labs/beadle/secrets/claude-api-key`
+or `secrets/claude-token`). The daemon sets the env var before spawning.
+
+**MCP config per mission:** The daemon writes a temporary `mission-mcp.json`
+with exactly the MCP servers the mission needs:
+
+```json
+{
+  "mcpServers": {
+    "ethos": {"command": "ethos", "args": ["mcp"]},
+    "beadle-email": {"command": "beadle-email", "args": ["serve"]}
+  }
+}
+```
+
+Different mission types may need different tool stacks. An inbox-reply mission
+needs beadle-email. A code-review mission needs only filesystem tools.
+
+**Mission prompt template:** Written to a temp file per mission, injected via
+`--append-system-prompt-file`:
+
+```text
+You are a beadle mission worker. Your mission contract is {mission_id}.
+Read it: ethos mission show {mission_id}
+Execute within the write_set and budget constraints.
+When done, submit your result: ethos mission result {mission_id} --file <path>
+Do not commit, push, or merge unless the contract explicitly says to.
+```
+
+**Result collection:** Two channels:
+
+1. **stdout JSON** — `--output-format json` returns `{result: string}`. The
+   daemon captures stdout and parses JSON for the text result and session
+   metadata.
+2. **Ethos result artifact** — The worker runs
+   `ethos mission result <id> --file result.yaml`. The daemon reads it via
+   `ethos mission results <id> --json`.
+
+Both must succeed. If stdout JSON parses but no ethos result artifact exists,
+the daemon treats the mission as incomplete.
+
+**Safety bounds:**
+
+| Bound | Flag | Default | Purpose |
+|-------|------|---------|---------|
+| Turns | `--max-turns` | 50 | Prevent runaway loops |
+| Budget | `--max-budget-usd` | 5.00 | Cost cap per mission |
+| Timeout | `exec.CommandContext` | 30 min | Process-level kill |
+| Permissions | `--permission-mode auto` | — | No human in the loop |
+
+**Failure modes:**
+
+| Failure | Detection | Response |
+|---------|-----------|----------|
+| Non-zero exit | `cmd.Wait()` error | Mark mission failed, notify requester |
+| Max turns exceeded | Exit with error, JSON `is_error: true` | Mark failed, retriable |
+| Budget exceeded | Exit with error | Mark failed, not retriable |
+| Process timeout | Context deadline exceeded | Kill process, mark failed |
+| Worker hangs | Timeout fires | Same as timeout |
+| Malformed output | JSON parse error | Mark failed, log raw stdout |
+| IMAP error | Poller `recordFailure` | Retry next poll cycle |
+
+**Concurrency:** Serial to start (one mission at a time, `sync.Mutex`).
+The daemon queues pending missions and drains them one by one. Future:
+bounded parallelism via `chan struct{}` semaphore. Serial-first because
+the orchestrator is new and concurrent mission execution introduces
+failure modes (resource contention, interleaved file edits) that are
+harder to debug than serial bottlenecks.
+
+**Instruction detection:** Phase 1 treats ALL emails from x-bit contacts as
+instructions. This is correct by the rwx model — `x` means "I authorize
+this contact to trigger autonomous actions." If a contact has `x` and sends
+a message, they intend it to be acted on. Phase 2 (future) may add LLM
+classification to distinguish instructions from informational messages
+within x-bit contacts, but this is an optimization, not a prerequisite.
+
+**Deployment modes (revised):**
+
+| Mode | Poller | Processing | Mission Control | Human required |
+|------|--------|------------|-----------------|----------------|
+| Attended (today) | MCP server goroutine | CronCreate `/loop 5m /inbox` | Manual | Yes |
+| Daemon (vyv) | Daemon goroutine | Daemon spawns `claude -p` | Daemon | No |
+| Docker daemon (9zh) | Same daemon, in container | Same spawn, in container | Same | No |
+
+Attended mode and daemon mode are independent. Attended mode serves the
+"Claude is my assistant" workflow. Daemon mode serves the "beadle runs
+autonomously" workflow. Both use the same Poller, the same email tools,
+the same trust model.
+
+**Pipeline orchestration:** Piped missions (per orchestrator-design.md) are
+daemon-driven: mission 1 completes → daemon reads result → daemon creates
+mission 2 with previous output as input. Pipeline state lives in the daemon,
+not in ethos. Ethos provides the individual mission primitive.
+
+**Relationship to channels (beadle-9rb):** When/if channels unblocks, it
+provides a third processing mode (attended + channels = autonomous inbox
+inside an interactive session). Channels and daemon are complementary, not
+competing. Channels works when a human has Claude Code open. Daemon works
+when no one is home.
+
+**Rejected alternatives:**
+
+- **Channels-only architecture** — Requires Claude Code running with a human
+  session. Not suitable for always-on autonomous processing. Also currently
+  blocked by the client gate.
+- **CronCreate-only** — Requires Claude Code running. `/loop 5m /inbox` only
+  fires when idle. Not reliable for SLA-bound inbox processing.
+- **Interactive mode spawn** — `claude "prompt"` (no `-p`) opens an interactive
+  session. Cannot be driven by a daemon. No structured output. No budget cap.
+- **Agent SDK (Python/TypeScript)** — The SDK packages offer programmatic
+  control, but the daemon is Go. Shelling out to `claude -p` is simpler and
+  avoids a polyglot runtime. If the Go SDK materializes, migrate.
+- **Full `--mcp-config` with all tools** — Rejected in favor of per-mission
+  configs. Each mission gets exactly the tools it needs. Principle of least
+  privilege.
+- **Concurrent missions from day 1** — Serial first. Concurrent introduces
+  file-edit races and resource contention. Add parallelism after serial works.
+
+**Full design document:** `docs/orchestrator-design.md`

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- DES-027: Orchestrator design — daemon spawns Claude Code workers via
+  `claude -p --bare` print mode with per-mission MCP config, system prompt,
+  safety bounds, and ethos missions as control plane. (beadle-vyv)
+
 ## [0.14.1] - 2026-04-13
 
 ### Changed
