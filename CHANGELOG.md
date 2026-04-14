@@ -18,6 +18,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   missions. `internal/daemon/` package with `MailHandler` (x-bit gate) and
   `EthosMissionCreator` (contract YAML generation + `ethos mission create`).
   Fetch capped at 20 messages to prevent first-run flood. (beadle-z16, beadle-dsv)
+- Worker spawner: daemon spawns `claude -p --bare` with per-mission MCP config
+  and system prompt. 30m timeout, $5 budget cap, 50 turn limit. Minimal env
+  (no daemon credentials leaked to subprocess). Mission ID format validated
+  before exec. (beadle-btr)
+- Mission templates: generates per-mission MCP config (ethos + beadle-email)
+  and system prompt with mission ID. Temp files cleaned up after subprocess
+  exits. (beadle-msy)
 
 ### Changed
 

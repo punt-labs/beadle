@@ -114,7 +114,7 @@ func TestOnNewMail(t *testing.T) {
 			}
 
 			mock := &mockMissionCreator{}
-			handler := NewMailHandler(env.Resolver, dialer, mock, discardLogger())
+			handler := NewMailHandler(t.Context(), env.Resolver, dialer, mock, nil, nil, discardLogger())
 
 			handler.OnNewMail(uint32(len(tt.messages)))
 

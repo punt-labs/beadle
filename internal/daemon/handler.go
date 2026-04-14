@@ -2,8 +2,11 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"sync"
 
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
@@ -17,23 +20,43 @@ type MissionCreator interface {
 }
 
 // MailHandler processes new mail notifications from the poller.
-// For each unread message, it checks the sender's x-bit permission
-// and creates an ethos mission if authorized.
+// For each unread message, it checks the sender's x-bit permission,
+// creates an ethos mission, and spawns a Claude Code worker to execute it.
 type MailHandler struct {
-	resolver *identity.Resolver
-	dialer   email.Dialer
-	missions MissionCreator
-	logger   *slog.Logger
+	resolver  *identity.Resolver
+	dialer    email.Dialer
+	missions  MissionCreator
+	spawner   *WorkerSpawner
+	templates *MissionTemplate
+	logger    *slog.Logger
+
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
-// NewMailHandler creates a MailHandler.
-func NewMailHandler(resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, logger *slog.Logger) *MailHandler {
+// NewMailHandler creates a MailHandler. If spawner or templates is nil,
+// mission creation still works but no worker is spawned.
+// The returned context governs worker subprocess lifetimes — call Stop
+// to cancel running workers and wait for them to exit.
+func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner *WorkerSpawner, templates *MissionTemplate, logger *slog.Logger) *MailHandler {
+	ctx, cancel := context.WithCancel(ctx)
 	return &MailHandler{
-		resolver: resolver,
-		dialer:   dialer,
-		missions: missions,
-		logger:   logger,
+		resolver:  resolver,
+		dialer:    dialer,
+		missions:  missions,
+		spawner:   spawner,
+		templates: templates,
+		logger:    logger,
+		ctx:       ctx,
+		cancel:    cancel,
 	}
+}
+
+// Stop cancels all running workers and waits for them to exit.
+func (h *MailHandler) Stop() {
+	h.cancel()
+	h.wg.Wait()
 }
 
 // OnNewMail is the poller callback. It lists recent unread messages,
@@ -113,7 +136,45 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 			continue
 		}
 		h.logger.Info("mission created", "mission", missionID, "from", addr, "subject", msg.Subject)
+
+		if h.spawner != nil && h.templates != nil {
+			h.wg.Add(1)
+			go func() {
+				defer h.wg.Done()
+				h.spawnWorker(h.ctx, missionID)
+			}()
+		}
 	}
+}
+
+func (h *MailHandler) spawnWorker(ctx context.Context, missionID string) {
+	mcpPath, err := h.templates.BuildMCPConfig()
+	if err != nil {
+		h.logger.Error("build mcp config", "mission", missionID, "error", err)
+		return
+	}
+
+	promptPath, err := h.templates.BuildSystemPrompt(missionID)
+	if err != nil {
+		os.Remove(mcpPath)
+		h.logger.Error("build system prompt", "mission", missionID, "error", err)
+		return
+	}
+
+	result, err := h.spawner.Run(ctx, missionID, mcpPath, promptPath)
+	// Clean up temp files after subprocess exits.
+	os.Remove(mcpPath)
+	os.Remove(promptPath)
+
+	if err != nil {
+		h.logger.Error("spawn worker", "mission", missionID, "error", err)
+		return
+	}
+	h.logger.Info("worker completed",
+		"mission", missionID,
+		"session", result.SessionID,
+		"isError", result.IsError,
+		"exitCode", result.ExitCode)
 }
 
 func (h *MailHandler) loadConfig(identityEmail string) (*email.Config, error) {

@@ -60,7 +60,25 @@ var runCmd = &cobra.Command{
 		missions := &daemon.EthosMissionCreator{
 			TmpDir: missionsTmpDir,
 		}
-		handler := daemon.NewMailHandler(resolver, email.DefaultDialer{}, missions, logger)
+
+		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		var spawner *daemon.WorkerSpawner
+		var templates *daemon.MissionTemplate
+		if apiKey != "" {
+			spawner = &daemon.WorkerSpawner{
+				APIKey: apiKey,
+				Logger: logger,
+			}
+			templates = &daemon.MissionTemplate{
+				TmpDir: missionsTmpDir,
+			}
+			logger.Info("worker spawning enabled")
+		} else {
+			logger.Warn("ANTHROPIC_API_KEY not set, worker spawning disabled")
+		}
+
+		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger)
+		defer handler.Stop()
 
 		poller := email.NewPoller(handler.OnNewMail, resolver, logger, email.DefaultDialer{})
 		if err := poller.Start(); err != nil {
