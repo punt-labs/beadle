@@ -2,9 +2,11 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
@@ -27,11 +29,18 @@ type MailHandler struct {
 	spawner   *WorkerSpawner
 	templates *MissionTemplate
 	logger    *slog.Logger
+
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // NewMailHandler creates a MailHandler. If spawner or templates is nil,
 // mission creation still works but no worker is spawned.
-func NewMailHandler(resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner *WorkerSpawner, templates *MissionTemplate, logger *slog.Logger) *MailHandler {
+// The returned context governs worker subprocess lifetimes — call Stop
+// to cancel running workers and wait for them to exit.
+func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner *WorkerSpawner, templates *MissionTemplate, logger *slog.Logger) *MailHandler {
+	ctx, cancel := context.WithCancel(ctx)
 	return &MailHandler{
 		resolver:  resolver,
 		dialer:    dialer,
@@ -39,7 +48,15 @@ func NewMailHandler(resolver *identity.Resolver, dialer email.Dialer, missions M
 		spawner:   spawner,
 		templates: templates,
 		logger:    logger,
+		ctx:       ctx,
+		cancel:    cancel,
 	}
+}
+
+// Stop cancels all running workers and waits for them to exit.
+func (h *MailHandler) Stop() {
+	h.cancel()
+	h.wg.Wait()
 }
 
 // OnNewMail is the poller callback. It lists recent unread messages,
@@ -121,12 +138,16 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 		h.logger.Info("mission created", "mission", missionID, "from", addr, "subject", msg.Subject)
 
 		if h.spawner != nil && h.templates != nil {
-			go h.spawnWorker(missionID)
+			h.wg.Add(1)
+			go func() {
+				defer h.wg.Done()
+				h.spawnWorker(h.ctx, missionID)
+			}()
 		}
 	}
 }
 
-func (h *MailHandler) spawnWorker(missionID string) {
+func (h *MailHandler) spawnWorker(ctx context.Context, missionID string) {
 	mcpPath, err := h.templates.BuildMCPConfig()
 	if err != nil {
 		h.logger.Error("build mcp config", "mission", missionID, "error", err)
@@ -140,7 +161,7 @@ func (h *MailHandler) spawnWorker(missionID string) {
 		return
 	}
 
-	result, err := h.spawner.Run(missionID, mcpPath, promptPath)
+	result, err := h.spawner.Run(ctx, missionID, mcpPath, promptPath)
 	// Clean up temp files after subprocess exits.
 	os.Remove(mcpPath)
 	os.Remove(promptPath)

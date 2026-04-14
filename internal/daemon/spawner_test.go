@@ -52,25 +52,30 @@ func TestParseWorkerOutput_InvalidJSON(t *testing.T) {
 }
 
 func TestParseWorkerOutput_EmptyOutput(t *testing.T) {
-	_, err := parseWorkerOutput("m-test-004", []byte(""), 0)
+	result, err := parseWorkerOutput("m-test-004", []byte(""), 0)
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty output")
+	assert.True(t, result.IsError)
 }
 
 func TestValidMissionID(t *testing.T) {
 	tests := []struct {
+		name  string
 		id    string
 		valid bool
 	}{
-		{"m-2026-04-14-001", true},
-		{"m-test-001", true},
-		{"abc123", true},
-		{"", false},
-		{"has spaces", false},
-		{"has\nnewline", false},
-		{"has\x00null", false},
+		{"canonical", "m-2026-04-14-001", true},
+		{"short", "m-test-001", true},
+		{"single_digit", "m-1", true},
+		{"no_m_prefix", "abc123", false},
+		{"empty", "", false},
+		{"spaces", "m-has spaces", false},
+		{"newline", "m-has\nnewline", false},
+		{"null_byte", "m-has\x00null", false},
+		{"uppercase", "M-TEST-001", false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.id, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.valid, validMissionIDRe.MatchString(tt.id))
 		})
 	}

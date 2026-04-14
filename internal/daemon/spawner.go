@@ -9,10 +9,11 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
-var validMissionIDRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9\-]{0,63}$`)
+var validMissionIDRe = regexp.MustCompile(`^m-[a-z0-9][a-z0-9-]{0,61}$`)
 
 // WorkerResult holds the outcome of a Claude Code worker session.
 type WorkerResult struct {
@@ -39,13 +40,22 @@ type workerJSON struct {
 	IsError   bool   `json:"is_error"`
 }
 
+func (s *WorkerSpawner) logger() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.Default()
+}
+
 // Run executes a Claude Code worker for the given mission.
+// The context governs subprocess lifetime — cancel it for graceful shutdown.
 // mcpConfigPath and systemPromptPath must be paths to existing files;
 // the caller is responsible for cleanup.
-func (s *WorkerSpawner) Run(missionID, mcpConfigPath, systemPromptPath string) (WorkerResult, error) {
+func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, systemPromptPath string) (WorkerResult, error) {
 	if !validMissionIDRe.MatchString(missionID) {
 		return WorkerResult{MissionID: missionID}, fmt.Errorf("invalid mission ID %q", missionID)
 	}
+
 	timeout := s.Timeout
 	if timeout == 0 {
 		timeout = 30 * time.Minute
@@ -59,7 +69,7 @@ func (s *WorkerSpawner) Run(missionID, mcpConfigPath, systemPromptPath string) (
 		maxBudget = "5.00"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	args := []string{
@@ -84,14 +94,14 @@ func (s *WorkerSpawner) Run(missionID, mcpConfigPath, systemPromptPath string) (
 		"USER=" + os.Getenv("USER"),
 	}
 
-	s.Logger.Info("spawning worker", "mission", missionID, "timeout", timeout)
+	s.logger().Info("spawning worker", "mission", missionID, "timeout", timeout)
 
 	out, err := cmd.Output()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
-			s.Logger.Warn("worker exited with error",
+			s.logger().Warn("worker exited with error",
 				"mission", missionID,
 				"exitCode", exitCode,
 				"stderr", string(exitErr.Stderr))
@@ -101,17 +111,34 @@ func (s *WorkerSpawner) Run(missionID, mcpConfigPath, systemPromptPath string) (
 		}
 	}
 
-	return parseWorkerOutput(missionID, out, exitCode)
+	result, parseErr := parseWorkerOutput(missionID, out, exitCode)
+	if parseErr != nil {
+		return result, parseErr
+	}
+	// Non-zero exit is always an error, even if JSON parsed successfully.
+	if exitCode != 0 {
+		result.IsError = true
+	}
+	return result, nil
 }
 
 // parseWorkerOutput parses the JSON output from a claude --output-format json
 // invocation and returns a WorkerResult.
 func parseWorkerOutput(missionID string, out []byte, exitCode int) (WorkerResult, error) {
-	var parsed workerJSON
-	if err := json.Unmarshal(out, &parsed); err != nil {
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
 		return WorkerResult{
 			MissionID: missionID,
-			Output:    string(out),
+			IsError:   true,
+			ExitCode:  exitCode,
+		}, fmt.Errorf("worker for mission %s produced empty output (exit code %d)", missionID, exitCode)
+	}
+
+	var parsed workerJSON
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		return WorkerResult{
+			MissionID: missionID,
+			Output:    trimmed,
 			IsError:   true,
 			ExitCode:  exitCode,
 		}, fmt.Errorf("parse worker output for mission %s: %w", missionID, err)

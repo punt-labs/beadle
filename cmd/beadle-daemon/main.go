@@ -77,7 +77,8 @@ var runCmd = &cobra.Command{
 			logger.Warn("ANTHROPIC_API_KEY not set, worker spawning disabled")
 		}
 
-		handler := daemon.NewMailHandler(resolver, email.DefaultDialer{}, missions, spawner, templates, logger)
+		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger)
+		defer handler.Stop()
 
 		poller := email.NewPoller(handler.OnNewMail, resolver, logger, email.DefaultDialer{})
 		if err := poller.Start(); err != nil {
