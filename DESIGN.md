@@ -1479,7 +1479,8 @@ beadle-daemon (Go, always-on)
     |
     +-- polls INBOX via existing Poller (detection)
     |
-    +-- classifies email as instruction (x-bit gate)
+    +-- checks x-bit authorization gate
+    |    (Phase 1: all emails from x-bit contacts are instructions)
     |
     +-- ethos mission create --file contract.yaml
     |
@@ -1496,7 +1497,11 @@ beadle-daemon (Go, always-on)
     |
     +-- parse JSON output {result, session_id, ...}
     |
-    +-- ethos mission close <id>
+    +-- ethos mission results <id> --json
+    |
+    +-- verify ethos result artifact exists
+    |       +-- missing → treat mission as incomplete
+    |       +-- present → ethos mission close <id>
 ```
 
 **`--bare` mode is mandatory.** Bare mode skips hooks, plugins, MCP servers,

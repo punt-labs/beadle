@@ -8,12 +8,12 @@
 ```text
 beadle-daemon (Go, always-on)
     │
-    ├── Poller ──── IMAP ──── Proton Bridge ──── Proton servers
+    ├── Poller ──── IMAP ──── IMAP server (Proton Bridge, Fastmail, ...)
     │   (detect new mail, same code as MCP server poller)
     │
-    ├── Classifier
-    │   (Phase 1: all x-bit emails are instructions)
-    │   (Phase 2: LLM classification within x-bit contacts)
+    ├── x-bit Authorization Gate
+    │   (Phase 1: x-bit → instruction, no classification needed)
+    │   (Phase 2 future: LLM classification within x-bit contacts)
     │
     ├── Mission Manager
     │   ├── ethos mission create --file contract.yaml
