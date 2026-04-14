@@ -16,9 +16,10 @@ type EmailMeta struct {
 }
 
 // BuildContract generates a mission contract YAML string from email metadata.
-// User-controlled fields (message_id, from, subject) are always double-quoted
-// via escapeYAMLValue to prevent type ambiguity and YAML injection.
-// Template literals (leader, worker, etc.) are safe unquoted.
+// Email provenance is embedded in inputs.ticket as "email:<id>:<from>".
+// Subject propagates to success_criteria. All user-controlled values are
+// double-quoted via escapeYAMLValue. Leader is claude (the ethos identity),
+// worker is bwk, evaluator is mdm (must be valid distinct ethos identities).
 func BuildContract(meta EmailMeta) string {
 	// YAML is simple enough to template directly.
 	// Using fmt.Sprintf avoids a yaml library dependency for a fixed structure.
@@ -97,17 +98,26 @@ func (c *EthosMissionCreator) Create(meta EmailMeta) (string, error) {
 	}
 
 	// ethos may print deprecation warnings before the "created:" line.
-	// Parse only the line containing the mission ID.
+	// Parse the "created: m-... worker=... evaluator=..." line for the ID.
+	// Fallback: if no "created:" line, use the last non-empty line trimmed.
 	missionID := ""
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "created: ") {
-			// "created: m-2026-04-14-010 worker=bwk evaluator=mdm"
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
 				missionID = parts[1]
 			}
 			break
+		}
+	}
+	if missionID == "" {
+		// Fallback: last non-empty line (handles plain ID output).
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "ethos:") {
+				missionID = line
+			}
 		}
 	}
 	if missionID == "" {

@@ -11,10 +11,9 @@ import (
 
 func TestBuildContract(t *testing.T) {
 	tests := []struct {
-		name    string
-		meta    EmailMeta
-		wantID  string
-		wantSub string
+		name   string
+		meta   EmailMeta
+		wantID string
 	}{
 		{
 			name: "basic email",
@@ -23,8 +22,7 @@ func TestBuildContract(t *testing.T) {
 				From:      "jim@punt-labs.com",
 				Subject:   "Schedule a team meeting",
 			},
-			wantID:  "1205",
-			wantSub: "Schedule a team meeting",
+			wantID: "1205",
 		},
 		{
 			name: "special characters in subject",
@@ -33,8 +31,7 @@ func TestBuildContract(t *testing.T) {
 				From:      "alice@example.com",
 				Subject:   "Re: [beadle] PR #123: fix bug",
 			},
-			wantID:  "42",
-			wantSub: "Re: [beadle] PR #123: fix bug",
+			wantID: "42",
 		},
 		{
 			name: "empty subject",
@@ -43,8 +40,7 @@ func TestBuildContract(t *testing.T) {
 				From:      "bob@example.com",
 				Subject:   "",
 			},
-			wantID:  "99",
-			wantSub: "",
+			wantID: "99",
 		},
 	}
 
@@ -69,6 +65,13 @@ func TestBuildContract(t *testing.T) {
 			require.True(t, ok, "inputs.ticket must be a string")
 			assert.Contains(t, ticket, "email:"+tt.wantID)
 			assert.Contains(t, ticket, tt.meta.From)
+
+			sc, ok := doc["success_criteria"].([]any)
+			require.True(t, ok, "success_criteria must be a list")
+			if tt.meta.Subject != "" {
+				require.Greater(t, len(sc), 0)
+				assert.Contains(t, sc[0], tt.meta.Subject)
+			}
 
 			ws, ok := doc["write_set"].([]any)
 			require.True(t, ok, "write_set must be a list")
