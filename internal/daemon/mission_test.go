@@ -56,21 +56,19 @@ func TestBuildContract(t *testing.T) {
 			var doc map[string]any
 			require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
 
-			assert.Equal(t, "beadle-daemon", doc["leader"])
-			assert.Equal(t, "claude-session", doc["worker"])
+			assert.Equal(t, "claude", doc["leader"])
+			assert.Equal(t, "bwk", doc["worker"])
 
 			eval, ok := doc["evaluator"].(map[string]any)
 			require.True(t, ok, "evaluator must be a map")
-			assert.Equal(t, "beadle-daemon", eval["handle"])
+			assert.Equal(t, "mdm", eval["handle"])
 
 			inputs, ok := doc["inputs"].(map[string]any)
 			require.True(t, ok, "inputs must be a map")
-			trigger, ok := inputs["trigger"].(map[string]any)
-			require.True(t, ok, "inputs.trigger must be a map")
-			assert.Equal(t, "email", trigger["type"])
-			assert.Equal(t, tt.wantID, trigger["message_id"])
-			assert.Equal(t, tt.meta.From, trigger["from"])
-			assert.Equal(t, tt.wantSub, trigger["subject"])
+			ticket, ok := inputs["ticket"].(string)
+			require.True(t, ok, "inputs.ticket must be a string")
+			assert.Contains(t, ticket, "email:"+tt.wantID)
+			assert.Contains(t, ticket, tt.meta.From)
 
 			ws, ok := doc["write_set"].([]any)
 			require.True(t, ok, "write_set must be a list")
@@ -93,10 +91,9 @@ func TestBuildContract_ContainsRequiredFields(t *testing.T) {
 	out := BuildContract(meta)
 
 	required := []string{
-		"leader: beadle-daemon",
-		"worker: claude-session",
-		"type: email",
-		"message_id:",
+		"leader: claude",
+		"worker: bwk",
+		"ticket:",
 		"write_set:",
 		"success_criteria:",
 		"budget:",

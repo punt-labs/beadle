@@ -22,16 +22,15 @@ type EmailMeta struct {
 func BuildContract(meta EmailMeta) string {
 	// YAML is simple enough to template directly.
 	// Using fmt.Sprintf avoids a yaml library dependency for a fixed structure.
-	return fmt.Sprintf(`leader: beadle-daemon
-worker: claude-session
+	// inputs.trigger is not yet in ethos schema (beadle-40k).
+	// Email provenance is recorded in the ticket reference and daemon log.
+	// Worker/evaluator must be valid ethos identities with distinct roles.
+	return fmt.Sprintf(`leader: claude
+worker: bwk
 evaluator:
-  handle: beadle-daemon
+  handle: mdm
 inputs:
-  trigger:
-    type: email
-    message_id: %s
-    from: %s
-    subject: %s
+  ticket: %s
   files: []
 write_set:
   - daemon output
@@ -40,8 +39,8 @@ success_criteria:
 budget:
   rounds: 1
   reflection_after_each: false
-`, escapeYAMLValue(meta.MessageID), escapeYAMLValue(meta.From),
-		escapeYAMLValue(meta.Subject), escapeYAMLValue(meta.Subject))
+`, escapeYAMLValue("email:"+meta.MessageID+":"+meta.From),
+		escapeYAMLValue(meta.Subject))
 }
 
 // escapeYAMLValue returns a double-quoted YAML scalar with proper escaping.
@@ -97,9 +96,22 @@ func (c *EthosMissionCreator) Create(meta EmailMeta) (string, error) {
 		return "", fmt.Errorf("ethos mission create: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 
-	missionID := strings.TrimSpace(string(out))
+	// ethos may print deprecation warnings before the "created:" line.
+	// Parse only the line containing the mission ID.
+	missionID := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "created: ") {
+			// "created: m-2026-04-14-010 worker=bwk evaluator=mdm"
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				missionID = parts[1]
+			}
+			break
+		}
+	}
 	if missionID == "" {
-		return "", fmt.Errorf("ethos mission create returned empty output")
+		return "", fmt.Errorf("ethos mission create: no mission ID in output: %s", strings.TrimSpace(string(out)))
 	}
 	return missionID, nil
 }
