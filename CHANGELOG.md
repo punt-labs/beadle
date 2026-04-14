@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `beadle-daemon` binary with `run` subcommand — daemon skeleton with signal
   handling, graceful shutdown, and file-based logging at
   `~/.punt-labs/beadle/logs/beadle-daemon.log`. (beadle-nv7)
+- x-bit enforcement: daemon checks sender's `x` permission before creating
+  missions. `internal/daemon/` package with `MailHandler` (x-bit gate) and
+  `EthosMissionCreator` (contract YAML generation + `ethos mission create`).
+  Fetch capped at 20 messages to prevent first-run flood. (beadle-z16, beadle-dsv)
 
 ### Changed
 

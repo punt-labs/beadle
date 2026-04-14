@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/punt-labs/beadle/internal/daemon"
 	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
@@ -48,10 +49,16 @@ var runCmd = &cobra.Command{
 			return fmt.Errorf("create resolver: %w", err)
 		}
 
-		onNewMail := func(newCount uint32) {
-			logger.Info("daemon: new mail", "count", newCount)
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("resolve cwd: %w", err)
 		}
-		poller := email.NewPoller(onNewMail, resolver, logger, email.DefaultDialer{})
+		missions := &daemon.EthosMissionCreator{
+			TmpDir: filepath.Join(cwd, ".tmp", "missions"),
+		}
+		handler := daemon.NewMailHandler(resolver, email.DefaultDialer{}, missions, logger)
+
+		poller := email.NewPoller(handler.OnNewMail, resolver, logger, email.DefaultDialer{})
 		if err := poller.Start(); err != nil {
 			return fmt.Errorf("start poller: %w", err)
 		}
