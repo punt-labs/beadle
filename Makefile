@@ -1,7 +1,7 @@
 VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: help lint docs test test-integration check format build install deploy-commands clean dist docker docker-push cover tools doctor
+.PHONY: help lint docs test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover tools doctor
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -25,8 +25,11 @@ check: lint docs test ## Run all quality gates
 format: ## Format code (with simplify)
 	gofmt -s -w ./cmd/ ./internal/
 
-build: ## Build binary
+build: ## Build beadle-email binary
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o beadle-email ./cmd/beadle-email/
+
+build-daemon: ## Build beadle-daemon binary
+	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o beadle-daemon ./cmd/beadle-daemon/
 
 install: build ## Build and install to ~/.local/bin
 	mkdir -p $(HOME)/.local/bin
@@ -44,7 +47,7 @@ deploy-commands: ## Deploy commands to ~/.claude/commands/
 	done
 
 clean: ## Remove build artifacts
-	rm -f beadle-email coverage.out
+	rm -f beadle-email beadle-daemon coverage.out
 	rm -rf dist/
 
 dist: clean ## Cross-compile for all platforms
