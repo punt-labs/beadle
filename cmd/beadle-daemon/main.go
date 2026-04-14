@@ -17,6 +17,7 @@ import (
 	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
+	"github.com/punt-labs/beadle/internal/secret"
 )
 
 var version = "dev"
@@ -61,7 +62,12 @@ var runCmd = &cobra.Command{
 			TmpDir: missionsTmpDir,
 		}
 
-		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		// Resolve API key: keychain (pass/secret-tool) → file → env.
+		apiKey, err := secret.Get("anthropic-api-key")
+		if err != nil {
+			// Fallback: standard Claude env var (not beadle-prefixed).
+			apiKey = os.Getenv("ANTHROPIC_API_KEY")
+		}
 		var spawner *daemon.WorkerSpawner
 		var templates *daemon.MissionTemplate
 		if apiKey != "" {
@@ -72,9 +78,9 @@ var runCmd = &cobra.Command{
 			templates = &daemon.MissionTemplate{
 				TmpDir: missionsTmpDir,
 			}
-			logger.Info("worker spawning enabled")
+			logger.Info("worker spawning enabled", "source", secretSource(apiKey, err))
 		} else {
-			logger.Warn("ANTHROPIC_API_KEY not set, worker spawning disabled")
+			logger.Warn("worker spawning disabled: no API key found (checked: pass beadle/anthropic-api-key, file, BEADLE_ANTHROPIC_API_KEY, ANTHROPIC_API_KEY)")
 		}
 
 		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger)
@@ -140,4 +146,15 @@ func openDaemonLogFile() (*os.File, string, error) {
 		return nil, "", fmt.Errorf("open %s: %w", path, err)
 	}
 	return f, path, nil
+}
+
+// secretSource returns a human-readable label for where the API key came from.
+func secretSource(key string, secretErr error) string {
+	if secretErr == nil {
+		return "keychain"
+	}
+	if key != "" {
+		return "ANTHROPIC_API_KEY env"
+	}
+	return "none"
 }

@@ -72,8 +72,10 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	prompt := "Execute mission " + missionID
 	args := []string{
-		"-p", "--bare",
+		"-p",
+		"--bare",
 		"--mcp-config", mcpConfigPath,
 		"--append-system-prompt-file", systemPromptPath,
 		"--output-format", "json",
@@ -81,7 +83,7 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 		"--max-budget-usd", maxBudget,
 		"--permission-mode", "auto",
 		"--allowedTools", "Bash,Read,Edit,Write,Glob,Grep,Agent",
-		"Execute mission " + missionID,
+		"--", prompt,
 	}
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
