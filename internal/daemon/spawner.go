@@ -83,6 +83,7 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 		"--max-budget-usd", maxBudget,
 		"--permission-mode", "auto",
 		"--allowedTools", "Bash,Read,Edit,Write,Glob,Grep,Agent",
+		// -- ends option parsing; prompt is always positional even if it starts with -
 		"--", prompt,
 	}
 
