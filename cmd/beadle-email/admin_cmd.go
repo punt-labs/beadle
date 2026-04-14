@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 
@@ -63,7 +64,21 @@ var serveCmd = &cobra.Command{
 				"claude/channel": map[string]any{},
 			}),
 		)
-		poller := email.NewPoller(s, resolver, logger, email.DefaultDialer{})
+		onNewMail := func(newCount uint32) {
+			s.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
+			logger.Info("poller: sent tools/list_changed notification")
+			channelParams := map[string]any{
+				"content": fmt.Sprintf("%d new message(s) in inbox. Check with /inbox.", newCount),
+				"meta": map[string]string{
+					"source": "beadle-email",
+					"type":   "inbox_alert",
+				},
+			}
+			logger.Info("poller: sending channel notification", "content", channelParams["content"])
+			s.SendNotificationToAllClients("notifications/claude/channel", channelParams)
+			logger.Info("poller: channel notification sent")
+		}
+		poller := email.NewPoller(onNewMail, resolver, logger, email.DefaultDialer{})
 		mcptools.RegisterTools(s, resolver, logger, mcptools.WithEthosDir(ethosDir), mcptools.WithPoller(poller))
 		if err := poller.Start(); err != nil {
 			logger.Error("background polling failed to start", "error", err)
@@ -79,6 +94,7 @@ var serveCmd = &cobra.Command{
 			defer cancel()
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+			defer signal.Stop(sigCh)
 			go func() {
 				<-sigCh
 				cancel()

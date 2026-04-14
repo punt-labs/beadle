@@ -11,6 +11,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - DES-027: Orchestrator design — daemon spawns Claude Code workers via
   `claude -p --bare` print mode with per-mission MCP config, system prompt,
   safety bounds, and ethos missions as control plane. (beadle-vyv)
+- `beadle-daemon` binary with `run` subcommand — daemon skeleton with signal
+  handling, graceful shutdown, and file-based logging at
+  `~/.punt-labs/beadle/logs/beadle-daemon.log`. (beadle-nv7)
+
+### Changed
+
+- Poller refactored: `*server.MCPServer` dependency replaced with
+  `NewMailFunc` callback. MCP server passes a closure that fires
+  `tools/list_changed` and `notifications/claude/channel`. Daemon passes a
+  logging callback. Enables Poller reuse outside MCP context. (beadle-6ob)
 
 ## [0.14.1] - 2026-04-13
 
