@@ -49,12 +49,16 @@ var runCmd = &cobra.Command{
 			return fmt.Errorf("create resolver: %w", err)
 		}
 
-		cwd, err := os.Getwd()
+		dataDir, err := paths.DataDir()
 		if err != nil {
-			return fmt.Errorf("resolve cwd: %w", err)
+			return fmt.Errorf("resolve data dir: %w", err)
+		}
+		missionsTmpDir := filepath.Join(dataDir, "tmp", "missions")
+		if err := os.MkdirAll(missionsTmpDir, 0o750); err != nil {
+			return fmt.Errorf("create missions tmp dir: %w", err)
 		}
 		missions := &daemon.EthosMissionCreator{
-			TmpDir: filepath.Join(cwd, ".tmp", "missions"),
+			TmpDir: missionsTmpDir,
 		}
 		handler := daemon.NewMailHandler(resolver, email.DefaultDialer{}, missions, logger)
 

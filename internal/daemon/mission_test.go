@@ -108,23 +108,24 @@ func TestBuildContract_ContainsRequiredFields(t *testing.T) {
 
 func TestEscapeYAMLValue(t *testing.T) {
 	tests := []struct {
+		name string
 		in   string
 		want string
 	}{
-		{"simple text", `"simple text"`},
-		{"", `""`},
-		{"has: colon", `"has: colon"`},
-		{"has #comment", `"has #comment"`},
-		{`has "quotes"`, `"has \"quotes\""`},
-		{"has\nnewline", `"has\nnewline"`},
-		{"has\rcarriage", `"has\rcarriage"`},
-		{"has\ttab", `"has\ttab"`},
-		{`has\backslash`, `"has\\backslash"`},
-		{"99", `"99"`},
-		{"true", `"true"`},
+		{"simple_text", "simple text", `"simple text"`},
+		{"empty", "", `""`},
+		{"colon", "has: colon", `"has: colon"`},
+		{"comment", "has #comment", `"has #comment"`},
+		{"quotes", `has "quotes"`, `"has \"quotes\""`},
+		{"newline", "has\nnewline", `"has\nnewline"`},
+		{"carriage_return", "has\rcarriage", `"has\rcarriage"`},
+		{"tab", "has\ttab", `"has\ttab"`},
+		{"backslash", `has\backslash`, `"has\\backslash"`},
+		{"numeric", "99", `"99"`},
+		{"boolean", "true", `"true"`},
 	}
 	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			got := escapeYAMLValue(tt.in)
 			assert.Equal(t, tt.want, got)
 		})

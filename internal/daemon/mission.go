@@ -16,6 +16,9 @@ type EmailMeta struct {
 }
 
 // BuildContract generates a mission contract YAML string from email metadata.
+// User-controlled fields (message_id, from, subject) are always double-quoted
+// via escapeYAMLValue to prevent type ambiguity and YAML injection.
+// Template literals (leader, worker, etc.) are safe unquoted.
 func BuildContract(meta EmailMeta) string {
 	// YAML is simple enough to template directly.
 	// Using fmt.Sprintf avoids a yaml library dependency for a fixed structure.
@@ -89,9 +92,9 @@ func (c *EthosMissionCreator) Create(meta EmailMeta) (string, error) {
 		return "", fmt.Errorf("resolve absolute path for %s: %w", tmpPath, err)
 	}
 
-	out, err := exec.Command("ethos", "mission", "create", "--file", absPath).Output()
+	out, err := exec.Command("ethos", "mission", "create", "--file", absPath).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("ethos mission create: %w", err)
+		return "", fmt.Errorf("ethos mission create: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 
 	missionID := strings.TrimSpace(string(out))
