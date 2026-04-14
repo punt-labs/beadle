@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -97,7 +98,13 @@ func setupHandlerWithPoller(t *testing.T) (*server.MCPServer, *testenv.Env, *tes
 	s := server.NewMCPServer("beadle-email", "test", server.WithToolCapabilities(true))
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	dialer := testserver.TestDialer{Password: "testpass"}
-	poller := email.NewPoller(s, env.Resolver, logger, dialer)
+	onNewMail := func(newCount uint32) {
+		s.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
+		s.SendNotificationToAllClients("notifications/claude/channel", map[string]any{
+			"content": fmt.Sprintf("%d new message(s) in inbox.", newCount),
+		})
+	}
+	poller := email.NewPoller(onNewMail, env.Resolver, logger, dialer)
 	mcptools.RegisterTools(s, env.Resolver, logger, mcptools.WithDialer(dialer), mcptools.WithPoller(poller))
 
 	callMCP(t, s, "initialize", 0, map[string]any{

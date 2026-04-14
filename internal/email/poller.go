@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
-
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
 )
+
+// NewMailFunc is called when the poller detects new messages.
+// newCount is the number of new unseen messages since the last poll.
+type NewMailFunc func(newCount uint32)
 
 // PollStatus is the current state of the background poller.
 type PollStatus struct {
@@ -25,13 +26,13 @@ type PollStatus struct {
 	LastError   string    `json:"last_error,omitempty"`
 }
 
-// Poller checks INBOX for new messages and sends tools/list_changed
-// notifications when the unread count increases.
+// Poller checks INBOX for new messages and calls onNewMail
+// when the unread count increases.
 type Poller struct {
-	server   *server.MCPServer
-	resolver *identity.Resolver
-	logger   *slog.Logger
-	dialer   Dialer
+	onNewMail NewMailFunc
+	resolver  *identity.Resolver
+	logger    *slog.Logger
+	dialer    Dialer
 
 	mu          sync.Mutex
 	wg          sync.WaitGroup
@@ -45,12 +46,14 @@ type Poller struct {
 }
 
 // NewPoller creates a poller that is initially stopped.
-func NewPoller(s *server.MCPServer, resolver *identity.Resolver, logger *slog.Logger, dialer Dialer) *Poller {
+// onNewMail is called each time new unseen messages are detected.
+// Pass nil to suppress notifications.
+func NewPoller(onNewMail NewMailFunc, resolver *identity.Resolver, logger *slog.Logger, dialer Dialer) *Poller {
 	return &Poller{
-		server:   s,
-		resolver: resolver,
-		logger:   logger,
-		dialer:   dialer,
+		onNewMail: onNewMail,
+		resolver:  resolver,
+		logger:    logger,
+		dialer:    dialer,
 	}
 }
 
@@ -199,21 +202,9 @@ func (p *Poller) poll() {
 	if !first && unseen > prev {
 		newCount := unseen - prev
 		p.logger.Info("poller: new mail", "unseen", unseen, "previous", prev)
-		p.server.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
-		p.logger.Info("poller: sent tools/list_changed notification")
-		// Channel notification: push directly into Claude Code's prompt queue.
-		// Sessions with channels enabled will process this as a real turn.
-		// Sessions without channels ignore unknown notifications.
-		channelParams := map[string]any{
-			"content": fmt.Sprintf("%d new message(s) in inbox. Check with /inbox.", newCount),
-			"meta": map[string]string{
-				"source": "beadle-email",
-				"type":   "inbox_alert",
-			},
+		if p.onNewMail != nil {
+			p.onNewMail(newCount)
 		}
-		p.logger.Info("poller: sending channel notification", "content", channelParams["content"])
-		p.server.SendNotificationToAllClients("notifications/claude/channel", channelParams)
-		p.logger.Info("poller: channel notification sent")
 	}
 }
 
