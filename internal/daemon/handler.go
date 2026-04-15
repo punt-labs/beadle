@@ -150,16 +150,16 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 			Subject:   msg.Subject,
 		}
 
-		missionID, err := h.missions.Create(meta)
-		if err != nil {
-			h.logger.Error("create mission", "from", addr, "id", msg.ID, "error", err)
-			continue
-		}
-		h.logger.Info("mission created", "mission", missionID, "from", addr, "subject", msg.Subject)
-
 		if h.spawner != nil && h.templates != nil {
 			select {
 			case h.workerSem <- struct{}{}:
+				missionID, err := h.missions.Create(meta)
+				if err != nil {
+					<-h.workerSem
+					h.logger.Error("create mission", "from", addr, "id", msg.ID, "error", err)
+					continue
+				}
+				h.logger.Info("mission created", "mission", missionID, "from", addr, "subject", msg.Subject)
 				h.wg.Add(1)
 				go func() {
 					defer h.wg.Done()
@@ -167,8 +167,15 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 					h.spawnWorker(h.ctx, missionID)
 				}()
 			default:
-				h.logger.Warn("worker semaphore full, skipping spawn", "mission", missionID)
+				h.logger.Warn("worker capacity full, skipping", "from", addr, "id", msg.ID)
 			}
+		} else {
+			missionID, err := h.missions.Create(meta)
+			if err != nil {
+				h.logger.Error("create mission", "from", addr, "id", msg.ID, "error", err)
+				continue
+			}
+			h.logger.Info("mission created (no spawner)", "mission", missionID, "from", addr)
 		}
 	}
 }
@@ -233,7 +240,13 @@ func (h *MailHandler) verifyTrust(client *email.Client, cfg *email.Config, msg c
 	}
 
 	// If the contact has a registered GPG key, the signing key must match.
-	if contact.GPGKeyID != "" && !strings.HasSuffix(result.KeyID, contact.GPGKeyID) {
+	// Normalize: strip 0x prefix, case-insensitive suffix match.
+	normalizeKeyID := func(id string) string {
+		id = strings.ToUpper(strings.TrimSpace(id))
+		id = strings.TrimPrefix(id, "0X")
+		return id
+	}
+	if contact.GPGKeyID != "" && !strings.HasSuffix(normalizeKeyID(result.KeyID), normalizeKeyID(contact.GPGKeyID)) {
 		h.logger.Warn("pgp key mismatch",
 			"id", msg.ID,
 			"expected", contact.GPGKeyID,

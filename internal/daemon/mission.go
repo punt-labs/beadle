@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
 
 // EmailMeta holds the metadata extracted from an email that triggered a mission.
@@ -51,8 +52,9 @@ budget:
 // limit adversarial input from email subjects.
 func escapeYAMLValue(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
-	if len(s) > 500 {
-		s = s[:500]
+	if utf8.RuneCountInString(s) > 500 {
+		runes := []rune(s)
+		s = string(runes[:500])
 	}
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)

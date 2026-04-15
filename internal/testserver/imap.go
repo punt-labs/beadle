@@ -138,7 +138,7 @@ func (s *IMAPServer) AddRawMessage(folder string, raw []byte) uint32 {
 	mb.messages = append(mb.messages, &memMessage{
 		uid:   imap.UID(uid),
 		flags: []imap.Flag{},
-		raw:   raw,
+		raw:   append([]byte(nil), raw...), // defensive copy
 		date:  time.Now(),
 	})
 	mb.uidNext++
