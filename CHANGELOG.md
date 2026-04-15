@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Pipeline orchestrator implementation: command YAML loader with typed arg
+  validation, Planner interface (Rule + LLM stub), sequential pipeline
+  executor with try/else error handling, per-command MCP config wiring,
+  crash-safe pipeline state persistence with startup recovery.
+  (beadle-5tk, beadle-uce, beadle-5ck, beadle-85e, beadle-e3w)
 - DES-027: Orchestrator design — daemon spawns Claude Code workers via
   `claude -p --bare` print mode with per-mission MCP config, system prompt,
   safety bounds, and ethos missions as control plane. (beadle-vyv)
