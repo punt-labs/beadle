@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,6 +15,11 @@ import (
 )
 
 var validMissionIDRe = regexp.MustCompile(`^m-[a-z0-9][a-z0-9-]{0,61}$`)
+
+// ValidMissionID reports whether id matches the mission ID format.
+func ValidMissionID(id string) bool {
+	return validMissionIDRe.MatchString(id)
+}
 
 // WorkerResult holds the outcome of a Claude Code worker session.
 type WorkerResult struct {
@@ -52,7 +58,7 @@ func (s *WorkerSpawner) logger() *slog.Logger {
 // mcpConfigPath and systemPromptPath must be paths to existing files;
 // the caller is responsible for cleanup.
 func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, systemPromptPath string) (WorkerResult, error) {
-	if !validMissionIDRe.MatchString(missionID) {
+	if !ValidMissionID(missionID) {
 		return WorkerResult{MissionID: missionID}, fmt.Errorf("invalid mission ID %q", missionID)
 	}
 
@@ -87,14 +93,33 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 		"--", prompt,
 	}
 
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	claudePath, err := exec.LookPath("claude")
+	if err != nil {
+		return WorkerResult{MissionID: missionID, ExitCode: -1},
+			fmt.Errorf("find claude binary: %w", err)
+	}
+
+	// Isolated HOME prevents the worker from reading ~/.ssh, ~/.gnupg, etc.
+	workerHome, err := os.MkdirTemp("", "beadle-worker-*")
+	if err != nil {
+		return WorkerResult{MissionID: missionID, ExitCode: -1},
+			fmt.Errorf("create worker home: %w", err)
+	}
+	defer os.RemoveAll(workerHome)
+
+	// Restricted PATH: claude binary dir + /usr/bin (git, basic tools).
+	workerPATH := filepath.Dir(claudePath) + ":/usr/bin:/usr/local/bin"
+
+	cmd := exec.CommandContext(ctx, claudePath, args...)
 	// Minimal env: only what claude needs. Do not leak daemon credentials
 	// (BEADLE_IMAP_PASSWORD, BEADLE_RESEND_API_KEY, etc.) to the subprocess.
+	// HOME is an isolated temp dir — no access to user's SSH keys, GPG, config.
 	cmd.Env = []string{
 		"ANTHROPIC_API_KEY=" + s.APIKey,
-		"HOME=" + os.Getenv("HOME"),
-		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + workerHome,
+		"PATH=" + workerPATH,
 		"USER=" + os.Getenv("USER"),
+		"TMPDIR=" + workerHome,
 	}
 
 	s.logger().Info("spawning worker", "mission", missionID, "timeout", timeout)
