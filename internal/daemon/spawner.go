@@ -56,8 +56,10 @@ func (s *WorkerSpawner) logger() *slog.Logger {
 // Run executes a Claude Code worker for the given mission.
 // The context governs subprocess lifetime — cancel it for graceful shutdown.
 // mcpConfigPath and systemPromptPath must be paths to existing files;
-// the caller is responsible for cleanup.
-func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, systemPromptPath string) (WorkerResult, error) {
+// the caller is responsible for cleanup. envOverrides are added to the
+// subprocess environment (e.g. secrets resolved by the daemon for a command).
+// Pass nil when no overrides are needed.
+func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, systemPromptPath string, envOverrides map[string]string) (WorkerResult, error) {
 	if !ValidMissionID(missionID) {
 		return WorkerResult{MissionID: missionID}, fmt.Errorf("invalid mission ID %q", missionID)
 	}
@@ -114,12 +116,30 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 	// Minimal env: only what claude needs. Do not leak daemon credentials
 	// (BEADLE_IMAP_PASSWORD, BEADLE_RESEND_API_KEY, etc.) to the subprocess.
 	// HOME is an isolated temp dir — no access to user's SSH keys, GPG, config.
-	cmd.Env = []string{
-		"ANTHROPIC_API_KEY=" + s.APIKey,
-		"HOME=" + workerHome,
-		"PATH=" + workerPATH,
-		"USER=" + os.Getenv("USER"),
-		"TMPDIR=" + workerHome,
+	//
+	// Build env as a map, apply overrides, then force-set protected vars
+	// AFTER overrides so they always win. Without this, a malicious command
+	// config could override ANTHROPIC_API_KEY, HOME, PATH, or TMPDIR via
+	// envOverrides to escape the sandbox.
+	envMap := map[string]string{
+		"ANTHROPIC_API_KEY": s.APIKey,
+		"HOME":              workerHome,
+		"PATH":              workerPATH,
+		"USER":              os.Getenv("USER"),
+		"TMPDIR":            workerHome,
+	}
+	for k, v := range envOverrides {
+		envMap[k] = v
+	}
+	// Force-set protected vars AFTER overrides — never allow override.
+	envMap["ANTHROPIC_API_KEY"] = s.APIKey
+	envMap["HOME"] = workerHome
+	envMap["PATH"] = workerPATH
+	envMap["TMPDIR"] = workerHome
+
+	cmd.Env = make([]string, 0, len(envMap))
+	for k, v := range envMap {
+		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
 	s.logger().Info("spawning worker", "mission", missionID, "timeout", timeout)

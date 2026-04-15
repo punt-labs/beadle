@@ -55,6 +55,25 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("resolve data dir: %w", err)
 		}
+
+		store := &daemon.PipelineStore{
+			Dir:    filepath.Join(dataDir, "pipelines"),
+			Logger: logger,
+		}
+		stale, err := store.LoadRunning()
+		if err != nil {
+			logger.Warn("load stale pipelines", "error", err)
+		}
+		for _, p := range stale {
+			logger.Warn("pipeline was running when daemon stopped",
+				"pipeline", p.ID, "from", p.Email.From)
+			p.Status = "failed"
+			p.Error = "daemon stopped while pipeline was running"
+			if saveErr := store.Save(p); saveErr != nil {
+				logger.Error("mark stale pipeline failed", "pipeline", p.ID, "error", saveErr)
+			}
+		}
+
 		missionsTmpDir := filepath.Join(dataDir, "tmp", "missions")
 		if err := os.MkdirAll(missionsTmpDir, 0o750); err != nil {
 			return fmt.Errorf("create missions tmp dir: %w", err)
@@ -94,7 +113,7 @@ var runCmd = &cobra.Command{
 			logger.Warn("worker spawning disabled: no API key found (checked: secret backends, ANTHROPIC_API_KEY env)")
 		}
 
-		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0)
+		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0, nil, nil)
 		defer handler.Stop()
 
 		poller := email.NewPoller(handler.OnNewMail, resolver, logger, email.DefaultDialer{})

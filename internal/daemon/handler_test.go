@@ -151,7 +151,7 @@ func TestOnNewMail(t *testing.T) {
 			}
 
 			mock := &mockMissionCreator{}
-			handler := NewMailHandler(t.Context(), env.Resolver, dialer, mock, nil, nil, discardLogger(), 0)
+			handler := NewMailHandler(t.Context(), env.Resolver, dialer, mock, nil, nil, discardLogger(), 0, nil, nil)
 
 			handler.OnNewMail(uint32(len(tt.messages)))
 
@@ -189,7 +189,7 @@ func TestOnNewMail_PGPKeyMismatch(t *testing.T) {
 	fix.AddRawMessage("INBOX", buildPGPSignedRFC822(t, gpgBin, "jim@punt-labs.com", "Test", "body"))
 
 	mock := &mockMissionCreator{}
-	handler := NewMailHandler(t.Context(), env.Resolver, dialer, mock, nil, nil, discardLogger(), 0)
+	handler := NewMailHandler(t.Context(), env.Resolver, dialer, mock, nil, nil, discardLogger(), 0, nil, nil)
 	handler.OnNewMail(1)
 
 	assert.Equal(t, 0, len(mock.calls), "mission should not be created: key mismatch")
@@ -217,7 +217,7 @@ func TestOnNewMail_PGPKeyMatch(t *testing.T) {
 	fix.AddRawMessage("INBOX", raw)
 
 	mock := &mockMissionCreator{}
-	handler := NewMailHandler(t.Context(), env.Resolver, dialer, mock, nil, nil, discardLogger(), 0)
+	handler := NewMailHandler(t.Context(), env.Resolver, dialer, mock, nil, nil, discardLogger(), 0, nil, nil)
 	handler.OnNewMail(1)
 
 	assert.Equal(t, 1, len(mock.calls), "mission should be created: key matches")

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,13 +24,15 @@ type MissionCreator interface {
 
 // MailHandler processes new mail notifications from the poller.
 // For each unread message, it checks the sender's x-bit permission,
-// creates an ethos mission, and spawns a Claude Code worker to execute it.
+// creates an Executor pipeline, and runs it.
 type MailHandler struct {
 	resolver  *identity.Resolver
 	dialer    email.Dialer
 	missions  MissionCreator
-	spawner   *WorkerSpawner
+	spawner   Spawner
 	templates *MissionTemplate
+	planner   Planner
+	commands  map[string]*Command
 	logger    *slog.Logger
 
 	ctx       context.Context
@@ -43,11 +44,19 @@ type MailHandler struct {
 // NewMailHandler creates a MailHandler. If spawner or templates is nil,
 // mission creation still works but no worker is spawned.
 // maxWorkers sets the concurrency limit for worker goroutines (default 2).
+// planner and commands configure the pipeline executor; if planner is nil,
+// a StubPlanner is used that returns a single generic CommandCall.
 // The returned context governs worker subprocess lifetimes — call Stop
 // to cancel running workers and wait for them to exit.
-func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner *WorkerSpawner, templates *MissionTemplate, logger *slog.Logger, maxWorkers int) *MailHandler {
+func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner Spawner, templates *MissionTemplate, logger *slog.Logger, maxWorkers int, planner Planner, commands map[string]*Command) *MailHandler {
 	if maxWorkers <= 0 {
 		maxWorkers = 2
+	}
+	if planner == nil {
+		planner = &StubPlanner{Err: fmt.Errorf("no planner configured")}
+	}
+	if commands == nil {
+		commands = make(map[string]*Command)
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	return &MailHandler{
@@ -56,6 +65,8 @@ func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer ema
 		missions:  missions,
 		spawner:   spawner,
 		templates: templates,
+		planner:   planner,
+		commands:  commands,
 		logger:    logger,
 		ctx:       ctx,
 		cancel:    cancel,
@@ -153,18 +164,30 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 		if h.spawner != nil && h.templates != nil {
 			select {
 			case h.workerSem <- struct{}{}:
-				missionID, err := h.missions.Create(meta)
-				if err != nil {
-					<-h.workerSem
-					h.logger.Error("create mission", "from", addr, "id", msg.ID, "error", err)
-					continue
-				}
-				h.logger.Info("mission created", "mission", missionID, "from", addr, "subject", msg.Subject)
 				h.wg.Add(1)
 				go func() {
 					defer h.wg.Done()
 					defer func() { <-h.workerSem }()
-					h.spawnWorker(h.ctx, missionID)
+					executor := &Executor{
+						Planner:   h.planner,
+						Commands:  h.commands,
+						Missions:  h.missions,
+						Spawner:   h.spawner,
+						Templates: h.templates,
+						Registry:  DefaultMCPRegistry(),
+						Logger:    h.logger,
+					}
+					p, err := executor.Run(h.ctx, meta, "")
+					if err != nil {
+						h.logger.Error("pipeline failed",
+							"pipeline", p.ID, "from", addr,
+							"id", msg.ID, "error", err)
+						return
+					}
+					h.logger.Info("pipeline completed",
+						"pipeline", p.ID, "from", addr,
+						"subject", truncateLog(msg.Subject, 200),
+						"stages", len(p.Results))
 				}()
 			default:
 				h.logger.Warn("worker capacity full, skipping", "from", addr, "id", msg.ID)
@@ -178,36 +201,6 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 			h.logger.Info("mission created (no spawner)", "mission", missionID, "from", addr)
 		}
 	}
-}
-
-func (h *MailHandler) spawnWorker(ctx context.Context, missionID string) {
-	mcpPath, err := h.templates.BuildMCPConfig()
-	if err != nil {
-		h.logger.Error("build mcp config", "mission", missionID, "error", err)
-		return
-	}
-
-	promptPath, err := h.templates.BuildSystemPrompt(missionID)
-	if err != nil {
-		os.Remove(mcpPath)
-		h.logger.Error("build system prompt", "mission", missionID, "error", err)
-		return
-	}
-
-	result, err := h.spawner.Run(ctx, missionID, mcpPath, promptPath)
-	// Clean up temp files after subprocess exits.
-	os.Remove(mcpPath)
-	os.Remove(promptPath)
-
-	if err != nil {
-		h.logger.Error("spawn worker", "mission", missionID, "error", err)
-		return
-	}
-	h.logger.Info("worker completed",
-		"mission", missionID,
-		"session", result.SessionID,
-		"isError", result.IsError,
-		"exitCode", result.ExitCode)
 }
 
 // verifyTrust determines the transport trust level for a message.

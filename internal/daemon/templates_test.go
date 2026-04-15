@@ -11,33 +11,112 @@ import (
 )
 
 func TestBuildMCPConfig(t *testing.T) {
+	registry := DefaultMCPRegistry()
+
+	tests := []struct {
+		name    string
+		servers []string
+		want    []string // expected keys in mcpServers
+		wantErr string
+	}{
+		{
+			name:    "single server",
+			servers: []string{"ethos"},
+			want:    []string{"ethos"},
+		},
+		{
+			name:    "two servers",
+			servers: []string{"ethos", "biff"},
+			want:    []string{"ethos", "biff"},
+		},
+		{
+			name:    "all defaults",
+			servers: []string{"ethos", "beadle-email", "biff"},
+			want:    []string{"ethos", "beadle-email", "biff"},
+		},
+		{
+			name:    "empty list",
+			servers: []string{},
+			want:    []string{},
+		},
+		{
+			name:    "nil list",
+			servers: nil,
+			want:    []string{},
+		},
+		{
+			name:    "unknown server",
+			servers: []string{"ethos", "nosuchserver"},
+			wantErr: `unknown MCP server "nosuchserver"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tmpl := &MissionTemplate{TmpDir: tmpDir}
+
+			path, err := tmpl.BuildMCPConfig(tt.servers, registry)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			defer os.Remove(path)
+
+			assert.True(t, strings.HasPrefix(path, tmpDir))
+
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+
+			var doc struct {
+				MCPServers map[string]MCPServerConfig `json:"mcpServers"`
+			}
+			require.NoError(t, json.Unmarshal(data, &doc))
+
+			assert.Equal(t, len(tt.want), len(doc.MCPServers),
+				"server count mismatch: got %v", doc.MCPServers)
+			for _, name := range tt.want {
+				_, ok := doc.MCPServers[name]
+				assert.True(t, ok, "missing server %q", name)
+			}
+		})
+	}
+}
+
+func TestBuildMCPConfigContent(t *testing.T) {
+	registry := DefaultMCPRegistry()
 	tmpDir := t.TempDir()
 	tmpl := &MissionTemplate{TmpDir: tmpDir}
 
-	path, err := tmpl.BuildMCPConfig()
+	path, err := tmpl.BuildMCPConfig([]string{"ethos", "beadle-email"}, registry)
 	require.NoError(t, err)
 	defer os.Remove(path)
-
-	assert.True(t, strings.HasPrefix(path, tmpDir), "file should be in TmpDir")
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	// Must be valid JSON.
-	var doc map[string]any
+	var doc struct {
+		MCPServers map[string]MCPServerConfig `json:"mcpServers"`
+	}
 	require.NoError(t, json.Unmarshal(data, &doc))
 
-	// Must contain mcpServers with ethos and beadle-email.
-	servers, ok := doc["mcpServers"].(map[string]any)
-	require.True(t, ok, "mcpServers must be an object")
+	ethos := doc.MCPServers["ethos"]
+	assert.Equal(t, "ethos", ethos.Command)
+	assert.Equal(t, []string{"mcp"}, ethos.Args)
 
-	ethos, ok := servers["ethos"].(map[string]any)
-	require.True(t, ok, "ethos server entry must exist")
-	assert.Equal(t, "ethos", ethos["command"])
+	beadle := doc.MCPServers["beadle-email"]
+	assert.Equal(t, "beadle-email", beadle.Command)
+	assert.Equal(t, []string{"serve"}, beadle.Args)
+}
 
-	beadle, ok := servers["beadle-email"].(map[string]any)
-	require.True(t, ok, "beadle-email server entry must exist")
-	assert.Equal(t, "beadle-email", beadle["command"])
+func TestDefaultMCPRegistry(t *testing.T) {
+	reg := DefaultMCPRegistry()
+	assert.Len(t, reg, 3)
+	assert.Contains(t, reg, "ethos")
+	assert.Contains(t, reg, "beadle-email")
+	assert.Contains(t, reg, "biff")
 }
 
 func TestBuildSystemPrompt(t *testing.T) {
