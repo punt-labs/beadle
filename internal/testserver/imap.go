@@ -122,6 +122,29 @@ func (s *IMAPServer) AddMessageWithFlags(folder, from, subject, body string, fla
 	return uid
 }
 
+// AddRawMessage seeds a message with raw RFC822 bytes.
+// Use this when you need custom headers (e.g., Proton trust headers).
+func (s *IMAPServer) AddRawMessage(folder string, raw []byte) uint32 {
+	s.backend.mu.Lock()
+	defer s.backend.mu.Unlock()
+
+	mb, ok := s.backend.mailboxes[folder]
+	if !ok {
+		mb = &memMailbox{name: folder, uidNext: 1}
+		s.backend.mailboxes[folder] = mb
+	}
+
+	uid := mb.uidNext
+	mb.messages = append(mb.messages, &memMessage{
+		uid:   imap.UID(uid),
+		flags: []imap.Flag{},
+		raw:   raw,
+		date:  time.Now(),
+	})
+	mb.uidNext++
+	return uid
+}
+
 func buildRFC822(from, subject, body string) []byte {
 	return []byte(fmt.Sprintf(
 		"From: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: <%d@test>\r\nContent-Type: text/plain\r\n\r\n%s",

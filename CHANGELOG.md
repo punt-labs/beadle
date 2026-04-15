@@ -25,6 +25,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mission templates: generates per-mission MCP config (ethos + beadle-email)
   and system prompt with mission ID. Temp files cleaned up after subprocess
   exits. (beadle-msy)
+- DES-028: Pipeline orchestrator design — missions as typed commands
+  with composition. GPG-signed command YAML, typed args (no string
+  interpolation), Planner interface, persisted pipeline state,
+  try/else error handling, fixed-text error replies. (beadle-88g)
+
+### Security
+
+- Transport trust required for x-bit execution: daemon rejects unverified
+  messages even from rwx contacts. Only PGP-verified messages trigger
+  missions. Proton E2E headers are insufficient — they are SMTP-injectable.
+- PGP key bound to sender: `pgp.Verify` result KeyID checked against
+  contact's registered GPGKeyID. Prevents impersonation via wrong key.
+- Worker isolation: HOME set to ephemeral temp dir (no access to ~/.ssh,
+  ~/.gnupg, ~/.punt-labs). PATH restricted. TMPDIR isolated.
+- Concurrency semaphore: max 2 concurrent workers (configurable).
+- Adversarial robustness instructions in worker system prompt.
+- Email subject removed from success_criteria — uses fixed text.
+  Subject in inputs.trigger only (audit metadata, not instructions).
+- escapeYAMLValue strips NUL bytes, caps at 500 chars.
+- Mission ID validated at creation, not just at spawn.
+- All temp dirs 0700 (owner-only).
 
 ### Changed
 

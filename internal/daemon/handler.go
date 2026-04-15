@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 
+	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
+	"github.com/punt-labs/beadle/internal/pgp"
 )
 
 // MissionCreator creates a mission from email metadata and returns the mission ID.
@@ -30,16 +34,21 @@ type MailHandler struct {
 	templates *MissionTemplate
 	logger    *slog.Logger
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	workerSem chan struct{} // limits concurrent workers
 }
 
 // NewMailHandler creates a MailHandler. If spawner or templates is nil,
 // mission creation still works but no worker is spawned.
+// maxWorkers sets the concurrency limit for worker goroutines (default 2).
 // The returned context governs worker subprocess lifetimes — call Stop
 // to cancel running workers and wait for them to exit.
-func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner *WorkerSpawner, templates *MissionTemplate, logger *slog.Logger) *MailHandler {
+func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner *WorkerSpawner, templates *MissionTemplate, logger *slog.Logger, maxWorkers int) *MailHandler {
+	if maxWorkers <= 0 {
+		maxWorkers = 2
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	return &MailHandler{
 		resolver:  resolver,
@@ -50,6 +59,7 @@ func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer ema
 		logger:    logger,
 		ctx:       ctx,
 		cancel:    cancel,
+		workerSem: make(chan struct{}, maxWorkers),
 	}
 }
 
@@ -124,6 +134,16 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 			continue
 		}
 
+		// Verify transport trust before creating a mission.
+		// Proton headers are SMTP-injectable; only PGP verification provides
+		// cryptographic proof of sender identity for x-bit execution.
+		trust := h.verifyTrust(client, cfg, msg, contact)
+		if trust != channel.Verified {
+			h.logger.Warn("skip message: insufficient transport trust",
+				"from", addr, "trust", trust, "id", msg.ID)
+			continue
+		}
+
 		meta := EmailMeta{
 			MessageID: msg.ID,
 			From:      msg.From,
@@ -138,11 +158,17 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 		h.logger.Info("mission created", "mission", missionID, "from", addr, "subject", msg.Subject)
 
 		if h.spawner != nil && h.templates != nil {
-			h.wg.Add(1)
-			go func() {
-				defer h.wg.Done()
-				h.spawnWorker(h.ctx, missionID)
-			}()
+			select {
+			case h.workerSem <- struct{}{}:
+				h.wg.Add(1)
+				go func() {
+					defer h.wg.Done()
+					defer func() { <-h.workerSem }()
+					h.spawnWorker(h.ctx, missionID)
+				}()
+			default:
+				h.logger.Warn("worker semaphore full, skipping spawn", "mission", missionID)
+			}
 		}
 	}
 }
@@ -175,6 +201,47 @@ func (h *MailHandler) spawnWorker(ctx context.Context, missionID string) {
 		"session", result.SessionID,
 		"isError", result.IsError,
 		"exitCode", result.ExitCode)
+}
+
+// verifyTrust determines the transport trust level for a message.
+// Proton headers are SMTP-injectable; only PGP verification provides
+// cryptographic proof of sender identity for x-bit execution.
+// If the contact has a GPGKeyID set, the signing key must match.
+func (h *MailHandler) verifyTrust(client *email.Client, cfg *email.Config, msg channel.MessageSummary, contact contacts.Contact) channel.TrustLevel {
+	if !msg.HasSig {
+		return channel.Unverified
+	}
+
+	// PGP signature present — fetch raw and verify.
+	uid, err := strconv.ParseUint(msg.ID, 10, 32)
+	if err != nil {
+		h.logger.Error("parse message uid", "id", msg.ID, "error", err)
+		return channel.Unverified
+	}
+	raw, err := client.FetchRaw("INBOX", uint32(uid))
+	if err != nil {
+		h.logger.Error("fetch raw for pgp verify", "id", msg.ID, "error", err)
+		return channel.Unverified
+	}
+	result, err := pgp.Verify(cfg.GPGBinary, raw)
+	if err != nil {
+		h.logger.Warn("pgp verify failed", "id", msg.ID, "error", err)
+		return channel.Untrusted
+	}
+	if !result.Valid {
+		return channel.Untrusted
+	}
+
+	// If the contact has a registered GPG key, the signing key must match.
+	if contact.GPGKeyID != "" && !strings.HasSuffix(result.KeyID, contact.GPGKeyID) {
+		h.logger.Warn("pgp key mismatch",
+			"id", msg.ID,
+			"expected", contact.GPGKeyID,
+			"got", result.KeyID)
+		return channel.Untrusted
+	}
+
+	return channel.Verified
 }
 
 func (h *MailHandler) loadConfig(identityEmail string) (*email.Config, error) {

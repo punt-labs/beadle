@@ -61,16 +61,25 @@ func TestBuildContract(t *testing.T) {
 
 			inputs, ok := doc["inputs"].(map[string]any)
 			require.True(t, ok, "inputs must be a map")
-			ticket, ok := inputs["ticket"].(string)
-			require.True(t, ok, "inputs.ticket must be a string")
-			assert.Contains(t, ticket, "email:"+tt.wantID)
-			assert.Contains(t, ticket, tt.meta.From)
 
+			// inputs.trigger must be a map with type, message_id, from, subject
+			trigger, ok := inputs["trigger"].(map[string]any)
+			require.True(t, ok, "inputs.trigger must be a map")
+			assert.Equal(t, "email", trigger["type"])
+			assert.Equal(t, tt.wantID, trigger["message_id"])
+			assert.Equal(t, tt.meta.From, trigger["from"])
+			assert.Equal(t, tt.meta.Subject, trigger["subject"])
+
+			// success_criteria must NOT contain the email subject
 			sc, ok := doc["success_criteria"].([]any)
 			require.True(t, ok, "success_criteria must be a list")
+			require.Equal(t, 1, len(sc))
+			criteria := sc[0].(string)
+			assert.Contains(t, criteria, "inputs.trigger")
+			assert.Contains(t, criteria, "beadle-email")
 			if tt.meta.Subject != "" {
-				require.Greater(t, len(sc), 0)
-				assert.Contains(t, sc[0], tt.meta.Subject)
+				assert.NotContains(t, criteria, tt.meta.Subject,
+					"success_criteria must not contain attacker-controlled subject")
 			}
 
 			ws, ok := doc["write_set"].([]any)
@@ -96,13 +105,22 @@ func TestBuildContract_ContainsRequiredFields(t *testing.T) {
 	required := []string{
 		"leader: claude",
 		"worker: bwk",
-		"ticket:",
+		"trigger:",
 		"write_set:",
 		"success_criteria:",
 		"budget:",
 	}
 	for _, r := range required {
 		assert.True(t, strings.Contains(out, r), "contract must contain %q", r)
+	}
+
+	// Subject must NOT appear in success_criteria.
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "success_criteria") || strings.HasPrefix(strings.TrimSpace(line), "- ") {
+			assert.NotContains(t, line, "Test subject",
+				"success_criteria lines must not contain the email subject")
+		}
 	}
 }
 
@@ -123,6 +141,8 @@ func TestEscapeYAMLValue(t *testing.T) {
 		{"backslash", `has\backslash`, `"has\\backslash"`},
 		{"numeric", "99", `"99"`},
 		{"boolean", "true", `"true"`},
+		{"nul_bytes", "has\x00null\x00bytes", `"hasnullbytes"`},
+		{"long_string", strings.Repeat("a", 600), `"` + strings.Repeat("a", 500) + `"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
