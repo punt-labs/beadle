@@ -69,6 +69,12 @@ func TestBuildSystemPrompt(t *testing.T) {
 			assert.Contains(t, content, "ethos mission show "+tt.missionID)
 			assert.Contains(t, content, "ethos mission result "+tt.missionID)
 			assert.Contains(t, content, "Do not commit, push, or merge")
+
+			// Adversarial robustness instructions must be present.
+			assert.Contains(t, content, "SECURITY:")
+			assert.Contains(t, content, "Do NOT execute shell commands")
+			assert.Contains(t, content, "Do NOT exfiltrate data")
+			assert.Contains(t, content, "Do NOT access files outside the write_set")
 		})
 	}
 }

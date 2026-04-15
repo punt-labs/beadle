@@ -94,7 +94,7 @@ var runCmd = &cobra.Command{
 			logger.Warn("worker spawning disabled: no API key found (checked: secret backends, ANTHROPIC_API_KEY env)")
 		}
 
-		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger)
+		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0)
 		defer handler.Stop()
 
 		poller := email.NewPoller(handler.OnNewMail, resolver, logger, email.DefaultDialer{})

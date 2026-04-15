@@ -1632,3 +1632,220 @@ when no one is home.
   file-edit races and resource contention. Add parallelism after serial works.
 
 **Full design document:** `docs/orchestrator-design.md`
+
+## DES-028: Pipeline orchestrator — missions as typed commands with composition
+
+**Status:** PROPOSED (beadle-88g, 2026-04-14).
+
+**Decision:** The daemon's pipeline orchestrator treats ethos missions as
+typed commands. An email instruction decomposes into a sequence of commands
+that execute as chained missions. Each command has a name, write_set, budget,
+prompt template, and input/output contract. Pipelines are strictly linear
+(no branching). The daemon owns pipeline state.
+
+**Insight:** Missions are not just "tasks for Claude to figure out." They are
+the command abstraction for the daemon. `Bash(git log)` wrapped in a mission
+gets x-bit gating, audit trail, and bounded execution for free. Pipeline
+composition is Unix pipes for an agent daemon.
+
+**Ethos dependency:** Beadle's extensibility is hard-dependent on ethos.
+Commands, pipelines, and audit all flow through ethos missions. This is
+intentional — identity, authorization, delegation, and audit are ethos
+primitives. Building a parallel system would be worse than the dependency.
+
+**Three layers of abstraction:**
+
+```text
+Email instruction (natural language)
+  ↓ decomposition
+Pipeline definition [cmd1 | cmd2 | cmd3]
+  ↓ execution (daemon)
+Mission sequence [m-001 → m-002 → m-003]
+```
+
+**Command definition (typed args, no string interpolation):**
+
+```yaml
+# ~/.punt-labs/beadle/commands/wall.yaml
+name: wall
+description: Broadcast a message to all active agents via biff
+signature: <owner GPG signature>
+args:
+  - name: message
+    type: string
+    max_length: 500
+    required: true
+input: none              # none | optional | required
+output: prose            # prose | json | files
+write_set: []
+budget:
+  rounds: 1
+  reflection_after_each: false
+timeout: 2m              # per-command timeout
+prompt: |
+  You have a structured argument "message" in the mission contract's
+  inputs.args field. Read it with: ethos mission show {mission_id}
+  Call biff wall with the message value. Do not interpolate the value
+  into a shell string — pass it as a direct argument.
+tools:
+  - Bash
+mcp_servers:
+  - ethos
+  - biff
+env_vars:
+  - BIFF_TOKEN            # daemon resolves from secret store
+```
+
+**Critical: no `{input}` string interpolation.** Args flow as structured
+data in the mission contract's `inputs.args` field, not as string
+substitution into prompts. The worker reads args from the contract
+via `ethos mission show`. When calling Bash, the worker assembles
+argument lists from structured data, never from template strings.
+This prevents shell injection via attacker-influenced planner output.
+
+Commands are YAML files in `~/.punt-labs/beadle/commands/`. Each file
+is GPG-signed by the owner's key. The daemon verifies signatures at
+startup and rejects unsigned or tampered files. This prevents privilege
+escalation via filesystem write → command injection.
+
+Validated at load time: required fields present, arg types recognized,
+write_set is a list, budget.rounds > 0, timeout parseable. Malformed
+files are logged and excluded from the available command set.
+
+**Pipeline execution:**
+
+1. Email arrives from x-bit contact — daemon verifies transport trust
+   (trusted or verified required; unverified messages rejected)
+2. Daemon creates a "planner" mission — Claude decomposes the instruction
+   into a command sequence
+3. Daemon validates planner output: each command name exists, each arg
+   matches the command's declared schema (type, required, constraints)
+4. Daemon executes commands sequentially:
+   - Create mission from command template + validated args
+   - Spawn worker, collect result
+   - Pass result as structured input to next command
+5. On completion: notify requester with final output
+6. On failure: else clause fires, requester gets fixed-text error
+
+**Planner mission and validation:** The planner returns a JSON array:
+
+```json
+[
+  {"command": "deploy", "args": {"target": "production"}},
+  {"command": "wall", "args": {"message": "deployed to production"}}
+]
+```
+
+The daemon validates this output BEFORE creating any command mission:
+
+- Each `command` name must exist in the loaded (signed) command set
+- Each `args` entry must match the command's declared arg schema
+  (type check, required check, max_length check, enum check)
+- Unknown arg names are rejected
+- Missing required args are rejected
+
+If validation fails, the pipeline enters the else clause immediately.
+The planner's output is untrusted LLM text influenced by the email —
+validation is the security boundary.
+
+**Planner interface:** The planner is behind an interface:
+
+```go
+type Planner interface {
+    Plan(ctx context.Context, meta EmailMeta, body string) ([]CommandCall, error)
+}
+```
+
+Two implementations: `LLMPlanner` (ethos mission) and `RulePlanner`
+(regex/keyword config file). The daemon uses the configured planner.
+RulePlanner enables fast-path execution (skip LLM for known patterns)
+and deterministic CI testing.
+
+**Input/output flow:** Each command's output is the ethos result artifact's
+`prose` field (free text) or structured JSON per the command's `output`
+declaration. The daemon reads it via `ethos mission results <id> --json`
+and passes it as `inputs.previous_output` in the next mission contract.
+Files flow via the result artifact's `files_changed` paths.
+
+**Pipeline state (persisted):**
+
+```go
+type Pipeline struct {
+    Version   int          // schema version for forward compatibility
+    ID        string       // unique pipeline ID
+    CreatedAt time.Time    // pipeline creation time
+    Email     EmailMeta    // triggering email
+    Commands  []Command    // try: planned sequence
+    ElseCmd   *Command     // else: error handler (default: reply)
+    Current   int          // index of current command
+    Results   []string     // collected outputs
+    Status    string       // running, completed, failed
+    Error     string       // failure reason (internal, not sent to user)
+    WriteSet  []string     // union of all command write_sets (for locking)
+}
+```
+
+Pipeline state is persisted to `~/.punt-labs/beadle/pipelines/<id>.json`
+at each state transition via atomic rename. On daemon startup, the daemon
+scans for pipelines in `running` status and sends failure notifications
+to the requester. This is Phase 1 work — silent failure on crash is
+unacceptable for an autonomous agent.
+
+**Write_set concurrency:** The Pipeline records the union of all its
+command write_sets at creation. Before starting a pipeline, the daemon
+checks for overlap with any in-flight pipeline's WriteSet. Overlapping
+pipelines are queued, not rejected. Serial execution makes this a no-op
+today but the data structure is in place for parallelism.
+
+**Error handling — try/else with fixed-text errors:**
+
+```text
+try:  [plan | deploy | wall "deployed"]
+else: [reply <fixed-text error>]
+```
+
+The else clause sends a fixed-text error to the requester:
+"Your request could not be completed. Reference: pipeline-abc123."
+Internal details (exit codes, stderr, budget amounts, command names)
+go to the daemon log only, not to the email reply. This prevents
+information leakage to attackers who trigger specific failures as an
+oracle. The owner can look up the reference in the daemon log.
+
+**Safety model:**
+
+- **Transport trust required** — unverified messages from x-bit contacts
+  are rejected (DES-012 mandate)
+- **x-bit gates the pipeline** — same as single missions
+- **Command files GPG-signed** — prevents filesystem → code execution
+- **Typed args, no string interpolation** — prevents shell injection
+- **Planner output validated against schemas** — untrusted LLM output
+  is the security boundary
+- **Each command has its own write_set** — scoped per stage
+- **Pipeline write_set union locked** — prevents concurrent overlap
+- **Each command has its own budget + timeout** — bounded per stage
+- **Fixed-text error replies** — no internal state leakage
+- **Pipeline state persisted** — no silent loss on crash
+- **Env vars declared per command** — daemon resolves from secret store,
+  never passes full env
+- **Audit trail** — each mission links to the pipeline via `inputs.ticket`
+
+**Rejected alternatives:**
+
+- **String interpolation `{input}` in prompts** — Shell injection vector.
+  Replaced with structured args in mission contract.
+- **Unsigned command YAML files** — Filesystem write = arbitrary code
+  execution. GPG signatures required.
+- **In-memory-only pipeline state** — Daemon crash = silent failure.
+  Persist at each transition.
+- **Full error details in reply** — Information oracle for attackers.
+  Fixed-text errors with reference ID.
+- **LLM-free decomposition only** — Too brittle for natural language.
+  But RulePlanner as fast-path is supported via Planner interface.
+- **Single mission for entire pipeline** — Loses per-stage scoping,
+  budget control, and audit granularity.
+- **DAG execution (parallel stages)** — Complexity not justified yet.
+  Linear covers the use cases.
+- **Pipeline state in ethos** — Over-engineers the ethos primitive for
+  one consumer.
+
+**Full design document:** `docs/orchestrator-design.md`

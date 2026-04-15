@@ -94,6 +94,11 @@ func (f *Fixture) AddMessageWithFlags(folder, from, subject, body string, flags 
 	return f.IMAP.AddMessageWithFlags(folder, from, subject, body, flags)
 }
 
+// AddRawMessage seeds a message with raw RFC822 bytes.
+func (f *Fixture) AddRawMessage(folder string, raw []byte) uint32 {
+	return f.IMAP.AddRawMessage(folder, raw)
+}
+
 // SentMessages returns all messages captured by the SMTP server.
 func (f *Fixture) SentMessages() []SentMessage {
 	return f.SMTP.SentMessages()

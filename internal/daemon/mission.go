@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
 
 // EmailMeta holds the metadata extracted from an email that triggered a mission.
@@ -16,38 +17,45 @@ type EmailMeta struct {
 }
 
 // BuildContract generates a mission contract YAML string from email metadata.
-// Email provenance is embedded in inputs.ticket as "email:<id>:<from>".
-// Subject propagates to success_criteria. All user-controlled values are
-// double-quoted via escapeYAMLValue. Leader is claude (the ethos identity),
-// worker is bwk, evaluator is mdm (must be valid distinct ethos identities).
+// Email provenance is recorded in inputs.trigger (structured metadata for audit).
+// The subject is in inputs.trigger, NOT in success_criteria — success_criteria
+// uses fixed text that directs the worker to read the email via beadle-email tools.
+// All user-controlled values are double-quoted via escapeYAMLValue.
 func BuildContract(meta EmailMeta) string {
-	// YAML is simple enough to template directly.
-	// Using fmt.Sprintf avoids a yaml library dependency for a fixed structure.
-	// inputs.trigger is not yet in ethos schema (beadle-40k).
-	// Email provenance is recorded in the ticket reference and daemon log.
-	// Worker/evaluator must be valid ethos identities with distinct roles.
 	return fmt.Sprintf(`leader: claude
 worker: bwk
 evaluator:
   handle: mdm
 inputs:
-  ticket: %s
+  trigger:
+    type: email
+    message_id: %s
+    from: %s
+    subject: %s
   files: []
 write_set:
   - daemon output
 success_criteria:
-  - %s
+  - "Complete the task described in the triggering email. Read the email via beadle-email tools using the message ID in inputs.trigger."
 budget:
   rounds: 1
   reflection_after_each: false
-`, escapeYAMLValue("email:"+meta.MessageID+":"+meta.From),
+`, escapeYAMLValue(meta.MessageID),
+		escapeYAMLValue(meta.From),
 		escapeYAMLValue(meta.Subject))
 }
 
 // escapeYAMLValue returns a double-quoted YAML scalar with proper escaping.
 // Always quotes to avoid type ambiguity (bare "99" parses as integer,
 // bare "true" parses as boolean).
+// NUL bytes are stripped and the value is capped at 500 characters to
+// limit adversarial input from email subjects.
 func escapeYAMLValue(s string) string {
+	s = strings.ReplaceAll(s, "\x00", "")
+	if utf8.RuneCountInString(s) > 500 {
+		runes := []rune(s)
+		s = string(runes[:500])
+	}
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 	escaped = strings.ReplaceAll(escaped, "\n", `\n`)
@@ -67,7 +75,7 @@ type EthosMissionCreator struct {
 func (c *EthosMissionCreator) Create(meta EmailMeta) (string, error) {
 	contract := BuildContract(meta)
 
-	if err := os.MkdirAll(c.TmpDir, 0o750); err != nil {
+	if err := os.MkdirAll(c.TmpDir, 0o700); err != nil {
 		return "", fmt.Errorf("create tmp dir %s: %w", c.TmpDir, err)
 	}
 
@@ -122,6 +130,9 @@ func (c *EthosMissionCreator) Create(meta EmailMeta) (string, error) {
 	}
 	if missionID == "" {
 		return "", fmt.Errorf("ethos mission create: no mission ID in output: %s", strings.TrimSpace(string(out)))
+	}
+	if !ValidMissionID(missionID) {
+		return "", fmt.Errorf("ethos mission create: invalid mission ID %q in output", missionID)
 	}
 	return missionID, nil
 }
