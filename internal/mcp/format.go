@@ -273,6 +273,11 @@ func formatMoveResult(r *moveResult) string {
 	return fmt.Sprintf("moved #%s → %s", r.MessageID, r.Destination)
 }
 
+// formatBatchMoveResult formats a batch move summary.
+func formatBatchMoveResult(count int, destination string) string {
+	return fmt.Sprintf("moved %d messages to %s", count, destination)
+}
+
 // formatDownloadResult formats a download result.
 func formatDownloadResult(r *downloadResult) string {
 	return fmt.Sprintf("%s: %s (%d bytes)\n%s", r.Status, r.Filename, r.Size, r.Path)
