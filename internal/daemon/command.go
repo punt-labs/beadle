@@ -19,19 +19,30 @@ type CommandArg struct {
 	MaxLength int      `yaml:"max_length"` // for string type
 	Required  bool     `yaml:"required"`
 	Default   string   `yaml:"default"`
+	Position  int      `yaml:"position"` // positional index for CLI arg assembly; 0 = named flag
+}
+
+// Step is one binary in a compound CLI command chain.
+type Step struct {
+	Binary    string   `yaml:"binary"`
+	FixedArgs []string `yaml:"fixed_args"`
+	Stdin     string   `yaml:"stdin"` // "pipe" or "stdout"
 }
 
 // Command is a GPG-signed YAML command definition for the pipeline orchestrator.
-// See DES-028 in DESIGN.md.
 type Command struct {
-	Name        string       `yaml:"name"`
-	Description string       `yaml:"description"`
-	Signature   string       `yaml:"signature"`
-	Args        []CommandArg `yaml:"args"`
-	Input       string       `yaml:"input"`  // none | optional | required
-	Output      string       `yaml:"output"` // prose | json | files
-	WriteSet    []string     `yaml:"write_set"`
-	Budget      struct {
+	Name         string       `yaml:"name"`
+	Description  string       `yaml:"description"`
+	Signature    string       `yaml:"signature"`
+	Runner       string       `yaml:"runner"` // claude | cli
+	Mode         string       `yaml:"mode"`   // process | passthrough
+	Args         []CommandArg `yaml:"args"`
+	OutputSchema any          `yaml:"output_schema"` // "text" or map[string]any
+	Binary       string       `yaml:"binary"`        // cli runner: single-binary
+	FixedArgs    []string     `yaml:"fixed_args"`    // cli runner: single-binary args
+	Steps        []Step       `yaml:"steps"`         // cli runner: compound steps
+	WriteSet     []string     `yaml:"write_set"`
+	Budget       struct {
 		Rounds              int  `yaml:"rounds"`
 		ReflectionAfterEach bool `yaml:"reflection_after_each"`
 	} `yaml:"budget"`
@@ -47,18 +58,6 @@ var validArgTypes = map[string]bool{
 	"enum":   true,
 	"int":    true,
 	"bool":   true,
-}
-
-var validInputModes = map[string]bool{
-	"none":     true,
-	"optional": true,
-	"required": true,
-}
-
-var validOutputModes = map[string]bool{
-	"prose": true,
-	"json":  true,
-	"files": true,
 }
 
 // LoadCommands scans dir for *.yaml files, parses each as a Command,
@@ -113,25 +112,61 @@ func validateCommand(cmd *Command) error {
 	if cmd.Name == "" {
 		return fmt.Errorf("missing required field: name")
 	}
-	if cmd.Prompt == "" {
-		return fmt.Errorf("missing required field: prompt")
+
+	// Default runner and mode.
+	if cmd.Runner == "" {
+		cmd.Runner = "claude"
 	}
-	if cmd.Budget.Rounds <= 0 {
-		return fmt.Errorf("budget.rounds must be > 0, got %d", cmd.Budget.Rounds)
+	if cmd.Runner != "claude" && cmd.Runner != "cli" {
+		return fmt.Errorf("invalid runner %q (want claude, cli)", cmd.Runner)
+	}
+	if cmd.Mode == "" {
+		cmd.Mode = "process"
+	}
+	if cmd.Mode != "process" && cmd.Mode != "passthrough" {
+		return fmt.Errorf("invalid mode %q (want process, passthrough)", cmd.Mode)
 	}
 
-	// Default empty input/output to their zero-values.
-	if cmd.Input == "" {
-		cmd.Input = "none"
+	// Runner-conditional validation.
+	switch cmd.Runner {
+	case "claude":
+		if cmd.Prompt == "" {
+			return fmt.Errorf("claude runner requires prompt")
+		}
+		if cmd.Budget.Rounds <= 0 {
+			return fmt.Errorf("claude runner requires budget.rounds > 0")
+		}
+		if cmd.Binary != "" {
+			return fmt.Errorf("binary is not valid for claude runner")
+		}
+		if len(cmd.Steps) > 0 {
+			return fmt.Errorf("steps is not valid for claude runner")
+		}
+		if len(cmd.FixedArgs) > 0 {
+			return fmt.Errorf("fixed_args is not valid for claude runner")
+		}
+	case "cli":
+		if cmd.Binary == "" && len(cmd.Steps) == 0 {
+			return fmt.Errorf("cli runner requires binary or steps")
+		}
+		if cmd.Binary != "" && len(cmd.Steps) > 0 {
+			return fmt.Errorf("cli runner: set binary or steps, not both")
+		}
 	}
-	if cmd.Output == "" {
-		cmd.Output = "prose"
+
+	// OutputSchema validation.
+	if cmd.OutputSchema == nil {
+		return fmt.Errorf("missing required field: output_schema")
 	}
-	if !validInputModes[cmd.Input] {
-		return fmt.Errorf("invalid input mode %q (want none, optional, required)", cmd.Input)
-	}
-	if !validOutputModes[cmd.Output] {
-		return fmt.Errorf("invalid output mode %q (want prose, json, files)", cmd.Output)
+	switch v := cmd.OutputSchema.(type) {
+	case string:
+		if v != "text" {
+			return fmt.Errorf("output_schema string must be \"text\", got %q", v)
+		}
+	case map[string]any:
+		// valid JSON Schema object
+	default:
+		return fmt.Errorf("output_schema must be \"text\" or a JSON Schema object, got %T", cmd.OutputSchema)
 	}
 
 	if cmd.Timeout != "" {
@@ -140,6 +175,8 @@ func validateCommand(cmd *Command) error {
 		}
 	}
 
+	// Arg validation.
+	seenPos := make(map[int]string)
 	for i, a := range cmd.Args {
 		if a.Name == "" {
 			return fmt.Errorf("arg[%d]: missing name", i)
@@ -150,7 +187,27 @@ func validateCommand(cmd *Command) error {
 		if a.Type == "enum" && len(a.Values) == 0 {
 			return fmt.Errorf("arg %q: enum type requires non-empty values list", a.Name)
 		}
+		if a.Position > 0 {
+			if other, dup := seenPos[a.Position]; dup {
+				return fmt.Errorf("arg %q: duplicate position %d (conflicts with %q)", a.Name, a.Position, other)
+			}
+			seenPos[a.Position] = a.Name
+		}
 	}
+
+	// Compound step validation.
+	for i, step := range cmd.Steps {
+		if step.Binary == "" {
+			return fmt.Errorf("step[%d]: missing binary", i)
+		}
+		if i == 0 && step.Stdin != "pipe" {
+			return fmt.Errorf("step[0]: stdin must be \"pipe\", got %q", step.Stdin)
+		}
+		if i > 0 && step.Stdin != "stdout" {
+			return fmt.Errorf("step[%d]: stdin must be \"stdout\", got %q", i, step.Stdin)
+		}
+	}
+
 	return nil
 }
 

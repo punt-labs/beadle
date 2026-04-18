@@ -1,6 +1,6 @@
 # beadle
 
-> Autonomous agent daemon with cryptographic owner control.
+> A programmable agent daemon controlled by email, secured by GPG.
 
 [![License](https://img.shields.io/github/license/punt-labs/beadle)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/beadle/test.yml?label=CI)](https://github.com/punt-labs/beadle/actions/workflows/test.yml)
@@ -8,14 +8,54 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/punt-labs/beadle)](https://goreportcard.com/report/github.com/punt-labs/beadle)
 [![Working Backwards](https://img.shields.io/badge/Working_Backwards-hypothesis-lightgrey)](./prfaq.pdf)
 
-Beadle runs on your machine as a background daemon. Every action requires a GPG-signed instruction from the owner, every command declares its permissions upfront, and the audit log is tamperproof. The daemon executes no action without a GPG-signed instruction from the owner; no authority is implicit.
+Beadle is an autonomous agent that receives instructions via email and
+executes them as multi-stage pipelines. Commands are programs, the
+daemon is the shell, pipelines are pipes, and GPG signatures are sudo.
+The owner controls what beadle can do by signing command definitions.
+The trust gate controls who can trigger it.
 
-The first shipping component is `beadle-email` — an MCP server that lets you pair with Claude via email. Written in Go.
+**How it works.** You send an email. Beadle verifies your identity
+(PGP signature or Proton E2E encryption), checks your permissions,
+decomposes your instruction into a pipeline of commands, and executes
+them — mixing AI reasoning with fast CLI tools. You get the result
+back as an email reply. The daemon runs on your machine. No cloud
+service, no API keys shared with third parties.
 
-**Pair with Claude via email.** Beadle gives Claude Code a real email address — outbound and inbound, with cryptographic trust at every layer.
+**Example.** You email "summarize this" from your PGP-verified account:
 
-- **Claude emails you.** Session summaries, build reports, deploy notifications — anything Claude produces can be mailed to you or your team. No webhook plumbing, no Slack integration. Just email.
-- **You email Claude.** Send instructions, ask questions, or forward context from your phone. Beadle's four-level PGP trust model and per-contact permissions (`rwx`) control exactly what Claude can read, reply to, and act on — nothing is implicit.
+1. Beadle verifies your identity and `x` (execute) permission
+2. The planner maps "summarize" to a pipeline: `[summarize, notify, reply]`
+3. Stage 0: Claude reads your email and produces a structured summary (45s)
+4. Stage 1: `biff wall` broadcasts "New summary: Deploy plan" to the team (10ms)
+5. Stage 2: Claude formats the summary and emails it back to you (45s)
+
+The summary flows through the pipeline as JSON. Stage 1 is a
+side-effect (passthrough) — it reads the data but doesn't modify it.
+Stage 2 receives the full summary, not stage 1's "ok" output.
+
+**Two types of commands:**
+
+- **Claude commands** spawn an AI session for reasoning tasks:
+  summarization, analysis, code generation. 45-60 seconds per stage.
+- **CLI commands** exec binaries directly for deterministic operations:
+  notifications, status checks, data transforms. Milliseconds per stage.
+
+Both types are defined as YAML files, GPG-signed by the owner. The
+daemon validates signatures at startup and rejects unsigned commands.
+
+## beadle-email
+
+The shipping component is `beadle-email` — an MCP server that gives
+Claude Code a real email address with cryptographic trust at every
+layer.
+
+- **Claude emails you.** Session summaries, build reports, deploy
+  notifications — anything Claude produces can be mailed to you or
+  your team. No webhook plumbing, no Slack integration. Just email.
+- **You email Claude.** Send instructions, ask questions, or forward
+  context from your phone. Beadle's four-level PGP trust model and
+  per-contact permissions (`rwx`) control exactly what Claude can
+  read, reply to, and act on — nothing is implicit.
 
 **Platforms:** macOS, Linux
 
@@ -243,6 +283,7 @@ beadle-email --quiet send --to ...                      # Errors only
 ## Documentation
 
 [Design Log](DESIGN.md) |
+[Pipeline v2 Design](docs/pipeline-v2-design.md) |
 [Email Channel Plan](docs/email-channel-plan.md) |
 [Changelog](CHANGELOG.md)
 

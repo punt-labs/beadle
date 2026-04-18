@@ -1886,3 +1886,206 @@ args. The else handler also appends `reply` with a fixed-text error.
   Verbose, error-prone. The daemon should handle it.
 - **No auto-reply** — Originator expects a response. Auto-reply is the
   safe default. Future: commands can declare `reply: false` to suppress.
+
+## DES-030: Multi-runner commands — claude and cli
+
+**Status:** SETTLED (2026-04-18).
+
+**Decision:** Commands declare a `runner` field that determines how the
+daemon executes them. Two runners: `claude` (spawn `claude -p --bare`,
+current behavior) and `cli` (exec a binary directly). The executor
+dispatches to the appropriate runner per stage. Output piping between
+stages is runner-agnostic.
+
+**Why:** The current implementation wraps every command in a Claude Code
+session. A `biff wall "deployed"` takes 45-60 seconds through Claude
+when the actual operation is a 10ms subprocess. CLI tools that already
+exist (biff, ethos, git, curl) should execute directly. Claude sessions
+are for work that requires reasoning — summarization, analysis, code
+generation. Deterministic operations should not pay the LLM tax.
+
+**Command YAML with runner field:**
+
+```yaml
+# CLI runner — direct binary execution
+name: wall
+runner: cli
+mode: passthrough
+description: Broadcast a message to all active agents via biff
+binary: biff
+args:
+  - name: message
+    type: string
+    max_length: 500
+    required: true
+    position: 2          # positional: biff wall <message>
+fixed_args: ["wall"]     # prepended before positional args
+output_schema: text
+timeout: 30s
+```
+
+```yaml
+# Claude runner — LLM session (default, current behavior)
+name: summarize
+runner: claude            # default if omitted
+mode: process             # default if omitted
+description: Summarize the triggering email
+mcp_servers: [ethos, beadle-email]
+output_schema:
+  type: object
+  properties:
+    title: { type: string }
+    summary: { type: string }
+write_set: []
+budget:
+  rounds: 1
+  reflection_after_each: false
+timeout: 5m
+prompt: |
+  Read the triggering message via beadle-email and produce a JSON
+  summary with title and summary fields.
+```
+
+**Executor dispatch:**
+
+```text
+for each stage in pipeline:
+  switch command.runner:
+    case "claude":
+      create mission → build MCP config → spawn claude -p --bare
+      → collect output from mission result → close mission
+    case "cli":
+      resolve binary path → build arg list from typed args
+      → exec.CommandContext with timeout → capture stdout
+      → validate exit code (0 = success, nonzero = else clause)
+```
+
+**CLI runner execution model:**
+
+1. **Binary resolution.** The `binary` field names an executable. The
+   daemon resolves it against a whitelist of allowed paths, not the
+   system PATH. Default whitelist: `~/.local/bin/`, the beadle install
+   directory, and paths declared in a daemon config. Binaries outside
+   the whitelist are rejected at load time.
+2. **Argument assembly.** `fixed_args` are prepended. Typed args with
+   a `position` field are appended in position order. Named args without
+   `position` become `--name=value` flags. No shell expansion, no
+   globbing, no interpolation — `exec.Command(binary, args...)` only.
+3. **Environment.** Minimal env: `PATH` (restricted), `HOME`, `USER`.
+   Additional env vars declared in the command's `env_vars` field are
+   resolved from the daemon's secret store and injected. The daemon's
+   own credentials (ANTHROPIC_API_KEY, IMAP password) are never passed
+   unless explicitly declared.
+4. **Output capture.** Stdout is captured as the stage output (piped to
+   the next stage or to auto-reply). Stderr goes to the daemon log.
+   Output is capped at the same limit as Claude runner output.
+5. **Exit code.** 0 = success, proceed to next stage. Nonzero = stage
+   failure, enter else clause.
+6. **Timeout.** `context.WithTimeout` on the exec, same as Claude runner.
+
+**No missions for CLI runner.** Ethos missions add value for Claude
+sessions: write-set enforcement, round budgets, structured results,
+evaluator review. For a deterministic CLI call, missions are pure
+overhead. The pipeline's own audit trail (pipeline ID, stage index,
+command name, exit code, duration, truncated output) provides
+sufficient traceability.
+
+**Hybrid pipelines:**
+
+```text
+try: [summarize(claude) | wall(cli) | reply(claude)]
+```
+
+Stage 0: Claude summarizes the email (45s). Stage 1: biff broadcasts
+the summary (10ms). Stage 2: auto-appended reply sends the summary
+back to the sender. The executor doesn't care about runner boundaries
+— each stage produces output, the next stage consumes it.
+
+**Security model by runner:**
+
+| Concern | claude runner | cli runner |
+|---------|--------------|------------|
+| Binary trust | `claude` binary is fixed | Whitelist-only resolution |
+| Arg injection | Typed args in mission contract | Typed args in exec.Command |
+| Shell injection | No shell involved | No shell involved |
+| Env leakage | Minimal env + declared vars | Minimal env + declared vars |
+| Output leakage | Mission result, not raw | Stdout captured, stderr logged |
+| Timeout | 30m default | Per-command (default 30s) |
+| Audit | Ethos mission trail | Pipeline state log |
+| Isolation | --bare mode, adversarial prompt | No LLM, no prompt injection surface |
+
+CLI commands have a smaller attack surface than Claude commands — no
+prompt injection vector exists because there is no prompt. The main
+risk is binary substitution (mitigated by whitelist) and argument
+injection (mitigated by typed args with no shell expansion).
+
+**Command YAML signing applies to both runners.** GPG-signed YAML
+prevents an attacker from adding a `runner: cli` command that execs
+an arbitrary binary. The signature covers the binary path, args schema,
+and all fields. The whitelist is defense in depth — even a validly
+signed command can only exec whitelisted binaries.
+
+**Rejected alternatives:**
+
+- **Shell execution (`sh -c`)** — Shell injection surface. The daemon
+  must never invoke a shell. `exec.Command` with explicit arg list only.
+- **Missions for CLI commands** — 2-3 seconds of ethos overhead per
+  CLI call (create, result, close). For a 10ms `biff wall`, that's
+  300x overhead. Pipeline audit trail is sufficient.
+- **Separate command directories per runner** — Unnecessary complexity.
+  The `runner` field in the YAML is sufficient. Both types coexist in
+  `~/.punt-labs/beadle/commands/`.
+- **Dynamic binary resolution via system PATH** — Attacker who controls
+  PATH controls execution. Whitelist-only resolution.
+- **Runner as a daemon-level config, not per-command** — Some commands
+  are inherently LLM tasks (summarize), others are inherently CLI
+  (wall). The command author knows which. Per-command declaration.
+- **Plugin/extension model instead of runners** — Over-engineers
+  the dispatch. Two runners cover the space: reasoning (claude) and
+  deterministic (cli). A third runner (e.g., `http` for webhook calls)
+  can be added later without changing the model.
+
+## DES-031: Pipeline v2 — process/passthrough data flow with compound commands
+
+**Status:** SETTLED (2026-04-18).
+
+**Decision:** Pipeline stages operate in one of two modes: `process`
+(output replaces the pipe) or `passthrough` (pipe carries forward
+unchanged). CLI commands support compound `steps` — a mini-pipeline of
+binaries chained by stdin/stdout. The pipe payload is JSON by default,
+validated by `output_schema`. Commands declare runner-conditional fields:
+`prompt` and `budget` for `claude`, `binary` and `steps` for `cli`.
+
+**Why:** Side-effect commands (notifications, logging) destroyed the
+pipe under v1's linear model. The `biff wall` example: its stdout
+("ok") overwrote the summary from the prior stage, so the reply
+command received "ok" instead of the summary. `passthrough` mode
+solves this — the command reads the pipe but doesn't modify it.
+
+Compound steps solve data extraction: `jq -r ".title" | biff wall`
+extracts a field from JSON before passing it to a CLI tool, without
+invoking a shell.
+
+**Key design points:**
+
+- One pipe value, no accumulator, no stage-indexed history
+- `mode: process` (default) replaces the pipe; `mode: passthrough`
+  preserves it
+- `output_schema` replaces the retired `output` and `input` fields
+- Compound steps run as concurrent goroutines with `io.Pipe` chaining
+- Binary whitelist checked at both load time and execution time
+  (with `filepath.EvalSymlinks` to follow symlinks)
+- 1 MB output cap via `io.LimitReader` on the read side
+- Pipe value passed as `inputs.pipeline_output` in mission contracts
+- Else-path reply receives fixed-text error, not internal pipe state
+
+**Full design document:** `docs/pipeline-v2-design.md`
+
+**Rejected alternatives:**
+
+- **Accumulator model** — violates information hiding. Any stage can
+  read any prior output, expanding the data surface.
+- **Shell execution for compound commands** — injection surface.
+- **Unstructured (text) pipe by default** — CLI tools need JSON for
+  `jq` field extraction. Text is the explicit opt-out (`output_schema: text`).
+- **Missions for CLI commands** — 300x overhead for a 10ms operation.

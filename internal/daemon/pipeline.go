@@ -2,13 +2,14 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/punt-labs/beadle/internal/email"
 )
@@ -35,14 +36,11 @@ type Spawner interface {
 
 // Executor plans, validates, and runs a command pipeline for an incoming email.
 type Executor struct {
-	Planner   Planner
-	Commands  map[string]*Command
-	Missions  MissionCreator
-	Spawner   Spawner
-	Templates *MissionTemplate
-	Registry  map[string]MCPServerConfig
-	Store     *PipelineStore
-	Logger    *slog.Logger
+	Planner  Planner
+	Commands map[string]*Command
+	Runners  map[string]Runner
+	Store    *PipelineStore
+	Logger   *slog.Logger
 }
 
 // Run plans and executes a pipeline for the given email.
@@ -95,13 +93,51 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 	p.WriteSet = e.unionWriteSets(calls)
 	p.Results = make([]string, 0, len(calls))
 
+	// Pre-compile output schemas.
+	schemas := make(map[string]*jsonschema.Schema, len(calls))
+	for _, call := range calls {
+		cmd := e.Commands[call.Command]
+		schema, err := CompileSchema(cmd.OutputSchema)
+		if err != nil {
+			p.Status = "failed"
+			p.Error = fmt.Sprintf("compile schema for %s: %v", call.Command, err)
+			e.save(p)
+			e.fireElse(p)
+			return p, fmt.Errorf("pipeline %s: compile schema for %s: %w", p.ID, call.Command, err)
+		}
+		schemas[call.Command] = schema
+	}
+
+	// Initialize the pipe with email metadata JSON.
+	pipeData, err := json.Marshal(map[string]string{
+		"message_id":  meta.MessageID,
+		"from":        meta.From,
+		"subject":     meta.Subject,
+		"trust_level": "trusted",
+	})
+	if err != nil {
+		p.Status = "failed"
+		p.Error = fmt.Sprintf("marshal pipe: %v", err)
+		e.save(p)
+		return p, fmt.Errorf("pipeline %s: marshal pipe: %w", p.ID, err)
+	}
+	pipe := string(pipeData)
+
 	// Execute sequentially.
 	for i, call := range calls {
 		p.Current = i
 		e.save(p)
 
 		cmd := e.Commands[call.Command]
-		result, err := e.executeStage(ctx, p, i, cmd, call)
+		runner, ok := e.Runners[cmd.Runner]
+		if !ok {
+			p.Status = "failed"
+			p.Error = fmt.Sprintf("stage %d (%s): unknown runner %q", i, call.Command, cmd.Runner)
+			e.save(p)
+			e.fireElse(p)
+			return p, fmt.Errorf("pipeline %s stage %d (%s): unknown runner %q", p.ID, i, call.Command, cmd.Runner)
+		}
+		result, err := runner.Run(ctx, e, p, i, cmd, call, pipe)
 		if err != nil {
 			p.Status = "failed"
 			p.Error = fmt.Sprintf("stage %d (%s): %v", i, call.Command, err)
@@ -109,25 +145,45 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			e.fireElse(p)
 			return p, fmt.Errorf("pipeline %s stage %d (%s): %w", p.ID, i, call.Command, err)
 		}
+
+		if cmd.Mode == "process" {
+			if err := ValidateOutput(schemas[call.Command], result); err != nil {
+				e.Logger.Warn("output schema validation failed",
+					"pipeline", p.ID, "stage", i,
+					"command", call.Command, "error", err)
+				p.Status = "failed"
+				p.Error = fmt.Sprintf("stage %d (%s): output validation: %v", i, call.Command, err)
+				e.save(p)
+				e.fireElse(p)
+				return p, fmt.Errorf("pipeline %s stage %d (%s): output validation: %w", p.ID, i, call.Command, err)
+			}
+			pipe = result
+		}
+		// passthrough: pipe unchanged, result logged only
+
 		p.Results = append(p.Results, result)
 		e.save(p)
 	}
 
-	// Auto-append reply to originator with final output.
+	// Auto-append reply to originator with current pipe value.
 	if replyCmd, ok := e.Commands["reply"]; ok {
 		replyCall := CommandCall{
 			Command: "reply",
 			Args: map[string]any{
-				"to":      email.ExtractEmailAddress(p.Email.From),
-				"message": p.Results[len(p.Results)-1],
+				"to": email.ExtractEmailAddress(p.Email.From),
 			},
 		}
 		if err := ValidateArgs(replyCmd, replyCall.Args); err == nil {
-			replyResult, err := e.executeStage(ctx, p, len(p.Commands), replyCmd, replyCall)
-			if err != nil {
-				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
+			runner, rok := e.Runners[replyCmd.Runner]
+			if !rok {
+				e.Logger.Warn("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
 			} else {
-				p.Results = append(p.Results, replyResult)
+				replyResult, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe)
+				if err != nil {
+					e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
+				} else {
+					p.Results = append(p.Results, replyResult)
+				}
 			}
 		}
 	} else {
@@ -139,75 +195,11 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 	return p, nil
 }
 
-// executeStage creates a mission and spawns a worker for one pipeline stage.
-func (e *Executor) executeStage(ctx context.Context, p *Pipeline, idx int, cmd *Command, call CommandCall) (string, error) {
-	var prevOutput string
-	if idx > 0 {
-		prevOutput = p.Results[idx-1]
-	}
-
-	contract := buildStageContract(p.Email, cmd, call, prevOutput)
-
-	missionID, err := e.Missions.Create(EmailMeta{
-		MessageID: p.Email.MessageID,
-		From:      p.Email.From,
-		Subject:   fmt.Sprintf("[pipeline %s stage %d] %s", p.ID, idx, call.Command),
-	})
-	if err != nil {
-		return "", fmt.Errorf("create mission: %w", err)
-	}
-
-	e.Logger.Info("stage mission created",
-		"pipeline", p.ID, "stage", idx,
-		"command", call.Command, "mission", missionID)
-
-	// Build MCP config from the command's mcp_servers.
-	servers := cmd.MCPServers
-	if len(servers) == 0 {
-		servers = []string{"ethos", "beadle-email"}
-	}
-	mcpPath, err := e.Templates.BuildMCPConfig(servers, e.Registry)
-	if err != nil {
-		return "", fmt.Errorf("build mcp config: %w", err)
-	}
-	defer os.Remove(mcpPath)
-
-	promptPath, err := e.Templates.BuildSystemPrompt(missionID)
-	if err != nil {
-		return "", fmt.Errorf("build system prompt: %w", err)
-	}
-	defer os.Remove(promptPath)
-
-	// Resolve env overrides from command's env_vars.
-	envOverrides := resolveEnvVars(cmd.EnvVars)
-
-	wr, err := e.Spawner.Run(ctx, missionID, mcpPath, promptPath, envOverrides)
-	if err != nil {
-		return "", fmt.Errorf("spawn worker: %w", err)
-	}
-	if wr.IsError {
-		return "", fmt.Errorf("worker error (exit %d): %s", wr.ExitCode, wr.Output)
-	}
-
-	// Close the mission to release its write_set for the next stage.
-	closeOut, closeErr := exec.CommandContext(ctx, "ethos", "mission", "close", missionID).CombinedOutput()
-	if closeErr != nil {
-		e.Logger.Warn("close stage mission", "mission", missionID, "error", closeErr, "output", string(closeOut))
-	}
-
-	e.Logger.Info("stage completed",
-		"pipeline", p.ID, "stage", idx,
-		"command", call.Command, "mission", missionID)
-
-	_ = contract // contract string is passed to MissionCreator via meta; kept for future use
-	return wr.Output, nil
-}
-
 // buildStageContract generates a mission contract string for one pipeline stage.
-func buildStageContract(meta EmailMeta, cmd *Command, call CommandCall, prevOutput string) string {
-	prev := "none"
-	if prevOutput != "" {
-		prev = escapeYAMLValue(prevOutput)
+func buildStageContract(meta EmailMeta, cmd *Command, call CommandCall, pipe string) string {
+	pipeValue := "none"
+	if pipe != "" {
+		pipeValue = escapeYAMLPipe(pipe)
 	}
 
 	argsYAML := ""
@@ -226,7 +218,7 @@ inputs:
     from: %s
     subject: %s
   args:
-%s  previous_output: %s
+%s  pipeline_output: %s
 write_set:
   - %s
 success_criteria:
@@ -239,7 +231,7 @@ budget:
 		escapeYAMLValue(meta.From),
 		escapeYAMLValue(meta.Subject),
 		argsYAML,
-		prev,
+		pipeValue,
 		writeSetYAML(cmd.WriteSet),
 		escapeYAMLValue(cmd.Prompt),
 		cmd.Budget.Rounds,
@@ -328,18 +320,26 @@ func (e *Executor) fireElse(p *Pipeline) {
 	if !ok {
 		return
 	}
+
+	elsePipe := "Your request could not be completed. Reference: pipeline-" + p.ID
+
 	replyCall := CommandCall{
 		Command: "reply",
 		Args: map[string]any{
-			"to":      email.ExtractEmailAddress(p.Email.From),
-			"message": "Your request could not be completed. Reference: pipeline-" + p.ID,
+			"to": email.ExtractEmailAddress(p.Email.From),
 		},
 	}
 	if err := ValidateArgs(replyCmd, replyCall.Args); err != nil {
 		return
 	}
+
+	runner, ok := e.Runners[replyCmd.Runner]
+	if !ok {
+		return
+	}
+
 	ctx := context.Background()
-	_, err := e.executeStage(ctx, p, -1, replyCmd, replyCall)
+	_, err := runner.Run(ctx, e, p, -1, replyCmd, replyCall, elsePipe)
 	if err != nil {
 		e.Logger.Warn("else reply failed", "pipeline", p.ID, "error", err)
 	}
