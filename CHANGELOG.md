@@ -50,8 +50,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   end-to-end` + `X-Pm-Origin: internal` headers are safe when IMAP
   source is Bridge on localhost. (beadle-buw)
 - Worker spawner uses real HOME instead of isolated tmpdir. MCP servers
-  (ethos, beadle-email) need `~/.punt-labs/` for config. `--bare` mode
-  + adversarial prompt remains the defense layer. (beadle-buw)
+  (ethos, beadle-email) need `~/.punt-labs/` for config. Defense layer:
+  `--bare` mode and adversarial system prompt. (beadle-buw)
 
 ### Security
 
