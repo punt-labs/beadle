@@ -2089,3 +2089,315 @@ invoking a shell.
 - **Unstructured (text) pipe by default** — CLI tools need JSON for
   `jq` field extraction. Text is the explicit opt-out (`output_schema: text`).
 - **Missions for CLI commands** — 300x overhead for a 10ms operation.
+
+## DES-032: Pipeline files — attachments, generated artifacts, and file flow
+
+**Status:** PROPOSED (2026-04-18).
+
+**Decision:** The pipe carries two parts: `data` (JSON value, as in
+DES-031) and `files` (array of file references). Both follow the same
+process/passthrough semantics. The daemon pre-downloads email
+attachments before the pipeline starts and populates the initial
+`files` array. Process-mode commands can add, remove, or replace files.
+Passthrough-mode commands can read files but the array passes through
+unchanged.
+
+**Why:** Email attachments (PDFs, images, logs) are invisible to the
+current pipeline. A user sends "summarize the attached report" but no
+stage can access the attachment. Generalizing from "attachments" to
+"files" covers both inbound attachments and stage-generated artifacts
+(charts, compiled output, transformed documents). The reply stage can
+attach files to the outbound email.
+
+**Pipe representation:** The pipe remains a JSON string (`pipe string`
+in the Runner interface). The JSON shape changes from a flat value to
+`{"data": ..., "files": [...]}`. No Runner signature change, no mock
+migration, no persistence change. The executor parses and serializes
+the struct internally. This is consistent with DES-031's decision to
+keep the pipe as a string.
+
+**PipeValue struct (internal to executor):**
+
+```go
+type PipeValue struct {
+    Data  json.RawMessage `json:"data"`
+    Files []PipeFile      `json:"files"`
+}
+
+type PipeFile struct {
+    Name     string `json:"name"`
+    Path     string `json:"path"`      // relative to pipeline directory
+    MIMEType string `json:"mime_type"`
+    Size     int64  `json:"size"`
+    Origin   string `json:"origin"`    // "attachment" or "stage-N"
+}
+```
+
+`Data` is `json.RawMessage` to preserve the arbitrary JSON value from
+each stage without a round-trip through `any` (which loses integer
+precision and map key ordering). The executor marshals `PipeValue` to
+`string` before passing to runners and unmarshals the runner's output
+back to `PipeValue` after each stage.
+
+**Pipe structure:**
+
+```json
+{
+  "data": {"title": "Q3 Report Summary", "summary": "..."},
+  "files": [
+    {
+      "name": "02-report.pdf",
+      "path": "02-report.pdf",
+      "mime_type": "application/pdf",
+      "size": 245000,
+      "origin": "attachment"
+    },
+    {
+      "name": "chart.png",
+      "path": "chart.png",
+      "mime_type": "image/png",
+      "size": 82000,
+      "origin": "stage-1"
+    }
+  ]
+}
+```
+
+The `origin` field tracks where each file came from: `"attachment"` for
+email attachments, `"stage-N"` for files produced by pipeline stages.
+This is metadata for audit — commands don't use it for routing.
+
+**File paths are relative** to the pipeline directory. Relative paths
+simplify validation (reject paths containing `..` or starting with
+`/`) and are portable across HOME changes.
+
+**Path resolution round-trip:** Before calling `runner.Run()`, the
+executor resolves all `files[].path` values to absolute paths by
+joining with the pipeline directory. Runners receive absolute paths
+so they can read/write files directly. After the runner returns (for
+process-mode stages with `files: true`), the executor strips the
+pipeline directory prefix from each `files[].path`, converting back
+to relative before storing in the updated `PipeValue`. This prevents
+a command that echoes its input `files` array from double-resolving
+absolute paths on the next stage.
+
+**Pipeline file directory:** Each pipeline gets a scratch directory at
+`~/.punt-labs/beadle/pipelines/<pipeline-id>/`. The executor creates it
+before stage 0 and pre-downloads email attachments into it. Stages
+write generated files here. The executor removes the directory after
+pipeline completion (success or failure), with a configurable retention
+period for debugging (default: 0, immediate cleanup).
+
+**Orphan cleanup on startup:** The daemon scans `pipelines/` on
+startup. The directory contains two types of entries: `<id>.json`
+state files (managed by `PipelineStore`) and `<id>/` file directories
+(managed by `Executor.Run`). The startup scan walks subdirectories
+(not JSON files), checks each against the retention window, and
+removes directories older than the window. This handles the crash case
+where a pipeline directory was never cleaned up. `PipelineStore`
+continues to manage only JSON state files — file directory creation
+and cleanup are `Executor` responsibilities.
+
+**Attachment fetch boundary:** The `MailHandler` already has IMAP
+access and parses MIME via `ParseMIME`. A new `AttachmentFetcher`
+interface is injected into `Executor`, consistent with how `Spawner`
+is injected:
+
+```go
+type AttachmentFetcher interface {
+    Fetch(ctx context.Context, messageID string, dir string) ([]PipeFile, error)
+}
+```
+
+The `MailHandler` satisfies this interface. It fetches the full message
+content, extracts MIME parts, and writes attachment bytes to the
+pipeline directory. Returns `[]PipeFile` with name, relative path,
+MIME type, and size. A nil `Fetcher` on the `Executor` is a hard
+startup error — silent degradation hides configuration mistakes.
+
+**Duplicate filename handling:** Attachments are prefixed with their
+MIME part index: `02-report.pdf`, `05-data.csv`. This prevents
+collision when an email has multiple attachments with the same name.
+Stage-generated files use their original names (collision is the
+command author's responsibility within their own stage).
+
+**Command `files` declaration:** Commands declare file handling intent
+via a `files` field in the command YAML:
+
+```yaml
+# Command that reads and echoes files
+files: true
+
+# Command that intentionally drops files (default)
+files: false
+```
+
+- `files: true` — the command's `output_schema` must be a JSON Schema
+  object (not `"text"`). `validateCommand` enforces this at load time.
+  At runtime, the command is expected to include a `files` array in its
+  output. If the output omits `files`, the executor warns and treats it
+  as empty (files dropped).
+- `files: false` (default) — the command does not handle files. For
+  process-mode commands, files are dropped after this stage. The
+  executor does not warn — the drop is intentional.
+
+This makes file handling explicit at the command level, not just in
+the output. A pipeline author sees `files: true/false` in the YAML
+and knows whether files survive each stage.
+
+**Process/passthrough for files:**
+
+- `mode: process, files: true` — the command's output replaces both
+  `data` and `files`.
+- `mode: process, files: false` — the command's output replaces `data`.
+  Files are dropped (empty array).
+- `mode: passthrough` — both `data` and `files` pass through unchanged.
+  `files: true` is invalid on passthrough commands — `validateCommand`
+  rejects the combination. A passthrough command's output is ignored,
+  so declaring file handling intent is meaningless and misleading.
+
+**Reply stage:** The reply command has `files: true` and reads the
+`files` array to attach files to the outbound email. Reply is always
+the terminal stage — the executor enforces this in two ways:
+
+1. **Strip from planner output.** Before executing the command loop,
+   the executor removes any `reply` command from the planner's
+   `[]CommandCall`. If the planner returns `[summarize, reply, wall]`,
+   the executor runs `[summarize, wall]` then auto-appends reply.
+2. **Auto-append after loop.** The executor appends a single reply
+   stage after all planner stages complete. This is the only way
+   reply enters the pipeline.
+
+**How stages interact with files:**
+
+- **Claude runner:** The pipe JSON (including `files` with resolved
+  absolute paths) is passed via `inputs.pipeline_output` in the
+  mission contract. The worker reads files by absolute path. To add a
+  file, the worker writes it to the pipeline directory (path provided
+  in the contract) and includes the relative path in its output.
+- **CLI runner:** The pipe JSON is provided on stdin. CLI tools use
+  `jq` to extract file paths (absolute, resolved by executor before
+  passing). Generated files are written to the pipeline directory.
+
+**Initial pipe with attachments:**
+
+```json
+{
+  "data": {
+    "message_id": "1829",
+    "from": "jim@punt-labs.com",
+    "subject": "summarize the attached report",
+    "trust_level": "trusted"
+  },
+  "files": [
+    {
+      "name": "02-q3-report.pdf",
+      "path": "02-q3-report.pdf",
+      "mime_type": "application/pdf",
+      "size": 245000,
+      "origin": "attachment"
+    }
+  ]
+}
+```
+
+**Security considerations:**
+
+- **File path validation.** After each process-mode stage with
+  `files: true`, the executor validates all `files[].path` values:
+  must not contain `..`, must not start with `/`, must not be empty.
+  The executor resolves relative paths against the pipeline directory
+  and verifies the resolved file exists. Violations enter the else
+  clause.
+- **File size cap.** Individual files are capped at 25 MB (matching
+  the `send_email` attachment limit). Total pipeline directory size
+  capped at 100 MB. **Enforcement timing:** checked at pre-download
+  (before stage 0) and after each process-mode stage that produces
+  files (`files: true`). The executor sums all files in the directory.
+  Exceeding either cap enters the else clause.
+- **Cleanup.** Two complementary mechanisms: (1) the executor removes
+  the pipeline directory immediately after pipeline completion (success
+  or failure), and (2) the daemon startup scan removes orphaned
+  directories older than the retention window (handling the crash case
+  where mechanism 1 never ran). Files never persist beyond the
+  retention window.
+- **Passthrough isolation.** Passthrough-mode commands can read files
+  by path but cannot modify the `files` array. A passthrough command
+  that writes to the pipeline directory does not affect the pipe — the
+  files it writes are orphaned and cleaned up with the directory.
+
+**Example pipeline:**
+
+```text
+Email: "summarize the attached report" + q3-report.pdf
+
+Initial pipe:
+  data: {message_id, from, subject, trust_level}
+  files: [{name: "02-q3-report.pdf", path: "02-q3-report.pdf", origin: "attachment"}]
+
+Stage 0: summarize (claude, process, files: true)
+  → reads q3-report.pdf by absolute path, produces JSON summary
+  → output: {data: {title, summary}, files: [{02-q3-report.pdf}]}
+  → pipe: data replaced, files echoed
+
+Stage 1: generate-chart (cli, process, files: true)
+  → reads summary data, runs charting tool, writes chart.png
+  → output: {data: {title, summary}, files: [{02-q3-report.pdf}, {chart.png}]}
+  → pipe: data + files both updated
+
+Stage 2: notify (cli, passthrough)
+  → reads data, broadcasts headline via biff
+  → pipe unchanged (data + files preserved)
+
+Stage 3: reply (claude, process, files: true)
+  → reads data, attaches 02-q3-report.pdf + chart.png to email reply
+  → sends reply with 2 attachments to jim@punt-labs.com
+```
+
+**Implementation changes:**
+
+1. **Pipe shape.** The pipe JSON string changes from a flat value to
+   `{"data": ..., "files": [...]}`. Runner interface unchanged (`pipe
+   string`). Executor parses/serializes internally via a `PipeValue`
+   struct.
+2. **AttachmentFetcher interface.** New interface injected into
+   Executor. MailHandler satisfies it. Fetches MIME parts, writes to
+   pipeline directory, returns `[]PipeFile`.
+3. **Pipeline directory.** `PipelineStore` creates
+   `~/.punt-labs/beadle/pipelines/<id>/` at pipeline start. Cleanup
+   after completion. Orphan scan on daemon startup.
+4. **Command `files` field.** New boolean field on `Command` struct,
+   validated in `validateCommand`. Default `false`.
+5. **File path validation.** After each process-mode stage with
+   `files: true`, validate relative paths (no `..`, no `/` prefix),
+   verify files exist on disk.
+6. **Directory size enforcement.** Sum files after pre-download and
+   after each `files: true` stage. Exceeds 100 MB → else clause.
+7. **Duplicate filename prefix.** Pre-download prefixes attachments
+   with MIME part index: `02-report.pdf`.
+8. **Reply terminal enforcement.** Executor strips `reply` from
+   planner output and auto-appends it as the terminal stage.
+9. **Reply wiring.** The reply command's prompt includes instructions
+   to attach files from the pipe to the outbound email.
+
+**Rejected alternatives:**
+
+- **Files as base64 in the pipe JSON.** Bloats the pipe by 33%. A
+  245KB PDF becomes 327KB of base64 in every stage's stdin. File
+  paths are cheaper and CLI tools can read files directly.
+- **Implicit file passthrough.** If a process-mode command doesn't
+  mention files, carry them forward automatically. This hides data
+  flow — a command that forgot to include files silently passes
+  sensitive documents to downstream stages. Explicit is safer.
+- **Separate file channel.** Files flow on a different path than data.
+  Adds complexity without benefit — the pipe is already structured
+  JSON. A `files` field in the same object is simpler.
+- **Attachments only (no generated files).** Too narrow. A charting
+  command, a PDF-to-text converter, a code compiler all produce files.
+  The model must be general.
+- **Runner interface change to PipeValue struct.** Breaking change to
+  Runner signature, all mocks, persistence layer. Keeping `pipe string`
+  with `{data, files}` embedded as JSON avoids the migration.
+- **Absolute paths in the files array.** Fragile across HOME changes.
+  Relative paths within the pipeline directory are simpler to validate
+  and portable.
