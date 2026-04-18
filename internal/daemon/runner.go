@@ -139,7 +139,7 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 	// Best-effort parse of pipe as JSON so declared args can fall back
 	// to fields from the previous stage's output.
 	var pipeFields map[string]any
-	if pipe != "" {
+	if trimmed := strings.TrimSpace(pipe); len(trimmed) > 0 && trimmed[0] == '{' {
 		_ = json.Unmarshal([]byte(pipe), &pipeFields)
 	}
 
@@ -155,6 +155,9 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 
 	for _, decl := range cmd.Args {
 		val, ok := call.Args[decl.Name]
+		// TODO(beadle-vjo): pipe-derived args bypass ValidateArgs type constraints.
+		// Prior stage schema validation covers this for now. Add runtime validation
+		// when arg types are enforced at execution time.
 		if !ok && pipeFields != nil {
 			val, ok = pipeFields[decl.Name]
 		}
@@ -221,13 +224,6 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 // runCompound chains multiple binaries via io.Pipe, running all steps
 // concurrently under a shared context timeout.
 func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, pipe string) (string, error) {
-	// Best-effort parse of pipe as JSON for future arg interpolation.
-	var pipeFields map[string]any
-	if pipe != "" {
-		_ = json.Unmarshal([]byte(pipe), &pipeFields)
-	}
-	_ = pipeFields // reserved for compound arg interpolation
-
 	timeout := 30 * time.Second
 	if cmd.Timeout != "" {
 		if d, err := time.ParseDuration(cmd.Timeout); err == nil {
