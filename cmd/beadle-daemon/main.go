@@ -113,7 +113,36 @@ var runCmd = &cobra.Command{
 			logger.Warn("worker spawning disabled: no API key found (checked: secret backends, ANTHROPIC_API_KEY env)")
 		}
 
-		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0, nil, nil)
+		// Load command definitions.
+		cmdDir := filepath.Join(dataDir, "commands")
+		commands, err := daemon.LoadCommands(cmdDir)
+		if err != nil {
+			logger.Warn("load commands", "dir", cmdDir, "error", err)
+			commands = make(map[string]*daemon.Command)
+		}
+		logger.Info("commands loaded", "count", len(commands), "dir", cmdDir)
+
+		// Configure planner. Use RulePlanner with a "summarize" rule.
+		// Reply is auto-appended by the executor after the last stage.
+		var planner daemon.Planner
+		if len(commands) > 0 {
+			rules := []daemon.RuleEntry{
+				{
+					Pattern: "(?i)summarize|summary",
+					Commands: []daemon.CommandCall{
+						{Command: "summarize", Args: map[string]any{"text": "see email body"}},
+					},
+				},
+			}
+			rp, rpErr := daemon.NewRulePlanner(rules)
+			if rpErr != nil {
+				logger.Error("create rule planner", "error", rpErr)
+			} else {
+				planner = rp
+			}
+		}
+
+		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0, planner, commands)
 		defer handler.Stop()
 
 		poller := email.NewPoller(handler.OnNewMail, resolver, logger, email.DefaultDialer{})

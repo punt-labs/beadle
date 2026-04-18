@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/punt-labs/beadle/internal/email"
 )
 
 // Pipeline tracks the execution state of a planned command sequence.
@@ -110,6 +113,27 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 		e.save(p)
 	}
 
+	// Auto-append reply to originator with final output.
+	if replyCmd, ok := e.Commands["reply"]; ok {
+		replyCall := CommandCall{
+			Command: "reply",
+			Args: map[string]any{
+				"to":      email.ExtractEmailAddress(p.Email.From),
+				"message": p.Results[len(p.Results)-1],
+			},
+		}
+		if err := ValidateArgs(replyCmd, replyCall.Args); err == nil {
+			replyResult, err := e.executeStage(ctx, p, len(p.Commands), replyCmd, replyCall)
+			if err != nil {
+				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
+			} else {
+				p.Results = append(p.Results, replyResult)
+			}
+		}
+	} else {
+		e.Logger.Warn("reply command not in registry, skipping auto-reply", "pipeline", p.ID)
+	}
+
 	p.Status = "completed"
 	e.save(p)
 	return p, nil
@@ -163,6 +187,12 @@ func (e *Executor) executeStage(ctx context.Context, p *Pipeline, idx int, cmd *
 	}
 	if wr.IsError {
 		return "", fmt.Errorf("worker error (exit %d): %s", wr.ExitCode, wr.Output)
+	}
+
+	// Close the mission to release its write_set for the next stage.
+	closeOut, closeErr := exec.CommandContext(ctx, "ethos", "mission", "close", missionID).CombinedOutput()
+	if closeErr != nil {
+		e.Logger.Warn("close stage mission", "mission", missionID, "error", closeErr, "output", string(closeOut))
 	}
 
 	e.Logger.Info("stage completed",
@@ -284,11 +314,33 @@ func truncateLog(s string, max int) string {
 	return s[:max] + "..."
 }
 
-// fireElse logs the pipeline error. Sending a reply email is future work.
+// fireElse logs the pipeline error and sends a reply to the originator
+// with a fixed-text error message. If the reply command is not registered
+// or sending fails, the error is logged but does not propagate.
 func (e *Executor) fireElse(p *Pipeline) {
 	e.Logger.Error("pipeline failed, else handler",
 		"pipeline", p.ID,
 		"error", p.Error,
 		"email_from", p.Email.From,
 		"email_subject", truncateLog(p.Email.Subject, 200))
+
+	replyCmd, ok := e.Commands["reply"]
+	if !ok {
+		return
+	}
+	replyCall := CommandCall{
+		Command: "reply",
+		Args: map[string]any{
+			"to":      email.ExtractEmailAddress(p.Email.From),
+			"message": "Your request could not be completed. Reference: pipeline-" + p.ID,
+		},
+	}
+	if err := ValidateArgs(replyCmd, replyCall.Args); err != nil {
+		return
+	}
+	ctx := context.Background()
+	_, err := e.executeStage(ctx, p, -1, replyCmd, replyCall)
+	if err != nil {
+		e.Logger.Warn("else reply failed", "pipeline", p.ID, "error", err)
+	}
 }
