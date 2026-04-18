@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -135,6 +136,13 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 		return "", err
 	}
 
+	// Best-effort parse of pipe as JSON so declared args can fall back
+	// to fields from the previous stage's output.
+	var pipeFields map[string]any
+	if pipe != "" {
+		_ = json.Unmarshal([]byte(pipe), &pipeFields)
+	}
+
 	args := make([]string, len(cmd.FixedArgs))
 	copy(args, cmd.FixedArgs)
 
@@ -147,6 +155,9 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 
 	for _, decl := range cmd.Args {
 		val, ok := call.Args[decl.Name]
+		if !ok && pipeFields != nil {
+			val, ok = pipeFields[decl.Name]
+		}
 		if !ok {
 			continue
 		}
@@ -210,6 +221,13 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 // runCompound chains multiple binaries via io.Pipe, running all steps
 // concurrently under a shared context timeout.
 func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, pipe string) (string, error) {
+	// Best-effort parse of pipe as JSON for future arg interpolation.
+	var pipeFields map[string]any
+	if pipe != "" {
+		_ = json.Unmarshal([]byte(pipe), &pipeFields)
+	}
+	_ = pipeFields // reserved for compound arg interpolation
+
 	timeout := 30 * time.Second
 	if cmd.Timeout != "" {
 		if d, err := time.ParseDuration(cmd.Timeout); err == nil {
