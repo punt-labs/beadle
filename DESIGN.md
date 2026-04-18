@@ -1849,3 +1849,40 @@ oracle. The owner can look up the reference in the daemon log.
   one consumer.
 
 **Full design document:** `docs/orchestrator-design.md`
+
+## DES-029: Reply is a pipeline stage, not daemon I/O
+
+**Status:** SETTLED (2026-04-17).
+
+**Decision:** The daemon auto-appends a `reply` command as the terminal stage
+of every pipeline. The planner returns work stages only (e.g., `[summarize]`).
+The executor appends `reply` with the originating sender and final output as
+args. The else handler also appends `reply` with a fixed-text error.
+
+**Why a stage, not daemon I/O:**
+
+1. **Multi-channel.** Email is one channel. Chat (biff), Telegram, Discord
+   could be others. `reply_via_email`, `reply_via_chat` are different
+   commands with different tools. A stage is the right abstraction because
+   different channels need different MCP servers.
+
+2. **Commands produce output, the daemon delivers it.** Unix metaphor:
+   `summarize` writes to stdout, the shell displays it. The daemon is the
+   shell. But the delivery mechanism depends on the channel, so the reply
+   stage is where channel knowledge lives.
+
+3. **Reply always happens.** Every pipeline ends with acknowledgment. The
+   else handler replies with a fixed-text error. The originator never
+   gets silence.
+
+4. **Send vs reply.** `send` routes output to a different address (mid-pipeline).
+   `reply` acknowledges back to the originator (terminal, auto-appended).
+
+**Rejected alternatives:**
+
+- **Reply as daemon I/O** — Daemon sends reply directly. Hardcodes email
+  as the only channel. Adding chat requires modifying the daemon.
+- **Planner specifies reply** — Every rule must include a reply stage.
+  Verbose, error-prone. The daemon should handle it.
+- **No auto-reply** — Originator expects a response. Auto-reply is the
+  safe default. Future: commands can declare `reply: false` to suppress.

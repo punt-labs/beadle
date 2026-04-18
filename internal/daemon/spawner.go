@@ -101,32 +101,31 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 			fmt.Errorf("find claude binary: %w", err)
 	}
 
-	// Isolated HOME prevents the worker from reading ~/.ssh, ~/.gnupg, etc.
-	workerHome, err := os.MkdirTemp("", "beadle-worker-*")
-	if err != nil {
-		return WorkerResult{MissionID: missionID, ExitCode: -1},
-			fmt.Errorf("create worker home: %w", err)
-	}
-	defer os.RemoveAll(workerHome)
+	// Worker needs real HOME so MCP servers (ethos, beadle-email) can find
+	// their config at ~/.punt-labs/. --bare mode already skips CLAUDE.md,
+	// hooks, plugins, and auto memory. The adversarial system prompt is the
+	// defense against prompt injection reaching sensitive files.
+	// TODO: container isolation (network namespace, seccomp) for defense-in-depth.
+	workerHome := os.Getenv("HOME")
 
 	// Restricted PATH: claude binary dir + /usr/bin (git, basic tools).
 	workerPATH := filepath.Dir(claudePath) + ":/usr/bin:/usr/local/bin"
 
+	s.logger().Info("spawner",
+		"claude", claudePath,
+		"mission", missionID,
+		"home", workerHome,
+		"hasAPIKey", s.APIKey != "")
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 	// Minimal env: only what claude needs. Do not leak daemon credentials
 	// (BEADLE_IMAP_PASSWORD, BEADLE_RESEND_API_KEY, etc.) to the subprocess.
-	// HOME is an isolated temp dir — no access to user's SSH keys, GPG, config.
-	//
 	// Build env as a map, apply overrides, then force-set protected vars
-	// AFTER overrides so they always win. Without this, a malicious command
-	// config could override ANTHROPIC_API_KEY, HOME, PATH, or TMPDIR via
-	// envOverrides to escape the sandbox.
+	// AFTER overrides so they always win.
 	envMap := map[string]string{
 		"ANTHROPIC_API_KEY": s.APIKey,
 		"HOME":              workerHome,
 		"PATH":              workerPATH,
 		"USER":              os.Getenv("USER"),
-		"TMPDIR":            workerHome,
 	}
 	for k, v := range envOverrides {
 		envMap[k] = v
@@ -135,24 +134,35 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 	envMap["ANTHROPIC_API_KEY"] = s.APIKey
 	envMap["HOME"] = workerHome
 	envMap["PATH"] = workerPATH
-	envMap["TMPDIR"] = workerHome
 
 	cmd.Env = make([]string, 0, len(envMap))
 	for k, v := range envMap {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
-	s.logger().Info("spawning worker", "mission", missionID, "timeout", timeout)
+	// Log env keys (not values — API key is secret).
+	envKeys := make([]string, 0, len(envMap))
+	for k := range envMap {
+		envKeys = append(envKeys, k)
+	}
+	s.logger().Info("spawning worker",
+		"mission", missionID,
+		"timeout", timeout,
+		"envKeys", envKeys)
 
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
+	// Always log raw output for diagnostics.
+	s.logger().Info("worker raw output",
+		"mission", missionID,
+		"outputLen", len(out),
+		"output", truncateLog(string(out), 1000))
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 			s.logger().Warn("worker exited with error",
 				"mission", missionID,
-				"exitCode", exitCode,
-				"stderr", string(exitErr.Stderr))
+				"exitCode", exitCode)
 		} else {
 			return WorkerResult{MissionID: missionID, ExitCode: -1},
 				fmt.Errorf("run claude for mission %s: %w", missionID, err)

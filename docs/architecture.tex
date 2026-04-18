@@ -540,6 +540,80 @@ all operations:
 \end{itemize}
 
 %%----------------------------------------------------------------------
+\section{Daemon Architecture (DES-027/028/029)}
+%%----------------------------------------------------------------------
+
+\texttt{beadle-daemon} is a standalone Go process that monitors email
+autonomously and executes multi-stage pipelines when authorised
+contacts send instructions.
+
+\subsection{Detection and Trust Gate}
+
+The daemon reuses the same \texttt{Poller} as \texttt{beadle-email},
+decoupled via a \texttt{NewMailFunc} callback.  When new mail is
+detected, the handler:
+
+\begin{enumerate}
+  \item Fetches recent unread messages via IMAP.
+  \item Looks up the sender in the contact store.
+  \item Checks the \texttt{x} (execute) permission bit.
+  \item Verifies transport trust --- Proton E2E (trusted) or PGP
+    signature with key bound to contact (verified).  Unverified
+    messages from \texttt{rwx} contacts are rejected.
+  \item On pass: creates a pipeline.
+\end{enumerate}
+
+\subsection{Pipeline Orchestrator}
+
+A pipeline decomposes an email instruction into a sequence of typed
+commands.  Each command is a GPG-signed YAML definition with a typed
+argument schema, write-set, budget, timeout, and tool list.
+
+\begin{verbatim}
+  Email instruction
+    -> Planner (LLM or rule-based)
+    -> [cmd1 | cmd2 | ... | auto-reply]
+    -> Sequential mission execution
+\end{verbatim}
+
+Each stage spawns an ephemeral \texttt{claude -p --bare} session with
+per-command MCP configuration and a minimal environment.  Output flows
+between stages via \texttt{inputs.previous\_output} in the ethos
+mission contract.
+
+\subsection{Auto-Reply (DES-029)}
+
+The executor auto-appends a \texttt{reply} command as the terminal
+stage of every pipeline.  The planner returns work stages only; the
+reply is the daemon's I/O framing.  This keeps commands
+channel-agnostic --- different channels (email, chat) use different
+reply commands without modifying the pipeline logic.
+
+On failure, the else handler sends a fixed-text error reply.  The
+originator never receives silence.
+
+\subsection{Worker Isolation}
+
+Workers run with:
+
+\begin{itemize}
+  \item \texttt{--bare} mode (no hooks, plugins, CLAUDE.md).
+  \item Restricted PATH (claude binary dir + \texttt{/usr/bin}).
+  \item Per-command MCP servers from a registry.
+  \item Adversarial robustness instructions in the system prompt.
+  \item 30-minute timeout, \$5 budget cap, 50-turn limit.
+  \item Protected env vars (HOME, PATH, ANTHROPIC\_API\_KEY) forced
+    after command overrides.
+\end{itemize}
+
+\subsection{Pipeline Persistence}
+
+Pipeline state is written to
+\texttt{\~{}/.punt-labs/beadle/pipelines/<id>.json} via atomic rename
+at each state transition.  On daemon startup, in-flight pipelines
+are marked failed and the originator is notified.
+
+%%----------------------------------------------------------------------
 \section{Key Properties}
 %%----------------------------------------------------------------------
 
@@ -567,6 +641,23 @@ inspection and testing:
   \item \textbf{Connection-per-request}: each MCP tool call
     creates and destroys its own IMAP connection, preventing
     stale state across calls.
+
+  \item \textbf{Trust gate for execution}: only messages with
+    transport trust $\geq verified$ (PGP) or $= trusted$ (Proton E2E)
+    AND contact \texttt{x}-bit can trigger daemon pipelines.
+
+  \item \textbf{Auto-reply}: every pipeline terminates with a reply
+    to the originator.  Success sends the final output.  Failure
+    sends a fixed-text error with a pipeline reference ID.
+
+  \item \textbf{Stage isolation}: each pipeline stage runs as a
+    separate \texttt{claude -p --bare} process with per-command
+    tools, budget, and timeout.  Missions are closed between stages
+    to release write-set locks.
+
+  \item \textbf{Crash recovery}: pipeline state is persisted at each
+    transition.  On restart, in-flight pipelines are marked failed
+    and originators are notified.
 \end{enumerate}
 
 \end{document}

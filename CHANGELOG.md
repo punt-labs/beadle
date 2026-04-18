@@ -34,6 +34,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with composition. GPG-signed command YAML, typed args (no string
   interpolation), Planner interface, persisted pipeline state,
   try/else error handling, fixed-text error replies. (beadle-88g)
+- DES-029: Auto-reply as pipeline stage — executor auto-appends a
+  `reply` CommandCall after work stages complete. Args: `to` = original
+  sender, `message` = final output. Multi-channel ready (email, chat).
+  (beadle-buw)
+- Auto-reply in pipeline executor: Executor.Run appends reply stage
+  after planner's work stages. Else handler sends fixed-text error
+  reply to originator. Missions closed between stages to release
+  write_set locks. (beadle-buw)
+
+### Fixed
+
+- Trust gate accepts Proton E2E trusted messages (was PGP-only after
+  security hardening in v0.14.1). Proton `X-Pm-Content-Encryption:
+  end-to-end` + `X-Pm-Origin: internal` headers are safe when IMAP
+  source is Bridge on localhost. (beadle-buw)
+- Worker spawner uses real HOME instead of isolated tmpdir. MCP servers
+  (ethos, beadle-email) need `~/.punt-labs/` for config. Defense layer:
+  `--bare` mode and adversarial system prompt. (beadle-buw)
 
 ### Security
 
@@ -42,8 +60,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   missions. Proton E2E headers are insufficient — they are SMTP-injectable.
 - PGP key bound to sender: `pgp.Verify` result KeyID checked against
   contact's registered GPGKeyID. Prevents impersonation via wrong key.
-- Worker isolation: HOME set to ephemeral temp dir (no access to ~/.ssh,
-  ~/.gnupg, ~/.punt-labs). PATH restricted. TMPDIR isolated.
+- Worker isolation: `--bare` mode, restricted PATH, adversarial system
+  prompt. Real HOME preserved (MCP servers need `~/.punt-labs/`).
 - Concurrency semaphore: max 2 concurrent workers (configurable).
 - Adversarial robustness instructions in worker system prompt.
 - Email subject removed from success_criteria — uses fixed text.
