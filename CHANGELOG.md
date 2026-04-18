@@ -9,8 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - `batch_move_messages` MCP tool: move multiple messages to another folder
-  in one call. Accepts an array of UIDs, returns a summary with per-message
-  errors for partial failures.
+  in one call. Accepts an array of UIDs, returns an aggregate summary
+  ("moved N messages to Archive").
 - Pipeline v2: CLI runner executes binaries directly (milliseconds, not
   45-second Claude sessions). Binary whitelist with `filepath.EvalSymlinks`
   at both load and execution time. Typed arg assembly (fixed, positional,

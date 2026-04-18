@@ -295,7 +295,7 @@ func moveMessageTool() mcplib.Tool {
 
 func batchMoveMessagesTool() mcplib.Tool {
 	return mcplib.NewTool("batch_move_messages",
-		mcplib.WithDescription("Move multiple messages to another folder in one call. Returns a summary of successes and failures."),
+		mcplib.WithDescription("Move multiple messages to another folder in one call. Returns the count of messages moved."),
 		mcplib.WithArray("message_ids",
 			mcplib.Required(),
 			mcplib.Description("Message UIDs to move (from list_messages)"),
@@ -843,6 +843,10 @@ func (h *handler) batchMoveMessages(ctx context.Context, req mcplib.CallToolRequ
 	for _, id := range ids {
 		uid, parseErr := strconv.ParseUint(id, 10, 32)
 		if parseErr != nil {
+			parseErrs = append(parseErrs, fmt.Sprintf("#%s: invalid id", id))
+			continue
+		}
+		if uid == 0 {
 			parseErrs = append(parseErrs, fmt.Sprintf("#%s: invalid id", id))
 			continue
 		}

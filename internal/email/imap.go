@@ -344,11 +344,14 @@ func (c *Client) MoveMessage(srcFolder string, uid uint32, dstFolder string) err
 	return nil
 }
 
-// MoveMessages moves multiple messages by UID from one folder to another
-// in a single IMAP MOVE command. SELECTs the source folder once, builds
-// a UID set, and issues one round-trip. UIDs that don't exist on the
-// server are silently ignored by the IMAP protocol.
+// MoveMessages moves multiple messages by UID from one folder to another.
+// Issues a single SELECT followed by a single MOVE command. UIDs that
+// don't exist on the server are silently ignored by the IMAP protocol.
 func (c *Client) MoveMessages(srcFolder string, uids []uint32, dstFolder string) error {
+	if len(uids) == 0 {
+		return nil
+	}
+
 	_, err := c.imap.Select(srcFolder, &imap.SelectOptions{ReadOnly: false}).Wait()
 	if err != nil {
 		return fmt.Errorf("select %q: %w", srcFolder, err)

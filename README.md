@@ -125,7 +125,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 | `read_message` | Read full message body, headers, attachments, and trust classification. |
 | `send_email` | Send via Proton Bridge SMTP (primary) or Resend API (fallback). Resolves contact names inline. |
 | `move_message` | Move a message to another folder. Defaults to Archive. |
-| `batch_move_messages` | Move multiple messages to another folder in one call. Returns per-message success/failure summary. |
+| `batch_move_messages` | Move multiple messages to another folder in one call. Returns the count of messages moved. |
 | `list_folders` | List all IMAP mailbox folders. |
 | `show_mime` | Inspect multipart MIME structure, PGP parts, and attachments. |
 | `verify_signature` | Verify PGP signature on a message. Returns signer info and key ID. |
