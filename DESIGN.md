@@ -1889,7 +1889,7 @@ args. The else handler also appends `reply` with a fixed-text error.
 
 ## DES-030: Multi-runner commands — claude and cli
 
-**Status:** PROPOSED (2026-04-18).
+**Status:** SETTLED (2026-04-18).
 
 **Decision:** Commands declare a `runner` field that determines how the
 daemon executes them. Two runners: `claude` (spawn `claude -p --bare`,
@@ -1910,6 +1910,7 @@ generation. Deterministic operations should not pay the LLM tax.
 # CLI runner — direct binary execution
 name: wall
 runner: cli
+mode: passthrough
 description: Broadcast a message to all active agents via biff
 binary: biff
 args:
@@ -1919,8 +1920,7 @@ args:
     required: true
     position: 2          # positional: biff wall <message>
 fixed_args: ["wall"]     # prepended before positional args
-input: none
-output: stdout           # capture stdout as stage output
+output_schema: text
 timeout: 30s
 ```
 
@@ -1928,21 +1928,22 @@ timeout: 30s
 # Claude runner — LLM session (default, current behavior)
 name: summarize
 runner: claude            # default if omitted
+mode: process             # default if omitted
 description: Summarize the triggering email
 mcp_servers: [ethos, beadle-email]
-args:
-  - name: message_id
-    type: string
-    required: true
-input: none
-output: prose
+output_schema:
+  type: object
+  properties:
+    title: { type: string }
+    summary: { type: string }
 write_set: []
 budget:
   rounds: 1
   reflection_after_each: false
 timeout: 5m
 prompt: |
-  Read message {mission_id} via beadle-email and produce a summary.
+  Read the triggering message via beadle-email and produce a JSON
+  summary with title and summary fields.
 ```
 
 **Executor dispatch:**
@@ -2046,7 +2047,7 @@ signed command can only exec whitelisted binaries.
 
 ## DES-031: Pipeline v2 — process/passthrough data flow with compound commands
 
-**Status:** PROPOSED (2026-04-18).
+**Status:** SETTLED (2026-04-18).
 
 **Decision:** Pipeline stages operate in one of two modes: `process`
 (output replaces the pipe) or `passthrough` (pipe carries forward

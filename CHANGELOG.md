@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Pipeline v2: CLI runner executes binaries directly (milliseconds, not
+  45-second Claude sessions). Binary whitelist with `filepath.EvalSymlinks`
+  at both load and execution time. Typed arg assembly (fixed, positional,
+  named flags). 1MB output cap via `io.LimitReader`. (beadle-mvd)
+- Pipeline v2: process/passthrough data flow. Commands declare `mode:
+  process` (output replaces pipe) or `mode: passthrough` (side-effect,
+  pipe unchanged). Initial pipe is EmailMeta JSON. (beadle-mvd)
+- Pipeline v2: compound CLI steps — chain binaries (e.g., jq | biff)
+  via goroutine-per-step with `io.Pipe`. First nonzero exit cancels all
+  steps. Per-step stderr logging. (beadle-mvd)
+- Pipeline v2: JSON output schema validation via `santhosh-tekuri/jsonschema/v6`.
+  Process-mode stages validated against declared schema. `output_schema: text`
+  bypasses validation. Schema compiled at pipeline start. (beadle-mvd)
+- Pipeline v2: Runner interface decouples executor from spawn mechanism.
+  ClaudeRunner wraps existing mission/spawner logic. CLIRunner for
+  deterministic operations. Executor dispatches by `command.Runner` field.
+  (beadle-mvd)
+- DES-030: Multi-runner commands (claude + cli). DES-031: Pipeline v2
+  data flow with process/passthrough, compound steps, JSON pipe, schema
+  validation. (beadle-mvd)
 - 1m poll interval option for faster testing and low-latency use cases.
   (beadle-0sv)
 - Pipeline orchestrator implementation: command YAML loader with typed arg
@@ -57,6 +77,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- CLI runner environment isolation: explicit minimal env (PATH, HOME,
+  USER + declared vars). Daemon credentials (ANTHROPIC_API_KEY, IMAP
+  password) no longer leak to CLI subprocesses. (beadle-mvd)
+- CLI runner stderr capped at 1MB via cappedWriter. Prevents memory
+  exhaustion from malicious or runaway binaries. (beadle-mvd)
+- `escapeYAMLPipe` for pipeline_output: NUL-strip + YAML quoting with
+  no length cap. Prevents silent truncation of large pipe values in
+  mission contracts. `escapeYAMLValue` (500-char cap) unchanged for
+  email subjects and short fields. (beadle-mvd)
+- `fireElse` no longer accepts pipe parameter. Fixed-text error only.
+  No internal pipeline state can leak to originator. (beadle-mvd)
 - Transport trust required for x-bit execution: daemon rejects unverified
   messages even from rwx contacts. Only PGP-verified messages trigger
   missions. Proton E2E headers are insufficient — they are SMTP-injectable.
