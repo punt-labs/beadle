@@ -442,3 +442,88 @@ func TestCLIRunner_CompoundPipeStdin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "PIPE DATA", result)
 }
+
+func TestCLIRunner_ArgsFromPipe(t *testing.T) {
+	_, wl := setupWhitelist(t, "echo")
+	runner := &CLIRunner{Whitelist: wl}
+
+	cmd := &Command{
+		Name:   "test-pipe-args",
+		Runner: "cli",
+		Mode:   "process",
+		Binary: "echo",
+		FixedArgs: []string{"-n"},
+		Args: []CommandArg{
+			{Name: "title", Type: "string"},
+			{Name: "type", Type: "string"},
+		},
+		OutputSchema: "text",
+		Timeout:      "5s",
+	}
+	call := CommandCall{Command: "test-pipe-args", Args: map[string]any{}}
+	p := testPipeline()
+
+	pipe := `{"title": "Fix auth", "type": "task"}`
+	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe)
+	require.NoError(t, err)
+	assert.Contains(t, result, "--title=Fix auth")
+	assert.Contains(t, result, "--type=task")
+}
+
+func TestCLIRunner_ArgsPlannerOverridesPipe(t *testing.T) {
+	_, wl := setupWhitelist(t, "echo")
+	runner := &CLIRunner{Whitelist: wl}
+
+	cmd := &Command{
+		Name:   "test-override",
+		Runner: "cli",
+		Mode:   "process",
+		Binary: "echo",
+		FixedArgs: []string{"-n"},
+		Args: []CommandArg{
+			{Name: "title", Type: "string"},
+		},
+		OutputSchema: "text",
+		Timeout:      "5s",
+	}
+	call := CommandCall{
+		Command: "test-override",
+		Args:    map[string]any{"title": "Override"},
+	}
+	p := testPipeline()
+
+	pipe := `{"title": "From pipe"}`
+	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe)
+	require.NoError(t, err)
+	assert.Contains(t, result, "--title=Override")
+	assert.NotContains(t, result, "From pipe")
+}
+
+func TestCLIRunner_ArgsFromPipe_InvalidJSON(t *testing.T) {
+	_, wl := setupWhitelist(t, "echo")
+	runner := &CLIRunner{Whitelist: wl}
+
+	cmd := &Command{
+		Name:   "test-bad-json",
+		Runner: "cli",
+		Mode:   "process",
+		Binary: "echo",
+		FixedArgs: []string{"-n"},
+		Args: []CommandArg{
+			{Name: "title", Type: "string"},
+		},
+		OutputSchema: "text",
+		Timeout:      "5s",
+	}
+	call := CommandCall{
+		Command: "test-bad-json",
+		Args:    map[string]any{"title": "FromArgs"},
+	}
+	p := testPipeline()
+
+	// Pipe is not valid JSON — should not crash, args from call.Args only.
+	pipe := "this is not json"
+	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe)
+	require.NoError(t, err)
+	assert.Contains(t, result, "--title=FromArgs")
+}
