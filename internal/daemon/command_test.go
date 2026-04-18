@@ -12,6 +12,9 @@ import (
 const validCommandYAML = `name: wall
 description: Broadcast a message to all active agents via biff
 signature: deadbeef
+runner: claude
+mode: passthrough
+output_schema: text
 args:
   - name: message
     type: string
@@ -22,8 +25,6 @@ args:
     values: [general, alerts]
     required: false
     default: general
-input: none
-output: prose
 write_set: []
 budget:
   rounds: 1
@@ -38,6 +39,15 @@ mcp_servers:
   - biff
 env_vars:
   - BIFF_TOKEN
+`
+
+const validCLICommandYAML = `name: format
+runner: cli
+mode: process
+binary: jq
+fixed_args: ["-r", ".summary"]
+output_schema: text
+timeout: 10s
 `
 
 func writeYAML(t *testing.T, dir, name, content string) {
@@ -64,6 +74,7 @@ func TestLoadCommands(t *testing.T) {
 				"wall.yaml": validCommandYAML,
 				"deploy.yaml": `name: deploy
 prompt: deploy the thing
+output_schema: text
 budget:
   rounds: 2
 `,
@@ -74,6 +85,7 @@ budget:
 			name: "skip missing name",
 			files: map[string]string{
 				"bad.yaml": `prompt: do something
+output_schema: text
 budget:
   rounds: 1
 `,
@@ -81,9 +93,10 @@ budget:
 			wantNames: []string{},
 		},
 		{
-			name: "skip missing prompt",
+			name: "skip claude runner missing prompt",
 			files: map[string]string{
 				"bad.yaml": `name: noprompt
+output_schema: text
 budget:
   rounds: 1
 `,
@@ -91,10 +104,11 @@ budget:
 			wantNames: []string{},
 		},
 		{
-			name: "skip zero budget rounds",
+			name: "skip claude runner zero budget rounds",
 			files: map[string]string{
 				"bad.yaml": `name: nobudget
 prompt: hello
+output_schema: text
 budget:
   rounds: 0
 `,
@@ -106,6 +120,7 @@ budget:
 			files: map[string]string{
 				"bad.yaml": `name: unknown
 prompt: hello
+output_schema: text
 budget:
   rounds: 1
 extra_field: should_fail
@@ -118,6 +133,7 @@ extra_field: should_fail
 			files: map[string]string{
 				"bad.yaml": `name: badarg
 prompt: hello
+output_schema: text
 budget:
   rounds: 1
 args:
@@ -133,36 +149,13 @@ args:
 			files: map[string]string{
 				"bad.yaml": `name: badenum
 prompt: hello
+output_schema: text
 budget:
   rounds: 1
 args:
   - name: x
     type: enum
     required: true
-`,
-			},
-			wantNames: []string{},
-		},
-		{
-			name: "skip invalid input mode",
-			files: map[string]string{
-				"bad.yaml": `name: badinput
-prompt: hello
-budget:
-  rounds: 1
-input: stream
-`,
-			},
-			wantNames: []string{},
-		},
-		{
-			name: "skip invalid output mode",
-			files: map[string]string{
-				"bad.yaml": `name: badoutput
-prompt: hello
-budget:
-  rounds: 1
-output: binary
 `,
 			},
 			wantNames: []string{},
@@ -185,6 +178,7 @@ output: binary
 			files: map[string]string{
 				"minimal.yaml": `name: minimal
 prompt: do the thing
+output_schema: text
 budget:
   rounds: 1
 `,
@@ -196,9 +190,126 @@ budget:
 			files: map[string]string{
 				"bad.yaml": `name: badtimeout
 prompt: hello
+output_schema: text
 budget:
   rounds: 1
 timeout: not-a-duration
+`,
+			},
+			wantNames: []string{},
+		},
+		{
+			name: "skip cli runner missing binary and steps",
+			files: map[string]string{
+				"bad.yaml": `name: nobinary
+runner: cli
+output_schema: text
+`,
+			},
+			wantNames: []string{},
+		},
+		{
+			name: "skip claude runner with binary",
+			files: map[string]string{
+				"bad.yaml": `name: claudebin
+runner: claude
+binary: jq
+prompt: hello
+output_schema: text
+budget:
+  rounds: 1
+`,
+			},
+			wantNames: []string{},
+		},
+		{
+			name: "skip output_schema number",
+			files: map[string]string{
+				"bad.yaml": `name: numschema
+prompt: hello
+output_schema: 42
+budget:
+  rounds: 1
+`,
+			},
+			wantNames: []string{},
+		},
+		{
+			name: "skip output_schema invalid string",
+			files: map[string]string{
+				"bad.yaml": `name: jsonschema
+prompt: hello
+output_schema: json
+budget:
+  rounds: 1
+`,
+			},
+			wantNames: []string{},
+		},
+		{
+			name: "valid cli runner single binary",
+			files: map[string]string{
+				"fmt.yaml": validCLICommandYAML,
+			},
+			wantNames: []string{"format"},
+		},
+		{
+			name: "valid claude runner with schema object",
+			files: map[string]string{
+				"sum.yaml": `name: summarize
+prompt: summarize
+output_schema:
+  type: object
+  properties:
+    title: { type: string }
+budget:
+  rounds: 1
+`,
+			},
+			wantNames: []string{"summarize"},
+		},
+		{
+			name: "skip step[0] stdin not pipe",
+			files: map[string]string{
+				"bad.yaml": `name: badstep
+runner: cli
+output_schema: text
+steps:
+  - binary: echo
+    stdin: stdout
+`,
+			},
+			wantNames: []string{},
+		},
+		{
+			name: "skip step[1] stdin not stdout",
+			files: map[string]string{
+				"bad.yaml": `name: badstep2
+runner: cli
+output_schema: text
+steps:
+  - binary: echo
+    stdin: pipe
+  - binary: cat
+    stdin: pipe
+`,
+			},
+			wantNames: []string{},
+		},
+		{
+			name: "skip duplicate arg positions",
+			files: map[string]string{
+				"bad.yaml": `name: duppos
+runner: cli
+binary: echo
+output_schema: text
+args:
+  - name: a
+    type: string
+    position: 1
+  - name: b
+    type: string
+    position: 1
 `,
 			},
 			wantNames: []string{},
@@ -232,11 +343,13 @@ func TestLoadCommands_DuplicateNames(t *testing.T) {
 	dir := t.TempDir()
 	writeYAML(t, dir, "wall1.yaml", `name: wall
 prompt: first
+output_schema: text
 budget:
   rounds: 1
 `)
 	writeYAML(t, dir, "wall2.yaml", `name: wall
 prompt: second
+output_schema: text
 budget:
   rounds: 1
 `)
@@ -266,8 +379,9 @@ func TestLoadCommands_FieldValues(t *testing.T) {
 	assert.Equal(t, "wall", cmd.Name)
 	assert.Equal(t, "Broadcast a message to all active agents via biff", cmd.Description)
 	assert.Equal(t, "deadbeef", cmd.Signature)
-	assert.Equal(t, "none", cmd.Input)
-	assert.Equal(t, "prose", cmd.Output)
+	assert.Equal(t, "claude", cmd.Runner)
+	assert.Equal(t, "passthrough", cmd.Mode)
+	assert.Equal(t, "text", cmd.OutputSchema)
 	assert.Equal(t, "2m", cmd.Timeout)
 	assert.Equal(t, 1, cmd.Budget.Rounds)
 	assert.False(t, cmd.Budget.ReflectionAfterEach)
@@ -287,18 +401,19 @@ func TestLoadCommands_FieldValues(t *testing.T) {
 	assert.Equal(t, "general", cmd.Args[1].Default)
 }
 
-func TestLoadCommands_DefaultInputOutput(t *testing.T) {
+func TestLoadCommands_DefaultRunnerMode(t *testing.T) {
 	dir := t.TempDir()
 	writeYAML(t, dir, "min.yaml", `name: min
 prompt: hello
+output_schema: text
 budget:
   rounds: 1
 `)
 	cmds, err := LoadCommands(dir)
 	require.NoError(t, err)
 	require.Contains(t, cmds, "min")
-	assert.Equal(t, "none", cmds["min"].Input)
-	assert.Equal(t, "prose", cmds["min"].Output)
+	assert.Equal(t, "claude", cmds["min"].Runner)
+	assert.Equal(t, "process", cmds["min"].Mode)
 }
 
 func TestValidateArgs(t *testing.T) {

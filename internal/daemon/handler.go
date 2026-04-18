@@ -172,13 +172,17 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 					defer h.wg.Done()
 					defer func() { <-h.workerSem }()
 					executor := &Executor{
-						Planner:   h.planner,
-						Commands:  h.commands,
-						Missions:  h.missions,
-						Spawner:   h.spawner,
-						Templates: h.templates,
-						Registry:  DefaultMCPRegistry(),
-						Logger:    h.logger,
+						Planner:  h.planner,
+						Commands: h.commands,
+						Runners: map[string]Runner{
+							"claude": &ClaudeRunner{
+								Spawner:   h.spawner,
+								Missions:  h.missions,
+								Templates: h.templates,
+								Registry:  DefaultMCPRegistry(),
+							},
+						},
+						Logger: h.logger,
 					}
 					p, err := executor.Run(h.ctx, meta, "")
 					if err != nil {
