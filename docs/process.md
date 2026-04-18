@@ -181,16 +181,47 @@ Budget the mission with enough rounds for 2-3 review cycles.
 Security-critical stages (whitelist, exec, crypto) typically need
 2 cycles. Interface changes typically need 1.
 
+## Task Tracking
+
+Every epic has beads (issues) that map to the work. The task list
+is the COO's primary tracking instrument — it shows what's done,
+what's in progress, and what's blocked.
+
+**Bead structure for an epic:**
+
+- One epic bead (`bd create --type=epic`)
+- One task bead per pipeline stage (`bd create --type=task`)
+- Each task bead's description includes the stage name, worker, and
+  evaluator
+
+**Lifecycle per task bead:**
+
+```text
+bd update <id> --status=in_progress   # when stage starts
+  → spawn worker, review, reflect loop
+bd close <id>                         # when stage closes clean
+```
+
+The beads mirror the pipeline stages. When a stage closes in ethos,
+the corresponding bead closes. The epic bead closes when all stage
+beads are closed and the PR is merged.
+
+**In-session tracking:** Use `TaskCreate` for the active session's
+task list. Map each task to its bead ID. Mark tasks `in_progress`
+when starting, `completed` when the bead closes. This gives the
+user visibility into progress without checking beads directly.
+
 ## Setup Checklist
 
 Before starting an epic:
 
 1. `bd update <epic-id> --status=in_progress`
-2. `git checkout -b feat/<name> main`
-3. `/plan` with epic summary
-4. `ethos mission pipeline instantiate <pipeline> --leader claude --worker bwk --evaluator mdm --var feature=<name> --var target=<path>`
-5. Close the design stage immediately if the architecture doc already exists (rare — usually the detailed design still needs to be produced)
-6. Begin stage 1
+2. Create task beads for each pipeline stage (if not already created)
+3. `git checkout -b feat/<name> main`
+4. `/plan` with epic summary
+5. `ethos mission pipeline instantiate <pipeline> --leader claude --worker bwk --evaluator mdm --var feature=<name> --var target=<path>`
+6. Create session task list (`TaskCreate`) mapping each task to its bead
+7. Begin stage 1
 
 ## Shipping
 
