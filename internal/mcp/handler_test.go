@@ -333,11 +333,11 @@ func TestHandler_BatchMoveMessages(t *testing.T) {
 		"destination": "Archive",
 	})
 	assert.False(t, r.IsError, "batch move failed: %s", r.text())
-	assert.Contains(t, r.text(), "moved 3 of 3")
+	assert.Contains(t, r.text(), "moved 3 messages")
 	assert.Contains(t, r.text(), "Archive")
 }
 
-func TestHandler_BatchMoveMessages_PartialFailure(t *testing.T) {
+func TestHandler_BatchMoveMessages_InvalidUID(t *testing.T) {
 	s, env, fix := setupHandler(t)
 	env.AddContact("Alice", "alice@test.com", "r--")
 
@@ -347,14 +347,13 @@ func TestHandler_BatchMoveMessages_PartialFailure(t *testing.T) {
 	r := callTool(t, s, "batch_move_messages", map[string]any{
 		"message_ids": []any{
 			fmt.Sprintf("%d", uid1),
-			"not-a-number", // invalid UID triggers parse error
+			"not-a-number",
 		},
 		"destination": "Archive",
 	})
-	assert.False(t, r.IsError, "batch move failed: %s", r.text())
-	assert.Contains(t, r.text(), "moved 1 of 2")
+	assert.True(t, r.IsError, "invalid UID should produce error")
 	assert.Contains(t, r.text(), "#not-a-number")
-	assert.Contains(t, r.text(), "invalid id")
+	assert.Contains(t, r.text(), "invalid")
 }
 
 func TestHandler_BatchMoveMessages_Empty(t *testing.T) {
@@ -364,7 +363,15 @@ func TestHandler_BatchMoveMessages_Empty(t *testing.T) {
 		"message_ids": []any{},
 	})
 	assert.False(t, r.IsError, "batch move failed: %s", r.text())
-	assert.Contains(t, r.text(), "moved 0 of 0")
+	assert.Contains(t, r.text(), "moved 0 messages")
+}
+
+func TestHandler_BatchMoveMessages_MissingParam(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "batch_move_messages", map[string]any{})
+	assert.True(t, r.IsError, "missing message_ids should produce error")
+	assert.Contains(t, r.text(), "message_ids is required")
 }
 
 func TestHandler_Contacts_CRUD(t *testing.T) {

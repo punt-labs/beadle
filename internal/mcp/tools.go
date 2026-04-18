@@ -825,30 +825,38 @@ func (h *handler) batchMoveMessages(ctx context.Context, req mcplib.CallToolRequ
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
+	if ids == nil {
+		return mcplib.NewToolResultError("message_ids is required"), nil
+	}
 
 	folder := stringParam(req, "folder", "INBOX")
 	destination := stringParam(req, "destination", "Archive")
 
 	if len(ids) == 0 {
-		return textResult(formatBatchMoveResult(0, 0, destination, nil))
+		return textResult(formatBatchMoveResult(0, destination))
+	}
+
+	// Parse all UIDs up front so we can report invalid IDs before
+	// opening a connection.
+	uids := make([]uint32, 0, len(ids))
+	var parseErrs []string
+	for _, id := range ids {
+		uid, parseErr := strconv.ParseUint(id, 10, 32)
+		if parseErr != nil {
+			parseErrs = append(parseErrs, fmt.Sprintf("#%s: invalid id", id))
+			continue
+		}
+		uids = append(uids, uint32(uid))
+	}
+	if len(parseErrs) > 0 {
+		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_ids: %s", strings.Join(parseErrs, ", "))), nil
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		var moved int
-		var errs []string
-		for _, msgID := range ids {
-			uid, parseErr := strconv.ParseUint(msgID, 10, 32)
-			if parseErr != nil {
-				errs = append(errs, fmt.Sprintf("#%s: invalid id", msgID))
-				continue
-			}
-			if moveErr := c.MoveMessage(folder, uint32(uid), destination); moveErr != nil {
-				errs = append(errs, fmt.Sprintf("#%s: %v", msgID, moveErr))
-				continue
-			}
-			moved++
+		if err := c.MoveMessages(folder, uids, destination); err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("batch move: %v", err)), nil
 		}
-		return textResult(formatBatchMoveResult(moved, len(ids), destination, errs))
+		return textResult(formatBatchMoveResult(len(uids), destination))
 	})
 }
 

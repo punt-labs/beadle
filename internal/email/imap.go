@@ -344,6 +344,28 @@ func (c *Client) MoveMessage(srcFolder string, uid uint32, dstFolder string) err
 	return nil
 }
 
+// MoveMessages moves multiple messages by UID from one folder to another
+// in a single IMAP MOVE command. SELECTs the source folder once, builds
+// a UID set, and issues one round-trip. UIDs that don't exist on the
+// server are silently ignored by the IMAP protocol.
+func (c *Client) MoveMessages(srcFolder string, uids []uint32, dstFolder string) error {
+	_, err := c.imap.Select(srcFolder, &imap.SelectOptions{ReadOnly: false}).Wait()
+	if err != nil {
+		return fmt.Errorf("select %q: %w", srcFolder, err)
+	}
+
+	imapUIDs := make([]imap.UID, len(uids))
+	for i, u := range uids {
+		imapUIDs[i] = imap.UID(u)
+	}
+
+	_, err = c.imap.Move(imap.UIDSetNum(imapUIDs...), dstFolder).Wait()
+	if err != nil {
+		return fmt.Errorf("move %d messages to %q: %w", len(uids), dstFolder, err)
+	}
+	return nil
+}
+
 func formatAddress(addr imap.Address) string {
 	if addr.Name != "" {
 		return fmt.Sprintf("%s <%s@%s>", addr.Name, addr.Mailbox, addr.Host)
