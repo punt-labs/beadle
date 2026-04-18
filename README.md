@@ -96,7 +96,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 | `remove_contact` | Remove a contact by name. |
 | `whoami` | Return the active identity (email, display name, ethos handle). |
 | `switch_identity` | Switch the active identity for this session. Pass an ethos handle or empty to reset. |
-| `set_poll_interval` | Set automatic inbox polling interval (5m, 10m, 15m, 30m, 1h, 2h) or disable (`n`). |
+| `set_poll_interval` | Set automatic inbox polling interval (1m, 5m, 10m, 15m, 30m, 1h, 2h) or disable (`n`). |
 | `get_poll_status` | Return current polling configuration: interval, active state, last check time, unseen count. |
 
 ## Commands
@@ -106,7 +106,7 @@ Available when installed as a Claude Code plugin.
 | Command | What it does |
 |---------|-------------|
 | `/inbox` | Check beadle's email inbox. Optional natural language filter. |
-| `/inbox 5m` | Set inbox polling interval (5m, 10m, 15m, 30m, 1h, 2h). |
+| `/inbox 5m` | Set inbox polling interval (1m, 5m, 10m, 15m, 30m, 1h, 2h). |
 | `/inbox n` | Disable automatic inbox polling. |
 | `/inbox status` | Show current polling configuration. |
 | `/mail` | Mail something to the owner or a specific recipient. |

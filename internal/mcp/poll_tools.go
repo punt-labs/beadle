@@ -17,11 +17,11 @@ func setPollIntervalTool() mcplib.Tool {
 		mcplib.WithDescription(
 			"Set the background inbox polling interval. "+
 				"The server checks INBOX periodically and sends a notification when new mail arrives. "+
-				"Valid intervals: 5m, 10m, 15m, 30m, 1h, 2h. Use 'n' to disable.",
+				"Valid intervals: 1m, 5m, 10m, 15m, 30m, 1h, 2h. Use 'n' to disable.",
 		),
 		mcplib.WithString("interval",
 			mcplib.Required(),
-			mcplib.Description("Polling interval: 5m, 10m, 15m, 30m, 1h, 2h, or n (disable)"),
+			mcplib.Description("Polling interval: 1m, 5m, 10m, 15m, 30m, 1h, 2h, or n (disable)"),
 		),
 	)
 }
@@ -40,7 +40,7 @@ func (h *handler) setPollInterval(_ context.Context, req mcplib.CallToolRequest)
 
 	if !email.ValidPollInterval(interval) {
 		return mcplib.NewToolResultError(
-			fmt.Sprintf("invalid interval %q: must be 5m, 10m, 15m, 30m, 1h, 2h, or n", interval),
+			fmt.Sprintf("invalid interval %q: must be 1m, 5m, 10m, 15m, 30m, 1h, 2h, or n", interval),
 		), nil
 	}
 

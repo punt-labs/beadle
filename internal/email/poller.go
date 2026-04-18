@@ -66,7 +66,7 @@ func (p *Poller) Start() error {
 	d, ok := cfg.PollDuration()
 	if !ok {
 		if cfg.PollInterval != "" && cfg.PollInterval != "n" {
-			return fmt.Errorf("invalid poll_interval %q in config (valid: 5m, 10m, 15m, 30m, 1h, 2h, n=disable)", cfg.PollInterval)
+			return fmt.Errorf("invalid poll_interval %q in config (valid: 1m, 5m, 10m, 15m, 30m, 1h, 2h, n=disable)", cfg.PollInterval)
 		}
 		return nil // disabled, not an error
 	}
@@ -248,5 +248,5 @@ type InvalidIntervalError struct {
 }
 
 func (e *InvalidIntervalError) Error() string {
-	return "invalid poll interval " + e.Value + ": must be 5m, 10m, 15m, 30m, 1h, 2h, or n"
+	return "invalid poll interval " + e.Value + ": must be 1m, 5m, 10m, 15m, 30m, 1h, 2h, or n"
 }

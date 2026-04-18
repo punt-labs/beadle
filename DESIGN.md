@@ -501,7 +501,7 @@ has no MCP spec mechanism to bridge.
 
 **Detection layer (MCP server, autonomous):**
 
-1. `email.json` stores `poll_interval` (valid: 5m, 10m, 15m, 30m, 1h, 2h, n)
+1. `email.json` stores `poll_interval` (valid: 1m, 5m, 10m, 15m, 30m, 1h, 2h, n)
 2. On startup, the server reads the config and starts a background goroutine
 3. The goroutine calls IMAP STATUS on the configured interval
 4. When unread count increases, it fires `tools/list_changed` (MCP notification)
