@@ -56,14 +56,14 @@ func TestOnNewMail(t *testing.T) {
 			wantSubjects: []string{"Schedule meeting"},
 		},
 		{
-			name: "proton-only trusted rwx sender rejected without PGP",
+			name: "proton E2E trusted rwx sender accepted",
 			messages: []testMsg{
 				{from: "jim@punt-labs.com", subject: "Schedule meeting", trusted: true},
 			},
 			contacts: []testContact{
 				{name: "Jim", addr: "jim@punt-labs.com", perm: "rwx"},
 			},
-			wantMissions: 0,
+			wantMissions: 1,
 		},
 		{
 			name: "unverified rwx sender rejected",
