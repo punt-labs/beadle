@@ -315,6 +315,65 @@ func TestHandler_MoveMessage(t *testing.T) {
 	assert.Contains(t, r.text(), "moved")
 }
 
+func TestHandler_BatchMoveMessages(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body 1")
+	uid2 := fix.AddMessage("INBOX", "alice@test.com", "Msg 2", "body 2")
+	uid3 := fix.AddMessage("INBOX", "alice@test.com", "Msg 3", "body 3")
+	fix.AddMessage("Archive", "system@test.com", "Placeholder", "x")
+
+	r := callTool(t, s, "batch_move_messages", map[string]any{
+		"message_ids": []any{
+			fmt.Sprintf("%d", uid1),
+			fmt.Sprintf("%d", uid2),
+			fmt.Sprintf("%d", uid3),
+		},
+		"destination": "Archive",
+	})
+	assert.False(t, r.IsError, "batch move failed: %s", r.text())
+	assert.Contains(t, r.text(), "moved 3 messages")
+	assert.Contains(t, r.text(), "Archive")
+}
+
+func TestHandler_BatchMoveMessages_InvalidUID(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body 1")
+	fix.AddMessage("Archive", "system@test.com", "Placeholder", "x")
+
+	r := callTool(t, s, "batch_move_messages", map[string]any{
+		"message_ids": []any{
+			fmt.Sprintf("%d", uid1),
+			"not-a-number",
+		},
+		"destination": "Archive",
+	})
+	assert.True(t, r.IsError, "invalid UID should produce error")
+	assert.Contains(t, r.text(), "#not-a-number")
+	assert.Contains(t, r.text(), "invalid")
+}
+
+func TestHandler_BatchMoveMessages_Empty(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "batch_move_messages", map[string]any{
+		"message_ids": []any{},
+	})
+	assert.False(t, r.IsError, "batch move failed: %s", r.text())
+	assert.Contains(t, r.text(), "moved 0 messages")
+}
+
+func TestHandler_BatchMoveMessages_MissingParam(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "batch_move_messages", map[string]any{})
+	assert.True(t, r.IsError, "missing message_ids should produce error")
+	assert.Contains(t, r.text(), "message_ids is required")
+}
+
 func TestHandler_Contacts_CRUD(t *testing.T) {
 	s, _, _ := setupHandler(t)
 
