@@ -365,6 +365,60 @@ func TestCLIRunner_CompoundTimeout(t *testing.T) {
 	assert.Less(t, elapsed, 5*time.Second)
 }
 
+func TestCLIRunner_EnvIsolation(t *testing.T) {
+	// Set a sentinel env var and verify the CLI subprocess does NOT see it.
+	t.Setenv("BEADLE_TEST_SENTINEL", "leaked")
+
+	_, wl := setupWhitelist(t, "env")
+	runner := &CLIRunner{Whitelist: wl}
+
+	cmd := &Command{
+		Name:         "test-env",
+		Runner:       "cli",
+		Mode:         "process",
+		Binary:       "env",
+		OutputSchema: "text",
+		Timeout:      "5s",
+	}
+	call := CommandCall{Command: "test-env", Args: map[string]any{}}
+	p := testPipeline()
+
+	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	require.NoError(t, err)
+
+	assert.NotContains(t, result, "BEADLE_TEST_SENTINEL", "subprocess must not inherit daemon env")
+	assert.Contains(t, result, "PATH=", "subprocess must have PATH")
+	assert.Contains(t, result, "HOME=", "subprocess must have HOME")
+	assert.Contains(t, result, "USER=", "subprocess must have USER")
+}
+
+func TestCLIRunner_EnvDeclaredVars(t *testing.T) {
+	// Verify that declared env_vars are passed through.
+	t.Setenv("BEADLE_ALLOWED_VAR", "included")
+	t.Setenv("BEADLE_BLOCKED_VAR", "excluded")
+
+	_, wl := setupWhitelist(t, "env")
+	runner := &CLIRunner{Whitelist: wl}
+
+	cmd := &Command{
+		Name:         "test-env-declared",
+		Runner:       "cli",
+		Mode:         "process",
+		Binary:       "env",
+		EnvVars:      []string{"BEADLE_ALLOWED_VAR"},
+		OutputSchema: "text",
+		Timeout:      "5s",
+	}
+	call := CommandCall{Command: "test-env-declared", Args: map[string]any{}}
+	p := testPipeline()
+
+	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	require.NoError(t, err)
+
+	assert.Contains(t, result, "BEADLE_ALLOWED_VAR=included", "declared var must be present")
+	assert.NotContains(t, result, "BEADLE_BLOCKED_VAR", "undeclared var must not leak")
+}
+
 func TestCLIRunner_CompoundPipeStdin(t *testing.T) {
 	// Verify that step[0] receives the pipe data on stdin.
 	_, wl := setupWhitelist(t, "cat", "tr")

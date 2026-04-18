@@ -59,14 +59,14 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 		p.Status = "failed"
 		p.Error = fmt.Sprintf("plan: %v", err)
 		e.save(p)
-		e.fireElse(p, "")
+		e.fireElse(p)
 		return p, fmt.Errorf("plan pipeline %s: %w", p.ID, err)
 	}
 	if len(calls) == 0 {
 		p.Status = "failed"
 		p.Error = "plan returned empty command list"
 		e.save(p)
-		e.fireElse(p, "")
+		e.fireElse(p)
 		return p, fmt.Errorf("pipeline %s: empty plan", p.ID)
 	}
 
@@ -77,14 +77,14 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			p.Status = "failed"
 			p.Error = fmt.Sprintf("stage %d: unknown command %q", i, call.Command)
 			e.save(p)
-			e.fireElse(p, "")
+			e.fireElse(p)
 			return p, fmt.Errorf("pipeline %s stage %d: unknown command %q", p.ID, i, call.Command)
 		}
 		if err := ValidateArgs(cmd, call.Args); err != nil {
 			p.Status = "failed"
 			p.Error = fmt.Sprintf("stage %d: %v", i, err)
 			e.save(p)
-			e.fireElse(p, "")
+			e.fireElse(p)
 			return p, fmt.Errorf("pipeline %s stage %d: %w", p.ID, i, err)
 		}
 	}
@@ -102,7 +102,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			p.Status = "failed"
 			p.Error = fmt.Sprintf("compile schema for %s: %v", call.Command, err)
 			e.save(p)
-			e.fireElse(p, "")
+			e.fireElse(p)
 			return p, fmt.Errorf("pipeline %s: compile schema for %s: %w", p.ID, call.Command, err)
 		}
 		schemas[call.Command] = schema
@@ -134,7 +134,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			p.Status = "failed"
 			p.Error = fmt.Sprintf("stage %d (%s): unknown runner %q", i, call.Command, cmd.Runner)
 			e.save(p)
-			e.fireElse(p, pipe)
+			e.fireElse(p)
 			return p, fmt.Errorf("pipeline %s stage %d (%s): unknown runner %q", p.ID, i, call.Command, cmd.Runner)
 		}
 		result, err := runner.Run(ctx, e, p, i, cmd, call, pipe)
@@ -142,7 +142,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			p.Status = "failed"
 			p.Error = fmt.Sprintf("stage %d (%s): %v", i, call.Command, err)
 			e.save(p)
-			e.fireElse(p, pipe)
+			e.fireElse(p)
 			return p, fmt.Errorf("pipeline %s stage %d (%s): %w", p.ID, i, call.Command, err)
 		}
 
@@ -154,7 +154,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 				p.Status = "failed"
 				p.Error = fmt.Sprintf("stage %d (%s): output validation: %v", i, call.Command, err)
 				e.save(p)
-				e.fireElse(p, pipe)
+				e.fireElse(p)
 				return p, fmt.Errorf("pipeline %s stage %d (%s): output validation: %w", p.ID, i, call.Command, err)
 			}
 			pipe = result
@@ -195,7 +195,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 func buildStageContract(meta EmailMeta, cmd *Command, call CommandCall, pipe string) string {
 	pipeValue := "none"
 	if pipe != "" {
-		pipeValue = escapeYAMLValue(pipe)
+		pipeValue = escapeYAMLPipe(pipe)
 	}
 
 	argsYAML := ""
@@ -305,7 +305,7 @@ func truncateLog(s string, max int) string {
 // fireElse logs the pipeline error and sends a reply to the originator
 // with a fixed-text error message. If the reply command is not registered
 // or sending fails, the error is logged but does not propagate.
-func (e *Executor) fireElse(p *Pipeline, pipe string) {
+func (e *Executor) fireElse(p *Pipeline) {
 	e.Logger.Error("pipeline failed, else handler",
 		"pipeline", p.ID,
 		"error", p.Error,

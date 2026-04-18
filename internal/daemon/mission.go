@@ -64,6 +64,19 @@ func escapeYAMLValue(s string) string {
 	return `"` + escaped + `"`
 }
 
+// escapeYAMLPipe returns a double-quoted YAML scalar suitable for pipeline
+// output values. Unlike escapeYAMLValue it has no length cap, since pipe
+// data can be up to 1MB. NUL bytes are still stripped.
+func escapeYAMLPipe(s string) string {
+	s = strings.ReplaceAll(s, "\x00", "")
+	escaped := strings.ReplaceAll(s, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+	escaped = strings.ReplaceAll(escaped, "\r", `\r`)
+	escaped = strings.ReplaceAll(escaped, "\t", `\t`)
+	return `"` + escaped + `"`
+}
+
 // EthosMissionCreator creates missions by writing a contract YAML to a temp
 // file and invoking `ethos mission create`.
 type EthosMissionCreator struct {

@@ -182,9 +182,10 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 
 	c := exec.CommandContext(ctx, resolvedPath, args...)
 	c.Stdin = strings.NewReader(pipe)
+	c.Env = minimalEnv(r.Whitelist.Dirs, cmd.EnvVars)
 
-	var stderrBuf bytes.Buffer
-	c.Stderr = &stderrBuf
+	stderrBuf := &cappedWriter{max: 1 << 20}
+	c.Stderr = stderrBuf
 
 	stdoutPipe, err := c.StdoutPipe()
 	if err != nil {
@@ -197,14 +198,14 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 	output, _ := io.ReadAll(io.LimitReader(stdoutPipe, 1<<20))
 
 	if err := c.Wait(); err != nil {
-		if stderrBuf.Len() > 0 {
-			e.Logger.Info("cli command stderr", "command", cmd.Name, "stderr", stderrBuf.String())
+		if stderrBuf.buf.Len() > 0 {
+			e.Logger.Info("cli command stderr", "command", cmd.Name, "stderr", stderrBuf.buf.String())
 		}
 		return "", fmt.Errorf("cli %s: %w", cmd.Binary, err)
 	}
 
-	if stderrBuf.Len() > 0 {
-		e.Logger.Info("cli command stderr", "command", cmd.Name, "stderr", stderrBuf.String())
+	if stderrBuf.buf.Len() > 0 {
+		e.Logger.Info("cli command stderr", "command", cmd.Name, "stderr", stderrBuf.buf.String())
 	}
 
 	return string(output), nil
@@ -242,12 +243,15 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 	}
 
 	// Build commands.
+	env := minimalEnv(r.Whitelist.Dirs, cmd.EnvVars)
+
 	cmds := make([]*exec.Cmd, n)
-	stderrBufs := make([]*bytes.Buffer, n)
+	stderrBufs := make([]*cappedWriter, n)
 	for i, step := range cmd.Steps {
 		c := exec.CommandContext(ctx, resolved[i], step.FixedArgs...)
-		stderrBufs[i] = &bytes.Buffer{}
+		stderrBufs[i] = &cappedWriter{max: 1 << 20}
 		c.Stderr = stderrBufs[i]
+		c.Env = env
 
 		if i == 0 {
 			c.Stdin = strings.NewReader(pipe)
@@ -312,12 +316,12 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 
 	// Log per-step stderr.
 	for i, buf := range stderrBufs {
-		if buf.Len() > 0 {
+		if buf.buf.Len() > 0 {
 			e.Logger.Info("compound step stderr",
 				"command", cmd.Name,
 				"step", i,
 				"binary", cmd.Steps[i].Binary,
-				"stderr", truncateLog(buf.String(), 500))
+				"stderr", truncateLog(buf.buf.String(), 500))
 		}
 	}
 
@@ -325,4 +329,39 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 		return "", firstErr
 	}
 	return string(output), nil
+}
+
+// cappedWriter is a bytes.Buffer that silently stops accepting data
+// after max bytes have been written.
+type cappedWriter struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	remaining := w.max - w.buf.Len()
+	if remaining <= 0 {
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		p = p[:remaining]
+	}
+	return w.buf.Write(p)
+}
+
+// minimalEnv builds an explicit environment for subprocess execution.
+// It includes PATH (from whitelist dirs), HOME, USER, and any declared
+// env vars the command definition allows.
+func minimalEnv(dirs []string, declaredVars []string) []string {
+	env := []string{
+		"PATH=" + strings.Join(dirs, ":"),
+		"HOME=" + os.Getenv("HOME"),
+		"USER=" + os.Getenv("USER"),
+	}
+	for _, name := range declaredVars {
+		if v, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+v)
+		}
+	}
+	return env
 }
