@@ -1,6 +1,6 @@
 ---
 description: "Check beadle's email inbox"
-argument-hint: "[<filter text> | 5m | 10m | 15m | 30m | 1h | 2h | n | status]"
+argument-hint: "[<filter text> | 1m | 5m | 10m | 15m | 30m | 1h | 2h | n | status]"
 allowed-tools: ["mcp__plugin_beadle_email__list_messages", "mcp__plugin_beadle_email__read_message", "mcp__plugin_beadle_email__move_message", "mcp__plugin_beadle_email__check_trust", "mcp__plugin_beadle_email__find_contact", "mcp__plugin_beadle_email__send_email", "mcp__plugin_beadle_email__set_poll_interval", "mcp__plugin_beadle_email__get_poll_status", "mcp__plugin_beadle-dev_email__list_messages", "mcp__plugin_beadle-dev_email__read_message", "mcp__plugin_beadle-dev_email__move_message", "mcp__plugin_beadle-dev_email__check_trust", "mcp__plugin_beadle-dev_email__find_contact", "mcp__plugin_beadle-dev_email__send_email", "mcp__plugin_beadle-dev_email__set_poll_interval", "mcp__plugin_beadle-dev_email__get_poll_status", "Read", "CronCreate", "CronList", "CronDelete"]
 ---
 <!-- markdownlint-disable MD041 -->
@@ -17,13 +17,13 @@ Check beadle's email inbox. You are the beadle — this is your inbox, not the u
 
 First, check if the argument matches a **polling config** command:
 
-- Exactly one of `5m`, `10m`, `15m`, `30m`, `1h`, `2h` → set polling interval
+- Exactly one of `1m`, `5m`, `10m`, `15m`, `30m`, `1h`, `2h` → set polling interval
 - Exactly `n` → disable polling
 - Exactly `status` → show polling config
 
 If none of the above match, treat the argument as a **filter** (existing behavior).
 
-### Polling interval (`5m`, `10m`, `15m`, `30m`, `1h`, `2h`)
+### Polling interval (`1m`, `5m`, `10m`, `15m`, `30m`, `1h`, `2h`)
 
 1. Call `set_poll_interval` with the interval value. If it returns an error, report the error and
    stop — do not touch the cron job.
@@ -41,7 +41,7 @@ If none of the above match, treat the argument as a **filter** (existing behavio
    )
    ```
 
-   Cron expressions: `5m` → `*/5 * * * *`, `10m` → `*/10 * * * *`, `15m` → `*/15 * * * *`,
+   Cron expressions: `1m` → `*/1 * * * *`, `5m` → `*/5 * * * *`, `10m` → `*/10 * * * *`, `15m` → `*/15 * * * *`,
    `30m` → `*/30 * * * *`, `1h` → `0 * * * *`, `2h` → `0 */2 * * *`. All auto-poll jobs must set
    `durable: true` — without it, the cron dies on session exit and the autonomous loop silently
    stops.

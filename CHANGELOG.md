@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- 1m poll interval option for faster testing and low-latency use cases.
+  (beadle-0sv)
 - Pipeline orchestrator implementation: command YAML loader with typed arg
   validation, Planner interface (Rule + LLM stub), sequential pipeline
   executor with try/else error handling, per-command MCP config wiring,
