@@ -27,17 +27,13 @@ type ClaudeRunner struct {
 	Registry  map[string]MCPServerConfig
 }
 
-// Run creates a mission, spawns a Claude worker, and returns the output.
+// Run creates a mission from the stage contract, spawns a Claude worker, and returns the output.
 func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string) (string, error) {
 	contract := buildStageContract(p.Email, cmd, call, pipe)
 
-	missionID, err := r.Missions.Create(EmailMeta{
-		MessageID: p.Email.MessageID,
-		From:      p.Email.From,
-		Subject:   fmt.Sprintf("[pipeline %s stage %d] %s", p.ID, idx, call.Command),
-	})
+	missionID, err := createMissionFromContract(r.Templates.TmpDir, contract)
 	if err != nil {
-		return "", fmt.Errorf("create mission: %w", err)
+		return "", fmt.Errorf("create stage mission: %w", err)
 	}
 
 	e.Logger.Info("stage mission created",
@@ -79,7 +75,6 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 		"pipeline", p.ID, "stage", idx,
 		"command", call.Command, "mission", missionID)
 
-	_ = contract
 	return wr.Output, nil
 }
 
@@ -196,6 +191,7 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 	}
 
 	output, _ := io.ReadAll(io.LimitReader(stdoutPipe, 1<<20))
+	io.Copy(io.Discard, stdoutPipe) // drain remainder so Wait() won't hang
 
 	if err := c.Wait(); err != nil {
 		if stderrBuf.buf.Len() > 0 {
@@ -277,9 +273,14 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 	for i, c := range cmds {
 		if err := c.Start(); err != nil {
 			cancel()
-			// Close any open pipe writers so readers unblock.
-			for j := i; j < n-1; j++ {
+			// Close all pipe endpoints so started processes unblock.
+			for j := 0; j < n-1; j++ {
 				pipeWriters[j].Close()
+				pipeReaders[j].Close()
+			}
+			// Wait on already-started processes (best-effort cleanup).
+			for j := 0; j < i; j++ {
+				cmds[j].Wait()
 			}
 			return "", fmt.Errorf("step[%d] start %s: %w", i, cmd.Steps[i].Binary, err)
 		}
@@ -312,6 +313,7 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 
 	// Read final output while goroutines are running.
 	output, _ := io.ReadAll(io.LimitReader(lastStdout, 1<<20))
+	io.Copy(io.Discard, lastStdout) // drain remainder so Wait() won't hang
 	wg.Wait()
 
 	// Log per-step stderr.
@@ -340,13 +342,13 @@ type cappedWriter struct {
 
 func (w *cappedWriter) Write(p []byte) (int, error) {
 	remaining := w.max - w.buf.Len()
-	if remaining <= 0 {
-		return len(p), nil
+	if remaining > 0 {
+		if len(p) < remaining {
+			remaining = len(p)
+		}
+		w.buf.Write(p[:remaining])
 	}
-	if len(p) > remaining {
-		p = p[:remaining]
-	}
-	return w.buf.Write(p)
+	return len(p), nil
 }
 
 // minimalEnv builds an explicit environment for subprocess execution.

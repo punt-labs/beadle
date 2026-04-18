@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -171,6 +173,10 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 				go func() {
 					defer h.wg.Done()
 					defer func() { <-h.workerSem }()
+					whitelistDirs := []string{filepath.Join(os.Getenv("HOME"), ".local", "bin")}
+					if exe, err := os.Executable(); err == nil {
+						whitelistDirs = append(whitelistDirs, filepath.Dir(exe))
+					}
 					executor := &Executor{
 						Planner:  h.planner,
 						Commands: h.commands,
@@ -181,6 +187,7 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 								Templates: h.templates,
 								Registry:  DefaultMCPRegistry(),
 							},
+							"cli": &CLIRunner{Whitelist: &BinaryWhitelist{Dirs: whitelistDirs}},
 						},
 						Logger: h.logger,
 					}

@@ -174,12 +174,16 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			},
 		}
 		if err := ValidateArgs(replyCmd, replyCall.Args); err == nil {
-			runner := e.Runners[replyCmd.Runner]
-			replyResult, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe)
-			if err != nil {
-				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
+			runner, rok := e.Runners[replyCmd.Runner]
+			if !rok {
+				e.Logger.Warn("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
 			} else {
-				p.Results = append(p.Results, replyResult)
+				replyResult, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe)
+				if err != nil {
+					e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
+				} else {
+					p.Results = append(p.Results, replyResult)
+				}
 			}
 		}
 	} else {

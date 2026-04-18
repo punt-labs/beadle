@@ -87,17 +87,22 @@ type EthosMissionCreator struct {
 // Returns the mission ID parsed from stdout.
 func (c *EthosMissionCreator) Create(meta EmailMeta) (string, error) {
 	contract := BuildContract(meta)
+	return createMissionFromContract(c.TmpDir, contract)
+}
 
-	if err := os.MkdirAll(c.TmpDir, 0o700); err != nil {
-		return "", fmt.Errorf("create tmp dir %s: %w", c.TmpDir, err)
+// createMissionFromContract writes a YAML contract to a temp file, invokes
+// `ethos mission create --file`, and returns the parsed mission ID.
+func createMissionFromContract(tmpDir, contract string) (string, error) {
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+		return "", fmt.Errorf("create tmp dir %s: %w", tmpDir, err)
 	}
 
-	f, err := os.CreateTemp(c.TmpDir, "mission-*.yaml")
+	f, err := os.CreateTemp(tmpDir, "mission-*.yaml")
 	if err != nil {
 		return "", fmt.Errorf("create temp contract file: %w", err)
 	}
 	tmpPath := f.Name()
-	defer os.Remove(tmpPath) // clean up temp file regardless of outcome
+	defer os.Remove(tmpPath)
 
 	if _, err := f.WriteString(contract); err != nil {
 		f.Close()
@@ -109,7 +114,6 @@ func (c *EthosMissionCreator) Create(meta EmailMeta) (string, error) {
 
 	absPath, err := filepath.Abs(tmpPath)
 	if err != nil {
-		os.Remove(tmpPath)
 		return "", fmt.Errorf("resolve absolute path for %s: %w", tmpPath, err)
 	}
 
@@ -118,11 +122,13 @@ func (c *EthosMissionCreator) Create(meta EmailMeta) (string, error) {
 		return "", fmt.Errorf("ethos mission create: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 
-	// ethos may print deprecation warnings before the "created:" line.
-	// Parse the "created: m-... worker=... evaluator=..." line for the ID.
-	// Fallback: if no "created:" line, use the last non-empty line trimmed.
+	return parseMissionID(string(out))
+}
+
+// parseMissionID extracts the mission ID from ethos mission create output.
+func parseMissionID(output string) (string, error) {
 	missionID := ""
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "created: ") {
 			parts := strings.Fields(line)
@@ -133,8 +139,7 @@ func (c *EthosMissionCreator) Create(meta EmailMeta) (string, error) {
 		}
 	}
 	if missionID == "" {
-		// Fallback: last non-empty line (handles plain ID output).
-		for _, line := range strings.Split(string(out), "\n") {
+		for _, line := range strings.Split(output, "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" && !strings.HasPrefix(line, "ethos:") {
 				missionID = line
@@ -142,7 +147,7 @@ func (c *EthosMissionCreator) Create(meta EmailMeta) (string, error) {
 		}
 	}
 	if missionID == "" {
-		return "", fmt.Errorf("ethos mission create: no mission ID in output: %s", strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("ethos mission create: no mission ID in output: %s", strings.TrimSpace(output))
 	}
 	if !ValidMissionID(missionID) {
 		return "", fmt.Errorf("ethos mission create: invalid mission ID %q in output", missionID)
