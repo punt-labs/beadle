@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-04-18
+
 ### Added
 
 - `batch_move_messages` MCP tool: move multiple messages to another folder
