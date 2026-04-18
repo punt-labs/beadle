@@ -2147,7 +2147,7 @@ back to `PipeValue` after each stage.
   "files": [
     {
       "name": "02-report.pdf",
-      "path": "report.pdf",
+      "path": "02-report.pdf",
       "mime_type": "application/pdf",
       "size": 245000,
       "origin": "attachment"
@@ -2157,7 +2157,7 @@ back to `PipeValue` after each stage.
       "path": "chart.png",
       "mime_type": "image/png",
       "size": 82000,
-      "origin": "stage-2"
+      "origin": "stage-1"
     }
   ]
 }
@@ -2182,10 +2182,10 @@ a command that echoes its input `files` array from double-resolving
 absolute paths on the next stage.
 
 **Pipeline file directory:** Each pipeline gets a scratch directory at
-`~/.punt-labs/beadle/pipelines/<pipeline-id>/`. The daemon creates it
+`~/.punt-labs/beadle/pipelines/<pipeline-id>/`. The executor creates it
 before stage 0 and pre-downloads email attachments into it. Stages
-write generated files here. The directory is cleaned up after the
-pipeline completes (success or failure), with a configurable retention
+write generated files here. The executor removes the directory after
+pipeline completion (success or failure), with a configurable retention
 period for debugging (default: 0, immediate cleanup).
 
 **Orphan cleanup on startup:** The daemon scans `pipelines/` on
@@ -2375,8 +2375,8 @@ Stage 3: reply (claude, process, files: true)
    after each `files: true` stage. Exceeds 100 MB → else clause.
 7. **Duplicate filename prefix.** Pre-download prefixes attachments
    with MIME part index: `02-report.pdf`.
-8. **Reply terminal enforcement.** Executor rejects pipelines where
-   commands follow the reply stage.
+8. **Reply terminal enforcement.** Executor strips `reply` from
+   planner output and auto-appends it as the terminal stage.
 9. **Reply wiring.** The reply command's prompt includes instructions
    to attach files from the pipe to the outbound email.
 
