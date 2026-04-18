@@ -143,6 +143,7 @@ func (c *Config) SMTPEffectiveUser() string {
 
 // validPollIntervals enumerates allowed poll_interval values.
 var validPollIntervals = map[string]time.Duration{
+	"1m":  time.Minute,
 	"5m":  5 * time.Minute,
 	"10m": 10 * time.Minute,
 	"15m": 15 * time.Minute,
@@ -162,7 +163,7 @@ func (c *Config) PollDuration() (time.Duration, bool) {
 }
 
 // ValidPollInterval reports whether s is a valid poll_interval value.
-// Valid values: "5m", "10m", "15m", "30m", "1h", "2h", "n", "".
+// Valid values: "1m", "5m", "10m", "15m", "30m", "1h", "2h", "n", "".
 func ValidPollInterval(s string) bool {
 	if s == "" || s == "n" {
 		return true
