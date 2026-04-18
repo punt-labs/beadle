@@ -229,25 +229,102 @@ bd create --title="..." --type=task   # Create issue
 bd sync                     # Sync with git remote
 ```
 
-## Delegation with Missions
+## Delegation with Missions and Pipelines
 
-All code delegation uses ethos missions (`/mission` skill). Missions are typed contracts between a leader (claude) and a worker (bwk, mdm, djb, adb) that enforce write-set admission, frozen evaluators, bounded rounds, and append-only event logs.
+All code delegation uses ethos missions. Missions are typed contracts
+between a leader (claude) and a worker (bwk, mdm, djb, adb) that
+enforce write-set admission, frozen evaluators, bounded rounds, and
+append-only event logs.
 
-### When to use missions
+### Pipeline selection
 
-- Any bounded task with clear success criteria, a known set of files, and design ambiguity that benefits from write-set enforcement.
-- Sized for 1-3 rounds of one worker plus one evaluator.
+Every non-trivial task uses an ethos pipeline. The pipeline determines
+the stages, their ordering, and the `depends_on` wiring. Select the
+pipeline based on the nature of the work:
 
-Do NOT use missions for: exploratory research, work you do yourself, epics that need decomposition first (decompose into multiple missions), or review-cycle fix rounds (Copilot/Bugbot findings are mechanical — tight scope, no design ambiguity, 1 round. Use bare `Agent()` calls for fix rounds).
+| Pipeline | When to use |
+|----------|------------|
+| `quick` | Well-understood changes: bug fixes, single-file tasks, mechanical updates |
+| `docs` | Documentation-only: ADRs, README, CHANGELOG, architecture docs |
+| `coverage` | Test gap identified: measure, write tests, verify delta |
+| `standard` | Features with clear goals: 4+ files, needs design-implement-test-review-document |
+| `product` | New feature with product uncertainty: Working Backwards validation first |
+| `formal` | Complex stateful systems: Z-spec modeling before implementation |
+| `coe` | Recurring bugs, data corruption, incidents: structured root cause analysis |
+| `full` | Epics, cross-cutting work: product validation + formal spec + implementation + retro |
 
-### Workflow
+**Selection rules (evaluate in order):**
 
-1. **Scaffold**: `/mission` skill scaffolds the contract YAML from conversation context.
-2. **Confirm**: present the contract to the user (or decide as leader). Edit any field before creation.
-3. **Create**: `ethos mission create --file .tmp/missions/<name>.yaml` — returns a mission ID.
-4. **Spawn**: `Agent(subagent_type=<worker>, run_in_background=true)` with a prompt that points at the mission ID. The worker reads the contract via `ethos mission show <id>` as its first action.
-5. **Track**: `ethos mission show <id>`, `ethos mission log <id>`, `ethos mission results <id>`.
-6. **Review**: read the result artifact. Pass → `ethos mission close <id>`. Continue → `ethos mission reflect <id> --file <path>` then `ethos mission advance <id>`. Fail → `ethos mission close <id> --status failed`.
+1. Context mentions PR/FAQ, working backwards, product validation → `product`
+2. Context mentions Z-spec, formal spec, model check, state machine → `formal`
+3. Context mentions cause of error, recurring bug, postmortem → `coe`
+4. Write-set is all markdown or `docs/` → `docs`
+5. Context mentions test gap → `coverage`
+6. 11+ files or multi-repo context → `full`
+7. 4+ files or 3+ success criteria → `standard`
+8. Otherwise → `quick`
+
+Escalation only goes up. Never demote mid-flight.
+
+### Instantiation
+
+```bash
+# Preview before creating
+ethos mission pipeline instantiate standard --dry-run \
+  --leader claude --worker bwk --evaluator mdm \
+  --var feature=pipeline-v2 \
+  --var target=internal/daemon/
+
+# Create — produces one mission per stage with depends_on wiring
+ethos mission pipeline instantiate standard \
+  --leader claude --worker bwk --evaluator mdm \
+  --var feature=pipeline-v2 \
+  --var target=internal/daemon/
+```
+
+This creates 5 missions (design → implement → test → review → document)
+with `inputs_from` dependency edges. The worker picks up each stage in
+order. The leader is the quality gate between stages.
+
+### Execution loop
+
+For each stage in the pipeline:
+
+1. **Spawn**: `Agent(subagent_type=<worker>, run_in_background=true)`
+   with a prompt pointing at the mission ID. Fresh agent per stage —
+   sub-agents are stateless, the mission contract carries context.
+2. **Wait**: notification arrives when agent completes.
+3. **Review**: read the diff and the result artifact.
+4. **Reflect**: `ethos mission reflect <id> --file <path>`. Pass or
+   findings.
+5. **Advance or close**: if findings → `ethos mission advance <id>`,
+   spawn fresh worker to fix. If clean → mission closes, next stage
+   unblocks.
+6. **Commit**: after each clean stage. Tests must pass at every commit.
+
+For security-critical stages, spawn djb as a separate background
+review agent before reflecting. djb's review informs the reflection.
+
+### When NOT to use pipelines
+
+- Exploratory research — no write-set, no success criteria
+- Work you do directly (docs, ADRs, CLAUDE.md, memory files)
+- Copilot/Bugbot fix rounds — mechanical, tight scope, 1 round.
+  Use bare `Agent()` calls with the specific fix instructions.
+
+### Single-mission dispatch
+
+For work that genuinely doesn't fit a pipeline (rare), use direct
+dispatch:
+
+```bash
+ethos mission dispatch \
+  --worker bwk --evaluator mdm \
+  --write-set "internal/email/config.go,internal/email/config_test.go" \
+  --criteria "1m is a valid poll interval,make check passes" \
+  --context "Add 1m to validPollIntervals map" \
+  --ticket beadle-xyz --budget 1
+```
 
 ### Contract schema (required fields)
 
@@ -294,9 +371,13 @@ Note: write-set admission is advisory — the leader verifies compliance during 
 
 Worker and evaluator must be distinct handles with no shared role.
 
-### Task tracking and parallelism
+### Task tracking
 
-For multi-phase features, create a TaskCreate list with all missions up front and wire dependencies via `addBlockedBy`. Launch independent missions in parallel — two `Agent()` calls, both `run_in_background: true`. The task list is the source of truth for what's done, what's in flight, and what's blocked.
+Pipelines handle stage sequencing via `depends_on`. Use beads for
+tracking at the epic/task level (`bd list --status=open`). Use
+`ethos mission show <id>` and `ethos mission log <id>` for per-stage
+tracking. Do not duplicate pipeline sequencing in TaskCreate — the
+pipeline is the source of truth for stage ordering.
 
 ### Scratch files
 

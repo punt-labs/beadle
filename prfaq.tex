@@ -77,7 +77,7 @@
 
 % ── Document version ─────────────────────────────────────────────────────────
 \newcommand{\prfaqversion}[2]{\def\theprfaqmajor{#1}\def\theprfaqminor{#2}}
-\prfaqversion{2}{2}
+\prfaqversion{3}{0}
 
 % ── Header/footer ────────────────────────────────────────────────────────────
 \usepackage{fancyhdr}
@@ -182,17 +182,18 @@
 
 \section*{Press Release}
 
-SEATTLE, WA --- September 15, 2026 --- Punt Labs, whose products address
-the second-order effects of AI --- including the trust failures and adoption
-backlash that follow when autonomous systems lack verifiable controls --- today
-released Beadle, a free, open-source daemon that gives developers cryptographic
-control over an autonomous agent running on their own machine. Unlike agent
-frameworks that ask for broad trust and offer opaque logs, Beadle requires a
-GPG-signed instruction for every action, enforces declared permissions before
-executing anything, and records every step in a tamperproof, signed audit trail.
-The owner triggers pipelines via CLI, email through Proton Mail, or scheduled
-cron --- Beadle executes multi-step workflows using bash, Claude, or Python
-regardless of how the task arrives (see \faqref{faq:competitors}).
+SEATTLE, WA --- September 15, 2026 --- Punt Labs today released Beadle,
+a free, open-source daemon that turns email into a programmable control
+plane for an autonomous agent running on your own machine. You send an
+email; Beadle verifies your identity via PGP or Proton E2E encryption,
+decomposes your instruction into a pipeline of commands, and executes
+them --- mixing AI reasoning (Claude) with fast CLI tools (biff, jq,
+git) in a single pipeline. Results arrive as an email reply. Unlike
+agent frameworks that ask for broad trust, Beadle requires GPG-signed
+command definitions, enforces per-contact permissions before executing
+anything, and records every step in a pipeline audit trail. Commands
+are programs, the daemon is the shell, pipelines are pipes, and GPG
+signatures are sudo (see \faqref{faq:competitors}).
 
 \prsection{Problem}
 
@@ -216,46 +217,53 @@ failures at scale (see \faqref{faq:customer-evidence}).
 
 \prsection{Solution}
 
-Beadle is a background daemon configured for a single identity: a name, an email
-address, and a GPG keychain. The owner writes command documents --- small
-Markdown files that declare their interpreter (bash, Claude, or Python), their
-inputs and outputs, and their required permissions. Commands are signed with the
-owner's GPG key and can be piped together like Unix commands:
+Beadle is a background daemon with its own email address, GPG keychain,
+and a library of GPG-signed YAML command files. Each command declares
+a runner (Claude for AI reasoning, CLI for deterministic tools), its
+inputs and outputs via JSON schema, and whether it transforms the pipeline
+data or passes it through as a side-effect. Commands compose like Unix
+pipes:
 
-{\small\texttt{check-schedule.md | find-free-slot.md | reserve-slot.md | notify-attendees.md}}
+{\small\texttt{summarize | notify-team | reply}}
 
-The owner triggers a pipeline from the CLI, by emailing Beadle, or by
-scheduling it on Beadle's internal cron. Regardless of how the task arrives,
-Beadle validates every signature, preflights all permissions before executing
-anything, and runs the pipeline atomically. Every action is recorded in a
-signed, plaintext audit log that only the owner can clear
+The owner sends an email to Beadle's address. The daemon verifies the
+sender's identity (PGP signature or Proton E2E encryption), checks their
+\texttt{x} (execute) permission, maps the instruction to a command
+pipeline, and executes stages sequentially. A single JSON value --- the
+pipe --- flows through the pipeline. Process-mode commands transform it;
+passthrough-mode commands (notifications, logging) read it without
+modification. Results arrive as an email reply. Every stage is logged
+with pipeline ID, command name, runner, duration, and exit status
 (see \faqref{faq:why-email}).
 
 \prsection{Customer Quote}
 
 \begin{customerquote}
-\textit{``I used to leave a terminal open overnight hoping my test pipeline
-wouldn't hang. Now I email Beadle a signed command before bed, and by morning
-there's a summary in my inbox with every step logged. I know exactly what ran,
-in what order, and that nobody tampered with it. The first time I woke up to a
-clean test report instead of a hung terminal, I realized I'd been doing this
-wrong for years.''}
+\textit{``I emailed `summarize this' to my agent and 90 seconds later had
+a structured summary in my inbox. The Claude stage did the reasoning, a
+jq + biff stage broadcasted the headline to my team in 10 milliseconds,
+and the reply landed in my inbox with the full analysis. Three stages,
+two different runners, one email. I didn't have to be at my keyboard.
+The pipeline log shows exactly what happened: which command, which runner,
+how long, what output. It's like having cron + Unix pipes + GPG sudo for
+an AI agent.''}
 
 \raggedleft --- \textbf{Alex Petrov}, Senior Platform Engineer
 \end{customerquote}
 
 \prsection{Getting Started}
 
-Getting started with Beadle takes three steps. First, run
-{\small\texttt{beadle init}} --- Beadle generates a GPG signing key, creates
-your identity file, and sets up the audit log. Second, write your first task in
-a Markdown file and sign it with {\small\texttt{beadle sign my-task.md}}.
-Third, run {\small\texttt{beadle run my-task.md}} and see the result. Within
-minutes, Beadle validates the signature, checks permissions, executes the
-command, and logs every step with a cryptographic proof chain. No cloud account,
-no data leaves your machine. To add email as a remote trigger, run
-{\small\texttt{beadle init {-}{-}email}} to connect Proton Bridge --- but
-the core value works without it.
+Getting started takes three steps. First, install the binary:
+{\small\texttt{curl -fsSL .../install.sh | sh}} downloads the Go binary
+and installs the Claude Code plugin (MCP tools + slash commands). Second,
+configure your email connection (IMAP/SMTP via Proton Bridge or any
+provider) and store credentials in your OS keychain. Third, start the
+daemon: {\small\texttt{beadle-daemon run}}. Beadle polls your inbox,
+and when you send an email with ``summarize'' in the subject, you get
+a structured summary back within two minutes. No cloud account, no data
+leaves your machine. Commands are YAML files in
+{\small\texttt{\textasciitilde/.punt-labs/beadle/commands/}} --- add new
+capabilities by writing a YAML file and signing it with your GPG key.
 
 \prsection{Spokesperson Quote}
 
@@ -277,11 +285,11 @@ well.''
 \prsection{Call to Action}
 
 Beadle is available now at
-{\small\texttt{github.com/punt-labs/beadle}} under an open-source license.
-Installation requires Python 3.11+ and a GPG keychain. For email-triggered
-execution, add a Proton Mail paid plan with Proton Bridge. Documentation,
-example command documents, and a quickstart tutorial are included in the
-repository.
+{\small\texttt{github.com/punt-labs/beadle}} under the MIT license.
+Static Go binaries for macOS and Linux (arm64/amd64). Installation
+requires an IMAP/SMTP server (Proton Bridge recommended for E2E
+encryption) and GPG for command signing. Documentation, example
+commands, and the pipeline design document are in the repository.
 
 \newpage
 
@@ -296,25 +304,30 @@ repository.
 \subsection*{External FAQs}
 
 \begin{faqpair}{What is Beadle and who is it for?}\label{faq:what-is-it}
-  Beadle is an open-source autonomous agent daemon for developers and power users
-  who want to delegate tasks to an AI agent that runs on their own machine.
-  It is designed for people who already use AI coding assistants but need a way to
-  run multi-step pipelines unattended --- overnight test suites, scheduled code
-  reviews, automated triage of incoming emails --- with cryptographic proof of
-  what was authorized and what happened.
+  Beadle is an open-source agent daemon that receives instructions via email
+  and executes them as multi-stage pipelines. It is for developers who want
+  to delegate tasks to an AI agent running on their own machine --- with
+  cryptographic verification of who authorized what. Commands are YAML files
+  that declare a runner (Claude for reasoning, CLI for tools like jq, biff,
+  git), a JSON output schema, and whether they transform the pipeline data
+  or pass it through as a side-effect. The daemon is the shell; commands
+  are programs; GPG signatures are sudo.
 \end{faqpair}
 
 \begin{faqpair}{How is Beadle different from Auto-GPT or Claude Code?}\label{faq:competitors}
-  Auto-GPT and similar frameworks give an agent broad autonomy to decide its own
-  next steps, with minimal authentication and coarse-grained permissions. Claude
-  Code is an interactive assistant that requires the developer at the keyboard.
+  Auto-GPT and similar frameworks give an agent broad autonomy with minimal
+  authentication. Claude Code is an interactive assistant that requires the
+  developer at the keyboard (its \texttt{-{}-bare} mode enables headless
+  execution but provides no trust model, no command library, and no pipeline
+  orchestration).
 
-  Beadle occupies a different point in the design space: it has \textit{zero}
-  independent authority. Every action requires a GPG-signed instruction from the
-  owner. Commands declare their permissions (read, write, execute) per document.
-  Pipelines are composed explicitly, not decided by the agent. The audit log is
-  signed and tamperproof. The trade-off is deliberate: Beadle sacrifices agent
-  autonomy for owner control and auditability.
+  Beadle occupies a different point: it has \textit{zero} independent authority.
+  Every command is a GPG-signed YAML file with a declared runner, typed args,
+  and JSON output schema. Pipelines compose explicitly. The trust gate verifies
+  sender identity (PGP or Proton E2E) and per-contact permissions before any
+  execution. CLI commands run in milliseconds with whitelist-only binary
+  resolution and no shell. The trade-off is deliberate: Beadle sacrifices agent
+  autonomy for owner control, auditability, and speed on deterministic operations.
 \end{faqpair}
 
 \begin{faqpair}{Why email? Why not a web UI or a CLI?}\label{faq:why-email}
@@ -334,11 +347,13 @@ repository.
 \end{faqpair}
 
 \begin{faqpair}{How do I get started?}\label{faq:getting-started}
-  Install Beadle via pip ({\small\texttt{pip install punt-beadle}}), run
-  {\small\texttt{beadle init}} to configure your identity and Proton Bridge
-  connection, and sign your first command with
-  {\small\texttt{beadle sign my-task.md}}. Email it to your Beadle address
-  or run it locally. Results arrive in your inbox within minutes.
+  Run the install script ({\small\texttt{curl -fsSL .../install.sh | sh}})
+  to download the Go binary and install the Claude Code plugin. Configure
+  your email connection (IMAP/SMTP) and credentials. Start the daemon with
+  {\small\texttt{beadle-daemon run}}. Send an email with ``summarize'' in
+  the subject from a PGP-verified or Proton E2E contact, and receive the
+  summary as a reply. Add commands by writing YAML files in
+  {\small\texttt{\textasciitilde/.punt-labs/beadle/commands/}}.
 \end{faqpair}
 
 \begin{faqpair}{How much does it cost?}\label{faq:pricing}
@@ -469,8 +484,8 @@ repository.
 \end{faqpair}
 
 \begin{faqpair}{What is the customer acquisition strategy?}
-  Open-source distribution via GitHub and PyPI. Beadle is a CLI tool in the Punt
-  Labs ecosystem (alongside Biff, Quarry, and TTS), which provides cross-project
+  Open-source distribution via GitHub Releases. Beadle is a CLI tool in the Punt
+  Labs ecosystem (alongside Biff, Quarry, and Vox), which provides cross-project
   visibility. The secondary purpose --- as a showcase for the Jacobson-Cockburn
   use-case methodology \cite{jacobson2023usecases} --- generates content that
   attracts developers interested in both the tool and the process.
@@ -484,21 +499,23 @@ repository.
 \end{faqpair}
 
 \begin{faqpair}{What is your next step to validate your vision?}\label{faq:next-step}
-  The proof-of-concept already validates three core mechanics: GPG-signed
-  prompt policies with SHA-256 integrity verification, single-command
-  execution via Claude CLI, and result delivery through Proton Bridge.
-  These run reliably as a daily LaunchAgent on the author's machine.
+  The daemon is running. Pipeline v1 is verified end-to-end: a real email
+  from a PGP/Proton-verified sender triggers a multi-stage pipeline
+  (summarize via Claude, auto-reply via Claude), and the sender receives
+  the result. 9 PRs merged, 3 security reviews, e2e tested on Proton Bridge.
 
-  The next step is to generalize the PoC into the Beadle daemon ---
-  specifically, multi-command pipelines with the two-level try-catch model
-  and identity management via {\small\texttt{beadle init}}. Once a user can
-  run {\small\texttt{beadle init}} to configure an identity and
-  {\small\texttt{beadle run pipeline.md}} to execute a multi-step pipeline,
-  the tool is ready for external testing: 5--10 developers who currently use
-  Auto-GPT or Claude Code for automation tasks. The test is successful if
-  users can configure an identity, sign a multi-command pipeline, execute it,
-  and read a clear audit log without consulting GPG documentation. The key
-  question is whether the signing ceremony feels like a feature or a burden.
+  The next step is Pipeline v2: add CLI runners (execute tools like biff,
+  jq, git in milliseconds instead of 45-second Claude sessions),
+  process/passthrough data flow (side-effect commands don't destroy the
+  pipe), compound CLI steps (jq | biff chained without a shell), and
+  JSON schema validation between stages. The design has passed three
+  rounds of architect review and is broken into 8 implementation tasks.
+
+  After v2 ships, the tool is ready for external testing: 5--10 developers
+  who use Claude Code or Auto-GPT for automation. The test: can they
+  write a command YAML, sign it, send an email, and receive a pipeline
+  result without consulting GPG documentation? The key question is
+  whether the trust model feels like a feature or a burden.
 \end{faqpair}
 
 \subsubsection*{Technical}
@@ -593,27 +610,29 @@ repository.
   \textbf{Phased delivery order:}
 
   \begin{enumerate}[nosep]
-    \item \textbf{Foundation} --- Identity config (UC1), single command
-      execution, GPG signing, audit log, CLI interface. This is the minimum
-      viable trust loop: sign a command, execute it locally, get a
-      cryptographically verified result. A proof-of-concept already validates
-      GPG signing, single-command execution via Claude CLI, and Proton Bridge
-      email delivery, so this phase starts with reduced unknowns.
-    \item \textbf{Email} --- Proton Bridge integration (UC2),
-      email-triggered execution, result reporting. Adds remote triggering
-      without giving up the local trust model.
-    \item \textbf{Pipelines} --- Multi-command pipelines (UC3), two-level
-      try-catch, schema validation between stages. Generalizes the
-      single-command model into composable workflows.
-    \item \textbf{Scheduler} --- Internal cron (UC4), third-party email
-      handling (UC5), key rotation (UC7, UC8). Convenience and operational
-      hygiene; not part of the core value proposition.
+    \item \textbf{Foundation (shipped)} --- MCP email server with 17 tools,
+      four-level PGP trust model, per-contact rwx permissions, multi-identity
+      via ethos, credential isolation (OS keychain), Proton Bridge IMAP/SMTP.
+      Released as \texttt{beadle-email} (v0.14.1).
+    \item \textbf{Daemon + Pipeline v1 (shipped)} --- Background daemon with
+      IMAP poller, trust gate (PGP verified + Proton E2E), x-bit enforcement,
+      pipeline orchestrator (command YAML loader, regex planner, sequential
+      executor, auto-reply, crash-safe persistence), worker spawner via
+      \texttt{claude -p --bare} with adversarial isolation. 9 PRs, 3 security
+      reviews, e2e verified on Proton Bridge.
+    \item \textbf{Pipeline v2 (in progress)} --- CLI runners (execute tools
+      in milliseconds), process/passthrough data flow, compound CLI steps
+      (jq | biff without shell), JSON pipe with schema validation,
+      runner-conditional command validation. 8 tasks across 4 phases.
+      Three architect reviews completed.
+    \item \textbf{Future} --- LLM planner (replace regex with Claude
+      decomposition), GPG command signing enforcement, multi-channel triggers
+      (biff chat, webhooks), internal scheduler, key rotation management.
   \end{enumerate}
 
-  \textbf{Cut order:} If scope compresses, Scheduler is cut first ---
-  it is operational convenience, not core value. Pipelines can be
-  deferred to a fast follow-up if Foundation and Email prove the trust
-  model. The kill switch is not timeline-based but adoption-based:
+  \textbf{Cut order:} Future items are cut first. Pipeline v2 is the
+  current priority --- it enables the command library that makes beadle
+  useful beyond the ``summarize'' demo. The kill switch is adoption-based:
   see \faqref{faq:metrics}.
 \end{faqpair}
 
@@ -682,7 +701,7 @@ repository.
   improvements, LangLearn ports). This cost is governed by a kill switch tied
   to the metrics in \faqref{faq:metrics}: if, at the 6-month mark after
   public release, Beadle has fewer than 100 GitHub stars \textit{or} fewer
-  than 10 weekly PyPI installs, the project enters archival mode (security
+  than 10 weekly binary downloads, the project enters archival mode (security
   patches only, no new feature work). This is a hard threshold, not a
   judgment call --- below either number means the positioning missed the
   audience and further development hours are not justified.
@@ -695,7 +714,7 @@ repository.
   \midrule
   GitHub stars & 500+ & Below 100 after launch suggests the positioning
     missed the audience \\
-  Weekly active installs (PyPI) & 50+ & Below 10 suggests the tool is not
+  Weekly binary downloads & 50+ & Below 10 suggests the tool is not
     useful enough to keep \\
   Prototype test completion & 8/10 users complete first pipeline &
     Below 5/10 signals fatal usability friction \\
@@ -704,7 +723,7 @@ repository.
 
   \vspace{0.5em}
   \textbf{Pre-mortem --- what failure looks like:} It is March 2027. Beadle has
-  200 GitHub stars, 8 PyPI installs per week, and the prototype test showed
+  200 GitHub stars, 8 binary downloads per week, and the prototype test showed
   3/10 users abandoned during GPG key setup. The cryptographic trust model ---
   signed commands, declared permissions, tamperproof audit trail --- resonated
   in blog posts but not in practice. Developers found the signing ceremony
@@ -781,19 +800,21 @@ Usability & \textcolor{RiskRed}{High} &
   product. The signing ceremony (sign every command, declare every
   permission) is the trust model's core value but also its primary
   usability risk: developers may perceive it as ceremony, not safety. \\
-Feasibility & \textcolor{RiskAmber}{Medium} &
-  A proof-of-concept validates the core integration: GPG-signed prompts,
-  Claude CLI invocation, and Proton Bridge email delivery run reliably as a
-  daily LaunchAgent. The remaining integration risk is in generalizing this
-  to multi-command pipelines with the two-level try-catch model, which is
-  novel and unproven. Proton Bridge long-term uptime for continuous daemon
-  operation is untested beyond the current daily-run pattern. \\
+Feasibility & \textcolor{RiskGreen}{Low} &
+  Pipeline v1 is built and e2e verified on Proton Bridge: email arrival
+  triggers a multi-stage pipeline (summarize + auto-reply) and delivers
+  results to the sender. The trust gate, worker spawner, pipeline executor,
+  and crash-safe persistence all work. The remaining integration risk is in
+  Pipeline v2's CLI runner and compound step execution --- both are
+  well-understood patterns (exec.Command, io.Pipe) with a thorough design
+  (3 architect reviews). Proton Bridge has run continuously for weeks as a
+  daemon IMAP source without issues. \\
 Viability & \textcolor{RiskGreen}{Low} &
   No revenue requirement. Open-source, no infrastructure costs beyond the
   developer's own machine. The only viability risk is opportunity cost ---
   development time spent on Beadle is time not spent on other Punt Labs
   projects. Mitigated by a kill switch: if at 6 months post-release Beadle
-  has fewer than 100 GitHub stars or fewer than 10 weekly PyPI installs,
+  has fewer than 100 GitHub stars or fewer than 10 weekly binary downloads,
   the project enters archival mode and development hours stop
   (see \faqref{faq:pnl} and \faqref{faq:metrics}). \\
 \bottomrule
@@ -810,52 +831,77 @@ Viability & \textcolor{RiskGreen}{Low} &
 Defines the scope boundary for the product. Every feature is explicitly
 categorized to prevent scope creep and force prioritization decisions upfront.
 
-\subsection*{Must Do}
+\subsection*{Shipped}
 
-Features that are essential for launch. Without these, the product does not
-solve the core problem.
+Features that are built and working.
 
 \begin{enumerate}[nosep,leftmargin=2.5em]
-  \featureitem{Identity configuration}{single-identity setup with name, email,
-    and GPG keychain via {\small\texttt{beadle init}}}\label{feat:identity}
-  \featureitem{GPG command signing}{sign command documents with owner's key;
-    reject unsigned or expired-key commands}\label{feat:signing}
-  \featureitem{Command pipeline execution}{pipe commands together with
-    Unix-style syntax; two-level try-catch (preflight then
-    execute)}\label{feat:pipelines}
-  \featureitem{Three interpreters}{bash, Claude, and Python as command
-    interpreters, declared per document}\label{feat:interpreters}
-  \featureitem{Per-command permissions}{rwx permission bits per command
-    document, validated at preflight}\label{feat:permissions}
-  \featureitem{Signed audit log}{plaintext, GPG-signed log of every action;
-    only owner can clear}\label{feat:audit-log}
-  \featureitem{Email trigger via Proton Bridge}{receive GPG-signed instructions
-    by email and return results by email}\label{feat:email}
-  \featureitem{Local CLI execution}{run pipelines locally via
-    {\small\texttt{beadle run}} for development and
-    testing}\label{feat:local-cli}
+  \featureitem{MCP email server}{17 tools --- list, read, send, move,
+    attachments, verify signatures, MIME inspection, trust classification,
+    address book, identity switching, inbox polling}\label{feat:mcp}
+  \featureitem{Four-level transport trust}{trusted (Proton E2E), verified
+    (PGP), untrusted (bad PGP), unverified (none). Inline PGP verification
+    during message listing}\label{feat:trust}
+  \featureitem{Per-contact rwx permissions}{read, write, execute per contact
+    per identity. x-bit gates autonomous pipeline execution}\label{feat:permissions}
+  \featureitem{Multi-identity via ethos}{identity resolved per-request from
+    ethos sidecar. Repo-local config, global fallback, mid-session
+    switching}\label{feat:identity}
+  \featureitem{Pipeline v1}{background daemon with IMAP poller, trust gate,
+    command YAML loader with typed args, regex planner, sequential executor,
+    auto-reply as terminal stage, crash-safe pipeline persistence, worker
+    spawner via \texttt{claude -p --bare} with adversarial
+    isolation}\label{feat:pipeline-v1}
+  \featureitem{Email trigger via Proton Bridge}{receive instructions by email,
+    verify sender identity, execute pipeline, return results by
+    email}\label{feat:email}
+  \featureitem{Credential isolation}{secrets resolved at runtime from OS
+    keychain (macOS Keychain, Linux pass/libsecret), secret files, or env
+    vars. Never stored in config}\label{feat:credentials}
+\end{enumerate}
+
+\subsection*{In Progress (Pipeline v2)}
+
+The next round of work. Designed and architect-reviewed (3 rounds).
+
+\begin{enumerate}[nosep,leftmargin=2.5em]
+  \featureitem{CLI runner}{execute tools (biff, jq, git, ethos) directly via
+    \texttt{exec.Command} in milliseconds. Whitelist-only binary resolution.
+    No shell, no LLM overhead for deterministic
+    operations}\label{feat:cli-runner}
+  \featureitem{Process/passthrough modes}{commands declare whether they
+    transform the pipe (process) or read it as a side-effect (passthrough).
+    Notifications don't destroy pipeline data}\label{feat:passthrough}
+  \featureitem{Compound CLI steps}{chain binaries within a single command
+    (jq | biff) via goroutine-per-step with io.Pipe. No shell
+    invoked}\label{feat:compound}
+  \featureitem{JSON pipe with schema validation}{structured data flows between
+    stages. Commands declare output schemas. Daemon validates JSON between
+    process-mode stages}\label{feat:schemas}
+  \featureitem{Runner-conditional validation}{prompt and budget required for
+    Claude commands only. Binary and steps for CLI only. Typed args for
+    both}\label{feat:runner-validation}
 \end{enumerate}
 
 \subsection*{Should Do}
 
-Features that meaningfully improve the product but are not launch-blocking.
-Candidates for fast follow-up.
+Features for after Pipeline v2. Not launch-blocking.
 
 \begin{enumerate}[nosep,leftmargin=2.5em]
+  \featureitem{LLM planner}{replace regex planner with Claude decomposition
+    of natural language instructions into command
+    sequences}\label{feat:llm-planner}
+  \featureitem{GPG command signing enforcement}{verify GPG signatures on
+    command YAML files at daemon startup. Reject unsigned or tampered
+    files}\label{feat:signing}
   \featureitem{Internal scheduler}{cron-like scheduled pipeline execution with
     no catch-up on missed runs}\label{feat:scheduler}
-  \featureitem{Third-party email handling}{quarantine and escape unsigned
-    third-party content from forwarded emails}\label{feat:third-party}
+  \featureitem{Multi-channel triggers}{biff chat, webhooks as trigger channels
+    alongside email}\label{feat:multi-channel}
   \featureitem{Key rotation management}{guided key rotation with expiry
-    enforcement; remove keys from trusted list}\label{feat:key-rotation}
-  \featureitem{Command schema validation}{declare input/output schemas per
-    command; preflight validates compatibility between adjacent pipeline
-    stages}\label{feat:schemas}
-  \featureitem{Multi-provider email support}{Beadle speaks standard
-    IMAP/SMTP --- supporting other providers (Fastmail, Dovecot, Gmail)
-    is a scope decision, not an architectural lock-in. Proton-only in
-    Phase~0 because E2E encryption aligns with the trust
-    model}\label{feat:multi-provider}
+    enforcement}\label{feat:key-rotation}
+  \featureitem{Multi-provider email}{Fastmail, Gmail, self-hosted Dovecot.
+    Standard IMAP/SMTP, no architectural lock-in}\label{feat:multi-provider}
 \end{enumerate}
 
 \subsection*{Won't Do}

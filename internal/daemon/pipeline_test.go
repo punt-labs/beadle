@@ -11,37 +11,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockSpawner returns preconfigured results per mission, keyed by call index.
-type mockSpawner struct {
-	calls   []mockSpawnerCall
+// mockClaudeRunner implements Runner for pipeline tests.
+type mockClaudeRunner struct {
+	calls   []mockRunnerCall
 	results []WorkerResult
 	errs    []error
 	idx     int
 }
 
-type mockSpawnerCall struct {
-	MissionID        string
-	MCPConfigPath    string
-	SystemPromptPath string
-	EnvOverrides     map[string]string
+type mockRunnerCall struct {
+	Idx  int
+	Cmd  string
+	Pipe string
+	Args map[string]any
 }
 
-func (m *mockSpawner) Run(_ context.Context, missionID, mcpConfigPath, systemPromptPath string, envOverrides map[string]string) (WorkerResult, error) {
-	m.calls = append(m.calls, mockSpawnerCall{
-		MissionID:        missionID,
-		MCPConfigPath:    mcpConfigPath,
-		SystemPromptPath: systemPromptPath,
-		EnvOverrides:     envOverrides,
-	})
+func (m *mockClaudeRunner) Run(_ context.Context, _ *Executor, _ *Pipeline, idx int, cmd *Command, call CommandCall, pipe string) (string, error) {
+	m.calls = append(m.calls, mockRunnerCall{Idx: idx, Cmd: cmd.Name, Pipe: pipe, Args: call.Args})
 	i := m.idx
 	m.idx++
 	if i < len(m.errs) && m.errs[i] != nil {
-		return WorkerResult{MissionID: missionID, IsError: true}, m.errs[i]
+		return "", m.errs[i]
 	}
 	if i < len(m.results) {
-		return m.results[i], nil
+		return m.results[i].Output, nil
 	}
-	return WorkerResult{MissionID: missionID, Output: "ok"}, nil
+	return "ok", nil
 }
 
 func testLogger() *slog.Logger {
@@ -51,10 +46,11 @@ func testLogger() *slog.Logger {
 func testCommands() map[string]*Command {
 	return map[string]*Command{
 		"greet": {
-			Name:   "greet",
-			Prompt: "Greet the user",
-			Input:  "none",
-			Output: "prose",
+			Name:         "greet",
+			Runner:       "claude",
+			Mode:         "passthrough",
+			Prompt:       "Greet the user",
+			OutputSchema: "text",
 			Budget: struct {
 				Rounds              int  `yaml:"rounds"`
 				ReflectionAfterEach bool `yaml:"reflection_after_each"`
@@ -64,9 +60,16 @@ func testCommands() map[string]*Command {
 		},
 		"summarize": {
 			Name:   "summarize",
+			Runner: "claude",
+			Mode:   "process",
 			Prompt: "Summarize the input",
-			Input:  "required",
-			Output: "prose",
+			OutputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"title":   map[string]any{"type": "string"},
+					"summary": map[string]any{"type": "string"},
+				},
+			},
 			Budget: struct {
 				Rounds              int  `yaml:"rounds"`
 				ReflectionAfterEach bool `yaml:"reflection_after_each"`
@@ -75,10 +78,11 @@ func testCommands() map[string]*Command {
 			MCPServers: []string{"ethos", "beadle-email"},
 		},
 		"deploy": {
-			Name:   "deploy",
-			Prompt: "Deploy to production",
-			Input:  "optional",
-			Output: "prose",
+			Name:         "deploy",
+			Runner:       "claude",
+			Mode:         "process",
+			Prompt:       "Deploy to production",
+			OutputSchema: "text",
 			Args: []CommandArg{
 				{Name: "env", Type: "enum", Values: []string{"prod", "staging"}, Required: true},
 			},
@@ -90,13 +94,13 @@ func testCommands() map[string]*Command {
 			MCPServers: []string{"ethos"},
 		},
 		"reply": {
-			Name:   "reply",
-			Prompt: "Reply to the sender with the pipeline output",
-			Input:  "required",
-			Output: "prose",
+			Name:         "reply",
+			Runner:       "claude",
+			Mode:         "process",
+			Prompt:       "Reply to the sender with the pipeline output",
+			OutputSchema: "text",
 			Args: []CommandArg{
 				{Name: "to", Type: "string", Required: true},
-				{Name: "message", Type: "string", Required: true},
 			},
 			Budget: struct {
 				Rounds              int  `yaml:"rounds"`
@@ -108,15 +112,18 @@ func testCommands() map[string]*Command {
 	}
 }
 
+func testRunners(runner *mockClaudeRunner) map[string]Runner {
+	return map[string]Runner{"claude": runner}
+}
+
 func TestExecutor_TwoStagePipeline(t *testing.T) {
-	sp := &mockSpawner{
+	runner := &mockClaudeRunner{
 		results: []WorkerResult{
 			{Output: "Hello, Jim!"},
-			{Output: "Summary: greeting sent"},
+			{Output: `{"title":"greeting","summary":"sent"}`},
+			{Output: "reply sent"},
 		},
 	}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
 
 	exec := &Executor{
 		Planner: &StubPlanner{
@@ -125,12 +132,9 @@ func TestExecutor_TwoStagePipeline(t *testing.T) {
 				{Command: "summarize", Args: map[string]any{}},
 			},
 		},
-		Commands:  testCommands(),
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "42", From: "jim@test.com", Subject: "Test"}
@@ -141,9 +145,8 @@ func TestExecutor_TwoStagePipeline(t *testing.T) {
 	assert.Equal(t, "", p.Error)
 	assert.Len(t, p.Results, 3) // 2 stages + auto-reply
 	assert.Equal(t, "Hello, Jim!", p.Results[0])
-	assert.Equal(t, "Summary: greeting sent", p.Results[1])
-	assert.Len(t, sp.calls, 3) // 2 stages + auto-reply
-	assert.Len(t, mock.calls, 3)
+	assert.Equal(t, `{"title":"greeting","summary":"sent"}`, p.Results[1])
+	assert.Len(t, runner.calls, 3) // 2 stages + auto-reply
 
 	// WriteSet is the union of both commands.
 	assert.Contains(t, p.WriteSet, "output/greet.txt")
@@ -151,7 +154,7 @@ func TestExecutor_TwoStagePipeline(t *testing.T) {
 }
 
 func TestExecutor_StageFailure(t *testing.T) {
-	sp := &mockSpawner{
+	runner := &mockClaudeRunner{
 		results: []WorkerResult{
 			{Output: "stage 0 ok"},
 		},
@@ -160,8 +163,6 @@ func TestExecutor_StageFailure(t *testing.T) {
 			fmt.Errorf("deploy exploded"),
 		},
 	}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
 
 	exec := &Executor{
 		Planner: &StubPlanner{
@@ -170,12 +171,9 @@ func TestExecutor_StageFailure(t *testing.T) {
 				{Command: "summarize", Args: map[string]any{}},
 			},
 		},
-		Commands:  testCommands(),
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "99", From: "jim@test.com", Subject: "Fail"}
@@ -185,23 +183,18 @@ func TestExecutor_StageFailure(t *testing.T) {
 	assert.Equal(t, "failed", p.Status)
 	assert.Contains(t, p.Error, "stage 1")
 	assert.Len(t, p.Results, 1) // first stage succeeded
-	// 2 stage spawns + 1 else reply spawn.
-	assert.Len(t, sp.calls, 3)
+	// 2 stage calls + 1 else reply call.
+	assert.Len(t, runner.calls, 3)
 }
 
 func TestExecutor_PlannerFailure(t *testing.T) {
-	sp := &mockSpawner{}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+	runner := &mockClaudeRunner{}
 
 	exec := &Executor{
-		Planner:   &StubPlanner{Err: fmt.Errorf("no rules matched")},
-		Commands:  testCommands(),
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Planner:  &StubPlanner{Err: fmt.Errorf("no rules matched")},
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "1", From: "x@test.com", Subject: "Nope"}
@@ -212,22 +205,17 @@ func TestExecutor_PlannerFailure(t *testing.T) {
 	assert.Contains(t, p.Error, "plan")
 	assert.Contains(t, err.Error(), "plan pipeline")
 	// Else handler fires reply.
-	assert.Len(t, sp.calls, 1)
+	assert.Len(t, runner.calls, 1)
 }
 
 func TestExecutor_EmptyPlan(t *testing.T) {
-	sp := &mockSpawner{}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+	runner := &mockClaudeRunner{}
 
 	exec := &Executor{
-		Planner:   &StubPlanner{Result: []CommandCall{}},
-		Commands:  testCommands(),
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Planner:  &StubPlanner{Result: []CommandCall{}},
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "2", From: "x@test.com", Subject: "Empty"}
@@ -237,13 +225,11 @@ func TestExecutor_EmptyPlan(t *testing.T) {
 	assert.Equal(t, "failed", p.Status)
 	assert.Contains(t, p.Error, "empty")
 	// Else handler fires reply.
-	assert.Len(t, sp.calls, 1)
+	assert.Len(t, runner.calls, 1)
 }
 
 func TestExecutor_UnknownCommand(t *testing.T) {
-	sp := &mockSpawner{}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+	runner := &mockClaudeRunner{}
 
 	exec := &Executor{
 		Planner: &StubPlanner{
@@ -251,12 +237,9 @@ func TestExecutor_UnknownCommand(t *testing.T) {
 				{Command: "nonexistent", Args: map[string]any{}},
 			},
 		},
-		Commands:  testCommands(),
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "3", From: "x@test.com", Subject: "Bad cmd"}
@@ -266,13 +249,11 @@ func TestExecutor_UnknownCommand(t *testing.T) {
 	assert.Equal(t, "failed", p.Status)
 	assert.Contains(t, p.Error, "unknown command")
 	// Else handler fires reply.
-	assert.Len(t, sp.calls, 1)
+	assert.Len(t, runner.calls, 1)
 }
 
 func TestExecutor_InvalidArgs(t *testing.T) {
-	sp := &mockSpawner{}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+	runner := &mockClaudeRunner{}
 
 	exec := &Executor{
 		Planner: &StubPlanner{
@@ -280,12 +261,9 @@ func TestExecutor_InvalidArgs(t *testing.T) {
 				{Command: "deploy", Args: map[string]any{"env": "invalid-env"}},
 			},
 		},
-		Commands:  testCommands(),
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "4", From: "x@test.com", Subject: "Bad args"}
@@ -295,17 +273,15 @@ func TestExecutor_InvalidArgs(t *testing.T) {
 	assert.Equal(t, "failed", p.Status)
 	assert.Contains(t, p.Error, "stage 0")
 	// Else handler fires reply.
-	assert.Len(t, sp.calls, 1)
+	assert.Len(t, runner.calls, 1)
 }
 
 func TestExecutor_WorkerError(t *testing.T) {
-	sp := &mockSpawner{
-		results: []WorkerResult{
-			{Output: "something went wrong", IsError: true, ExitCode: 1},
+	runner := &mockClaudeRunner{
+		errs: []error{
+			fmt.Errorf("something went wrong"),
 		},
 	}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
 
 	exec := &Executor{
 		Planner: &StubPlanner{
@@ -313,12 +289,9 @@ func TestExecutor_WorkerError(t *testing.T) {
 				{Command: "greet", Args: map[string]any{}},
 			},
 		},
-		Commands:  testCommands(),
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "5", From: "x@test.com", Subject: "Worker fail"}
@@ -326,22 +299,19 @@ func TestExecutor_WorkerError(t *testing.T) {
 	require.Error(t, err)
 
 	assert.Equal(t, "failed", p.Status)
-	assert.Contains(t, p.Error, "worker error")
-	// 1 stage spawn (failed) + 1 else reply spawn.
-	assert.Len(t, sp.calls, 2)
+	assert.Contains(t, p.Error, "stage 0")
+	// 1 stage call (failed) + 1 else reply call.
+	assert.Len(t, runner.calls, 2)
 }
 
 func TestExecutor_ResultFlowing(t *testing.T) {
-	// Verify that the second stage's spawner call happens after the first
-	// completes, and the mock records both calls in order.
-	sp := &mockSpawner{
+	runner := &mockClaudeRunner{
 		results: []WorkerResult{
 			{Output: "stage-0-output"},
-			{Output: "stage-1-output"},
+			{Output: `{"title":"flow","summary":"test"}`},
+			{Output: "reply sent"},
 		},
 	}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
 
 	exec := &Executor{
 		Planner: &StubPlanner{
@@ -350,12 +320,9 @@ func TestExecutor_ResultFlowing(t *testing.T) {
 				{Command: "summarize", Args: map[string]any{}},
 			},
 		},
-		Commands:  testCommands(),
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "6", From: "x@test.com", Subject: "Flow"}
@@ -366,21 +333,19 @@ func TestExecutor_ResultFlowing(t *testing.T) {
 	// 2 work stages + auto-reply.
 	require.Len(t, p.Results, 3)
 	assert.Equal(t, "stage-0-output", p.Results[0])
-	assert.Equal(t, "stage-1-output", p.Results[1])
+	assert.Equal(t, `{"title":"flow","summary":"test"}`, p.Results[1])
 
 	// 2 stages + 1 auto-reply.
-	require.Len(t, sp.calls, 3)
+	require.Len(t, runner.calls, 3)
 }
 
 func TestExecutor_AutoReplyArgs(t *testing.T) {
-	sp := &mockSpawner{
+	runner := &mockClaudeRunner{
 		results: []WorkerResult{
-			{Output: "summarized content"},
-			{Output: "reply sent"}, // auto-reply stage
+			{Output: `{"title":"test","summary":"summarized content"}`},
+			{Output: "reply sent"},
 		},
 	}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
 
 	exec := &Executor{
 		Planner: &StubPlanner{
@@ -388,12 +353,9 @@ func TestExecutor_AutoReplyArgs(t *testing.T) {
 				{Command: "summarize", Args: map[string]any{}},
 			},
 		},
-		Commands:  testCommands(),
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "10", From: "Alice <alice@example.com>", Subject: "Summarize this"}
@@ -402,25 +364,19 @@ func TestExecutor_AutoReplyArgs(t *testing.T) {
 
 	assert.Equal(t, "completed", p.Status)
 	require.Len(t, p.Results, 2) // 1 stage + auto-reply
-	assert.Equal(t, "summarized content", p.Results[0])
+	assert.Equal(t, `{"title":"test","summary":"summarized content"}`, p.Results[0])
 
-	// The reply mission subject includes "reply" command name.
-	require.Len(t, mock.calls, 2)
-	assert.Contains(t, mock.calls[1].Subject, "reply")
-
-	// Verify the sender address was extracted from "Name <email>" format.
-	// The reply stage was called (2 spawner calls), confirming args passed validation.
-	require.Len(t, sp.calls, 2)
+	// The reply runner call should have "to" arg with extracted address.
+	require.Len(t, runner.calls, 2)
+	assert.Equal(t, "reply", runner.calls[1].Cmd)
 }
 
 func TestExecutor_NoReplyCommand(t *testing.T) {
-	sp := &mockSpawner{
+	runner := &mockClaudeRunner{
 		results: []WorkerResult{
 			{Output: "done"},
 		},
 	}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
 
 	// Build commands without the reply command.
 	cmds := map[string]*Command{
@@ -433,12 +389,9 @@ func TestExecutor_NoReplyCommand(t *testing.T) {
 				{Command: "greet", Args: map[string]any{}},
 			},
 		},
-		Commands:  cmds,
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "11", From: "bob@test.com", Subject: "Hi"}
@@ -447,26 +400,21 @@ func TestExecutor_NoReplyCommand(t *testing.T) {
 
 	assert.Equal(t, "completed", p.Status)
 	assert.Len(t, p.Results, 1) // no auto-reply appended
-	assert.Len(t, sp.calls, 1)  // only the greet stage
+	assert.Len(t, runner.calls, 1)
 }
 
 func TestExecutor_ElseReply(t *testing.T) {
-	sp := &mockSpawner{
+	runner := &mockClaudeRunner{
 		results: []WorkerResult{
-			{Output: "else reply sent"}, // else handler reply
+			{Output: "else reply sent"},
 		},
 	}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
 
 	exec := &Executor{
-		Planner:   &StubPlanner{Err: fmt.Errorf("no match")},
-		Commands:  testCommands(),
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Planner:  &StubPlanner{Err: fmt.Errorf("no match")},
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "12", From: "carol@test.com", Subject: "Unknown"}
@@ -474,17 +422,13 @@ func TestExecutor_ElseReply(t *testing.T) {
 	require.Error(t, err)
 
 	assert.Equal(t, "failed", p.Status)
-	// Else handler fires a reply spawn.
-	require.Len(t, sp.calls, 1)
-	require.Len(t, mock.calls, 1)
-	// The else reply mission subject includes "reply".
-	assert.Contains(t, mock.calls[0].Subject, "reply")
+	// Else handler fires a reply.
+	require.Len(t, runner.calls, 1)
+	assert.Equal(t, "reply", runner.calls[0].Cmd)
 }
 
 func TestExecutor_ElseNoReplyCommand(t *testing.T) {
-	sp := &mockSpawner{}
-	mock := &mockMissionCreator{}
-	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+	runner := &mockClaudeRunner{}
 
 	// Build commands without the reply command.
 	cmds := map[string]*Command{
@@ -492,13 +436,10 @@ func TestExecutor_ElseNoReplyCommand(t *testing.T) {
 	}
 
 	exec := &Executor{
-		Planner:   &StubPlanner{Err: fmt.Errorf("no match")},
-		Commands:  cmds,
-		Missions:  mock,
-		Spawner:   sp,
-		Templates: tmpl,
-		Registry:  DefaultMCPRegistry(),
-		Logger:    testLogger(),
+		Planner:  &StubPlanner{Err: fmt.Errorf("no match")},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
 	}
 
 	meta := EmailMeta{MessageID: "13", From: "dave@test.com", Subject: "Unknown"}
@@ -506,7 +447,6 @@ func TestExecutor_ElseNoReplyCommand(t *testing.T) {
 	require.Error(t, err)
 
 	assert.Equal(t, "failed", p.Status)
-	// No reply command — else handler logs but does not spawn.
-	assert.Len(t, sp.calls, 0)
-	assert.Len(t, mock.calls, 0)
+	// No reply command — else handler logs but does not call runner.
+	assert.Len(t, runner.calls, 0)
 }
