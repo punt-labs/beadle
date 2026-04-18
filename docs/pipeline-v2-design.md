@@ -551,17 +551,17 @@ The following changes are required to the existing codebase:
 
 ### Phase 2: CLI Runner (unblocked by Phase 1)
 
-4. **`runner.go` (new):** `Runner` interface with `Run(ctx, pipe, cmd) (output, error)`.
+1. **`runner.go` (new):** `Runner` interface with `Run(ctx, pipe, cmd) (output, error)`.
    `ClaudeRunner` wraps existing spawner + mission logic.
    `CLIRunner` implements single-binary exec with whitelist check,
    arg assembly, timeout, stdout capture, and 1 MB output cap.
 
-5. **`executor` dispatch:** Replace direct spawner call with
+2. **`executor` dispatch:** Replace direct spawner call with
    `Runner.Run()` dispatch based on `command.Runner`.
 
 ### Phase 3: Compound Steps (unblocked by Phase 2)
 
-6. **`CLIRunner` compound execution:** Goroutine-per-step with
+1. **`CLIRunner` compound execution:** Goroutine-per-step with
    `io.Pipe` chaining. All steps start concurrently under a shared
    `context.WithTimeout`. First nonzero exit cancels the context.
    Per-step stderr logging with `step[N]` labels. Final step's
@@ -569,16 +569,16 @@ The following changes are required to the existing codebase:
 
 ### Phase 4: Process/Passthrough + Validation (unblocked by Phase 1)
 
-7. **Executor pipe logic:** Track `pipe` variable. After each stage:
+1. **Executor pipe logic:** Track `pipe` variable. After each stage:
    if `mode == "process"`, replace pipe with output. If `passthrough`,
    leave pipe unchanged.
 
-8. **JSON + schema validation:** `json.Valid()` for process-mode
+2. **JSON + schema validation:** `json.Valid()` for process-mode
    stages with non-text schemas. Schema validation via
    `santhosh-tekuri/jsonschema/v6`. Text-mode stages bypass all
    JSON validation.
 
-9. **Auto-reply wiring:** Pass pipe as `inputs.pipeline_output` in the
+3. **Auto-reply wiring:** Pass pipe as `inputs.pipeline_output` in the
    reply mission contract instead of raw `message` arg. Migrate
    `reply.yaml` to remove the `message` required arg and document
    that the reply command reads `inputs.pipeline_output` from the
@@ -586,9 +586,9 @@ The following changes are required to the existing codebase:
 
 ### Post-Implementation
 
-10. **Update DES-030** in `DESIGN.md` — its YAML examples use the
-    retired `output` field and pre-v2 command schema. Update examples
-    to match the v2 format after this design is settled.
+1. **Update DES-030** in `DESIGN.md` — its YAML examples use the
+   retired `output` field and pre-v2 command schema. Update examples
+   to match the v2 format after this design is settled.
 
 ## Rejected Alternatives
 
