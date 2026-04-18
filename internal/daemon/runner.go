@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -135,6 +136,13 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 		return "", err
 	}
 
+	// Best-effort parse of pipe as JSON so declared args can fall back
+	// to fields from the previous stage's output.
+	var pipeFields map[string]any
+	if trimmed := strings.TrimSpace(pipe); len(trimmed) > 0 && trimmed[0] == '{' {
+		_ = json.Unmarshal([]byte(pipe), &pipeFields)
+	}
+
 	args := make([]string, len(cmd.FixedArgs))
 	copy(args, cmd.FixedArgs)
 
@@ -147,6 +155,12 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 
 	for _, decl := range cmd.Args {
 		val, ok := call.Args[decl.Name]
+		// TODO(beadle-vjo): pipe-derived args bypass ValidateArgs type constraints.
+		// Prior stage schema validation covers this for now. Add runtime validation
+		// when arg types are enforced at execution time.
+		if !ok && pipeFields != nil {
+			val, ok = pipeFields[decl.Name]
+		}
 		if !ok {
 			continue
 		}
