@@ -306,7 +306,7 @@ For security-critical stages, spawn djb (cryptographic implementation)
 or bcs (threat-modeling and policy) as a separate background review
 agent before reflecting. djb is the right reviewer for code-level PGP
 and crypto correctness; bcs is the right reviewer when the question is
-"what is the threat model?" or "does this defense composes against the
+"what is the threat model?" or "does this defense compose against the
 attacker we expect?" The reviewer's findings inform the reflection.
 
 ### When NOT to use pipelines
