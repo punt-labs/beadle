@@ -1,7 +1,9 @@
 ---
+vibe_tags: "[neutral]"
+vibe_signals: ""
 notify: "y"
-speak: "n"
+speak: "y"
 voice: "matilda"
-vibe_signals: "git-commit@18:23"
-vibe_tags: ""
+vibe: "neutral"
+vibe_mode: "manual"
 ---

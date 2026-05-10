@@ -302,8 +302,12 @@ For each stage in the pipeline:
    unblocks.
 6. **Commit**: after each clean stage. Tests must pass at every commit.
 
-For security-critical stages, spawn djb as a separate background
-review agent before reflecting. djb's review informs the reflection.
+For security-critical stages, spawn djb (cryptographic implementation)
+or bcs (threat-modeling and policy) as a separate background review
+agent before reflecting. djb is the right reviewer for code-level PGP
+and crypto correctness; bcs is the right reviewer when the question is
+"what is the threat model?" or "does this defense compose against the
+attacker we expect?" The reviewer's findings inform the reflection.
 
 ### When NOT to use pipelines
 
@@ -330,7 +334,7 @@ ethos mission dispatch \
 
 ```yaml
 leader: claude
-worker: bwk                    # bwk|mdm|adb|djb
+worker: bwk                    # bwk|rsc|mdm|rop|adb|kth|djb|bcs
 evaluator:
   handle: mdm                  # must differ from worker, no shared role
 inputs:
@@ -362,14 +366,26 @@ Note: write-set admission is advisory — the leader verifies compliance during 
 
 ### Evaluator defaults
 
+Two specialists per domain. Worker and evaluator must be distinct
+handles with no shared role.
+
 | Task type | Worker | Evaluator |
 |-----------|--------|-----------|
-| Go internals / library design | `bwk` | `mdm` |
-| CLI / command design | `mdm` | `bwk` |
-| Security / PGP / crypto | `bwk` | `djb` |
-| Infrastructure / CI | `adb` | `bwk` |
+| Go internals / library design | `bwk` (Kernighan) | `rsc` (Cox) — toolchain, supply-chain |
+| Go module / dependency / vuln | `rsc` | `bwk` |
+| CLI / command design | `mdm` (McIlroy) | `rop` (Pike) — Plan 9 minimalism |
+| CLI minimalism / man-page | `rop` | `mdm` |
+| Crypto / PGP implementation | `bwk` | `djb` (Bernstein) |
+| Threat-modeling / policy | `claude` (leader) | `bcs` (Schneier) |
+| Infrastructure / CI | `adb` (Lovelace) | `kth` (Hightower) — cloud-native |
+| Cloud-native / kubernetes | `kth` | `adb` |
+| Product validation (PR/FAQ) | `claude` (leader) | `mcg` (Cagan) |
+| Product discovery / interviews | `claude` (leader) | `tdt` (Torres) |
 
-Worker and evaluator must be distinct handles with no shared role.
+Pair the right reviewer to the question: bwk reads Go like prose; rsc
+reads it like a contract. djb implements the primitive; bcs models the
+adversary. mdm composes pipes; rop strips ceremony. Use both pairs when
+both questions matter.
 
 ### Task tracking
 
@@ -403,7 +419,7 @@ Identity is managed by ethos. The SessionStart hook resolves identity from `.pun
 - **Team submodule**: `.punt-labs/ethos/` — shared identity registry across all Punt Labs projects
 - **Identity resolution**: repo-local `.punt-labs/ethos.yaml` → global `~/.punt-labs/ethos/active` → `~/.punt-labs/beadle/default-identity`
 - **Extensions**: `~/.punt-labs/ethos/identities/claude.ext/beadle.yaml` stores beadle-specific config (GPG key ID, contact permissions) outside ethos's schema
-- **Sub-agent matching**: `subagent_type` in Agent() calls matches ethos identity handles (bwk, mdm, djb, adb) — loads the agent definition from `.claude/agents/<handle>.md` with full personality, writing style, and tool restrictions
+- **Sub-agent matching**: `subagent_type` in Agent() calls matches ethos identity handles. For beadle work the working pool is: `bwk`/`rsc` (Go), `mdm`/`rop` (CLI), `djb`/`bcs` (security/crypto), `adb`/`kth` (infra/CI). Each loads the agent definition from `.claude/agents/<handle>.md` with full personality, writing style, and tool restrictions. The full org roster (including `kpz`/`ylc` for ML, `kwb`/`rej` for Smalltalk, `csl`/`srn` for Swift, `bne`/`ahj` for web, `jms`/`jra` for formal methods, `edt`/`dna` for UX, `mcg`/`tdt` for product) is available via `ethos identity list` when cross-domain review is needed.
 
 ## Development Workflow
 
