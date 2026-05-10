@@ -366,8 +366,13 @@ Note: write-set admission is advisory — the leader verifies compliance during 
 
 ### Evaluator defaults
 
-Two specialists per domain. Worker and evaluator must be distinct
-handles with no shared role.
+Two specialists per domain. Within each row, the worker and evaluator
+must be distinct handles. Across rows, swap pairs are intentional —
+`bwk`/`rsc` trade roles on Go internals vs. module/dependency work,
+`mdm`/`rop` trade on CLI command design vs. CLI minimalism, and
+`adb`/`kth` trade on infrastructure/CI vs. cloud-native — bringing
+complementary perspectives without ever putting a handle in conflict
+with itself on a single task.
 
 | Task type | Worker | Evaluator |
 |-----------|--------|-----------|
