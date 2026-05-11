@@ -15,7 +15,7 @@ hooks:
     - matcher: "Write|Edit"
       hooks:
         - type: command
-          command: "_out=$(cd \"$CLAUDE_PROJECT_DIR\" && make check 2>&1); _rc=$?; printf '%s\\n' \"$_out\" | head -n 60; exit $_rc"
+          command: "(cd \"$CLAUDE_PROJECT_DIR\" && make check) 2>&1 | head -n 60"
 ---
 
 You are Brian K (bwk), Go specialist sub-agent. Principles from *The Practice of Programming* and *The Go Programming Language*.
