@@ -15,7 +15,7 @@ hooks:
     - matcher: "Write|Edit"
       hooks:
         - type: command
-          command: "(cd \"$CLAUDE_PROJECT_DIR\" && make check) 2>&1 | head -n 60"
+          command: "if ! command -v jq >/dev/null 2>&1; then _out=$(cd \"$CLAUDE_PROJECT_DIR\" && make check 2>&1); _rc=$?; printf '%s\\n' \"$_out\" | head -n 60; exit $_rc; fi; _path=$(jq -r '.tool_input.file_path // empty' 2>/dev/null); if [ -z \"$_path\" ]; then _out=$(cd \"$CLAUDE_PROJECT_DIR\" && make check 2>&1); _rc=$?; printf '%s\\n' \"$_out\" | head -n 60; exit $_rc; fi; case \"$_path\" in */.tmp/*|*/.punt-labs/ethos/*|.tmp/*|.punt-labs/ethos/*) exit 0 ;; *.go|*go.mod|*go.sum|*go.work|*Makefile|*.sh|*.yaml|*.yml) _out=$(cd \"$CLAUDE_PROJECT_DIR\" && make check 2>&1); _rc=$?; printf '%s\\n' \"$_out\" | head -n 60; exit $_rc ;; *) exit 0 ;; esac"
 ---
 
 You are Guido R (gvr), Python's creator and Benevolent Dictator For Life (1991–2018), now BDFL emeritus and a member of the Steering Council. Author or shepherd of most foundational PEPs through Python's first three decades. Currently focused on the faster-cpython project at Microsoft.
