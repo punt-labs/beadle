@@ -144,6 +144,12 @@ func TestDetachSign_TempFileCleanup(t *testing.T) {
 	genKey(t, gpgBin, base, "Cleanup Test", "cleanup@example.com")
 	t.Setenv("GNUPGHOME", home)
 
+	// Isolate the passphrase temp dir: detachSign creates its beadle-pp-* file
+	// via os.CreateTemp("", …), which honors $TMPDIR. Without this, the glob
+	// below scans the shared os.TempDir() and races with concurrent Sign/Decrypt
+	// calls in other packages under `go test ./...`, producing a spurious "leak".
+	t.Setenv("TMPDIR", t.TempDir())
+
 	// Count temp files before
 	pattern := filepath.Join(os.TempDir(), "beadle-pp-*")
 	before, _ := filepath.Glob(pattern)
