@@ -31,11 +31,14 @@ cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || true
 BRANCH=$(git branch --show-current 2>/dev/null)
 
 # Deny when pushing while on main/master, or when the push names main/master
-# as a ref (e.g. `git push origin main` from any branch).
+# as a destination ref — bare (`origin main`), a refspec RHS (`HEAD:main`), or
+# a full ref (`refs/heads/main`). A source-only refspec like `main:feature`
+# (main preceded by nothing on the dest side, followed by `:`) is not a push to
+# the protected branch and is left alone.
 if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
     deny
 fi
-if printf '%s' "$COMMAND" | grep -qE 'git[[:space:]]+push([[:space:]]+[^[:space:]]+)*[[:space:]]+(main|master)([^[:alnum:]_/]|$)'; then
+if printf '%s' "$COMMAND" | grep -qE '([[:space:]:/])(main|master)([^[:alnum:]_/:-]|$)'; then
     deny
 fi
 
