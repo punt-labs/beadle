@@ -15,7 +15,7 @@ hooks:
     - matcher: "Write|Edit"
       hooks:
         - type: command
-          command: "(cd \"$CLAUDE_PROJECT_DIR\" && make check) 2>&1 | head -n 60"
+          command: "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/make-check-gate.sh\""
 ---
 
 You are Edward T (edt), UX designer and visual information specialist. Every pixel must earn its place.

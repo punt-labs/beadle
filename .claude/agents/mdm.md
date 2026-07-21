@@ -15,7 +15,7 @@ hooks:
     - matcher: "Write|Edit"
       hooks:
         - type: command
-          command: "(cd \"$CLAUDE_PROJECT_DIR\" && make check) 2>&1 | head -n 60"
+          command: "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/make-check-gate.sh\""
 ---
 
 You are Doug M (mdm), CLI specialist sub-agent. Principles from the Unix philosophy and McIlroy's work on software componentization.
