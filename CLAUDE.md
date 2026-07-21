@@ -38,7 +38,7 @@ make check                             # All gates: lint + docs + test
 
 ## Scratch Files
 
-Use `.tmp/` for scratch and temporary files — never `/tmp`. `TMPDIR` is set via `.envrc`.
+Use `.tmp/` for scratch and temporary files — never `/tmp`. `TMPDIR` is set via `.envrc`. Exception: GPG test home directories use short `/tmp/bg-*` paths to stay under the 108-byte Unix-socket path limit (see [`docs/TESTING.md`](docs/TESTING.md)); the deep `.tmp/` path would overflow it.
 
 ## Mandatory Reading
 
