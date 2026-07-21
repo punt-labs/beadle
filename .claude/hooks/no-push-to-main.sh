@@ -17,10 +17,11 @@ else
 fi
 
 # Only proceed when `git push` appears in command position — at the start or
-# after a shell separator (&&, ||, ;, |, `(`). This catches compound commands
-# (cd … && git push, git commit && git push) without false-matching the phrase
-# inside quoted text (echo "git push"), which is not an invocation.
-printf '%s' "$COMMAND" | grep -qE '(^[[:space:]]*|[&|;(][[:space:]]*)git[[:space:]]+push' || exit 0
+# after a shell separator (&&, ||, ;, |, `(`), optionally behind leading env
+# assignments (GIT_TRACE=1 git push …). This catches compound and env-prefixed
+# invocations without false-matching the phrase inside quoted text
+# (echo "git push"), which is not an invocation.
+printf '%s' "$COMMAND" | grep -qE '(^|[&|;(])[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*git[[:space:]]+push' || exit 0
 
 deny() {
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"BLOCKED: Cannot push to main/master. All changes go through PRs. Create a feature branch, push it, and open a PR."}}'
