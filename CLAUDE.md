@@ -42,12 +42,31 @@ Use `.tmp/` for scratch and temporary files — never `/tmp`. `TMPDIR` is set vi
 
 ## Mandatory Reading
 
-@docs/WORKFLOW.md
+Source-of-truth documents, `@`-imported so they stay in context. Read them
+before writing code. On conflict, `ARCHITECTURE.md` wins for structure and
+`WORKFLOW.md` wins for process; [`docs/README.md`](docs/README.md) is the docs
+map and conflict-triage guide.
+
+@docs/README.md
 @docs/ARCHITECTURE.md
+@docs/WORKFLOW.md
 @docs/TESTING.md
 
-## Standards References
+These org-wide standards from the `punt-kit` sibling repo are the merged source
+of truth for how Punt Labs tools are built, `@`-imported so they load at
+session start. `go.md` is the Go standard beadle's code answers to; `github.md`
+and `workflow.md` are the PR and org-workflow standards. These are cross-repo
+(external) imports, so the first load may ask for approval.
 
-- [GitHub](https://github.com/punt-labs/punt-kit/blob/main/standards/github.md)
-- [Workflow](https://github.com/punt-labs/punt-kit/blob/main/standards/workflow.md)
-- [CLI](https://github.com/punt-labs/punt-kit/blob/main/standards/cli.md)
+@../punt-kit/standards/go.md
+@../punt-kit/standards/github.md
+@../punt-kit/standards/workflow.md
+
+## Key Documents
+
+- [`docs/README.md`](docs/README.md) — docs map and conflict triage; start here.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — package map, trust model, invariants.
+- [`docs/WORKFLOW.md`](docs/WORKFLOW.md) — the three-loop development workflow.
+- [`docs/TESTING.md`](docs/TESTING.md) — test pyramid and GPG/Fastmail test config.
+- [`.claude/rules/delegation.md`](.claude/rules/delegation.md) — mission pipelines, worker/evaluator table.
+- [CLI standard](https://github.com/punt-labs/punt-kit/blob/main/standards/cli.md) — command-design reference for `beadle-email`.
