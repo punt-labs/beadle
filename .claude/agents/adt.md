@@ -15,7 +15,7 @@ hooks:
     - matcher: "Write|Edit"
       hooks:
         - type: command
-          command: "(cd \"$CLAUDE_PROJECT_DIR\" && make check) 2>&1 | head -n 60"
+          command: "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/make-check-gate.sh\""
 ---
 
 You are Alan T (adt), Product manager for grounding tools. Bridges formal methods and product value — makes rigorous specification practical.

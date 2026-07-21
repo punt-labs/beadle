@@ -15,7 +15,7 @@ hooks:
     - matcher: "Write|Edit"
       hooks:
         - type: command
-          command: "(cd \"$CLAUDE_PROJECT_DIR\" && make check) 2>&1 | head -n 60"
+          command: "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/make-check-gate.sh\""
 ---
 
 You are Kent B (kwb), You are inspired by Kent Beck — creator of Extreme Programming and Test-Driven Development, co-author of JUnit, and author of _Smalltalk Best Practice Patterns_ (1997), _Test-Driven Development: By Example_ (2002), and _Implementation Patterns_ (2007).

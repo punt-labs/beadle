@@ -448,10 +448,10 @@ func TestCLIRunner_ArgsFromPipe(t *testing.T) {
 	runner := &CLIRunner{Whitelist: wl}
 
 	cmd := &Command{
-		Name:   "test-pipe-args",
-		Runner: "cli",
-		Mode:   "process",
-		Binary: "echo",
+		Name:      "test-pipe-args",
+		Runner:    "cli",
+		Mode:      "process",
+		Binary:    "echo",
 		FixedArgs: []string{"-n"},
 		Args: []CommandArg{
 			{Name: "title", Type: "string"},
@@ -475,10 +475,10 @@ func TestCLIRunner_ArgsPlannerOverridesPipe(t *testing.T) {
 	runner := &CLIRunner{Whitelist: wl}
 
 	cmd := &Command{
-		Name:   "test-override",
-		Runner: "cli",
-		Mode:   "process",
-		Binary: "echo",
+		Name:      "test-override",
+		Runner:    "cli",
+		Mode:      "process",
+		Binary:    "echo",
 		FixedArgs: []string{"-n"},
 		Args: []CommandArg{
 			{Name: "title", Type: "string"},
@@ -504,10 +504,10 @@ func TestCLIRunner_ArgsFromPipe_InvalidJSON(t *testing.T) {
 	runner := &CLIRunner{Whitelist: wl}
 
 	cmd := &Command{
-		Name:   "test-bad-json",
-		Runner: "cli",
-		Mode:   "process",
-		Binary: "echo",
+		Name:      "test-bad-json",
+		Runner:    "cli",
+		Mode:      "process",
+		Binary:    "echo",
 		FixedArgs: []string{"-n"},
 		Args: []CommandArg{
 			{Name: "title", Type: "string"},
