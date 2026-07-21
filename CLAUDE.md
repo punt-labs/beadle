@@ -21,7 +21,7 @@ This project follows [Punt Labs standards](https://github.com/punt-labs/punt-kit
 ```bash
 make build                              # Build beadle-email binary
 make install                            # Build and install to ~/.local/bin
-make check                              # All quality gates (vet, staticcheck, markdownlint, tests)
+make check                              # All quality gates (gofmt, vet, staticcheck, markdownlint, tests)
 ./beadle-email serve                    # Start MCP server (stdio transport)
 ./beadle-email version                  # Print version
 ./beadle-email doctor                   # Check installation health
