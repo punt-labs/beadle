@@ -2401,3 +2401,85 @@ Stage 3: reply (claude, process, files: true)
 - **Absolute paths in the files array.** Fragile across HOME changes.
   Relative paths within the pipeline directory are simpler to validate
   and portable.
+
+## DES-033: Repo tagging and per-repo scoping for a shared mailbox
+
+**Status:** ACCEPTED (2026-07-21). Operator-ratified against a live inbox;
+implementation tracked under epic beadle-6i0 (children 6i0.2 tagging, 6i0.3
+scoping).
+
+**Context:** One mailbox (e.g. `claude@punt-labs.com`) is shared by an agent
+that works across many repos. A live INBOX check showed 695 messages, almost
+all GitHub notifications, with no way for an agent in one repo to see only its
+own mail. Two facts from that inbox drove the decision: GitHub already prefixes
+every notification subject with `[punt-labs/<repo>]`, and beadle's list view
+already crushes the SUBJECT column to ~22 chars (every row rendered
+`Re: [punt-labs/ethos]…`, the real subject invisible). The mailbox is the
+per-*identity* unit; there was no per-*repo* dimension at all — no tag, no
+header, no filter.
+
+**Decision:** Beadle tags outbound mail and scopes the inbox by repo using the
+mailing-list pattern — a visible subject tag for humans plus a structured
+header for tools — with the repo surfaced as its own column in beadle's list
+view rather than left inside the subject. Four ratified points:
+
+1. **Tag scope is the repo, not the agent.** The subject tag carries the repo;
+   the agent identity is already the mailbox and travels in a header.
+2. **Tag form matches GitHub: `[punt-labs/<repo>]`** (owner-qualified) on the
+   wire, so one convention and one filter cover GitHub notifications and
+   agent-sent mail alike. Replies preserve it as `Re: [punt-labs/<repo>] …`.
+3. **Repo identity comes from the git-remote slug** (`owner/repo`), resolved by
+   the same mechanism biff uses — stable, headless-safe, org-consistent.
+4. **The inbox auto-filters to the current repo**, with an explicit all-repos
+   override. Solving the shared-mailbox pain is the whole point.
+
+Outbound composition (all paths: plain, signed, encrypted) auto-adds the
+subject tag and the headers `X-Beadle-Repo: <owner/repo>` and
+`X-Beadle-Agent: <handle>`. The read side filters on `X-Beadle-Repo` first and
+the subject tag second (so human replies without the header are still caught),
+and beadle's list view renders a dedicated short `repo` column (owner stripped)
+sourced from the tag/header — the SUBJECT column is never used to carry the
+repo, so it stays readable.
+
+**Why:** The tag must be first-class for both audiences without hacking either.
+A human in any mail client sees and searches `[punt-labs/beadle]` in the
+subject (and it matches what GitHub already sends); a tool filters on the clean
+`X-Beadle-Repo` header rather than parsing strings. Putting the repo in the
+subject *and* in the list view's subject column is what crushes readability
+today, so the list view reads the repo from the header into its own column.
+
+**Real-inbox mock (mock-before-code), 80-col list view:**
+
+```text
+Live now:  684 ● Copilot <notifications@github.com>  May23 ? Re: [punt-labs/ethos]…
+Proposed:  684 ● gh/Copilot      ethos   May23 ? Re: signing key rejected on push
+```
+
+The proposed row moves the repo into a narrow `repo` column, trims the
+redundant FROM (all `notifications@github.com`), and returns the freed width to
+SUBJECT. Scoped to the current repo, an agent in `beadle` sees its handful of
+`[punt-labs/beadle]` threads instead of 695 mixed notifications.
+
+**Consequences:**
+
+- Agent-to-agent and GitHub mail are first-class filterable; arbitrary
+  human-originated mail is best-effort (caught only if it carries the tag or is
+  a reply that preserved it).
+- The FROM-column trim and the `repo` column are a net readability win for the
+  existing inbox, independent of agent-sent mail.
+- The header set is additive and does not touch the trust model or the PGP
+  envelope.
+
+**Alternatives considered:**
+
+- **Bare `[beadle]` tag.** Rejected — does not match GitHub's
+  `[punt-labs/<repo>]`, so the mailbox would carry two conventions and need two
+  filters.
+- **Header only (no subject tag).** Rejected — invisible to a human in Proton
+  or Gmail; fails the first-class-for-humans bar.
+- **Subject tag only, parsed by tools.** Rejected — fragile string parsing, and
+  it keeps the repo inside the SUBJECT column that is already crushed.
+- **IMAP keywords / provider labels.** Rejected — provider-dependent (Gmail
+  labels vs Proton vs Fastmail), not portable, and invisible in a plain subject.
+- **Per-identity separation only (status quo).** Rejected — the identity is the
+  mailbox; it gives no per-repo dimension within one shared mailbox.
