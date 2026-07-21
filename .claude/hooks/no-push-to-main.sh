@@ -30,15 +30,19 @@ deny() {
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || true
 BRANCH=$(git branch --show-current 2>/dev/null)
 
-# Deny when pushing while on main/master, or when the push names main/master
-# as a destination ref — bare (`origin main`), a refspec RHS (`HEAD:main`), or
-# a full ref (`refs/heads/main`). A source-only refspec like `main:feature`
-# (main preceded by nothing on the dest side, followed by `:`) is not a push to
-# the protected branch and is left alone.
 if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
     deny
 fi
-if printf '%s' "$COMMAND" | grep -qE '([[:space:]:/])(main|master)([^[:alnum:]_/:-]|$)'; then
+
+# Scope the ref check to each `git push …` invocation's own arguments (up to
+# the next shell separator), so main/master mentioned elsewhere in a compound
+# command — echo text, an unrelated branch (`git push origin feat && echo
+# see main`) — does not false-trigger. Within those args, deny main/master as a
+# destination ref: bare (`origin main`), a refspec RHS (`HEAD:main`), or a full
+# ref (`refs/heads/main`). A source-only refspec (`main:feature`, main followed
+# by `:`) is not a push to the protected branch and is left alone.
+PUSH_ARGS=$(printf '%s' "$COMMAND" | grep -oE 'git[[:space:]]+push[^;&|]*')
+if printf '%s' "$PUSH_ARGS" | grep -qE '([[:space:]:/])(main|master)([^[:alnum:]_/:-]|$)'; then
     deny
 fi
 

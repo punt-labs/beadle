@@ -241,11 +241,16 @@ function pr_loop(unit):
         correctly against a live mailbox
 
     # D. SHIP
-    bd close the bead
+    bd close the bead                       # per org convention: close before
+                                            # push, once local review + verify
+                                            # pass and the unit is merge-ready
     push; create the PR (description carries the verification playbook)
     request Copilot review once, on open
     schedule a background poll with /loop   # never gh pr checks --watch,
                                             # never foreground sleep loops
+    # If the PR is later abandoned or closed unmerged, reopen its bead
+    # (bd update <id> --status open) so the backlog never shows unshipped
+    # work as done — the one case where a closed bead returns to the funnel.
 
 function poll_tick(pr):
     state = current reviews, threads, checks

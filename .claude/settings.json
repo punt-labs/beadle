@@ -144,7 +144,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/no-edit-on-main.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/no-edit-on-main.sh\"",
             "timeout": 5
           }
         ]
@@ -154,12 +154,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/no-gh-watch.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/no-gh-watch.sh\"",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/no-push-to-main.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/no-push-to-main.sh\"",
             "timeout": 5
           }
         ]
@@ -169,7 +169,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/agents-in-background.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/agents-in-background.sh\"",
             "timeout": 5
           }
         ]
