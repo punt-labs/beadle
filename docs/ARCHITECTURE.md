@@ -37,7 +37,7 @@ Resolved at runtime by name through a priority chain:
 3. **Secret file** (`~/.punt-labs/beadle/secrets/<name>`, mode 600)
 4. **Environment variable** (`BEADLE_IMAP_PASSWORD`, `BEADLE_RESEND_API_KEY`)
 
-Config file (`~/.punt-labs/beadle/email.json`) stores only connection parameters, never secrets.
+The config file stores only connection parameters, never secrets. It is resolved per identity: `~/.punt-labs/beadle/identities/<email>/email.json` is preferred, with the root `~/.punt-labs/beadle/email.json` kept as a legacy fallback (and migrated into the identity dir on demand).
 
 ## Design Invariants
 
