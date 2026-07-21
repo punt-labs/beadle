@@ -215,6 +215,12 @@ func TestDecrypt_TempFileCleanup(t *testing.T) {
 	raw, home := buildEncryptedMessage(t, gpgBin, plaintext)
 	t.Setenv("GNUPGHOME", home)
 
+	// Isolate the passphrase temp dir: Decrypt creates its beadle-pp-* file via
+	// os.CreateTemp("", …), which honors $TMPDIR. Without this, the count below
+	// scans the shared os.TempDir() and races with concurrent Sign/Decrypt calls
+	// in other packages under `go test ./...`, producing a spurious "leak".
+	t.Setenv("TMPDIR", t.TempDir())
+
 	// Count passphrase temp files before
 	before := countTempFiles(t, "beadle-pp-")
 
