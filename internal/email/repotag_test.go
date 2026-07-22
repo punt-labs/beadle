@@ -51,6 +51,7 @@ func TestRepoTag_Subject(t *testing.T) {
 		{"same repo not re-tagged", tag, "[punt-labs/beadle] Hello", "[punt-labs/beadle] Hello"},
 		{"same owner other repo not re-tagged", tag, "[punt-labs/ethos] Hi", "[punt-labs/ethos] Hi"},
 		{"same owner sibling repo not re-tagged", tag, "[punt-labs/lux] Hi", "[punt-labs/lux] Hi"},
+		{"same owner different case not re-tagged", tag, "Re: [Punt-Labs/beadle] status", "Re: [Punt-Labs/beadle] status"},
 		{"reply with org tag not re-tagged", tag, "Re: [punt-labs/lux] Hi", "Re: [punt-labs/lux] Hi"},
 		{"reply fresh tagged after prefix", tag, "Re: Hello", "Re: [punt-labs/beadle] Hello"},
 		{"fwd fresh tagged after prefix", tag, "Fwd: Hello", "Fwd: [punt-labs/beadle] Hello"},

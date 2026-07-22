@@ -133,7 +133,9 @@ func (t RepoTag) bracketTagged(s string) bool {
 		return false
 	}
 	curOwner, _, _ := strings.Cut(t.Slug, "/")
-	return owner == curOwner
+	// GitHub owners are case-insensitive, and clone-URL casing often differs
+	// from notification casing, so compare without regard to case.
+	return strings.EqualFold(owner, curOwner)
 }
 
 // headers returns the X-Beadle-* header map for the Resend JSON path, or nil
