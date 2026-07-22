@@ -35,13 +35,17 @@ type SendResult struct {
 // signed then encrypted (RFC 3156 multipart/encrypted).
 // Resend fallback is blocked when signing is configured because Resend cannot
 // preserve raw MIME.
-func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment, recipientKeyIDs []string) (*SendResult, error) {
+func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment, recipientKeyIDs []string, tag RepoTag) (*SendResult, error) {
 	// Validate BCC addresses for CR/LF injection.
 	for _, addr := range bcc {
 		if strings.ContainsAny(addr, "\r\n") {
 			return nil, fmt.Errorf("bcc address contains CR/LF")
 		}
 	}
+
+	// Tag the subject once, so every transport and the reported result carry
+	// the same "[owner/repo]" prefix. A zero tag leaves the subject unchanged.
+	subject = tag.subject(subject)
 
 	allRecipients := make([]string, 0, len(to)+len(cc)+len(bcc))
 	allRecipients = append(allRecipients, to...)
@@ -79,11 +83,11 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 
 		switch {
 		case encrypting:
-			raw, composeErr = ComposeEncryptedSignedRaw(cfg.FromAddress, to, cc, subject, body, attachments, cfg.GPGBinary, cfg.GPGSigner, passphrase, recipientKeyIDs)
+			raw, composeErr = ComposeEncryptedSignedRaw(cfg.FromAddress, to, cc, subject, body, attachments, cfg.GPGBinary, cfg.GPGSigner, passphrase, recipientKeyIDs, tag)
 		case signing:
-			raw, composeErr = ComposeSignedRaw(cfg.FromAddress, to, cc, subject, body, attachments, cfg.GPGBinary, cfg.GPGSigner, passphrase)
+			raw, composeErr = ComposeSignedRaw(cfg.FromAddress, to, cc, subject, body, attachments, cfg.GPGBinary, cfg.GPGSigner, passphrase, tag)
 		default:
-			raw, composeErr = ComposeRaw(cfg.FromAddress, to, cc, subject, body, attachments)
+			raw, composeErr = ComposeRaw(cfg.FromAddress, to, cc, subject, body, attachments, tag)
 		}
 		if composeErr != nil {
 			return nil, composeErr
@@ -131,6 +135,7 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 		Text:        body,
 		HTML:        html,
 		Attachments: resendAtts,
+		Headers:     tag.headers(),
 	})
 	if err != nil {
 		return nil, err

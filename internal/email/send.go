@@ -29,9 +29,10 @@ const resendAPIURL = "https://api.resend.com/emails"
 // ComposeRaw builds an RFC 822 message for SMTP delivery.
 // When attachments is empty, produces a simple text/plain message.
 // When attachments is non-empty, produces a multipart/mixed message.
+// The repo tag, when non-empty, adds the X-Beadle-* headers.
 // Returns an error if header fields contain CR/LF (header injection).
 // Bcc recipients are intentionally excluded from headers per RFC 822.
-func ComposeRaw(from string, to, cc []string, subject, textBody string, attachments []OutboundAttachment) ([]byte, error) {
+func ComposeRaw(from string, to, cc []string, subject, textBody string, attachments []OutboundAttachment, tag RepoTag) ([]byte, error) {
 	allAddrs := make([]string, 0, len(to)+len(cc))
 	allAddrs = append(allAddrs, to...)
 	allAddrs = append(allAddrs, cc...)
@@ -48,6 +49,9 @@ func ComposeRaw(from string, to, cc []string, subject, textBody string, attachme
 		fmt.Fprintf(&msg, "Cc: %s\r\n", strings.Join(cc, ", "))
 	}
 	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
+	if err := tag.writeHeaders(&msg); err != nil {
+		return nil, err
+	}
 	fmt.Fprintf(&msg, "MIME-Version: 1.0\r\n")
 
 	if len(attachments) == 0 {
@@ -106,8 +110,10 @@ func ComposeRaw(from string, to, cc []string, subject, textBody string, attachme
 
 // ComposeSignedRaw builds a PGP/MIME signed RFC 822 message (RFC 3156).
 // The body (text/plain or multipart/mixed with attachments) is signed with
-// gpg --detach-sign, then wrapped in a multipart/signed envelope.
-func ComposeSignedRaw(from string, to, cc []string, subject, textBody string, attachments []OutboundAttachment, gpgBinary, signer, passphrase string) ([]byte, error) {
+// gpg --detach-sign, then wrapped in a multipart/signed envelope. The repo
+// tag, when non-empty, adds the X-Beadle-* headers to the top-level envelope,
+// outside the signed body, so the signature is unaffected.
+func ComposeSignedRaw(from string, to, cc []string, subject, textBody string, attachments []OutboundAttachment, gpgBinary, signer, passphrase string, tag RepoTag) ([]byte, error) {
 	allAddrs := make([]string, 0, len(to)+len(cc))
 	allAddrs = append(allAddrs, to...)
 	allAddrs = append(allAddrs, cc...)
@@ -153,6 +159,9 @@ func ComposeSignedRaw(from string, to, cc []string, subject, textBody string, at
 		fmt.Fprintf(&msg, "Cc: %s\r\n", strings.Join(cc, ", "))
 	}
 	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
+	if err := tag.writeHeaders(&msg); err != nil {
+		return nil, err
+	}
 	fmt.Fprintf(&msg, "MIME-Version: 1.0\r\n")
 	fmt.Fprintf(&msg, "Content-Type: multipart/signed; boundary=%q; micalg=pgp-sha256; protocol=\"application/pgp-signature\"\r\n", boundary)
 	fmt.Fprintf(&msg, "\r\n")
@@ -236,9 +245,12 @@ func buildMixedBodyPart(textBody string, attachments []OutboundAttachment) ([]by
 // ComposeEncryptedSignedRaw builds a PGP/MIME encrypted+signed message (RFC 3156).
 // Signs the body first, then encrypts the signed body to the recipient keys.
 // The result is a multipart/encrypted envelope containing the signed message.
+// The repo tag, when non-empty, adds the X-Beadle-* headers to the outer
+// envelope, outside the encrypted body, so neither signature nor ciphertext
+// is affected.
 func ComposeEncryptedSignedRaw(from string, to, cc []string, subject, textBody string,
 	attachments []OutboundAttachment, gpgBinary, signer, passphrase string,
-	recipientKeyIDs []string) ([]byte, error) {
+	recipientKeyIDs []string, tag RepoTag) ([]byte, error) {
 
 	allAddrs := make([]string, 0, len(to)+len(cc))
 	allAddrs = append(allAddrs, to...)
@@ -310,6 +322,9 @@ func ComposeEncryptedSignedRaw(from string, to, cc []string, subject, textBody s
 		fmt.Fprintf(&msg, "Cc: %s\r\n", strings.Join(cc, ", "))
 	}
 	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
+	if err := tag.writeHeaders(&msg); err != nil {
+		return nil, err
+	}
 	fmt.Fprintf(&msg, "MIME-Version: 1.0\r\n")
 	fmt.Fprintf(&msg, "Content-Type: multipart/encrypted; boundary=%q; protocol=\"application/pgp-encrypted\"\r\n", encBoundary)
 	fmt.Fprintf(&msg, "\r\n")
@@ -345,6 +360,7 @@ type SendRequest struct {
 	Text        string             `json:"text,omitempty"`
 	HTML        string             `json:"html,omitempty"`
 	Attachments []ResendAttachment `json:"attachments,omitempty"`
+	Headers     map[string]string  `json:"headers,omitempty"`
 }
 
 // SendResponse is the Resend API response.

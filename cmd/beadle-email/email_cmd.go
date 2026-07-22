@@ -65,6 +65,21 @@ func resolveConfig(explicitPath string) (*email.Config, error) {
 	return cfg, nil
 }
 
+// resolveAgentHandle returns the active ethos handle for repo tagging, or ""
+// when identity resolution is unavailable. A missing handle is not an error —
+// the repo tag simply omits X-Beadle-Agent.
+func resolveAgentHandle() string {
+	resolver, err := newResolver()
+	if err != nil {
+		return ""
+	}
+	id, err := resolver.Resolve()
+	if err != nil {
+		return ""
+	}
+	return id.Handle
+}
+
 // resolveContactsPath returns the identity-scoped contacts path, or the default.
 func resolveContactsPath() string {
 	resolver, err := newResolver()
@@ -258,7 +273,8 @@ var sendCmd = &cobra.Command{
 			return err
 		}
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
-		result, err := email.TrySendChain(cfg, logger, to, cc, bcc, sendSubject, sendBody, "", nil, nil)
+		tag := email.ResolveRepoTag(resolveAgentHandle())
+		result, err := email.TrySendChain(cfg, logger, to, cc, bcc, sendSubject, sendBody, "", nil, nil, tag)
 		if err != nil {
 			return fmt.Errorf("send: %w", err)
 		}
