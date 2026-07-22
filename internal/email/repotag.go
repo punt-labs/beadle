@@ -41,6 +41,11 @@ var (
 // does not parse to a two-part slug. Nested paths (e.g. a GitLab group) and
 // slugs carrying control characters return "" — the regexp dot matches CR, so
 // a control character must be rejected explicitly rather than reaching a header.
+//
+// A trailing ".git" is stripped by design: git clone does the same, so the
+// remote "owner/my.git" names the repo "my", and the tag becomes
+// "[owner/my]". A repository literally named "my.git" is therefore tagged as
+// "my" — the git-clone convention wins over that rare literal name.
 func parseRepoSlug(url string) string {
 	url = strings.TrimSpace(url)
 	for _, re := range []*regexp.Regexp{slugSCP, slugURL} {
@@ -77,6 +82,12 @@ func ResolveRepoTag(ctx context.Context, logger *slog.Logger, agent string) Repo
 		logger.Debug("repo tag skipped: git remote is not an owner/repo slug")
 		return RepoTag{}
 	}
+	// Drop a tainted agent handle at the source so neither the SMTP nor the
+	// Resend header path can carry a control character.
+	if strings.ContainsFunc(agent, unicode.IsControl) {
+		logger.Debug("repo tag: dropping agent handle with control characters")
+		agent = ""
+	}
 	return RepoTag{Slug: slug, Agent: agent}
 }
 
@@ -97,22 +108,19 @@ func (t RepoTag) subject(s string) string {
 	}
 	prefix := replyPrefix.FindString(s)
 	rest := s[len(prefix):]
-	if bracketTagged(rest) {
+	if t.bracketTagged(rest) {
 		return s
 	}
 	return prefix + "[" + t.Slug + "] " + rest
 }
 
-// repoTagContent matches an owner/repo-shaped bracket tag: two slash-separated
-// parts, each holding at least one letter. Requiring a letter keeps numeric
-// prefixes like "[1/2]" or "[7/22]" from being mistaken for an existing tag, so
-// they still receive the repo tag.
-var repoTagContent = regexp.MustCompile(`^[\w.-]*[A-Za-z][\w.-]*/[\w.-]*[A-Za-z][\w.-]*$`)
-
-// bracketTagged reports whether s begins with an owner/repo-shaped bracket tag
-// such as "[punt-labs/beadle]", distinguishing it from a numeric prefix
-// ("[1/2]") or a note ("[Part 1/2]") that must still be tagged.
-func bracketTagged(s string) bool {
+// bracketTagged reports whether s begins with a bracket tag owned by the same
+// org as this tag — i.e. "[<owner>/…]" where <owner> is the part of t.Slug
+// before the slash. Keying on the current owner preserves org repo tags
+// (including a cross-repo reply within the org, e.g. "[punt-labs/lux]" seen by
+// beadle) while leaving phrase prefixes like "[CI/CD]", "[UI/UX]", or "[1/2]"
+// to receive the repo tag.
+func (t RepoTag) bracketTagged(s string) bool {
 	if !strings.HasPrefix(s, "[") {
 		return false
 	}
@@ -120,7 +128,12 @@ func bracketTagged(s string) bool {
 	if end < 0 {
 		return false
 	}
-	return repoTagContent.MatchString(s[1:end])
+	owner, _, ok := strings.Cut(s[1:end], "/")
+	if !ok {
+		return false
+	}
+	curOwner, _, _ := strings.Cut(t.Slug, "/")
+	return owner == curOwner
 }
 
 // headers returns the X-Beadle-* header map for the Resend JSON path, or nil
