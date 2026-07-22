@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Automatic repo/agent tagging on outbound email (DES-033). Every message now
+  carries a `[owner/repo]` subject tag (matching the GitHub convention, and
+  inserted after any `Re:`/`Fwd:` marker) plus `X-Beadle-Repo` and
+  `X-Beadle-Agent` headers, so a mailbox shared by an agent across repos can be
+  filtered by origin. The repo is resolved from the git `origin` remote; when no
+  repo context is available the message sends untagged. Tagging is idempotent
+  (replies are not double-tagged) and does not affect PGP signature
+  verification.
+
 ## [0.15.0] - 2026-04-18
 
 ### Added

@@ -650,7 +650,8 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 		encryptionWarning = fmt.Sprintf("encryption skipped: not all recipients have GPG keys (missing: %s)", strings.Join(missingKeyAddrs, ", "))
 	}
 
-	result, sendErr := email.TrySendChain(cfg, h.logger, to, cc, bcc, subject, body, html, attachments, encryptKeyIDs)
+	tag := email.ResolveRepoTag(ctx, h.logger, id.Handle)
+	result, sendErr := email.TrySendChain(cfg, h.logger, to, cc, bcc, subject, body, html, attachments, encryptKeyIDs, tag)
 	if sendErr != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("send email: %v", sendErr)), nil
 	}
