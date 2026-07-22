@@ -25,6 +25,11 @@ func TestParseRepoSlug(t *testing.T) {
 		{"trailing whitespace", "git@github.com:punt-labs/beadle.git\n", "punt-labs/beadle"},
 		{"nested path rejected", "https://gitlab.com/group/sub/repo.git", ""},
 		{"control char rejected", "git@github.com:punt-labs\r/beadle", ""},
+		{"internal space rejected", "git@github.com:own er/repo", ""},
+		{"empty repo rejected", "git@github.com:owner/", ""},
+		// Stripping a trailing ".git" is git-clone convention: a remote named
+		// "owner/my.git" clones into "my", so the tag is "owner/my".
+		{"repo named my.git strips to my", "git@github.com:punt-labs/my.git", "punt-labs/my"},
 		{"garbage", "not-a-url", ""},
 		{"empty", "", ""},
 	}
@@ -45,21 +50,54 @@ func TestRepoTag_Subject(t *testing.T) {
 	}{
 		{"empty tag unchanged", RepoTag{}, "Hello", "Hello"},
 		{"fresh subject tagged", tag, "Hello", "[punt-labs/beadle] Hello"},
-		{"already tagged same repo", tag, "[punt-labs/beadle] Hello", "[punt-labs/beadle] Hello"},
-		{"already tagged other repo", tag, "[punt-labs/ethos] Hi", "[punt-labs/ethos] Hi"},
-		{"already tagged bare owner/repo", tag, "[owner/repo] x", "[owner/repo] x"},
-		{"reply already tagged", tag, "Re: [punt-labs/ethos] Hi", "Re: [punt-labs/ethos] Hi"},
+		{"same repo not re-tagged", tag, "[punt-labs/beadle] Hello", "[punt-labs/beadle] Hello"},
+		{"same owner other repo not re-tagged", tag, "[punt-labs/ethos] Hi", "[punt-labs/ethos] Hi"},
+		{"same owner sibling repo not re-tagged", tag, "[punt-labs/lux] Hi", "[punt-labs/lux] Hi"},
+		{"same owner different case not re-tagged", tag, "Re: [Punt-Labs/beadle] status", "Re: [Punt-Labs/beadle] status"},
+		{"reply with org tag not re-tagged", tag, "Re: [punt-labs/lux] Hi", "Re: [punt-labs/lux] Hi"},
 		{"reply fresh tagged after prefix", tag, "Re: Hello", "Re: [punt-labs/beadle] Hello"},
 		{"fwd fresh tagged after prefix", tag, "Fwd: Hello", "Fwd: [punt-labs/beadle] Hello"},
 		{"bare non-repo bracket still tagged", tag, "[URGENT] fix", "[punt-labs/beadle] [URGENT] fix"},
+		// A different owner is a phrase prefix, not a repo tag — it must still be tagged.
+		{"different owner repo tagged", tag, "[owner/repo] x", "[punt-labs/beadle] [owner/repo] x"},
+		{"CI/CD phrase tagged", tag, "[CI/CD] pipeline", "[punt-labs/beadle] [CI/CD] pipeline"},
+		{"UI/UX phrase tagged", tag, "[UI/UX] review", "[punt-labs/beadle] [UI/UX] review"},
+		{"A/B phrase tagged", tag, "[A/B] test", "[punt-labs/beadle] [A/B] test"},
+		{"AI/ML phrase tagged", tag, "[AI/ML] notes", "[punt-labs/beadle] [AI/ML] notes"},
 		// A numeric or spaced bracket is not a repo tag — it must still be tagged.
 		{"numeric fraction tagged", tag, "[1/2] status", "[punt-labs/beadle] [1/2] status"},
 		{"numeric date tagged", tag, "[7/22] standup", "[punt-labs/beadle] [7/22] standup"},
 		{"spaced prefix tagged", tag, "[Part 1/2] notes", "[punt-labs/beadle] [Part 1/2] notes"},
+		// A malformed same-owner bracket is not a well-formed tag — still tagged.
+		{"same owner extra slash tagged", tag, "[punt-labs/CI/CD] x", "[punt-labs/beadle] [punt-labs/CI/CD] x"},
+		{"same owner empty repo tagged", tag, "[punt-labs/] x", "[punt-labs/beadle] [punt-labs/] x"},
+		{"same owner spaced repo tagged", tag, "[punt-labs/ beadle] x", "[punt-labs/beadle] [punt-labs/ beadle] x"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, tc.tag.subject(tc.in))
+		})
+	}
+}
+
+func TestRepoTag_BracketTaggedValidatesOwnSlug(t *testing.T) {
+	// A malformed Slug must recognize nothing as an existing tag, so subject()
+	// falls through to prepend — bracketTagged validates its own slug and does
+	// not rely on RepoTag having been built by ResolveRepoTag.
+	tests := []struct {
+		name string
+		slug string
+	}{
+		{"empty repo", "punt-labs/"},
+		{"no slash", "punt-labs"},
+		{"extra slash", "punt-labs/a/b"},
+		{"spaced", "punt labs/beadle"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tag := RepoTag{Slug: tc.slug, Agent: "claude"}
+			assert.False(t, tag.bracketTagged("[punt-labs/beadle] x"),
+				"a malformed slug must treat nothing as already-tagged")
 		})
 	}
 }
@@ -176,5 +214,15 @@ func TestResolveRepoTag(t *testing.T) {
 
 		tag := ResolveRepoTag(context.Background(), nil, "claude")
 		assert.True(t, tag.empty(), "a nested-path remote is not an owner/repo slug")
+	})
+
+	t.Run("control-char agent handle dropped", func(t *testing.T) {
+		dir := tempRepoDir(t)
+		gitRun(t, dir, "init", "-q")
+		gitRun(t, dir, "remote", "add", "origin", "git@github.com:punt-labs/beadle.git")
+
+		tag := ResolveRepoTag(context.Background(), nil, "cl\raude")
+		assert.Equal(t, "punt-labs/beadle", tag.Slug)
+		assert.Empty(t, tag.Agent, "a tainted agent handle must be dropped")
 	})
 }
