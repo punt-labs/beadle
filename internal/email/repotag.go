@@ -38,16 +38,21 @@ var (
 )
 
 // parseRepoSlug extracts owner/repo from a git remote URL, or "" when the URL
-// does not parse to a two-part slug. Nested paths (e.g. a GitLab group) and
-// slugs carrying control characters return "" — the regexp dot matches CR, so
-// a control character must be rejected explicitly rather than reaching a header.
+// does not parse to a well-formed owner/repo slug. It shares one definition of
+// "valid slug" with bracketTagged via splitSlug: exactly one slash, both parts
+// non-empty, no whitespace or control characters. Nested paths (a GitLab group)
+// and slugs bearing whitespace or control characters therefore return "".
+//
+// A trailing ".git" is stripped by design: git clone does the same, so the
+// remote "owner/my.git" names the repo "my", and the tag becomes
+// "[owner/my]". A repository literally named "my.git" is therefore tagged as
+// "my" — the git-clone convention wins over that rare literal name.
 func parseRepoSlug(url string) string {
 	url = strings.TrimSpace(url)
 	for _, re := range []*regexp.Regexp{slugSCP, slugURL} {
 		if m := re.FindStringSubmatch(url); m != nil {
-			slug := m[1]
-			if strings.Count(slug, "/") == 1 && !strings.ContainsFunc(slug, unicode.IsControl) {
-				return slug
+			if _, _, ok := splitSlug(m[1]); ok {
+				return m[1]
 			}
 		}
 	}
@@ -77,6 +82,12 @@ func ResolveRepoTag(ctx context.Context, logger *slog.Logger, agent string) Repo
 		logger.Debug("repo tag skipped: git remote is not an owner/repo slug")
 		return RepoTag{}
 	}
+	// Drop a tainted agent handle at the source so neither the SMTP nor the
+	// Resend header path can carry a control character.
+	if strings.ContainsFunc(agent, unicode.IsControl) {
+		logger.Debug("repo tag: dropping agent handle with control characters")
+		agent = ""
+	}
 	return RepoTag{Slug: slug, Agent: agent}
 }
 
@@ -87,32 +98,39 @@ func (t RepoTag) empty() bool { return t.Slug == "" }
 // and repeated, so a subject tag lands after them (matching GitHub's form).
 var replyPrefix = regexp.MustCompile(`(?i)^((re|fwd|fw)\s*:\s*)+`)
 
-// subject returns s with the repo tag inserted as "[slug] ". It is idempotent:
-// a subject already carrying a leading "[owner/repo]" tag (after any Re:/Fwd:
-// markers) is returned unchanged, so a reply keeps exactly one tag. A zero tag
-// returns s unchanged.
+// subject returns s with the repo tag inserted as "[slug] ". It is idempotent
+// for a same-owner tag: a subject already carrying a well-formed "[owner/repo]"
+// tag whose owner matches this tag's owner case-insensitively (after any
+// Re:/Fwd: markers) is returned unchanged, so a reply keeps exactly one tag. A
+// zero tag returns s unchanged.
 func (t RepoTag) subject(s string) string {
 	if t.empty() {
 		return s
 	}
 	prefix := replyPrefix.FindString(s)
 	rest := s[len(prefix):]
-	if bracketTagged(rest) {
+	if t.bracketTagged(rest) {
 		return s
 	}
 	return prefix + "[" + t.Slug + "] " + rest
 }
 
-// repoTagContent matches an owner/repo-shaped bracket tag: two slash-separated
-// parts, each holding at least one letter. Requiring a letter keeps numeric
-// prefixes like "[1/2]" or "[7/22]" from being mistaken for an existing tag, so
-// they still receive the repo tag.
-var repoTagContent = regexp.MustCompile(`^[\w.-]*[A-Za-z][\w.-]*/[\w.-]*[A-Za-z][\w.-]*$`)
-
-// bracketTagged reports whether s begins with an owner/repo-shaped bracket tag
-// such as "[punt-labs/beadle]", distinguishing it from a numeric prefix
-// ("[1/2]") or a note ("[Part 1/2]") that must still be tagged.
-func bracketTagged(s string) bool {
+// bracketTagged reports whether s begins with a bracket tag owned by the same
+// org as this tag — a leading "[owner/repo]" whose owner matches t.Slug's owner
+// case-insensitively (GitHub owners are case-insensitive and clone-URL casing
+// often differs from notification casing). This preserves org repo tags,
+// including a cross-repo reply within the org (e.g. "[punt-labs/lux]" seen by
+// beadle), while leaving phrase prefixes like "[CI/CD]" or "[1/2]" and any
+// malformed bracket ("[punt-labs/CI/CD]", "[punt-labs/]") to receive the tag.
+//
+// Both t.Slug and the candidate bracket run through splitSlug, so the check is
+// self-validating: a malformed t.Slug recognizes nothing as already tagged,
+// independent of how the RepoTag was constructed.
+func (t RepoTag) bracketTagged(s string) bool {
+	curOwner, _, ok := splitSlug(t.Slug)
+	if !ok {
+		return false
+	}
 	if !strings.HasPrefix(s, "[") {
 		return false
 	}
@@ -120,7 +138,31 @@ func bracketTagged(s string) bool {
 	if end < 0 {
 		return false
 	}
-	return repoTagContent.MatchString(s[1:end])
+	owner, _, ok := splitSlug(s[1:end])
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(owner, curOwner)
+}
+
+// splitSlug splits a well-formed "owner/repo" token into its parts. It is the
+// single definition of a valid slug, shared by parseRepoSlug and bracketTagged:
+// ok is false unless the token has exactly one slash, both parts are non-empty,
+// and it carries no whitespace or control characters.
+func splitSlug(s string) (owner, repo string, ok bool) {
+	owner, repo, ok = strings.Cut(s, "/")
+	if !ok || owner == "" || repo == "" {
+		return "", "", false
+	}
+	if strings.ContainsRune(repo, '/') {
+		return "", "", false
+	}
+	if strings.ContainsFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}) {
+		return "", "", false
+	}
+	return owner, repo, true
 }
 
 // headers returns the X-Beadle-* header map for the Resend JSON path, or nil
