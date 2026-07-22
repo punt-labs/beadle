@@ -115,11 +115,12 @@ func (t RepoTag) subject(s string) string {
 }
 
 // bracketTagged reports whether s begins with a bracket tag owned by the same
-// org as this tag — i.e. "[<owner>/…]" where <owner> is the part of t.Slug
-// before the slash. Keying on the current owner preserves org repo tags
-// (including a cross-repo reply within the org, e.g. "[punt-labs/lux]" seen by
-// beadle) while leaving phrase prefixes like "[CI/CD]", "[UI/UX]", or "[1/2]"
-// to receive the repo tag.
+// org as this tag — a leading "[owner/repo]" whose owner matches t.Slug's owner
+// case-insensitively (GitHub owners are case-insensitive and clone-URL casing
+// often differs from notification casing). This preserves org repo tags,
+// including a cross-repo reply within the org (e.g. "[punt-labs/lux]" seen by
+// beadle), while leaving phrase prefixes like "[CI/CD]" or "[1/2]" and any
+// malformed bracket ("[punt-labs/CI/CD]", "[punt-labs/]") to receive the tag.
 func (t RepoTag) bracketTagged(s string) bool {
 	if !strings.HasPrefix(s, "[") {
 		return false
@@ -128,14 +129,32 @@ func (t RepoTag) bracketTagged(s string) bool {
 	if end < 0 {
 		return false
 	}
-	owner, _, ok := strings.Cut(s[1:end], "/")
+	owner, _, ok := splitSlug(s[1:end])
 	if !ok {
 		return false
 	}
 	curOwner, _, _ := strings.Cut(t.Slug, "/")
-	// GitHub owners are case-insensitive, and clone-URL casing often differs
-	// from notification casing, so compare without regard to case.
 	return strings.EqualFold(owner, curOwner)
+}
+
+// splitSlug splits a well-formed "owner/repo" token into its parts. It returns
+// ok=false unless the token has exactly one slash, both parts are non-empty,
+// and it carries no whitespace or control characters — the same shape
+// parseRepoSlug accepts.
+func splitSlug(s string) (owner, repo string, ok bool) {
+	owner, repo, ok = strings.Cut(s, "/")
+	if !ok || owner == "" || repo == "" {
+		return "", "", false
+	}
+	if strings.ContainsRune(repo, '/') {
+		return "", "", false
+	}
+	if strings.ContainsFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}) {
+		return "", "", false
+	}
+	return owner, repo, true
 }
 
 // headers returns the X-Beadle-* header map for the Resend JSON path, or nil

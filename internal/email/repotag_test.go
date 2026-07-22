@@ -66,6 +66,10 @@ func TestRepoTag_Subject(t *testing.T) {
 		{"numeric fraction tagged", tag, "[1/2] status", "[punt-labs/beadle] [1/2] status"},
 		{"numeric date tagged", tag, "[7/22] standup", "[punt-labs/beadle] [7/22] standup"},
 		{"spaced prefix tagged", tag, "[Part 1/2] notes", "[punt-labs/beadle] [Part 1/2] notes"},
+		// A malformed same-owner bracket is not a well-formed tag — still tagged.
+		{"same owner extra slash tagged", tag, "[punt-labs/CI/CD] x", "[punt-labs/beadle] [punt-labs/CI/CD] x"},
+		{"same owner empty repo tagged", tag, "[punt-labs/] x", "[punt-labs/beadle] [punt-labs/] x"},
+		{"same owner spaced repo tagged", tag, "[punt-labs/ beadle] x", "[punt-labs/beadle] [punt-labs/ beadle] x"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
