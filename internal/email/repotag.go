@@ -38,9 +38,10 @@ var (
 )
 
 // parseRepoSlug extracts owner/repo from a git remote URL, or "" when the URL
-// does not parse to a two-part slug. Nested paths (e.g. a GitLab group) and
-// slugs carrying control characters return "" — the regexp dot matches CR, so
-// a control character must be rejected explicitly rather than reaching a header.
+// does not parse to a well-formed owner/repo slug. It shares one definition of
+// "valid slug" with bracketTagged via splitSlug: exactly one slash, both parts
+// non-empty, no whitespace or control characters. Nested paths (a GitLab group)
+// and slugs bearing whitespace or control characters therefore return "".
 //
 // A trailing ".git" is stripped by design: git clone does the same, so the
 // remote "owner/my.git" names the repo "my", and the tag becomes
@@ -50,9 +51,8 @@ func parseRepoSlug(url string) string {
 	url = strings.TrimSpace(url)
 	for _, re := range []*regexp.Regexp{slugSCP, slugURL} {
 		if m := re.FindStringSubmatch(url); m != nil {
-			slug := m[1]
-			if strings.Count(slug, "/") == 1 && !strings.ContainsFunc(slug, unicode.IsControl) {
-				return slug
+			if _, _, ok := splitSlug(m[1]); ok {
+				return m[1]
 			}
 		}
 	}
@@ -98,10 +98,11 @@ func (t RepoTag) empty() bool { return t.Slug == "" }
 // and repeated, so a subject tag lands after them (matching GitHub's form).
 var replyPrefix = regexp.MustCompile(`(?i)^((re|fwd|fw)\s*:\s*)+`)
 
-// subject returns s with the repo tag inserted as "[slug] ". It is idempotent:
-// a subject already carrying a leading "[owner/repo]" tag (after any Re:/Fwd:
-// markers) is returned unchanged, so a reply keeps exactly one tag. A zero tag
-// returns s unchanged.
+// subject returns s with the repo tag inserted as "[slug] ". It is idempotent
+// for a same-owner tag: a subject already carrying a well-formed "[owner/repo]"
+// tag whose owner matches this tag's owner case-insensitively (after any
+// Re:/Fwd: markers) is returned unchanged, so a reply keeps exactly one tag. A
+// zero tag returns s unchanged.
 func (t RepoTag) subject(s string) string {
 	if t.empty() {
 		return s
@@ -137,10 +138,10 @@ func (t RepoTag) bracketTagged(s string) bool {
 	return strings.EqualFold(owner, curOwner)
 }
 
-// splitSlug splits a well-formed "owner/repo" token into its parts. It returns
-// ok=false unless the token has exactly one slash, both parts are non-empty,
-// and it carries no whitespace or control characters — the same shape
-// parseRepoSlug accepts.
+// splitSlug splits a well-formed "owner/repo" token into its parts. It is the
+// single definition of a valid slug, shared by parseRepoSlug and bracketTagged:
+// ok is false unless the token has exactly one slash, both parts are non-empty,
+// and it carries no whitespace or control characters.
 func splitSlug(s string) (owner, repo string, ok bool) {
 	owner, repo, ok = strings.Cut(s, "/")
 	if !ok || owner == "" || repo == "" {

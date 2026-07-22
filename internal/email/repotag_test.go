@@ -25,6 +25,8 @@ func TestParseRepoSlug(t *testing.T) {
 		{"trailing whitespace", "git@github.com:punt-labs/beadle.git\n", "punt-labs/beadle"},
 		{"nested path rejected", "https://gitlab.com/group/sub/repo.git", ""},
 		{"control char rejected", "git@github.com:punt-labs\r/beadle", ""},
+		{"internal space rejected", "git@github.com:own er/repo", ""},
+		{"empty repo rejected", "git@github.com:owner/", ""},
 		// Stripping a trailing ".git" is git-clone convention: a remote named
 		// "owner/my.git" clones into "my", so the tag is "owner/my".
 		{"repo named my.git strips to my", "git@github.com:punt-labs/my.git", "punt-labs/my"},
