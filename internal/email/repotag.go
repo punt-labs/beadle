@@ -2,10 +2,14 @@ package email
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
+	"unicode"
 )
 
 // Repo-tag header names. X-Beadle-Repo carries the owner/repo slug so tools can
@@ -14,6 +18,9 @@ const (
 	HeaderRepo  = "X-Beadle-Repo"
 	HeaderAgent = "X-Beadle-Agent"
 )
+
+// gitRemoteTimeout bounds the git subprocess that ResolveRepoTag spawns.
+const gitRemoteTimeout = 2 * time.Second
 
 // RepoTag identifies the repository and agent that originate an outbound
 // message. A zero RepoTag (empty Slug) carries no repo context: every compose
@@ -31,14 +38,15 @@ var (
 )
 
 // parseRepoSlug extracts owner/repo from a git remote URL, or "" when the URL
-// does not parse to a two-part slug. Nested paths (e.g. a GitLab group) return
-// "" because the tag convention is owner/repo only.
+// does not parse to a two-part slug. Nested paths (e.g. a GitLab group) and
+// slugs carrying control characters return "" — the regexp dot matches CR, so
+// a control character must be rejected explicitly rather than reaching a header.
 func parseRepoSlug(url string) string {
 	url = strings.TrimSpace(url)
 	for _, re := range []*regexp.Regexp{slugSCP, slugURL} {
 		if m := re.FindStringSubmatch(url); m != nil {
 			slug := m[1]
-			if strings.Count(slug, "/") == 1 {
+			if strings.Count(slug, "/") == 1 && !strings.ContainsFunc(slug, unicode.IsControl) {
 				return slug
 			}
 		}
@@ -48,15 +56,25 @@ func parseRepoSlug(url string) string {
 
 // ResolveRepoTag builds a RepoTag from the working directory's git origin
 // remote and the given agent handle. It returns a zero RepoTag when no git
-// remote resolves, so a caller with no repo context still sends normally. It
-// never fails a send.
-func ResolveRepoTag(agent string) RepoTag {
-	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
+// remote resolves or the URL is not an owner/repo slug, so a caller with no
+// repo context still sends normally — it never fails a send. The git lookup is
+// bounded by ctx and a short internal timeout. Skips are logged at Debug with a
+// distinct reason; the remote URL is never logged, since it may embed a token.
+func ResolveRepoTag(ctx context.Context, logger *slog.Logger, agent string) RepoTag {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	ctx, cancel := context.WithTimeout(ctx, gitRemoteTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "git", "remote", "get-url", "origin").Output()
 	if err != nil {
+		logger.Debug("repo tag skipped: git origin remote unavailable", "err", err)
 		return RepoTag{}
 	}
 	slug := parseRepoSlug(string(out))
 	if slug == "" {
+		logger.Debug("repo tag skipped: git remote is not an owner/repo slug")
 		return RepoTag{}
 	}
 	return RepoTag{Slug: slug, Agent: agent}
@@ -85,9 +103,15 @@ func (t RepoTag) subject(s string) string {
 	return prefix + "[" + t.Slug + "] " + rest
 }
 
-// bracketTagged reports whether s begins with an owner/repo bracket tag such as
-// "[punt-labs/beadle]". The slash distinguishes a repo tag from an unrelated
-// leading bracket like "[URGENT]".
+// repoTagContent matches an owner/repo-shaped bracket tag: two slash-separated
+// parts, each holding at least one letter. Requiring a letter keeps numeric
+// prefixes like "[1/2]" or "[7/22]" from being mistaken for an existing tag, so
+// they still receive the repo tag.
+var repoTagContent = regexp.MustCompile(`^[\w.-]*[A-Za-z][\w.-]*/[\w.-]*[A-Za-z][\w.-]*$`)
+
+// bracketTagged reports whether s begins with an owner/repo-shaped bracket tag
+// such as "[punt-labs/beadle]", distinguishing it from a numeric prefix
+// ("[1/2]") or a note ("[Part 1/2]") that must still be tagged.
 func bracketTagged(s string) bool {
 	if !strings.HasPrefix(s, "[") {
 		return false
@@ -96,7 +120,7 @@ func bracketTagged(s string) bool {
 	if end < 0 {
 		return false
 	}
-	return strings.Contains(s[1:end], "/")
+	return repoTagContent.MatchString(s[1:end])
 }
 
 // headers returns the X-Beadle-* header map for the Resend JSON path, or nil

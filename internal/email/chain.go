@@ -1,7 +1,6 @@
 package email
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -119,24 +118,7 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 		return nil, fmt.Errorf("pgp-signed email requires SMTP transport; Resend API cannot preserve raw MIME")
 	}
 
-	var resendAtts []ResendAttachment
-	for _, att := range attachments {
-		resendAtts = append(resendAtts, ResendAttachment{
-			Filename: att.Filename,
-			Content:  base64.StdEncoding.EncodeToString(att.Data),
-		})
-	}
-
-	resp, err := Send(cfg, SendRequest{
-		To:          to,
-		Cc:          cc,
-		Bcc:         bcc,
-		Subject:     subject,
-		Text:        body,
-		HTML:        html,
-		Attachments: resendAtts,
-		Headers:     tag.headers(),
-	})
+	resp, err := Send(cfg, resendRequest(to, cc, bcc, subject, body, html, attachments, tag))
 	if err != nil {
 		return nil, err
 	}

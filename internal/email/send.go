@@ -368,6 +368,28 @@ type SendResponse struct {
 	ID string `json:"id"`
 }
 
+// resendRequest assembles the Resend API payload, attaching the repo tag's
+// X-Beadle-* headers. The subject is already repo-tagged by the caller.
+func resendRequest(to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment, tag RepoTag) SendRequest {
+	var resendAtts []ResendAttachment
+	for _, att := range attachments {
+		resendAtts = append(resendAtts, ResendAttachment{
+			Filename: att.Filename,
+			Content:  base64.StdEncoding.EncodeToString(att.Data),
+		})
+	}
+	return SendRequest{
+		To:          to,
+		Cc:          cc,
+		Bcc:         bcc,
+		Subject:     subject,
+		Text:        body,
+		HTML:        html,
+		Attachments: resendAtts,
+		Headers:     tag.headers(),
+	}
+}
+
 // Send delivers an email via the Resend API.
 func Send(cfg *Config, req SendRequest) (*SendResponse, error) {
 	apiKey, err := cfg.ResendAPIKey()

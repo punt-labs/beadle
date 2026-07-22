@@ -47,3 +47,23 @@ func TestTrySendChain_EncryptionRequiresSigning(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "encryption requires signing")
 }
+
+func TestResendRequest_RepoTagHeaders(t *testing.T) {
+	tag := RepoTag{Slug: "punt-labs/beadle", Agent: "claude"}
+	req := resendRequest(
+		[]string{"to@example.com"}, nil, nil,
+		"[punt-labs/beadle] Hi", "body", "", nil, tag,
+	)
+	assert.Equal(t,
+		map[string]string{HeaderRepo: "punt-labs/beadle", HeaderAgent: "claude"},
+		req.Headers,
+		"Resend request must carry the X-Beadle-* headers")
+	assert.Equal(t, "[punt-labs/beadle] Hi", req.Subject)
+
+	// An empty tag leaves the Resend headers unset.
+	req = resendRequest(
+		[]string{"to@example.com"}, nil, nil,
+		"Hi", "body", "", nil, RepoTag{},
+	)
+	assert.Nil(t, req.Headers, "empty tag must not set Resend headers")
+}
