@@ -192,7 +192,6 @@ func (p *Poller) poll() {
 	first := p.lastCheck.IsZero()
 	prev := p.lastSeen
 	p.lastSeen = unseen
-	p.lastCheck = time.Now()
 	p.consecFails = 0
 	p.lastError = ""
 	p.mu.Unlock()
@@ -206,6 +205,14 @@ func (p *Poller) poll() {
 			p.onNewMail(newCount)
 		}
 	}
+
+	// Publish lastCheck only after the callback has run (or been skipped), so
+	// LastCheck marks completion of the whole poll cycle including notification.
+	// This makes LastCheck a valid happens-before edge for the callback — a
+	// waiter that sees LastCheck advance is guaranteed the callback already ran.
+	p.mu.Lock()
+	p.lastCheck = time.Now()
+	p.mu.Unlock()
 }
 
 func (p *Poller) recordFailure(msg string) {
