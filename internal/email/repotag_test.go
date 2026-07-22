@@ -80,6 +80,28 @@ func TestRepoTag_Subject(t *testing.T) {
 	}
 }
 
+func TestRepoTag_BracketTaggedValidatesOwnSlug(t *testing.T) {
+	// A malformed Slug must recognize nothing as an existing tag, so subject()
+	// falls through to prepend — bracketTagged validates its own slug and does
+	// not rely on RepoTag having been built by ResolveRepoTag.
+	tests := []struct {
+		name string
+		slug string
+	}{
+		{"empty repo", "punt-labs/"},
+		{"no slash", "punt-labs"},
+		{"extra slash", "punt-labs/a/b"},
+		{"spaced", "punt labs/beadle"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tag := RepoTag{Slug: tc.slug, Agent: "claude"}
+			assert.False(t, tag.bracketTagged("[punt-labs/beadle] x"),
+				"a malformed slug must treat nothing as already-tagged")
+		})
+	}
+}
+
 func TestRepoTag_SubjectIdempotent(t *testing.T) {
 	tag := RepoTag{Slug: "punt-labs/beadle", Agent: "claude"}
 	once := tag.subject("Hello")

@@ -122,7 +122,15 @@ func (t RepoTag) subject(s string) string {
 // including a cross-repo reply within the org (e.g. "[punt-labs/lux]" seen by
 // beadle), while leaving phrase prefixes like "[CI/CD]" or "[1/2]" and any
 // malformed bracket ("[punt-labs/CI/CD]", "[punt-labs/]") to receive the tag.
+//
+// Both t.Slug and the candidate bracket run through splitSlug, so the check is
+// self-validating: a malformed t.Slug recognizes nothing as already tagged,
+// independent of how the RepoTag was constructed.
 func (t RepoTag) bracketTagged(s string) bool {
+	curOwner, _, ok := splitSlug(t.Slug)
+	if !ok {
+		return false
+	}
 	if !strings.HasPrefix(s, "[") {
 		return false
 	}
@@ -134,7 +142,6 @@ func (t RepoTag) bracketTagged(s string) bool {
 	if !ok {
 		return false
 	}
-	curOwner, _, _ := strings.Cut(t.Slug, "/")
 	return strings.EqualFold(owner, curOwner)
 }
 
