@@ -65,7 +65,7 @@ Expire-Date: 0
 }
 
 func TestComposeRaw_NoAttachments(t *testing.T) {
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil, RepoTag{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -83,7 +83,7 @@ func TestComposeRaw_NoAttachments(t *testing.T) {
 }
 
 func TestComposeRaw_EmptyAttachments(t *testing.T) {
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", []OutboundAttachment{})
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", []OutboundAttachment{}, RepoTag{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -92,7 +92,7 @@ func TestComposeRaw_EmptyAttachments(t *testing.T) {
 }
 
 func TestComposeRaw_MultipleToRecipients(t *testing.T) {
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com", "e@f.com"}, nil, "Hi", "Hello", nil)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com", "e@f.com"}, nil, "Hi", "Hello", nil, RepoTag{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -103,7 +103,7 @@ func TestComposeRaw_MultipleToRecipients(t *testing.T) {
 }
 
 func TestComposeRaw_WithCc(t *testing.T) {
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"x@y.com", "z@w.com"}, "Hi", "Hello", nil)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"x@y.com", "z@w.com"}, "Hi", "Hello", nil, RepoTag{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -117,7 +117,7 @@ func TestComposeRaw_BccNotInHeaders(t *testing.T) {
 	// Bcc recipients should never appear in the message headers.
 	// ComposeRaw does not accept bcc — they are envelope-only (handled by SMTPSend).
 	// This test verifies that even with Cc, no Bcc header is written.
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"cc@example.com"}, "Hi", "Hello", nil)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"cc@example.com"}, "Hi", "Hello", nil, RepoTag{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -133,7 +133,7 @@ func TestComposeRaw_OneAttachment(t *testing.T) {
 		Data:        []byte("fake-pdf-content"),
 	}}
 
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Report", "See attached.", atts)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Report", "See attached.", atts, RepoTag{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -179,7 +179,7 @@ func TestComposeRaw_MultipleAttachments(t *testing.T) {
 		{Filename: "c.bin", ContentType: "application/octet-stream", Data: []byte("binary")},
 	}
 
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Files", "Here are files.", atts)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Files", "Here are files.", atts, RepoTag{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -222,7 +222,7 @@ func TestComposeRaw_HeaderInjectionWithAttachments(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ComposeRaw(tc.from, tc.to, nil, tc.subject, "body", atts)
+			_, err := ComposeRaw(tc.from, tc.to, nil, tc.subject, "body", atts, RepoTag{})
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "CR/LF")
 		})
@@ -230,7 +230,7 @@ func TestComposeRaw_HeaderInjectionWithAttachments(t *testing.T) {
 }
 
 func TestComposeRaw_HeaderInjectionInCc(t *testing.T) {
-	_, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"evil\r\n@hack.com"}, "Hi", "body", nil)
+	_, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"evil\r\n@hack.com"}, "Hi", "body", nil, RepoTag{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "CR/LF")
 }
@@ -252,7 +252,7 @@ func TestComposeRaw_AttachmentHeaderInjection(t *testing.T) {
 				ContentType: tc.contentType,
 				Data:        []byte("data"),
 			}}
-			_, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "body", atts)
+			_, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "body", atts, RepoTag{})
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "CR/LF")
 		})
@@ -266,7 +266,7 @@ func TestComposeRaw_NonASCIIFilename(t *testing.T) {
 		Data:        []byte("pdf-data"),
 	}}
 
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Report", "See attached.", atts)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Report", "See attached.", atts, RepoTag{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -306,6 +306,7 @@ func TestComposeSignedRaw_ProducesVerifiableMessage(t *testing.T) {
 		"Hello from the signed send test.",
 		nil,
 		gpgBin, "sendtest@example.com", "",
+		RepoTag{},
 	)
 	require.NoError(t, err)
 
@@ -348,6 +349,7 @@ func TestComposeSignedRaw_WithCc(t *testing.T) {
 		"Body with cc.",
 		nil,
 		gpgBin, "cctest@example.com", "",
+		RepoTag{},
 	)
 	require.NoError(t, err)
 
@@ -380,6 +382,7 @@ func TestComposeSignedRaw_WithAttachments(t *testing.T) {
 		"See attached.",
 		atts,
 		gpgBin, "att@example.com", "",
+		RepoTag{},
 	)
 	require.NoError(t, err)
 
@@ -435,6 +438,7 @@ func TestComposeSignedRaw_NonExpiringKeyRejected(t *testing.T) {
 		"Body",
 		nil,
 		gpgBin, "noexpiry@example.com", "",
+		RepoTag{},
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "signing key rejected")
@@ -460,7 +464,7 @@ func TestComposeSignedRaw_HeaderInjection(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ComposeSignedRaw(tc.from, tc.to, nil, tc.subject, "body", nil,
-				gpgBin, "signer@example.com", "")
+				gpgBin, "signer@example.com", "", RepoTag{})
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "CR/LF")
 		})
@@ -487,6 +491,7 @@ func TestComposeEncryptedSignedRaw_RoundTrip(t *testing.T) {
 		nil,
 		gpgBin, "sender@example.com", "",
 		[]string{"recipient@example.com"},
+		RepoTag{},
 	)
 	require.NoError(t, err)
 
@@ -534,6 +539,7 @@ func TestComposeEncryptedSignedRaw_WithAttachments(t *testing.T) {
 		atts,
 		gpgBin, "sender@example.com", "",
 		[]string{"recipient@example.com"},
+		RepoTag{},
 	)
 	require.NoError(t, err)
 
@@ -565,9 +571,103 @@ func TestComposeEncryptedSignedRaw_HeaderInjection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ComposeEncryptedSignedRaw(tc.from, tc.to, nil, tc.subject, "body", nil,
 				gpgBin, "signer@example.com", "",
-				[]string{"ABCD1234"})
+				[]string{"ABCD1234"}, RepoTag{})
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "CR/LF")
 		})
 	}
+}
+
+// --- Repo tagging (DES-033), compose paths ---
+
+// TestComposeRaw_RepoTag proves the plain path carries both headers when a tag
+// is present and none when it is empty (the missing-repo-context fallback).
+func TestComposeRaw_RepoTag(t *testing.T) {
+	tag := RepoTag{Slug: "punt-labs/beadle", Agent: "claude"}
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil, tag)
+	require.NoError(t, err)
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+	assert.Equal(t, "punt-labs/beadle", msg.Header.Get("X-Beadle-Repo"))
+	assert.Equal(t, "claude", msg.Header.Get("X-Beadle-Agent"))
+
+	// Missing repo context: no headers, still composes.
+	raw, err = ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil, RepoTag{})
+	require.NoError(t, err)
+	msg, err = mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+	assert.Empty(t, msg.Header.Get("X-Beadle-Repo"))
+	assert.Empty(t, msg.Header.Get("X-Beadle-Agent"))
+}
+
+// TestComposeSignedRaw_RepoTagVerifies is the PGP invariant: adding the top-level
+// X-Beadle-* headers must not change what is signed, so the message still verifies.
+func TestComposeSignedRaw_RepoTagVerifies(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+
+	home := gpgHome(t)
+	gpgGenKey(t, gpgBin, home, "Tag Test", "tagtest@example.com")
+	t.Setenv("GNUPGHOME", home)
+
+	tag := RepoTag{Slug: "punt-labs/beadle", Agent: "claude"}
+	raw, err := ComposeSignedRaw(
+		"tagtest@example.com",
+		[]string{"recipient@example.com"},
+		nil,
+		"Signed Subject",
+		"Signed body with a repo tag.",
+		nil,
+		gpgBin, "tagtest@example.com", "",
+		tag,
+	)
+	require.NoError(t, err)
+
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+	assert.Equal(t, "punt-labs/beadle", msg.Header.Get("X-Beadle-Repo"))
+	assert.Equal(t, "claude", msg.Header.Get("X-Beadle-Agent"))
+
+	result, verifyErr := pgp.Verify(gpgBin, raw)
+	require.NoError(t, verifyErr)
+	assert.True(t, result.Valid, "signed message must still verify after tagging")
+}
+
+// TestComposeEncryptedSignedRaw_RepoTag proves the encrypted path exposes the
+// X-Beadle-* headers on the outer envelope and still decrypts.
+func TestComposeEncryptedSignedRaw_RepoTag(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+
+	home := gpgHome(t)
+	gpgGenKey(t, gpgBin, home, "Sender", "sender@example.com")
+	gpgGenKey(t, gpgBin, home, "Recipient", "recipient@example.com")
+	t.Setenv("GNUPGHOME", home)
+
+	tag := RepoTag{Slug: "punt-labs/beadle", Agent: "claude"}
+	raw, err := ComposeEncryptedSignedRaw(
+		"sender@example.com",
+		[]string{"recipient@example.com"},
+		nil,
+		"Encrypted Subject",
+		"Encrypted and signed with a repo tag.",
+		nil,
+		gpgBin, "sender@example.com", "",
+		[]string{"recipient@example.com"},
+		tag,
+	)
+	require.NoError(t, err)
+
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+	assert.Equal(t, "punt-labs/beadle", msg.Header.Get("X-Beadle-Repo"))
+	assert.Equal(t, "claude", msg.Header.Get("X-Beadle-Agent"))
+
+	result, err := pgp.Decrypt(gpgBin, "", raw)
+	require.NoError(t, err)
+	assert.Contains(t, string(result.Plaintext), "Encrypted and signed with a repo tag.")
 }

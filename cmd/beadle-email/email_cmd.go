@@ -34,35 +34,42 @@ func newResolver() (*identity.Resolver, error) {
 	return identity.NewResolver(ethosDir, beadleDir, cwd), nil
 }
 
-// resolveConfig loads email config using identity resolution, falling back
-// to the explicit --config path.
-func resolveConfig(explicitPath string) (*email.Config, error) {
+// resolveConfig loads email config using identity resolution, falling back to
+// the explicit --config path. It also returns the resolved identity so callers
+// (e.g. send, for repo tagging) need not resolve it a second time; the identity
+// is nil when resolution itself fails.
+func resolveConfig(explicitPath string) (*email.Config, *identity.Identity, error) {
 	resolver, err := newResolver()
 	if err != nil {
 		slog.Warn("identity resolution unavailable, using explicit config", "error", err, "config", explicitPath)
-		return email.LoadConfig(explicitPath)
+		cfg, err := email.LoadConfig(explicitPath)
+		return cfg, nil, err
 	}
 	id, err := resolver.Resolve()
 	if err != nil {
 		slog.Warn("identity resolution failed, using explicit config", "error", err, "config", explicitPath)
-		return email.LoadConfig(explicitPath)
+		cfg, err := email.LoadConfig(explicitPath)
+		return cfg, nil, err
 	}
 	beadleDir, err := paths.DataDir()
 	if err != nil {
 		slog.Warn("data dir unavailable, using explicit config", "error", err, "config", explicitPath)
-		return email.LoadConfig(explicitPath)
+		cfg, err := email.LoadConfig(explicitPath)
+		return cfg, id, err
 	}
 	idDir, err := identity.EnsureIdentityDir(beadleDir, id.Email)
 	if err != nil {
 		slog.Warn("identity dir unavailable, using explicit config", "error", err, "config", explicitPath)
-		return email.LoadConfig(explicitPath)
+		cfg, err := email.LoadConfig(explicitPath)
+		return cfg, id, err
 	}
 	cfg, err := email.LoadConfig(filepath.Join(idDir, "email.json"))
 	if err != nil {
 		slog.Warn("identity config unavailable, using explicit config", "error", err, "config", explicitPath)
-		return email.LoadConfig(explicitPath)
+		cfg, err := email.LoadConfig(explicitPath)
+		return cfg, id, err
 	}
-	return cfg, nil
+	return cfg, id, nil
 }
 
 // resolveContactsPath returns the identity-scoped contacts path, or the default.
@@ -128,7 +135,7 @@ var listCmd = &cobra.Command{
 	Short: "List messages",
 	Long:  "List messages from the inbox or a specified IMAP folder.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := resolveConfig(listConfig)
+		cfg, _, err := resolveConfig(listConfig)
 		if err != nil {
 			return err
 		}
@@ -181,7 +188,7 @@ var readCmd = &cobra.Command{
 			return fmt.Errorf("invalid UID %q", args[0])
 		}
 
-		cfg, err := resolveConfig(readConfig)
+		cfg, _, err := resolveConfig(readConfig)
 		if err != nil {
 			return err
 		}
@@ -253,12 +260,17 @@ var sendCmd = &cobra.Command{
 			return fmt.Errorf("at least one recipient is required")
 		}
 
-		cfg, err := resolveConfig(sendConfig)
+		cfg, id, err := resolveConfig(sendConfig)
 		if err != nil {
 			return err
 		}
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
-		result, err := email.TrySendChain(cfg, logger, to, cc, bcc, sendSubject, sendBody, "", nil, nil)
+		agent := ""
+		if id != nil {
+			agent = id.Handle
+		}
+		tag := email.ResolveRepoTag(cmd.Context(), logger, agent)
+		result, err := email.TrySendChain(cfg, logger, to, cc, bcc, sendSubject, sendBody, "", nil, nil, tag)
 		if err != nil {
 			return fmt.Errorf("send: %w", err)
 		}
@@ -300,7 +312,7 @@ var moveCmd = &cobra.Command{
 			return fmt.Errorf("invalid UID %q", args[0])
 		}
 
-		cfg, err := resolveConfig(moveConfig)
+		cfg, _, err := resolveConfig(moveConfig)
 		if err != nil {
 			return err
 		}
@@ -336,7 +348,7 @@ var foldersCmd = &cobra.Command{
 	Use:   "folders",
 	Short: "List IMAP folders",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := resolveConfig(foldersConfig)
+		cfg, _, err := resolveConfig(foldersConfig)
 		if err != nil {
 			return err
 		}
