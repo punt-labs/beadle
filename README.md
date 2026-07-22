@@ -11,8 +11,10 @@
 Beadle is an autonomous agent that receives instructions via email and
 executes them as multi-stage pipelines. Commands are programs, the
 daemon is the shell, pipelines are pipes, and GPG signatures are sudo.
-The owner controls what beadle can do by signing command definitions.
-The trust gate controls who can trigger it.
+By design, the owner controls what beadle can do by signing command
+definitions, and the trust gate controls who can trigger it. The trust
+gate is enforced today; command-signature enforcement is defined but not
+yet wired (see below).
 
 **How it works.** You send an email. Beadle verifies your identity
 (PGP signature or Proton E2E encryption), checks your permissions,
@@ -40,8 +42,11 @@ Stage 2 receives the full summary, not stage 1's "ok" output.
 - **CLI commands** exec binaries directly for deterministic operations:
   notifications, status checks, data transforms. Milliseconds per stage.
 
-Both types are defined as YAML files, GPG-signed by the owner. The
-daemon validates signatures at startup and rejects unsigned commands.
+Both types are defined as YAML files with a `signature` field for owner
+GPG-signing. Command-signature verification is currently a stub and is
+not yet enforced; today the daemon gates execution on transport trust —
+a PGP-verified sender matched to a permitted contact — not on the command
+definitions themselves. Signature enforcement is the planned next step.
 
 ## beadle-email
 
