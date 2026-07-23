@@ -1,9 +1,12 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDecideMCP(t *testing.T) {
@@ -104,95 +107,156 @@ plugin:biff:tty: biff mcp - ✔ Connected
 	}
 }
 
-func TestProjectScopeRegistration(t *testing.T) {
-	project := `beadle-email:
-  Scope: Project config (shared via .mcp.json)
-  Status: ✔ Connected
-`
-	user := `beadle-email:
-  Scope: User config
-  Status: ✔ Connected
-`
-	tests := []struct {
-		name   string
-		output string
-		want   bool
-	}{
-		{"project scope", project, true},
-		{"user scope", user, false},
-		{"empty output (server absent)", "", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, projectScopeRegistration(tt.output))
-		})
-	}
+func TestMCPFileDeclaresServer(t *testing.T) {
+	dir := t.TempDir()
+
+	declares := filepath.Join(dir, "declares.json")
+	require.NoError(t, os.WriteFile(declares, []byte(`{"mcpServers":{"beadle-email":{"command":"beadle-email","args":["serve"]}}}`), 0o600))
+
+	other := filepath.Join(dir, "other.json")
+	require.NoError(t, os.WriteFile(other, []byte(`{"mcpServers":{"biff":{"command":"biff"}}}`), 0o600))
+
+	malformed := filepath.Join(dir, "malformed.json")
+	require.NoError(t, os.WriteFile(malformed, []byte(`{not json`), 0o600))
+
+	t.Run("declares beadle-email", func(t *testing.T) {
+		ok, err := mcpFileDeclaresServer(declares, mcpServerName)
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+	t.Run("declares other server only", func(t *testing.T) {
+		ok, err := mcpFileDeclaresServer(other, mcpServerName)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+	t.Run("missing file is not an error", func(t *testing.T) {
+		ok, err := mcpFileDeclaresServer(filepath.Join(dir, "nope.json"), mcpServerName)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+	t.Run("malformed file is an error", func(t *testing.T) {
+		_, err := mcpFileDeclaresServer(malformed, mcpServerName)
+		require.Error(t, err)
+	})
 }
 
-func TestMCPDriftChecks(t *testing.T) {
+// isolatedTempDir returns a temp dir under /tmp, deliberately OUTSIDE the
+// workspace tree. projectScopeMCPFile walks to the filesystem root, and the
+// repo's TMPDIR points into the workspace .tmp/ — so a t.TempDir() root would
+// sit below the real workspace .mcp.json and the up-walk would find it,
+// defeating isolation. /tmp has no beadle-email .mcp.json ancestor.
+func isolatedTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "beadle-mcpscan-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+func TestProjectScopeMCPFile(t *testing.T) {
+	t.Run("no .mcp.json anywhere -> empty", func(t *testing.T) {
+		start := isolatedTempDir(t)
+		got, err := projectScopeMCPFile(start)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	// The shadowing case: a project-scope entry lives in a .mcp.json at the
+	// workspace root, and a user-scope entry (in ~/.claude.json, which this scan
+	// never reads) would shadow it in `claude mcp get`. The filesystem scan
+	// finds the project entry regardless, walking up from a nested working dir.
+	t.Run("project entry found up-tree even when user scope would shadow it", func(t *testing.T) {
+		root := isolatedTempDir(t)
+		mcpPath := filepath.Join(root, ".mcp.json")
+		require.NoError(t, os.WriteFile(mcpPath, []byte(`{"mcpServers":{"beadle-email":{"command":"beadle-email","args":["serve"]}}}`), 0o600))
+
+		nested := filepath.Join(root, "repo", "cmd", "beadle-email")
+		require.NoError(t, os.MkdirAll(nested, 0o750))
+
+		got, err := projectScopeMCPFile(nested)
+		require.NoError(t, err)
+		assert.Equal(t, mcpPath, got)
+	})
+
+	t.Run(".mcp.json without beadle-email -> empty", func(t *testing.T) {
+		root := isolatedTempDir(t)
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(`{"mcpServers":{"biff":{"command":"biff"}}}`), 0o600))
+		got, err := projectScopeMCPFile(root)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	t.Run("malformed .mcp.json surfaces an error", func(t *testing.T) {
+		root := isolatedTempDir(t)
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(`{bad`), 0o600))
+		_, err := projectScopeMCPFile(root)
+		require.Error(t, err)
+	})
+}
+
+func TestMCPRegistrationCheck(t *testing.T) {
 	pluginList := "  ❯ beadle@punt-labs\n    Status: ✔ enabled\n"
 	noPlugin := "  ❯ biff@punt-labs\n    Status: ✔ enabled\n"
 	standaloneList := "plugin:biff:tty: biff mcp - ✔ Connected\nbeadle-email: /x/beadle-email serve - ✔ Connected\n"
 	pluginServerList := "plugin:beadle:email: beadle-email serve - ✔ Connected\n"
-	projectGet := "beadle-email:\n  Scope: Project config (shared via .mcp.json)\n"
-	userGet := "beadle-email:\n  Scope: User config\n"
 
-	find := func(checks []doctorCheck, name string) (doctorCheck, bool) {
-		for _, c := range checks {
-			if c.Name == name {
-				return c, true
-			}
-		}
-		return doctorCheck{}, false
-	}
-
-	t.Run("standalone coexists with plugin -> WARN", func(t *testing.T) {
-		checks := mcpDriftChecks(pluginList, standaloneList, userGet)
-		c, ok := find(checks, "mcp_registration")
-		assert.True(t, ok)
+	t.Run("coexistence, user scope -> WARN with -s user remedy", func(t *testing.T) {
+		c := mcpRegistrationCheck(pluginList, standaloneList, "")
 		assert.Equal(t, "WARN", c.Status)
 		assert.Contains(t, c.Detail, "coexists")
+		assert.Contains(t, c.Detail, "remove -s user")
+	})
+
+	t.Run("coexistence, project scope -> WARN with -s project remedy and path", func(t *testing.T) {
+		c := mcpRegistrationCheck(pluginList, standaloneList, "/ws/.mcp.json")
+		assert.Equal(t, "WARN", c.Status)
+		assert.Contains(t, c.Detail, "remove -s project")
+		assert.Contains(t, c.Detail, "/ws/.mcp.json")
 	})
 
 	t.Run("plugin only, no standalone -> OK", func(t *testing.T) {
-		checks := mcpDriftChecks(pluginList, pluginServerList, "")
-		c, ok := find(checks, "mcp_registration")
-		assert.True(t, ok)
+		c := mcpRegistrationCheck(pluginList, pluginServerList, "")
 		assert.Equal(t, "OK", c.Status)
-		_, hasScope := find(checks, "mcp_scope")
-		assert.False(t, hasScope, "no project-scope warning expected")
 	})
 
 	t.Run("no plugin, standalone only -> OK", func(t *testing.T) {
-		checks := mcpDriftChecks(noPlugin, standaloneList, userGet)
-		c, ok := find(checks, "mcp_registration")
-		assert.True(t, ok)
+		c := mcpRegistrationCheck(noPlugin, standaloneList, "")
 		assert.Equal(t, "OK", c.Status)
 		assert.Contains(t, c.Detail, "plugin not installed")
 	})
 
 	t.Run("disabled plugin + standalone -> OK (not an active duplicate)", func(t *testing.T) {
 		disabledPlugin := "  ❯ beadle@punt-labs\n    Status: ✘ disabled\n"
-		checks := mcpDriftChecks(disabledPlugin, standaloneList, userGet)
-		c, ok := find(checks, "mcp_registration")
-		assert.True(t, ok)
+		c := mcpRegistrationCheck(disabledPlugin, standaloneList, "")
 		assert.Equal(t, "OK", c.Status)
 		assert.Contains(t, c.Detail, "plugin not installed")
 	})
 
 	t.Run("nothing registered -> OK", func(t *testing.T) {
-		checks := mcpDriftChecks(noPlugin, "plugin:biff:tty: biff mcp\n", "")
-		c, ok := find(checks, "mcp_registration")
-		assert.True(t, ok)
+		c := mcpRegistrationCheck(noPlugin, "plugin:biff:tty: biff mcp\n", "")
 		assert.Equal(t, "OK", c.Status)
 		assert.Contains(t, c.Detail, "no beadle MCP registration")
 	})
+}
 
-	t.Run("project-scope registration -> WARN mcp_scope", func(t *testing.T) {
-		checks := mcpDriftChecks(pluginList, standaloneList, projectGet)
-		c, ok := find(checks, "mcp_scope")
-		assert.True(t, ok)
+func TestProjectScopeCheck(t *testing.T) {
+	t.Run("project file found -> WARN naming file and -s project", func(t *testing.T) {
+		c := projectScopeCheck("/ws/.mcp.json", nil)
+		require.NotNil(t, c)
+		assert.Equal(t, "mcp_scope", c.Name)
 		assert.Equal(t, "WARN", c.Status)
-		assert.Contains(t, c.Detail, "project scope")
+		assert.Contains(t, c.Detail, "/ws/.mcp.json")
+		assert.Contains(t, c.Detail, "remove -s project")
+	})
+
+	t.Run("scan error -> WARN, never silent", func(t *testing.T) {
+		c := projectScopeCheck("", assert.AnError)
+		require.NotNil(t, c)
+		assert.Equal(t, "WARN", c.Status)
+		assert.Contains(t, c.Detail, "cannot determine MCP project scope")
+	})
+
+	t.Run("no project entry -> nil", func(t *testing.T) {
+		assert.Nil(t, projectScopeCheck("", nil))
 	})
 }
