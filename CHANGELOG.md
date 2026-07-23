@@ -17,6 +17,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (replies are not double-tagged) and does not affect PGP signature
   verification.
 
+### Fixed
+
+- beadle-email no longer double-registers its MCP server. The beadle plugin
+  (which declares the server in its `plugin.json`) is now the single automatic
+  source: `beadle-email install`, `install.sh`, and `doctor` all converge on it
+  instead of also running a standalone `claude mcp add`. A standalone server is
+  registered only via the new explicit `beadle-email install --standalone` flag
+  (for a no-plugin machine), always at user scope with remove-before-add so
+  re-running is idempotent; using `--standalone` while the plugin is installed
+  warns that it creates a duplicate. `doctor` gains checks that flag a standalone
+  server coexisting with the plugin and any project-scope registration.
+
 ## [0.15.0] - 2026-04-18
 
 ### Added

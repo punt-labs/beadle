@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -14,6 +13,16 @@ import (
 	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/paths"
 )
+
+// installStandalone opts into registering a standalone user-scope MCP server
+// for a machine without the beadle plugin. Default false: the plugin is the
+// single automatic MCP source.
+var installStandalone bool
+
+func init() {
+	installCmd.Flags().BoolVar(&installStandalone, "standalone", false,
+		"Register a standalone user-scope MCP server (only for a machine without the beadle plugin)")
+}
 
 var installCmd = &cobra.Command{
 	Use:   "install",
@@ -52,18 +61,13 @@ var installCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "wrote %s\n", configPath)
 		}
 
-		// 3. Register MCP server
-		if _, err := exec.LookPath("claude"); err != nil {
-			fmt.Fprintf(os.Stderr, "claude CLI not found — register manually: claude mcp add -s user beadle-email -- %s serve\n", selfPath())
-		} else {
-			regCmd := exec.Command("claude", "mcp", "add", "-s", "user", "beadle-email", "--", selfPath(), "serve")
-			regCmd.Stdout = os.Stderr
-			regCmd.Stderr = os.Stderr
-			if err := regCmd.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "MCP registration failed: %v (register manually)\n", err)
-			} else {
-				fmt.Fprintln(os.Stderr, "MCP server registered")
-			}
+		// 3. Register the MCP server. The beadle plugin (plugin.json declares
+		// the "email" mcpServer) is the single automatic registration, so
+		// install stays hands-off when the plugin is present. A standalone
+		// user-scope server is registered only on explicit --standalone opt-in
+		// for a genuine no-plugin machine.
+		if err := setupMCPRegistration(installStandalone); err != nil {
+			fmt.Fprintf(os.Stderr, "MCP registration: %v\n", err)
 		}
 
 		// 4. Run doctor with the config we just created/selected
@@ -80,15 +84,13 @@ var uninstallCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		removed := 0
 
-		// 1. Remove MCP registration
-		if _, err := exec.LookPath("claude"); err == nil {
-			regCmd := exec.Command("claude", "mcp", "remove", "beadle-email")
-			regCmd.Stdout = os.Stderr
-			regCmd.Stderr = os.Stderr
-			if err := regCmd.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "MCP removal failed (may not be registered): %v\n", err)
+		// 1. Remove the standalone MCP registration at user scope — the exact
+		// scope install can add, keeping uninstall symmetric with install.
+		if claudeAvailable() {
+			if err := removeStandaloneMCP(); err != nil {
+				fmt.Fprintf(os.Stderr, "MCP removal (may not be registered): %v\n", err)
 			} else {
-				fmt.Fprintln(os.Stderr, "removed MCP registration")
+				fmt.Fprintln(os.Stderr, "removed standalone MCP registration (user scope)")
 				removed++
 			}
 		}

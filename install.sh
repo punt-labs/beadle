@@ -135,10 +135,10 @@ fi
 
 info "Installing beadle plugin..."
 
-HTTPS_ENV=""
+USE_HTTPS=0
 if ! ssh -n -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
   warn "SSH auth to GitHub unavailable, using HTTPS fallback"
-  HTTPS_ENV="GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com:"
+  USE_HTTPS=1
 fi
 
 PLUGIN_INSTALLED=0
@@ -167,24 +167,44 @@ if [ "$PLUGIN_IS_INSTALLED" = "1" ]; then
   ok "existing plugin uninstalled"
 fi
 
-if env $HTTPS_ENV claude plugin install "beadle@$MARKETPLACE_NAME" --scope user < /dev/null; then
+# Install the plugin. The HTTPS fallback rewrites the SSH clone URL via
+# per-invocation GIT_CONFIG_* env vars passed to `env` as separate arguments —
+# no word-splitting of a single string, so the invocation is shellcheck-clean.
+plugin_install_ok=0
+if [ "$USE_HTTPS" = "1" ]; then
+  if env GIT_CONFIG_COUNT=1 \
+         GIT_CONFIG_KEY_0="url.https://github.com/.insteadOf" \
+         GIT_CONFIG_VALUE_0="git@github.com:" \
+         claude plugin install "beadle@$MARKETPLACE_NAME" --scope user < /dev/null; then
+    plugin_install_ok=1
+  fi
+elif claude plugin install "beadle@$MARKETPLACE_NAME" --scope user < /dev/null; then
+  plugin_install_ok=1
+fi
+
+if [ "$plugin_install_ok" = "1" ]; then
   ok "beadle plugin installed"
   PLUGIN_INSTALLED=1
 else
   warn "Failed to install plugin (install manually: claude plugin install beadle@$MARKETPLACE_NAME)"
 fi
 
-# --- Step 8: Register MCP server ---
-# Only register standalone MCP server if plugin install failed (plugin.json declares mcpServers)
+# --- Step 8: Register MCP server (standalone fallback only) ---
+# The beadle plugin's plugin.json declares the "email" mcpServer — that is the
+# single automatic MCP registration. A standalone server is registered ONLY
+# when the plugin install failed, so the two never coexist. This mirrors
+# `beadle-email install`: no standalone add while the plugin is the source.
 
 if [ "$PLUGIN_INSTALLED" = "0" ]; then
-  info "Registering MCP server (fallback)..."
-  if claude mcp get "$BINARY" < /dev/null 2>/dev/null | grep -q "$BINARY"; then
-    ok "MCP server already registered"
-  else
-    claude mcp add -s user "$BINARY" -- "$INSTALL_DIR/$BINARY" serve < /dev/null || fail "Failed to register MCP server"
-    ok "MCP server registered (user scope)"
-  fi
+  info "Plugin unavailable — registering standalone MCP server (fallback)..."
+  # remove-before-add at USER scope: idempotent, and refreshes a stale binary
+  # path in the USER-scope entry rather than leaving it. The `-s user` remove
+  # does NOT touch a project-scope entry — that drift is surfaced by
+  # `beadle-email doctor` (mcp_scope), not healed here. Matches
+  # `beadle-email install --standalone` so both entry points do the same thing.
+  claude mcp remove -s user "$BINARY" < /dev/null >/dev/null 2>&1 || true
+  claude mcp add -s user "$BINARY" -- "$INSTALL_DIR/$BINARY" serve < /dev/null || fail "Failed to register MCP server"
+  ok "standalone MCP server registered (user scope)"
 fi
 
 # --- Step 9: Verify ---
