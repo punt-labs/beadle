@@ -11,25 +11,40 @@ import (
 
 func TestDecideMCP(t *testing.T) {
 	tests := []struct {
-		name          string
-		pluginPresent bool
-		standalone    bool
-		want          mcpDecision
+		name       string
+		state      pluginState
+		standalone bool
+		want       mcpDecision
 	}{
-		{"plugin present, no opt-in -> plugin provides", true, false, mcpPluginProvides},
-		{"no plugin, no opt-in -> advise install", false, false, mcpAdviseInstall},
-		{"no plugin, --standalone -> register standalone", false, true, mcpRegisterStandalone},
-		{"plugin present, --standalone -> warn about duplicate then register", true, true, mcpRegisterStandaloneWarnDuplicate},
+		{"enabled plugin, no opt-in -> plugin provides", pluginEnabled, false, mcpPluginProvides},
+		{"absent plugin, no opt-in -> advise install", pluginAbsent, false, mcpAdviseInstall},
+		{"disabled plugin, no opt-in -> advise install", pluginDisabled, false, mcpAdviseInstall},
+		{"unknown plugin, no opt-in -> advise install", pluginUnknown, false, mcpAdviseInstall},
+		{"absent plugin, --standalone -> register standalone", pluginAbsent, true, mcpRegisterStandalone},
+		{"disabled plugin, --standalone -> register standalone (legitimate)", pluginDisabled, true, mcpRegisterStandalone},
+		{"enabled plugin, --standalone -> warn duplicate then register", pluginEnabled, true, mcpRegisterStandaloneWarnDuplicate},
+		{"unknown plugin, --standalone -> warn duplicate (query failed, don't silently skip)", pluginUnknown, true, mcpRegisterStandaloneWarnDuplicate},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, decideMCP(tt.pluginPresent, tt.standalone))
+			assert.Equal(t, tt.want, decideMCP(tt.state, tt.standalone))
 		})
 	}
 }
 
-func TestBeadlePluginInstalled(t *testing.T) {
-	installed := `Installed plugins:
+func TestDuplicateWarning(t *testing.T) {
+	t.Run("enabled plugin -> already provides", func(t *testing.T) {
+		w := duplicateWarning(pluginEnabled)
+		assert.Contains(t, w, "already provides")
+	})
+	t.Run("unknown plugin -> could not confirm", func(t *testing.T) {
+		w := duplicateWarning(pluginUnknown)
+		assert.Contains(t, w, "could not confirm")
+	})
+}
+
+func TestBeadlePluginState(t *testing.T) {
+	enabled := `Installed plugins:
 
   ❯ beadle@punt-labs
     Version: 0.15.0
@@ -63,16 +78,16 @@ func TestBeadlePluginInstalled(t *testing.T) {
 	tests := []struct {
 		name   string
 		output string
-		want   bool
+		want   pluginState
 	}{
-		{"beadle installed and enabled", installed, true},
-		{"beadle installed but disabled -> not an active source", disabled, false},
-		{"beadle absent", absent, false},
-		{"empty output", "", false},
+		{"beadle installed and enabled", enabled, pluginEnabled},
+		{"beadle installed but disabled", disabled, pluginDisabled},
+		{"beadle absent", absent, pluginAbsent},
+		{"empty output", "", pluginAbsent},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, beadlePluginInstalled(tt.output))
+			assert.Equal(t, tt.want, beadlePluginState(tt.output))
 		})
 	}
 }
@@ -195,48 +210,64 @@ func TestProjectScopeMCPFile(t *testing.T) {
 }
 
 func TestMCPRegistrationCheck(t *testing.T) {
-	pluginList := "  ❯ beadle@punt-labs\n    Status: ✔ enabled\n"
-	noPlugin := "  ❯ biff@punt-labs\n    Status: ✔ enabled\n"
-	standaloneList := "plugin:biff:tty: biff mcp - ✔ Connected\nbeadle-email: /x/beadle-email serve - ✔ Connected\n"
-	pluginServerList := "plugin:beadle:email: beadle-email serve - ✔ Connected\n"
-
-	t.Run("coexistence, user scope -> WARN with -s user remedy", func(t *testing.T) {
-		c := mcpRegistrationCheck(pluginList, standaloneList, "")
+	t.Run("enabled plugin + standalone -> WARN, remedy always -s user", func(t *testing.T) {
+		c := mcpRegistrationCheck(pluginEnabled, true)
 		assert.Equal(t, "WARN", c.Status)
 		assert.Contains(t, c.Detail, "coexists")
 		assert.Contains(t, c.Detail, "remove -s user")
+		// The coexistence check never advises -s project: the standalone signal
+		// is the user-resolved mcp-list entry. Project scope is a SEPARATE check.
+		assert.NotContains(t, c.Detail, "-s project")
 	})
 
-	t.Run("coexistence, project scope -> WARN with -s project remedy and path", func(t *testing.T) {
-		c := mcpRegistrationCheck(pluginList, standaloneList, "/ws/.mcp.json")
-		assert.Equal(t, "WARN", c.Status)
-		assert.Contains(t, c.Detail, "remove -s project")
-		assert.Contains(t, c.Detail, "/ws/.mcp.json")
-	})
-
-	t.Run("plugin only, no standalone -> OK", func(t *testing.T) {
-		c := mcpRegistrationCheck(pluginList, pluginServerList, "")
+	t.Run("enabled plugin, no standalone -> OK", func(t *testing.T) {
+		c := mcpRegistrationCheck(pluginEnabled, false)
 		assert.Equal(t, "OK", c.Status)
+		assert.Contains(t, c.Detail, "plugin provides")
 	})
 
-	t.Run("no plugin, standalone only -> OK", func(t *testing.T) {
-		c := mcpRegistrationCheck(noPlugin, standaloneList, "")
+	t.Run("disabled plugin + standalone -> OK, says installed-but-disabled (not 'not installed')", func(t *testing.T) {
+		c := mcpRegistrationCheck(pluginDisabled, true)
 		assert.Equal(t, "OK", c.Status)
-		assert.Contains(t, c.Detail, "plugin not installed")
+		assert.Contains(t, c.Detail, "disabled")
+		assert.NotContains(t, c.Detail, "not installed")
 	})
 
-	t.Run("disabled plugin + standalone -> OK (not an active duplicate)", func(t *testing.T) {
-		disabledPlugin := "  ❯ beadle@punt-labs\n    Status: ✘ disabled\n"
-		c := mcpRegistrationCheck(disabledPlugin, standaloneList, "")
+	t.Run("disabled plugin, no standalone -> OK, says installed-but-disabled", func(t *testing.T) {
+		c := mcpRegistrationCheck(pluginDisabled, false)
+		assert.Equal(t, "OK", c.Status)
+		assert.Contains(t, c.Detail, "disabled")
+	})
+
+	t.Run("absent plugin, standalone only -> OK", func(t *testing.T) {
+		c := mcpRegistrationCheck(pluginAbsent, true)
 		assert.Equal(t, "OK", c.Status)
 		assert.Contains(t, c.Detail, "plugin not installed")
 	})
 
 	t.Run("nothing registered -> OK", func(t *testing.T) {
-		c := mcpRegistrationCheck(noPlugin, "plugin:biff:tty: biff mcp\n", "")
+		c := mcpRegistrationCheck(pluginAbsent, false)
 		assert.Equal(t, "OK", c.Status)
 		assert.Contains(t, c.Detail, "no beadle MCP registration")
 	})
+}
+
+// TestObservationsIndependent proves the three doctor observations do not share
+// signals: a coexisting enabled plugin + standalone AND a project-scope
+// .mcp.json produce a user-scope coexistence remedy and a distinct project-scope
+// remedy — neither rewrites the other.
+func TestObservationsIndependent(t *testing.T) {
+	reg := mcpRegistrationCheck(pluginEnabled, true)
+	scope := projectScopeCheck("/ws/.mcp.json", nil)
+
+	assert.Equal(t, "mcp_registration", reg.Name)
+	assert.Contains(t, reg.Detail, "remove -s user")
+	assert.NotContains(t, reg.Detail, "-s project")
+
+	require.NotNil(t, scope)
+	assert.Equal(t, "mcp_scope", scope.Name)
+	assert.Contains(t, scope.Detail, "remove -s project")
+	assert.Contains(t, scope.Detail, "/ws/.mcp.json")
 }
 
 func TestProjectScopeCheck(t *testing.T) {

@@ -16,6 +16,19 @@ import (
 // from its plugin.json; the two must never coexist (see decideMCP).
 const mcpServerName = "beadle-email"
 
+// pluginState is what we know about the beadle marketplace plugin. It is a
+// tri-state-plus: absent and disabled are distinct (a disabled plugin IS
+// installed, just inactive), and unknown records that the query itself failed —
+// which must never be silently downgraded to "absent".
+type pluginState int
+
+const (
+	pluginAbsent   pluginState = iota // confirmed not installed
+	pluginEnabled                     // installed and enabled — an active MCP source
+	pluginDisabled                    // installed but disabled — inactive
+	pluginUnknown                     // could not determine (the query failed)
+)
+
 // mcpDecision is the outcome of the install command's MCP-registration policy.
 // The beadle plugin (plugin.json declares the "email" mcpServer) is the single
 // automatic MCP registration; install adds a standalone server only for a
@@ -23,72 +36,94 @@ const mcpServerName = "beadle-email"
 type mcpDecision int
 
 const (
-	// mcpPluginProvides: the beadle plugin is installed and already registers
-	// the MCP server, so install does nothing for MCP.
+	// mcpPluginProvides: the beadle plugin is installed and enabled and already
+	// registers the MCP server, so install does nothing for MCP.
 	mcpPluginProvides mcpDecision = iota
 	// mcpRegisterStandalone: register a standalone user-scope server with
-	// remove-before-add. Chosen on --standalone opt-in with no plugin present.
+	// remove-before-add. Chosen on --standalone opt-in when the plugin is a
+	// confirmed non-source (absent or installed-but-disabled).
 	mcpRegisterStandalone
-	// mcpRegisterStandaloneWarnDuplicate: --standalone was passed WHILE the
-	// plugin is present. The explicit opt-in is honored, but the standalone
-	// server would duplicate the plugin's server, so a prominent warning
-	// precedes the add — registration is never silent in this case.
+	// mcpRegisterStandaloneWarnDuplicate: --standalone was passed while the
+	// plugin is an active source (enabled) OR its state could not be confirmed.
+	// The explicit opt-in is honored, but registering may/will duplicate the
+	// plugin's server, so a prominent warning precedes the add — never silent.
 	mcpRegisterStandaloneWarnDuplicate
-	// mcpAdviseInstall: no plugin and no opt-in — advise installing the plugin
-	// or re-running with --standalone. Register nothing.
+	// mcpAdviseInstall: no active plugin and no opt-in — advise installing the
+	// plugin or re-running with --standalone. Register nothing.
 	mcpAdviseInstall
 )
 
-// decideMCP applies the single-source policy. The beadle plugin registers the
-// MCP server, so install stays hands-off when the plugin is present. A
-// standalone server is registered only when the caller opts in with
-// --standalone (a no-plugin machine) or has no plugin at all. When --standalone
-// is passed WHILE the plugin is present, the explicit opt-in still wins — but
-// registering creates a duplicate, so the decision routes to a warn-first path
-// (mcpRegisterStandaloneWarnDuplicate) rather than registering silently.
-// pluginPresent reports whether the beadle plugin is installed and enabled;
-// standalone is the --standalone opt-in.
-func decideMCP(pluginPresent, standalone bool) mcpDecision {
+// decideMCP applies the single-source POLICY for install. An enabled plugin is
+// the active MCP source, so install stays hands-off. A standalone server is
+// registered only on --standalone. When --standalone is passed while the plugin
+// is enabled (a definite duplicate) OR its state is unknown (an unconfirmed
+// possible duplicate), the opt-in still wins but routes through a warn-first
+// path rather than registering silently. A disabled plugin is treated as a
+// non-source for policy purposes: --standalone is legitimate, no warning.
+func decideMCP(state pluginState, standalone bool) mcpDecision {
 	switch {
-	case standalone && pluginPresent:
+	case standalone && (state == pluginEnabled || state == pluginUnknown):
 		return mcpRegisterStandaloneWarnDuplicate
 	case standalone:
 		return mcpRegisterStandalone
-	case pluginPresent:
+	case state == pluginEnabled:
 		return mcpPluginProvides
 	default:
 		return mcpAdviseInstall
 	}
 }
 
-// beadlePluginInstalled reports whether `claude plugin list` shows the beadle
-// marketplace plugin installed AND enabled. The plugin header appears as
-// "beadle@<marketplace>", followed a few lines later by "Status: ✔ enabled" or
-// "Status: ✘ disabled". A disabled plugin does not run its MCP server, so it is
-// not an active source and is treated as not-installed for the single-source
-// policy (the enabled/disabled marker is what makes this distinguishable).
-func beadlePluginInstalled(pluginList string) bool {
+// duplicateWarning is the message printed before honoring --standalone on the
+// warn-first path. It distinguishes a confirmed active plugin from an
+// unconfirmed one (the plugin query failed) so the operator knows which risk
+// they are accepting.
+func duplicateWarning(state pluginState) string {
+	if state == pluginUnknown {
+		return "WARNING: could not confirm the beadle plugin is absent; --standalone may create a duplicate MCP registration.\n" +
+			"  Verify with `claude plugin list`, then remove the plugin or drop --standalone.\n"
+	}
+	return "WARNING: the beadle plugin already provides the MCP server; --standalone will create a duplicate.\n" +
+		"  Remove the plugin (claude plugin uninstall beadle@punt-labs) or drop --standalone.\n"
+}
+
+// beadlePluginState reports the beadle plugin's state from `claude plugin list`
+// output. The plugin header appears as "beadle@<marketplace>", followed a few
+// lines later by "Status: ✔ enabled" or "Status: ✘ disabled". This never
+// returns pluginUnknown — that value is reserved for a failed query (see
+// detectPluginState).
+func beadlePluginState(pluginList string) pluginState {
 	inBeadleBlock := false
+	sawBeadle := false
 	for _, line := range strings.Split(pluginList, "\n") {
 		trimmed := strings.TrimSpace(line)
 		switch {
 		case strings.Contains(line, "beadle@"):
 			inBeadleBlock = true
+			sawBeadle = true
 		case inBeadleBlock && strings.HasPrefix(trimmed, "Status:"):
-			return strings.Contains(trimmed, "enabled")
+			if strings.Contains(trimmed, "enabled") {
+				return pluginEnabled
+			}
+			return pluginDisabled
 		case inBeadleBlock && strings.Contains(trimmed, "@"):
-			// The next plugin's header before any Status line for beadle — a
-			// malformed block. Stop treating following lines as beadle's.
+			// The next plugin's header before beadle's Status line — a malformed
+			// block. Stop treating following lines as beadle's.
 			inBeadleBlock = false
 		}
 	}
-	return false
+	if sawBeadle {
+		// Header seen but no Status marker parsed; treat as installed-and-active.
+		return pluginEnabled
+	}
+	return pluginAbsent
 }
 
 // standaloneMCPRegistered reports whether `claude mcp list` output contains a
 // standalone beadle-email server. A standalone entry is named "beadle-email";
 // the plugin's server is "plugin:beadle:email", so a line beginning with
-// "beadle-email:" is unambiguously the standalone duplicate.
+// "beadle-email:" is unambiguously the standalone duplicate. The mcp-list entry
+// is the RESOLVED (user-scope) registration — hence the coexistence remedy is
+// always `-s user` (see mcpRegistrationCheck).
 func standaloneMCPRegistered(mcpList string) bool {
 	prefix := mcpServerName + ":"
 	for _, line := range strings.Split(mcpList, "\n") {
@@ -163,26 +198,25 @@ func currentProjectScopeFile() (string, error) {
 	return projectScopeMCPFile(cwd)
 }
 
-// mcpRegistrationCheck builds the single standalone-vs-plugin coexistence check
-// from raw `claude plugin list` / `claude mcp list` output. It is pure and
-// unit-testable. projectScopeFile (the path of a .mcp.json declaring
-// beadle-email, or "") makes the remediation name the CORRECT scope: a
-// project-scope duplicate is removed with `-s project`, a user-scope one with
-// `-s user`.
-func mcpRegistrationCheck(pluginList, mcpList, projectScopeFile string) doctorCheck {
-	pluginInstalled := beadlePluginInstalled(pluginList)
-	standalone := standaloneMCPRegistered(mcpList)
-
+// mcpRegistrationCheck builds the standalone-vs-plugin coexistence check — one
+// of three INDEPENDENT doctor observations. It reports whether an active
+// (enabled) plugin and a standalone server both exist, and it accurately
+// diagnoses a disabled-but-installed plugin. It does NOT consult project scope:
+// the standalone signal comes from `claude mcp list`, which surfaces the
+// RESOLVED user-scope entry, so the remedy is always `claude mcp remove -s user`.
+// Project-scope drift is a separate observation (projectScopeCheck) with its
+// own `-s project` remedy.
+func mcpRegistrationCheck(state pluginState, standalone bool) doctorCheck {
 	switch {
-	case pluginInstalled && standalone:
-		if projectScopeFile != "" {
-			return doctorCheck{"mcp_registration", "WARN",
-				fmt.Sprintf("standalone beadle-email server coexists with the beadle plugin (duplicate, project scope in %s) — remove it: claude mcp remove -s project beadle-email", projectScopeFile)}
-		}
+	case state == pluginEnabled && standalone:
 		return doctorCheck{"mcp_registration", "WARN",
-			"standalone beadle-email server coexists with the beadle plugin (duplicate, user scope) — remove it: claude mcp remove -s user beadle-email"}
-	case pluginInstalled:
+			"standalone beadle-email server coexists with the enabled beadle plugin (duplicate) — remove it: claude mcp remove -s user beadle-email"}
+	case state == pluginEnabled:
 		return doctorCheck{"mcp_registration", "OK", "plugin provides the MCP server (no standalone duplicate)"}
+	case state == pluginDisabled && standalone:
+		return doctorCheck{"mcp_registration", "OK", "standalone server active; beadle plugin is installed but disabled"}
+	case state == pluginDisabled:
+		return doctorCheck{"mcp_registration", "OK", "beadle plugin is installed but disabled; no standalone server"}
 	case standalone:
 		return doctorCheck{"mcp_registration", "OK", "standalone server (plugin not installed)"}
 	default:
@@ -190,10 +224,11 @@ func mcpRegistrationCheck(pluginList, mcpList, projectScopeFile string) doctorCh
 	}
 }
 
-// projectScopeCheck builds the project-scope drift check. It is pure. A found
-// project-scope file is a WARN naming the file and the correct `-s project`
-// remove; a scan error is a WARN (a failed scan must not read as "no drift");
-// no project entry returns nil.
+// projectScopeCheck builds the project-scope drift check — an INDEPENDENT
+// observation from the .mcp.json file scan, unrelated to the coexistence check.
+// It is pure. A found project-scope file is a WARN naming the file and the
+// correct `-s project` remove; a scan error is a WARN (a failed scan must not
+// read as "no drift"); no project entry returns nil.
 func projectScopeCheck(projectScopeFile string, scanErr error) *doctorCheck {
 	switch {
 	case scanErr != nil:
@@ -206,26 +241,26 @@ func projectScopeCheck(projectScopeFile string, scanErr error) *doctorCheck {
 	}
 }
 
-// inspectMCPRegistration queries for MCP-registration drift and returns doctor
-// checks. Two detectors run independently: the standalone-vs-plugin coexistence
-// check uses the claude CLI, while the project-scope check is a CLI-independent
-// .mcp.json scan — so a CLI failure, an absent claude, or a shadowing user-scope
-// entry can no longer hide a project-scope leak.
+// inspectMCPRegistration returns the three INDEPENDENT MCP-drift observations as
+// doctor checks. The coexistence check (mcp_registration) uses the claude CLI;
+// the project-scope check (mcp_scope) is a CLI-independent .mcp.json scan. No
+// check consults another's signal — a CLI failure, an absent claude, or a
+// shadowing user-scope entry cannot hide the project-scope leak, and the
+// project scope never rewrites the coexistence remedy.
 func inspectMCPRegistration() []doctorCheck {
 	projectFile, scanErr := currentProjectScopeFile()
 
-	checks := registrationChecks(projectFile)
+	checks := registrationChecks()
 	if sc := projectScopeCheck(projectFile, scanErr); sc != nil {
 		checks = append(checks, *sc)
 	}
 	return checks
 }
 
-// registrationChecks returns the standalone-vs-plugin coexistence check. It
-// needs the claude CLI: when claude is absent it returns nil (the caller still
-// runs the CLI-independent project-scope check), and a query failure becomes a
-// WARN. projectScopeFile informs the remediation scope.
-func registrationChecks(projectScopeFile string) []doctorCheck {
+// registrationChecks returns the coexistence check. It needs the claude CLI:
+// when claude is absent it returns nil (the caller still runs the
+// CLI-independent project-scope check), and a query failure becomes a WARN.
+func registrationChecks() []doctorCheck {
 	if !claudeAvailable() {
 		return nil
 	}
@@ -237,7 +272,7 @@ func registrationChecks(projectScopeFile string) []doctorCheck {
 	if err != nil {
 		return []doctorCheck{{"mcp_registration", "WARN", fmt.Sprintf("cannot query MCP servers: %v", err)}}
 	}
-	return []doctorCheck{mcpRegistrationCheck(string(pluginList), string(mcpList), projectScopeFile)}
+	return []doctorCheck{mcpRegistrationCheck(beadlePluginState(string(pluginList)), standaloneMCPRegistered(string(mcpList)))}
 }
 
 // claudeAvailable reports whether the claude CLI is on PATH.
@@ -246,18 +281,17 @@ func claudeAvailable() bool {
 	return err == nil
 }
 
-// detectBeadlePlugin runs `claude plugin list` and reports whether the beadle
-// plugin is installed and enabled. A CLI error is surfaced to stderr (a
-// transient failure must not be silently read as "not installed", which would
-// advise installing an already-present plugin) and then treated as not
-// installed so install falls back to advising the user.
-func detectBeadlePlugin() bool {
+// detectPluginState runs `claude plugin list` and reports the beadle plugin's
+// state. A query error is surfaced to stderr and returns pluginUnknown — NOT
+// pluginAbsent — so a transient failure cannot be silently read as "not
+// installed" (which would let --standalone create a duplicate with no warning).
+func detectPluginState() pluginState {
 	out, err := exec.Command("claude", "plugin", "list").Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "note: could not query installed plugins: %v\n", err)
-		return false
+		return pluginUnknown
 	}
-	return beadlePluginInstalled(string(out))
+	return beadlePluginState(string(out))
 }
 
 // registerStandaloneMCP registers the standalone beadle-email MCP server at
@@ -303,10 +337,11 @@ func removeStandaloneMCP() error {
 
 // setupMCPRegistration applies the single-source MCP policy for `install`. The
 // beadle plugin registers the MCP server automatically, so install stays
-// hands-off when the plugin is present and registers a standalone user-scope
-// server only when the caller opts in with --standalone. When --standalone is
-// passed while the plugin is present, it warns about the duplicate before
-// honoring the opt-in.
+// hands-off when an enabled plugin is present and registers a standalone
+// user-scope server only when the caller opts in with --standalone. When
+// --standalone is passed while the plugin is an active source (or its state
+// cannot be confirmed), it warns about the possible duplicate before honoring
+// the opt-in.
 func setupMCPRegistration(standalone bool) error {
 	if !claudeAvailable() {
 		fmt.Fprintf(os.Stderr,
@@ -315,7 +350,8 @@ func setupMCPRegistration(standalone bool) error {
 		return nil
 	}
 
-	switch decideMCP(detectBeadlePlugin(), standalone) {
+	state := detectPluginState()
+	switch decideMCP(state, standalone) {
 	case mcpPluginProvides:
 		fmt.Fprintln(os.Stderr, "MCP server provided by the beadle plugin — no standalone registration needed")
 		return nil
@@ -325,8 +361,7 @@ func setupMCPRegistration(standalone bool) error {
 			selfPath())
 		return nil
 	case mcpRegisterStandaloneWarnDuplicate:
-		fmt.Fprintf(os.Stderr,
-			"WARNING: the beadle plugin already provides the MCP server; --standalone will create a duplicate.\n  Remove the plugin (claude plugin uninstall beadle@punt-labs) or drop --standalone.\n")
+		fmt.Fprint(os.Stderr, duplicateWarning(state))
 		fallthrough
 	case mcpRegisterStandalone:
 		if err := registerStandaloneMCP(selfPath()); err != nil {
