@@ -124,6 +124,14 @@ var versionCmd = &cobra.Command{
 
 // --- doctor ---
 
+// doctorCheck is one line of doctor output: a named health check, its status
+// (OK, WARN, or FAIL), and an optional human-readable detail.
+type doctorCheck struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
+}
+
 var doctorConfig string
 
 var doctorCmd = &cobra.Command{
@@ -131,59 +139,53 @@ var doctorCmd = &cobra.Command{
 	Short: "Check installation health",
 	Long:  "Run health checks on identity, credentials, GPG, SMTP, and contacts.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		type check struct {
-			Name   string `json:"name"`
-			Status string `json:"status"`
-			Detail string `json:"detail,omitempty"`
-		}
+		var checks []doctorCheck
 
-		var checks []check
-
-		checks = append(checks, check{"version", "OK", version})
+		checks = append(checks, doctorCheck{"version", "OK", version})
 
 		// Check identity resolution
 		resolver, resolverErr := newResolver()
 		if resolverErr != nil {
-			checks = append(checks, check{"identity", "FAIL", resolverErr.Error()})
+			checks = append(checks, doctorCheck{"identity", "FAIL", resolverErr.Error()})
 		} else {
 			id, idErr := resolver.Resolve()
 			if idErr != nil {
-				checks = append(checks, check{"identity", "WARN", fmt.Sprintf("no identity: %v", idErr)})
+				checks = append(checks, doctorCheck{"identity", "WARN", fmt.Sprintf("no identity: %v", idErr)})
 			} else {
-				checks = append(checks, check{"identity", "OK", fmt.Sprintf("%s (source: %s)", id.Email, id.Source)})
+				checks = append(checks, doctorCheck{"identity", "OK", fmt.Sprintf("%s (source: %s)", id.Email, id.Source)})
 			}
 		}
 
 		// Check credential backends
 		backends := secret.Available()
-		checks = append(checks, check{"secret_backends", "OK", strings.Join(backends, ", ")})
+		checks = append(checks, doctorCheck{"secret_backends", "OK", strings.Join(backends, ", ")})
 
 		// Check config file
 		cfg, err := email.LoadConfig(doctorConfig)
 		if err != nil {
-			checks = append(checks, check{"config", "FAIL", err.Error()})
+			checks = append(checks, doctorCheck{"config", "FAIL", err.Error()})
 		} else {
-			checks = append(checks, check{"config", "OK", doctorConfig})
+			checks = append(checks, doctorCheck{"config", "OK", doctorConfig})
 
 			if _, err := cfg.IMAPPassword(); err != nil {
-				checks = append(checks, check{"imap_password", "FAIL", err.Error()})
+				checks = append(checks, doctorCheck{"imap_password", "FAIL", err.Error()})
 			} else {
-				checks = append(checks, check{"imap_password", "OK", ""})
+				checks = append(checks, doctorCheck{"imap_password", "OK", ""})
 			}
 
 			if _, err := cfg.ResendAPIKey(); err != nil {
-				checks = append(checks, check{"resend_api_key", "FAIL", err.Error()})
+				checks = append(checks, doctorCheck{"resend_api_key", "FAIL", err.Error()})
 			} else {
-				checks = append(checks, check{"resend_api_key", "OK", ""})
+				checks = append(checks, doctorCheck{"resend_api_key", "OK", ""})
 			}
 
 			gpgAvailable := false
 			gpgPath, err := exec.LookPath(cfg.GPGBinary)
 			if err != nil {
-				checks = append(checks, check{"gpg", "FAIL", fmt.Sprintf("%s not found", cfg.GPGBinary)})
+				checks = append(checks, doctorCheck{"gpg", "FAIL", fmt.Sprintf("%s not found", cfg.GPGBinary)})
 			} else {
 				gpgAvailable = true
-				checks = append(checks, check{"gpg", "OK", gpgPath})
+				checks = append(checks, doctorCheck{"gpg", "OK", gpgPath})
 			}
 
 			// Signing checks only run when gpg_signer is configured AND gpg is available.
@@ -191,42 +193,42 @@ var doctorCmd = &cobra.Command{
 				gpgKeyCmd := exec.Command(cfg.GPGBinary, "--list-keys", cfg.GPGSigner)
 				keyExists := gpgKeyCmd.Run() == nil
 				if !keyExists {
-					checks = append(checks, check{"gpg_signing_key", "FAIL", fmt.Sprintf("no key for %s", cfg.GPGSigner)})
+					checks = append(checks, doctorCheck{"gpg_signing_key", "FAIL", fmt.Sprintf("no key for %s", cfg.GPGSigner)})
 				} else {
-					checks = append(checks, check{"gpg_signing_key", "OK", cfg.GPGSigner})
+					checks = append(checks, doctorCheck{"gpg_signing_key", "OK", cfg.GPGSigner})
 				}
 
 				switch {
 				case !keyExists:
 					if _, err := cfg.GPGPassphrase(); err != nil {
-						checks = append(checks, check{"gpg_passphrase", "FAIL", err.Error()})
+						checks = append(checks, doctorCheck{"gpg_passphrase", "FAIL", err.Error()})
 					} else {
-						checks = append(checks, check{"gpg_passphrase", "OK", ""})
+						checks = append(checks, doctorCheck{"gpg_passphrase", "OK", ""})
 					}
 				default:
 					needsPassphrase, _ := pgp.KeyRequiresPassphrase(cfg.GPGBinary, cfg.GPGSigner)
 					switch {
 					case !needsPassphrase:
-						checks = append(checks, check{"gpg_passphrase", "OK",
+						checks = append(checks, doctorCheck{"gpg_passphrase", "OK",
 							fmt.Sprintf("not required (%s has no passphrase — filesystem access grants signing authority)", cfg.GPGSigner)})
 					default:
 						if _, err := cfg.GPGPassphrase(); err != nil {
-							checks = append(checks, check{"gpg_passphrase", "FAIL", err.Error()})
+							checks = append(checks, doctorCheck{"gpg_passphrase", "FAIL", err.Error()})
 						} else {
-							checks = append(checks, check{"gpg_passphrase", "OK", ""})
+							checks = append(checks, doctorCheck{"gpg_passphrase", "OK", ""})
 						}
 					}
 				}
 			} else if cfg.GPGSigner != "" {
-				checks = append(checks, check{"gpg_signing_key", "FAIL", fmt.Sprintf("cannot check signing key: gpg binary %q not found", cfg.GPGBinary)})
+				checks = append(checks, doctorCheck{"gpg_signing_key", "FAIL", fmt.Sprintf("cannot check signing key: gpg binary %q not found", cfg.GPGBinary)})
 			} else {
-				checks = append(checks, check{"gpg_signing_key", "OK", "signing disabled (gpg_signer not configured)"})
+				checks = append(checks, doctorCheck{"gpg_signing_key", "OK", "signing disabled (gpg_signer not configured)"})
 			}
 
 			if email.SMTPAvailable(cfg) {
-				checks = append(checks, check{"smtp", "OK", fmt.Sprintf("%s:%d", cfg.SMTPEffectiveHost(), cfg.SMTPPort)})
+				checks = append(checks, doctorCheck{"smtp", "OK", fmt.Sprintf("%s:%d", cfg.SMTPEffectiveHost(), cfg.SMTPPort)})
 			} else {
-				checks = append(checks, check{"smtp", "WARN", fmt.Sprintf("Proton Bridge SMTP not reachable at %s:%d — will use Resend fallback", cfg.SMTPEffectiveHost(), cfg.SMTPPort)})
+				checks = append(checks, doctorCheck{"smtp", "WARN", fmt.Sprintf("Proton Bridge SMTP not reachable at %s:%d — will use Resend fallback", cfg.SMTPEffectiveHost(), cfg.SMTPPort)})
 			}
 		}
 
@@ -234,12 +236,17 @@ var doctorCmd = &cobra.Command{
 		contactsPath := resolveContactsPath()
 		cs := contacts.NewStore(contactsPath)
 		if err := cs.Load(); err != nil {
-			checks = append(checks, check{"contacts", "FAIL", err.Error()})
+			checks = append(checks, doctorCheck{"contacts", "FAIL", err.Error()})
 		} else if cs.Count() == 0 {
-			checks = append(checks, check{"contacts", "WARN", fmt.Sprintf("no contacts at %s", contactsPath)})
+			checks = append(checks, doctorCheck{"contacts", "WARN", fmt.Sprintf("no contacts at %s", contactsPath)})
 		} else {
-			checks = append(checks, check{"contacts", "OK", fmt.Sprintf("%d contacts at %s", cs.Count(), contactsPath)})
+			checks = append(checks, doctorCheck{"contacts", "OK", fmt.Sprintf("%d contacts at %s", cs.Count(), contactsPath)})
 		}
+
+		// Check for MCP-registration drift: a standalone server duplicating the
+		// plugin, or a project-scope registration. The plugin is the single
+		// automatic source; anything else is drift this check makes visible.
+		checks = append(checks, inspectMCPRegistration()...)
 
 		failed := false
 		for _, c := range checks {
