@@ -16,7 +16,7 @@ func TestDecideMCP(t *testing.T) {
 		{"plugin present, no opt-in -> plugin provides", true, false, mcpPluginProvides},
 		{"no plugin, no opt-in -> advise install", false, false, mcpAdviseInstall},
 		{"no plugin, --standalone -> register standalone", false, true, mcpRegisterStandalone},
-		{"plugin present, --standalone -> explicit opt-in wins", true, true, mcpRegisterStandalone},
+		{"plugin present, --standalone -> warn about duplicate then register", true, true, mcpRegisterStandaloneWarnDuplicate},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -45,12 +45,25 @@ func TestBeadlePluginInstalled(t *testing.T) {
     Scope: user
     Status: ✔ enabled
 `
+	disabled := `Installed plugins:
+
+  ❯ beadle@punt-labs
+    Version: 0.15.0
+    Scope: user
+    Status: ✘ disabled
+
+  ❯ biff@punt-labs
+    Version: 1.11.2
+    Scope: user
+    Status: ✔ enabled
+`
 	tests := []struct {
 		name   string
 		output string
 		want   bool
 	}{
-		{"beadle listed", installed, true},
+		{"beadle installed and enabled", installed, true},
+		{"beadle installed but disabled -> not an active source", disabled, false},
 		{"beadle absent", absent, false},
 		{"empty output", "", false},
 	}
@@ -117,8 +130,8 @@ func TestProjectScopeRegistration(t *testing.T) {
 }
 
 func TestMCPDriftChecks(t *testing.T) {
-	pluginList := "  ❯ beadle@punt-labs\n"
-	noPlugin := "  ❯ biff@punt-labs\n"
+	pluginList := "  ❯ beadle@punt-labs\n    Status: ✔ enabled\n"
+	noPlugin := "  ❯ biff@punt-labs\n    Status: ✔ enabled\n"
 	standaloneList := "plugin:biff:tty: biff mcp - ✔ Connected\nbeadle-email: /x/beadle-email serve - ✔ Connected\n"
 	pluginServerList := "plugin:beadle:email: beadle-email serve - ✔ Connected\n"
 	projectGet := "beadle-email:\n  Scope: Project config (shared via .mcp.json)\n"
@@ -152,6 +165,15 @@ func TestMCPDriftChecks(t *testing.T) {
 
 	t.Run("no plugin, standalone only -> OK", func(t *testing.T) {
 		checks := mcpDriftChecks(noPlugin, standaloneList, userGet)
+		c, ok := find(checks, "mcp_registration")
+		assert.True(t, ok)
+		assert.Equal(t, "OK", c.Status)
+		assert.Contains(t, c.Detail, "plugin not installed")
+	})
+
+	t.Run("disabled plugin + standalone -> OK (not an active duplicate)", func(t *testing.T) {
+		disabledPlugin := "  ❯ beadle@punt-labs\n    Status: ✘ disabled\n"
+		checks := mcpDriftChecks(disabledPlugin, standaloneList, userGet)
 		c, ok := find(checks, "mcp_registration")
 		assert.True(t, ok)
 		assert.Equal(t, "OK", c.Status)
