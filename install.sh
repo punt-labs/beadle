@@ -197,8 +197,10 @@ fi
 
 if [ "$PLUGIN_INSTALLED" = "0" ]; then
   info "Plugin unavailable — registering standalone MCP server (fallback)..."
-  # remove-before-add at USER scope: idempotent, and refreshes a stale path or
-  # a leftover project-scope entry rather than leaving it. Matches
+  # remove-before-add at USER scope: idempotent, and refreshes a stale binary
+  # path in the USER-scope entry rather than leaving it. The `-s user` remove
+  # does NOT touch a project-scope entry — that drift is surfaced by
+  # `beadle-email doctor` (mcp_scope), not healed here. Matches
   # `beadle-email install --standalone` so both entry points do the same thing.
   claude mcp remove -s user "$BINARY" < /dev/null >/dev/null 2>&1 || true
   claude mcp add -s user "$BINARY" -- "$INSTALL_DIR/$BINARY" serve < /dev/null || fail "Failed to register MCP server"
