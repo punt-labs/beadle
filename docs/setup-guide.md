@@ -7,8 +7,9 @@ but also Proton Bridge, credentials, and identity.
 **Time:** 15-20 minutes (mostly waiting for Proton Bridge to sync).
 
 **Audience:** Punt Labs team members running `beadle-email` as a Claude
-Code plugin. If you're using it standalone, the steps are the same but
-skip the plugin registration in Step 5.
+Code plugin. If you cannot use the plugin, the steps are the same except
+Step 5, where you register a standalone MCP server with
+`beadle-email install --standalone` instead.
 
 ## Prerequisites
 
@@ -192,25 +193,53 @@ Beadle checks in this order and uses the first one found:
 
 ## Step 5: Register with Claude Code
 
+Beadle registers its MCP server through the **beadle plugin**. The
+plugin's `plugin.json` declares the `email` MCP server, so installing
+the plugin is the single, complete registration — there is no separate
+`claude mcp add` to run. This matches every other Punt Labs tool (biff,
+vox, quarry, lux), which are all plugin-only for their MCP servers.
+
 If you used the install script (Step 2, Option A), the plugin is
-already registered. Verify with:
+already installed. Verify with:
 
 ```bash
 claude plugin list 2>/dev/null | grep beadle
 ```
 
-If not registered, install the plugin:
+If not installed, install the plugin (recommended path):
 
 ```bash
 claude plugin marketplace add punt-labs/claude-plugins
 claude plugin install beadle@punt-labs --scope user
 ```
 
-Or register the standalone MCP server (no slash commands or hooks):
+`beadle-email install` will not add a standalone MCP server while the
+plugin is present — it detects the plugin and leaves registration to it,
+so the server is never registered twice.
+
+### No-plugin fallback (standalone server)
+
+Only on a machine that genuinely cannot use the plugin, register a
+standalone MCP server (no slash commands or hooks). Use the explicit
+opt-in flag — it is idempotent (remove-before-add) and always registers
+at **user scope**, never project scope:
 
 ```bash
+beadle-email install --standalone
+```
+
+Equivalent manual command:
+
+```bash
+claude mcp remove -s user beadle-email 2>/dev/null || true
 claude mcp add -s user beadle-email -- beadle-email serve
 ```
+
+Do not run this while the plugin is installed: a standalone server
+alongside the plugin is a duplicate registration that drifts out of
+sync. `beadle-email doctor` warns when it finds a standalone server
+coexisting with the plugin, or any beadle server registered at project
+scope.
 
 Restart Claude Code after registration.
 
