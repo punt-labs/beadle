@@ -238,8 +238,13 @@ claude mcp add -s user beadle-email -- beadle-email serve
 Do not run this while the plugin is installed: a standalone server
 alongside the plugin is a duplicate registration that drifts out of
 sync. `beadle-email doctor` warns when it finds a standalone server
-coexisting with the plugin, or any beadle server registered at project
-scope.
+coexisting with the plugin, and when a beadle server is registered at
+project scope. Project-scope detection scans `.mcp.json` from the
+working directory up to the filesystem root, so it catches a
+project-scope entry even when a user-scope entry shadows it in
+`claude mcp get` — and it works even if the `claude` CLI is unavailable.
+The remediation names the correct scope (`-s project` and the offending
+`.mcp.json` path, or `-s user`).
 
 Restart Claude Code after registration.
 
