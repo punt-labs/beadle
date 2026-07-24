@@ -34,35 +34,42 @@ var enableCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		dir := filepath.Join(root, ".punt-labs", "beadle")
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			return fmt.Errorf("creating %s: %w", dir, err)
-		}
-
-		guidePath := filepath.Join(dir, "CLAUDE.md")
-		if err := os.WriteFile(guidePath, claudemd.Guide, 0o644); err != nil {
-			return fmt.Errorf("writing %s: %w", guidePath, err)
-		}
-		fmt.Fprintf(os.Stderr, "deposited %s\n", guidePath)
-
-		markerPath := filepath.Join(dir, "enabled")
-		if err := os.WriteFile(markerPath, nil, 0o644); err != nil {
-			return fmt.Errorf("writing %s: %w", markerPath, err)
-		}
-
-		hostPath := filepath.Join(root, "CLAUDE.md")
-		wrote, err := claudemd.Register(hostPath, importLine)
-		if err != nil {
-			return fmt.Errorf("registering import in %s: %w", hostPath, err)
-		}
-		if wrote {
-			fmt.Fprintf(os.Stderr, "added %s to %s\n", importLine, hostPath)
-		} else {
-			fmt.Fprintf(os.Stderr, "%s already imports beadle\n", hostPath)
-		}
-		fmt.Fprintln(os.Stderr, "beadle enabled")
-		return nil
+		return enableRepo(root)
 	},
+}
+
+// enableRepo deposits the guide into <root>/.punt-labs/beadle/, writes the
+// enabled marker, and registers the import in <root>/CLAUDE.md. It is
+// idempotent, so re-running upgrades in place.
+func enableRepo(root string) error {
+	dir := filepath.Join(root, ".punt-labs", "beadle")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("creating %s: %w", dir, err)
+	}
+
+	guidePath := filepath.Join(dir, "CLAUDE.md")
+	if err := os.WriteFile(guidePath, claudemd.Guide, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", guidePath, err)
+	}
+	fmt.Fprintf(os.Stderr, "deposited %s\n", guidePath)
+
+	markerPath := filepath.Join(dir, "enabled")
+	if err := os.WriteFile(markerPath, nil, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", markerPath, err)
+	}
+
+	hostPath := filepath.Join(root, "CLAUDE.md")
+	wrote, err := claudemd.Register(hostPath, importLine)
+	if err != nil {
+		return fmt.Errorf("registering import in %s: %w", hostPath, err)
+	}
+	if wrote {
+		fmt.Fprintf(os.Stderr, "added %s to %s\n", importLine, hostPath)
+	} else {
+		fmt.Fprintf(os.Stderr, "%s already imports beadle\n", hostPath)
+	}
+	fmt.Fprintln(os.Stderr, "beadle enabled")
+	return nil
 }
 
 var disableCmd = &cobra.Command{
@@ -76,29 +83,36 @@ var disableCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		dir := filepath.Join(root, ".punt-labs", "beadle")
-
-		hostPath := filepath.Join(root, "CLAUDE.md")
-		wrote, err := claudemd.Prune(hostPath, importLine)
-		if err != nil {
-			return fmt.Errorf("removing import from %s: %w", hostPath, err)
-		}
-		if wrote {
-			fmt.Fprintf(os.Stderr, "removed %s from %s\n", importLine, hostPath)
-		}
-
-		markerPath := filepath.Join(dir, "enabled")
-		if err := os.Remove(markerPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("removing %s: %w", markerPath, err)
-		}
-
-		if disablePurge {
-			if err := os.RemoveAll(dir); err != nil {
-				return fmt.Errorf("purging %s: %w", dir, err)
-			}
-			fmt.Fprintf(os.Stderr, "purged %s\n", dir)
-		}
-		fmt.Fprintln(os.Stderr, "beadle disabled")
-		return nil
+		return disableRepo(root, disablePurge)
 	},
+}
+
+// disableRepo removes the import from <root>/CLAUDE.md and deletes the enabled
+// marker, leaving the rest of .punt-labs/beadle/ dormant. When purge is set it
+// removes the whole directory instead.
+func disableRepo(root string, purge bool) error {
+	dir := filepath.Join(root, ".punt-labs", "beadle")
+
+	hostPath := filepath.Join(root, "CLAUDE.md")
+	wrote, err := claudemd.Prune(hostPath, importLine)
+	if err != nil {
+		return fmt.Errorf("removing import from %s: %w", hostPath, err)
+	}
+	if wrote {
+		fmt.Fprintf(os.Stderr, "removed %s from %s\n", importLine, hostPath)
+	}
+
+	markerPath := filepath.Join(dir, "enabled")
+	if err := os.Remove(markerPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing %s: %w", markerPath, err)
+	}
+
+	if purge {
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("purging %s: %w", dir, err)
+		}
+		fmt.Fprintf(os.Stderr, "purged %s\n", dir)
+	}
+	fmt.Fprintln(os.Stderr, "beadle disabled")
+	return nil
 }
