@@ -220,6 +220,19 @@ func TestUnterminatedRoundTripGainsOneEOL(t *testing.T) {
 		"original content plus the single mandated trailing EOL")
 }
 
+func TestWriteStatErrorNotSwallowed(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "afile")
+	require.NoError(t, os.WriteFile(file, []byte("x"), 0o644))
+
+	// A path under a regular file: os.Stat fails with ENOTDIR, not "not exist".
+	// write must surface it rather than fall back to newFileMode and rewrite
+	// with a possibly-wrong mode.
+	err := write(filepath.Join(file, "CLAUDE.md"), "data")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stat")
+}
+
 func TestRemoveTemp(t *testing.T) {
 	dir := t.TempDir()
 	assert.NoError(t, removeTemp(filepath.Join(dir, "gone")), "a missing temp is not an error")

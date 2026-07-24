@@ -267,6 +267,10 @@ func write(path, text string) error {
 	mode := os.FileMode(newFileMode)
 	if fi, err := os.Stat(path); err == nil {
 		mode = fi.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		// Only a missing file falls back to newFileMode; any other stat error
+		// must surface rather than silently rewrite with a possibly-wrong mode.
+		return fmt.Errorf("stat %q: %w", path, err)
 	}
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
