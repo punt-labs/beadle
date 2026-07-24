@@ -39,11 +39,7 @@ func NewSMTPServer(t testing.TB) (*SMTPServer, string) {
 		t.Fatalf("testserver: smtp listen: %v", err)
 	}
 
-	go srv.Serve(ln) //nolint:errcheck
-
-	t.Cleanup(func() {
-		srv.Close()
-	})
+	serveUntilCleanup(t, ln, srv.Serve, srv.Close)
 
 	addr := ln.Addr().String()
 	return &SMTPServer{server: srv, backend: backend}, addr

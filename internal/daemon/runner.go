@@ -255,6 +255,15 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 	// Build commands.
 	env := minimalEnv(r.Whitelist.Dirs, cmd.EnvVars)
 
+	// Capture the last step's stdout in a capped buffer rather than via
+	// StdoutPipe. StdoutPipe's Wait closes the read end once the process
+	// exits, so reading it concurrently with cmds[n-1].Wait() (below, in a
+	// goroutine) races: under load the Wait can close the pipe before the
+	// read finishes, yielding empty output. A cappedWriter never blocks and
+	// is filled by the exec copy goroutine that Wait itself joins, so the
+	// buffer is complete once wg.Wait returns.
+	lastStdout := &cappedWriter{max: 1 << 20}
+
 	cmds := make([]*exec.Cmd, n)
 	stderrBufs := make([]*cappedWriter, n)
 	for i, step := range cmd.Steps {
@@ -271,16 +280,11 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 
 		if i < n-1 {
 			c.Stdout = pipeWriters[i]
+		} else {
+			c.Stdout = lastStdout
 		}
-		// Last step's stdout is captured below.
 
 		cmds[i] = c
-	}
-
-	// Capture last step's stdout.
-	lastStdout, err := cmds[n-1].StdoutPipe()
-	if err != nil {
-		return "", fmt.Errorf("step[%d] stdout pipe: %w", n-1, err)
 	}
 
 	// Start all commands.
@@ -325,9 +329,6 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 		}(i)
 	}
 
-	// Read final output while goroutines are running.
-	output, _ := io.ReadAll(io.LimitReader(lastStdout, 1<<20))
-	io.Copy(io.Discard, lastStdout) // drain remainder so Wait() won't hang
 	wg.Wait()
 
 	// Log per-step stderr.
@@ -344,7 +345,7 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 	if firstErr != nil {
 		return "", firstErr
 	}
-	return string(output), nil
+	return lastStdout.buf.String(), nil
 }
 
 // cappedWriter is a bytes.Buffer that silently stops accepting data

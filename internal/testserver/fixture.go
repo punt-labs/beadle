@@ -84,6 +84,33 @@ func NewFixture(t testing.TB) *Fixture {
 	}
 }
 
+// serveUntilCleanup runs serve(ln) in a goroutine and registers a cleanup
+// that closes the listener, waits for serve to return, then calls closeFn.
+//
+// Closing the listener first makes serve's Accept return, so the accept
+// goroutine finishes instead of leaking into the next test. It also removes
+// a race specific to go-imap: its Serve registers the listener in a
+// sync.WaitGroup with Add(1) after releasing the accept-loop mutex, and its
+// Close calls Wait; when cleanup's Close ran before the just-launched Serve
+// reached Add(1), Wait raced Add. go-smtp's Close does not Wait (only
+// Shutdown does) and its WaitGroup counts connections, not the accept loop,
+// so for go-smtp closing the listener alone cures the leak. Either way,
+// waiting for serve to return before closeFn establishes the happens-before
+// that settles the WaitGroup with no concurrent Add.
+func serveUntilCleanup(t testing.TB, ln net.Listener, serve func(net.Listener) error, closeFn func() error) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = serve(ln)
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		<-done
+		_ = closeFn()
+	})
+}
+
 // AddMessage seeds a message into the IMAP server. Returns the UID.
 func (f *Fixture) AddMessage(folder, from, subject, body string) uint32 {
 	return f.IMAP.AddMessage(folder, from, subject, body)

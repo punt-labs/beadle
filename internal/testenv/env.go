@@ -43,6 +43,7 @@ func New(t testing.TB, emailAddr string) *Env {
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 	t.Setenv("BEADLE_IMAP_PASSWORD", "testpass")
+	IsolateTempDir(t)
 
 	ethosDir := filepath.Join(fakeHome, ".punt-labs", "ethos")
 	beadleDir := filepath.Join(fakeHome, ".punt-labs", "beadle")

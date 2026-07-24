@@ -11,6 +11,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// IsolateTempDir points os.TempDir() at a private directory for the
+// duration of the test by overriding $TMPDIR. Production code that calls
+// os.CreateTemp("", …) — the pgp passphrase files, config rewrites — then
+// writes into this isolated directory instead of the shared system temp
+// dir, so a test that globs or counts os.TempDir() cannot observe another
+// package's writes and cannot collide with them under parallel go test.
+//
+// Passphrase files are ordinary files, so the deep t.TempDir() path is
+// fine here; the 108-byte Unix-socket limit that forces ShortGPGHome to
+// use /tmp does not apply. GPG sockets live under the explicit --homedir,
+// not $TMPDIR.
+func IsolateTempDir(t testing.TB) {
+	t.Helper()
+	t.Setenv("TMPDIR", t.TempDir())
+}
+
 // ShortGPGHome creates a GPG homedir with a path short enough for
 // gpg-agent's Unix socket (108-byte limit). Go's t.TempDir() paths
 // are too long, so we use /tmp directly and register cleanup.
