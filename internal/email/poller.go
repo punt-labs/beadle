@@ -1,6 +1,7 @@
 package email
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -181,10 +182,14 @@ func (p *Poller) poll() {
 		}
 	}()
 
-	unseen, err := client.Status("INBOX")
+	// Scope the unread count to the current repo so the "new mail" signal means
+	// this repo's mail, not the whole shared mailbox. An empty slug (no git
+	// remote, e.g. a headless daemon) counts all unseen.
+	slug := ResolveRepoTag(context.Background(), p.logger, "").Slug
+	unseen, err := client.UnreadCount("INBOX", slug)
 	if err != nil {
-		p.recordFailure(fmt.Sprintf("status: %v", err))
-		p.logger.Warn("poller: status", "error", err)
+		p.recordFailure(fmt.Sprintf("unread count: %v", err))
+		p.logger.Warn("poller: unread count", "error", err)
 		return
 	}
 

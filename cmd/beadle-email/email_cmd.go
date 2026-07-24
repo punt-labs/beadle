@@ -124,10 +124,11 @@ func splitAddresses(s string) []string {
 // --- list ---
 
 var (
-	listFolder string
-	listCount  int
-	listUnread bool
-	listConfig string
+	listFolder   string
+	listCount    int
+	listUnread   bool
+	listAllRepos bool
+	listConfig   string
 )
 
 var listCmd = &cobra.Command{
@@ -135,7 +136,7 @@ var listCmd = &cobra.Command{
 	Short: "List messages",
 	Long:  "List messages from the inbox or a specified IMAP folder.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, _, err := resolveConfig(listConfig)
+		cfg, id, err := resolveConfig(listConfig)
 		if err != nil {
 			return err
 		}
@@ -146,7 +147,18 @@ var listCmd = &cobra.Command{
 		}
 		defer client.Close()
 
-		lr, err := client.ListMessages(listFolder, listCount, listUnread)
+		// Scope to the current repo unless --all-repos is set. An empty slug
+		// (no git remote) leaves the listing unfiltered.
+		repoSlug := ""
+		if !listAllRepos {
+			agent := ""
+			if id != nil {
+				agent = id.Handle
+			}
+			repoSlug = email.ResolveRepoTag(cmd.Context(), logger, agent).Slug
+		}
+
+		lr, err := client.ListMessages(listFolder, listCount, listUnread, repoSlug)
 		if err != nil {
 			return fmt.Errorf("list messages: %w", err)
 		}
@@ -167,6 +179,7 @@ func init() {
 	listCmd.Flags().StringVar(&listFolder, "folder", "INBOX", "IMAP folder")
 	listCmd.Flags().IntVar(&listCount, "count", 10, "Maximum messages to return")
 	listCmd.Flags().BoolVar(&listUnread, "unread", false, "Show only unread messages")
+	listCmd.Flags().BoolVar(&listAllRepos, "all-repos", false, "List mail from every repo (default: current repo only)")
 	listCmd.Flags().StringVarP(&listConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
 }
 
