@@ -271,8 +271,10 @@ beadle-email send --to ADDR --subject S --body B        # Send an email
 beadle-email move <uid> [--folder F] [--to DEST]        # Move a message
 beadle-email folders                                    # List IMAP folders
 beadle-email contact list|add|remove|find               # Manage contacts
-beadle-email install                                    # Set up beadle-email
+beadle-email install                                    # Set up beadle-email (once per machine)
 beadle-email uninstall                                  # Remove beadle-email
+beadle-email enable                                     # Turn on agent guidance in this repo
+beadle-email disable [--purge]                          # Turn it off (--purge deletes the dir)
 beadle-email serve [--config PATH]                      # Start MCP server
 beadle-email doctor [--config PATH]                     # Check installation health
 beadle-email status [--config PATH]                     # Current state summary
@@ -285,6 +287,16 @@ beadle-email --json list                                # JSON output
 beadle-email --verbose doctor                           # Debug logging
 beadle-email --quiet send --to ...                      # Errors only
 ```
+
+`install` is a once-per-machine step (the binary and the MCP server, which is
+provided by the beadle marketplace plugin). `enable` and `disable` are
+per-repo: `enable`, run inside a repo, deposits beadle's agent user-guide at
+`.punt-labs/beadle/CLAUDE.md`, writes an `enabled` marker, and adds the single
+`@.punt-labs/beadle/CLAUDE.md` import line to the repo's `CLAUDE.md` so an agent
+working there learns how to drive beadle. `disable` removes that line and the
+marker, leaving the guide dormant; `disable --purge` deletes the
+`.punt-labs/beadle/` directory outright. This follows the org
+[Tool Enable/Disable standard](https://github.com/punt-labs/punt-kit/blob/main/standards/tool-enable-disable.md).
 
 ## Documentation
 
