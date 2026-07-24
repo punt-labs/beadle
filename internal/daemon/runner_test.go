@@ -246,6 +246,32 @@ func TestCLIRunner_OutputCap(t *testing.T) {
 	assert.Equal(t, 1<<20, len(result))
 }
 
+func TestCLIRunner_CompoundOutputCap(t *testing.T) {
+	// The last step emits >1MiB. The compound path captures it in a
+	// cappedWriter, so the result truncates at 1MiB without hanging —
+	// equivalent to the single-process LimitReader cap.
+	_, wl := setupWhitelist(t, "echo", "dd")
+	runner := &CLIRunner{Whitelist: wl}
+
+	cmd := &Command{
+		Name:   "test-compound-cap",
+		Runner: "cli",
+		Mode:   "process",
+		Steps: []Step{
+			{Binary: "echo", FixedArgs: []string{"-n", "seed"}, Stdin: "pipe"},
+			{Binary: "dd", FixedArgs: []string{"if=/dev/zero", "bs=1048577", "count=1"}, Stdin: "stdout"},
+		},
+		OutputSchema: "text",
+		Timeout:      "5s",
+	}
+	call := CommandCall{Command: "test-compound-cap", Args: map[string]any{}}
+	p := testPipeline()
+
+	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "input data")
+	require.NoError(t, err)
+	assert.Equal(t, 1<<20, len(result))
+}
+
 func TestCLIRunner_CompoundTwoSteps(t *testing.T) {
 	_, wl := setupWhitelist(t, "echo", "cat")
 	runner := &CLIRunner{Whitelist: wl}

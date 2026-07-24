@@ -28,6 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   re-running is idempotent; using `--standalone` while the plugin is installed
   warns that it creates a duplicate. `doctor` gains checks that flag a standalone
   server coexisting with the plugin and any project-scope registration.
+- Compound CLI pipeline steps could intermittently return empty output under
+  load: the last step's stdout was read from a pipe that a concurrent `Wait()`
+  could close mid-read. The last step's output is now captured into a buffer
+  that `Wait()` completes before it is read, so compound results are reliable.
 
 ## [0.15.0] - 2026-04-18
 
