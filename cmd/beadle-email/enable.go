@@ -40,8 +40,15 @@ var enableCmd = &cobra.Command{
 
 // enableRepo deposits the guide into <root>/.punt-labs/beadle/, writes the
 // enabled marker, and registers the import in <root>/CLAUDE.md. It is
-// idempotent, so re-running upgrades in place.
+// idempotent, so re-running upgrades in place. The whole operation holds an
+// exclusive per-repo lock so a concurrent enable and disable cannot interleave
+// into the §2.11-incorrect "marker without import" state; the nested CLAUDE.md
+// lock inside Register is always acquired after this one, never the reverse.
 func enableRepo(root string) error {
+	return claudemd.WithLock(root, func() error { return enableLocked(root) })
+}
+
+func enableLocked(root string) error {
 	dir := filepath.Join(root, ".punt-labs", "beadle")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w", dir, err)
@@ -105,7 +112,14 @@ var disableCmd = &cobra.Command{
 // marker BEFORE removing the import. A partial failure then leaves at worst an
 // orphan import with no marker (audit-flaggable), never a marker whose import is
 // already gone — the state that would make a repo look enabled while it is not.
+//
+// It holds the same exclusive per-repo lock as enableRepo, so the two are
+// mutually exclusive and a concurrent pair reaches one consistent end state.
 func disableRepo(root string, purge bool) error {
+	return claudemd.WithLock(root, func() error { return disableLocked(root, purge) })
+}
+
+func disableLocked(root string, purge bool) error {
 	dir := filepath.Join(root, ".punt-labs", "beadle")
 
 	// Clear the enabled signal first. Under --purge the whole directory (which

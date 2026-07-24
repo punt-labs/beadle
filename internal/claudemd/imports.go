@@ -317,18 +317,33 @@ func writeTemp(tmp *os.File, text string, mode os.FileMode) error {
 }
 
 // withLock resolves path (following a symlink to its real file), takes an
-// exclusive flock keyed on the resolved path, and runs fn with the resolved
+// exclusive lock keyed on the resolved path, and runs fn with the resolved
 // target. The lock serializes the whole read-modify-write against a parallel
 // invocation, which atomic rename alone cannot: two unsynchronized writers each
 // read the old bytes and the second clobbers the first.
-func withLock(path string, fn func(target string) error) (err error) {
+func withLock(path string, fn func(target string) error) error {
 	target, err := resolve(path)
 	if err != nil {
 		return err
 	}
-	abs, err := filepath.Abs(target)
+	return WithLock(target, func() error { return fn(target) })
+}
+
+// WithLock runs fn while holding an exclusive flock keyed on key. The lock file
+// lives in the OS temp dir, named by the SHA-256 of key's absolute path, so two
+// processes (or goroutines) that pass the same key are serialized while distinct
+// keys never contend.
+//
+// It is the shared locking primitive for the enable/disable guidance layer:
+// Register and Prune lock the CLAUDE.md path through it, and enable/disable lock
+// the repo root through it to make the whole operation atomic. Those two uses
+// nest — a repo-root lock is held across a CLAUDE.md-path lock — which is
+// deadlock-free because the acquire order is always operation (repo root) then
+// file (CLAUDE.md), never the reverse, and the two keys are distinct paths.
+func WithLock(key string, fn func() error) (err error) {
+	abs, err := filepath.Abs(key)
 	if err != nil {
-		return fmt.Errorf("resolving %q: %w", target, err)
+		return fmt.Errorf("resolving %q: %w", key, err)
 	}
 	sum := sha256.Sum256([]byte(abs))
 	lockPath := filepath.Join(os.TempDir(), "beadle-claudemd-"+hex.EncodeToString(sum[:])+".lock")
@@ -345,7 +360,7 @@ func withLock(path string, fn func(target string) error) (err error) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("locking %q: %w", lockPath, err)
 	}
-	return fn(target)
+	return fn()
 }
 
 // resolve returns the real path a write must rename onto. A symlinked target

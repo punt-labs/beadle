@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -71,6 +73,30 @@ func TestEnableFailedRegisterLeavesNoMarker(t *testing.T) {
 	err := enableRepo(root)
 	require.Error(t, err)
 	assert.False(t, exists(t, markerPath(root)), "a failed enable leaves no marker")
+}
+
+func TestConcurrentEnableDisableReachConsistentState(t *testing.T) {
+	root := t.TempDir()
+	// Seed a user CLAUDE.md so neither end state deletes the file; the check is
+	// purely about the import line and the marker moving together.
+	require.NoError(t, os.WriteFile(hostPath(root), []byte("# Rules\n"), 0o644))
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); assert.NoError(t, enableRepo(root)) }()
+	go func() { defer wg.Done(); assert.NoError(t, disableRepo(root, false)) }()
+	wg.Wait()
+
+	// The per-repo lock serializes the two, so the end state is whichever ran
+	// last: fully enabled (marker and import both present) or fully dormant
+	// (neither) — never the §2.11-incorrect marker without its import.
+	marker := exists(t, markerPath(root))
+	imported := strings.Contains(read(t, hostPath(root)), importLine)
+	if marker {
+		assert.True(t, imported, "enabled end state: marker implies import present")
+	} else {
+		assert.False(t, imported, "dormant end state: no marker and no import")
+	}
 }
 
 func TestDisableClearsMarkerBeforePruneFailure(t *testing.T) {
