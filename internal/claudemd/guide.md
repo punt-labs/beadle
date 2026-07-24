@@ -26,8 +26,9 @@ signing is configured.
   `cc`, `bcc`, and `attachments` are optional. The message is signed and
   tagged with the repo and agent when that context is available, so a
   recipient can filter a shared mailbox by repo.
-- Address a recipient by email, or by a name in the contact book — the
-  `contacts` tools resolve a name to an address before you send.
+- Address a recipient by email, or by a name in the contact book.
+  `find_contact` resolves a name to an address before you send;
+  `list_contacts`, `add_contact`, and `remove_contact` manage the book.
 
 ## The four-level trust model
 
@@ -70,8 +71,8 @@ These two tools appear only when polling is configured for the identity.
   preformatted tables. Show them as-is; do not rebuild them as Markdown.
 - **One identity at a time.** Check `whoami` before sending if you may have
   switched. A message sent as the wrong identity cannot be recalled.
-- **Attachments are references.** `read_message` lists attachments; fetch or
-  save them explicitly rather than assuming the body contains them.
+- **Attachments are references.** `read_message` lists attachments but does
+  not inline them; use `download_attachment` to save one to disk.
 - **Signing needs a signing-preserving SMTP path.** Some relays strip the
   `multipart/signed` envelope. If a recipient reports a broken signature,
   the send path — not your message — is usually the cause.
