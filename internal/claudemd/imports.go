@@ -14,6 +14,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -263,12 +264,20 @@ func write(path, text string) error {
 	}
 	tmpName := tmp.Name()
 	if err := writeTemp(tmp, text, mode); err != nil {
-		os.Remove(tmpName)
-		return err
+		return errors.Join(err, removeTemp(tmpName))
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		os.Remove(tmpName)
-		return fmt.Errorf("renaming %q to %q: %w", tmpName, path, err)
+		err = fmt.Errorf("renaming %q to %q: %w", tmpName, path, err)
+		return errors.Join(err, removeTemp(tmpName))
+	}
+	return nil
+}
+
+// removeTemp deletes an orphaned temp file, reporting a failure that is not a
+// missing file so the leftover is not silently ignored.
+func removeTemp(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing temp file %q: %w", path, err)
 	}
 	return nil
 }
@@ -332,7 +341,13 @@ func withLock(path string, fn func(target string) error) (err error) {
 func resolve(path string) (string, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
-		return path, nil
+		// A missing file is written fresh at path; any other stat error (a
+		// permission or I/O fault) must not be swallowed, or a symlinked target
+		// would be silently clobbered by a rename onto the link itself.
+		if os.IsNotExist(err) {
+			return path, nil
+		}
+		return "", fmt.Errorf("stat %q: %w", path, err)
 	}
 	if fi.Mode()&os.ModeSymlink == 0 {
 		return path, nil

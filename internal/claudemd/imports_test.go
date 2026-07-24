@@ -189,6 +189,30 @@ func TestConcurrentRegisterAppendsOnce(t *testing.T) {
 	assert.Equal(t, "# Title\n"+line+"\n", readHost(t, path))
 }
 
+func TestRegisterStatErrorNotSwallowed(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "afile")
+	require.NoError(t, os.WriteFile(file, []byte("x"), 0o644))
+
+	// A path whose parent is a regular file: Lstat fails with ENOTDIR, which is
+	// not "not exist". resolve must surface it rather than treat it as absent
+	// and risk clobbering a symlink on a transient stat fault.
+	_, err := Register(filepath.Join(file, "CLAUDE.md"), line)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stat")
+}
+
+func TestRemoveTemp(t *testing.T) {
+	dir := t.TempDir()
+	assert.NoError(t, removeTemp(filepath.Join(dir, "gone")), "a missing temp is not an error")
+
+	f := filepath.Join(dir, "orphan.tmp")
+	require.NoError(t, os.WriteFile(f, []byte("x"), 0o644))
+	require.NoError(t, removeTemp(f))
+	_, err := os.Stat(f)
+	assert.True(t, os.IsNotExist(err), "the orphan is gone")
+}
+
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name string
