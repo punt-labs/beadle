@@ -16,6 +16,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   repo context is available the message sends untagged. Tagging is idempotent
   (replies are not double-tagged) and does not affect PGP signature
   verification.
+- `beadle-email enable` / `disable` — repo-scoped agent guidance per the org
+  Tool Enable/Disable standard. `enable`, run in a repo, deposits beadle's
+  agent user-guide at `.punt-labs/beadle/CLAUDE.md`, writes an `enabled`
+  marker, and adds the single `@.punt-labs/beadle/CLAUDE.md` import line to the
+  repo's `CLAUDE.md` (idempotent; re-running is the upgrade). `disable` removes
+  the import line and the marker, leaving the guide dormant; `disable --purge`
+  deletes the `.punt-labs/beadle/` directory. The `CLAUDE.md` edit is atomic,
+  lock-serialized, and byte-preserving — it touches only its own import line.
+  `install`/`uninstall` are unchanged and remain once-per-machine.
 
 ### Fixed
 
