@@ -47,6 +47,10 @@ func enableRepo(root string) error {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
 
+	// The guide and marker are beadle-owned: enable overwrites them wholesale
+	// and a torn write self-heals on the next run, so they use plain WriteFile.
+	// Only the user-owned repo CLAUDE.md below goes through the atomic+flock
+	// import-writer, which exists to never corrupt bytes the user authored.
 	guidePath := filepath.Join(dir, "CLAUDE.md")
 	if err := os.WriteFile(guidePath, claudemd.Guide, 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", guidePath, err)
@@ -100,6 +104,16 @@ func disableRepo(root string, purge bool) error {
 	}
 	if wrote {
 		fmt.Fprintf(os.Stderr, "removed %s from %s\n", importLine, hostPath)
+	}
+
+	// When enable created CLAUDE.md from nothing, pruning the sole import line
+	// leaves a 0-byte file. Remove it, but only when exactly empty, so a file
+	// carrying any user content is never deleted.
+	if fi, err := os.Stat(hostPath); err == nil && fi.Size() == 0 {
+		if err := os.Remove(hostPath); err != nil {
+			return fmt.Errorf("removing empty %s: %w", hostPath, err)
+		}
+		fmt.Fprintf(os.Stderr, "removed empty %s\n", hostPath)
 	}
 
 	markerPath := filepath.Join(dir, "enabled")

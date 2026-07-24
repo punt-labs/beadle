@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/punt-labs/beadle/internal/claudemd"
 )
 
 func beadleDir(root string) string  { return filepath.Join(root, ".punt-labs", "beadle") }
@@ -35,10 +37,10 @@ func TestEnableDepositsGuideMarkerAndImport(t *testing.T) {
 	require.NoError(t, enableRepo(root))
 
 	guide := filepath.Join(beadleDir(root), "CLAUDE.md")
-	assert.True(t, exists(t, guide), "guide deposited")
-	assert.NotEmpty(t, read(t, guide), "guide has content")
+	assert.Equal(t, string(claudemd.Guide), read(t, guide), "guide deposited verbatim")
 	assert.True(t, exists(t, markerPath(root)), "enabled marker written")
-	assert.Contains(t, read(t, hostPath(root)), importLine, "import added to repo CLAUDE.md")
+	assert.Equal(t, importLine+"\n", read(t, hostPath(root)),
+		"import is the sole content of a repo CLAUDE.md created from nothing")
 }
 
 func TestEnablePreservesExistingCLAUDEMD(t *testing.T) {
@@ -61,22 +63,39 @@ func TestEnableIdempotent(t *testing.T) {
 
 func TestDisableLeavesDirectoryDormant(t *testing.T) {
 	root := t.TempDir()
+	existing := "# Team rules\n"
+	require.NoError(t, os.WriteFile(hostPath(root), []byte(existing), 0o644))
 	require.NoError(t, enableRepo(root))
 	require.NoError(t, disableRepo(root, false))
 
-	assert.NotContains(t, read(t, hostPath(root)), importLine, "import removed")
+	assert.Equal(t, existing, read(t, hostPath(root)), "user prose restored, import gone")
 	assert.False(t, exists(t, markerPath(root)), "marker deleted")
-	assert.True(t, exists(t, filepath.Join(beadleDir(root), "CLAUDE.md")),
+	assert.Equal(t, string(claudemd.Guide), read(t, filepath.Join(beadleDir(root), "CLAUDE.md")),
 		"guide stays dormant, not erased")
 }
 
 func TestDisablePurgeRemovesDirectory(t *testing.T) {
 	root := t.TempDir()
+	existing := "# Team rules\n"
+	require.NoError(t, os.WriteFile(hostPath(root), []byte(existing), 0o644))
 	require.NoError(t, enableRepo(root))
 	require.NoError(t, disableRepo(root, true))
 
-	assert.NotContains(t, read(t, hostPath(root)), importLine)
+	assert.Equal(t, existing, read(t, hostPath(root)), "user prose restored, import gone")
 	assert.False(t, exists(t, beadleDir(root)), "--purge removes the whole directory")
+}
+
+func TestDisableRemovesEmptyCLAUDEMD(t *testing.T) {
+	root := t.TempDir()
+	// No prior CLAUDE.md: enable creates it holding only the import line, so
+	// disable's prune empties it and must remove the 0-byte file it left.
+	require.NoError(t, enableRepo(root))
+	require.NoError(t, disableRepo(root, false))
+
+	assert.False(t, exists(t, hostPath(root)), "a CLAUDE.md created from nothing is removed")
+	assert.False(t, exists(t, markerPath(root)), "marker deleted")
+	assert.True(t, exists(t, filepath.Join(beadleDir(root), "CLAUDE.md")),
+		"the .punt-labs/beadle dir stays dormant")
 }
 
 func TestDisableWithoutEnableIsClean(t *testing.T) {
