@@ -147,7 +147,8 @@ func TestHandler_ListMessages(t *testing.T) {
 	fix.AddMessage("INBOX", "alice@test.com", "Hello World", "body")
 	fix.AddMessage("INBOX", "alice@test.com", "Second Message", "body 2")
 
-	r := callTool(t, s, "list_messages", map[string]any{"count": 10})
+	// Seeds are untagged; list every repo so they are not scoped out.
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10, "all_repos": true})
 	assert.False(t, r.IsError)
 	assert.Contains(t, r.text(), "Hello World")
 	assert.Contains(t, r.text(), "Second Message")
@@ -460,7 +461,7 @@ func TestHandler_ListMessages_PatternPermissionSurfacesSubject(t *testing.T) {
 	env.AddContact("Anthropic Mail", "*@mail.anthropic.com", "r--")
 	fix.AddMessage("INBOX", "no-reply-xyz@mail.anthropic.com", "Status Update", "body")
 
-	r := callTool(t, s, "list_messages", map[string]any{"count": 10})
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10, "all_repos": true})
 	assert.False(t, r.IsError, "list failed: %s", r.text())
 	assert.Contains(t, r.text(), "Status Update")
 	assert.NotContains(t, r.text(), "redacted")
@@ -473,7 +474,7 @@ func TestHandler_ListMessages_UnmatchedSenderRedacted(t *testing.T) {
 	env.AddContact("Anthropic Mail", "*@mail.anthropic.com", "r--")
 	fix.AddMessage("INBOX", "no-reply@other.com", "Leaky Subject", "body")
 
-	r := callTool(t, s, "list_messages", map[string]any{"count": 10})
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10, "all_repos": true})
 	assert.False(t, r.IsError, "list failed: %s", r.text())
 	assert.NotContains(t, r.text(), "Leaky Subject")
 	assert.Contains(t, r.text(), "redacted")

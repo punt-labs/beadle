@@ -35,6 +35,8 @@ type Poller struct {
 	logger    *slog.Logger
 	dialer    Dialer
 
+	repoSlug func() string
+
 	mu          sync.Mutex
 	wg          sync.WaitGroup
 	interval    time.Duration
@@ -46,16 +48,31 @@ type Poller struct {
 	lastError   string
 }
 
+// PollerOption configures a Poller at construction.
+type PollerOption func(*Poller)
+
+// WithRepoScope sets how the poller resolves the repo slug it scopes the unread
+// count to. The default resolves the current git remote; a headless deployment
+// or a test can supply a fixed slug, where "" counts every repo.
+func WithRepoScope(resolve func() string) PollerOption {
+	return func(p *Poller) { p.repoSlug = resolve }
+}
+
 // NewPoller creates a poller that is initially stopped.
 // onNewMail is called each time new unseen messages are detected.
 // Pass nil to suppress notifications.
-func NewPoller(onNewMail NewMailFunc, resolver *identity.Resolver, logger *slog.Logger, dialer Dialer) *Poller {
-	return &Poller{
+func NewPoller(onNewMail NewMailFunc, resolver *identity.Resolver, logger *slog.Logger, dialer Dialer, opts ...PollerOption) *Poller {
+	p := &Poller{
 		onNewMail: onNewMail,
 		resolver:  resolver,
 		logger:    logger,
 		dialer:    dialer,
+		repoSlug:  func() string { return ResolveRepoTag(context.Background(), logger, "").Slug },
 	}
+	for _, o := range opts {
+		o(p)
+	}
+	return p
 }
 
 // Start reads the identity config and begins polling if poll_interval is set.
@@ -185,8 +202,7 @@ func (p *Poller) poll() {
 	// Scope the unread count to the current repo so the "new mail" signal means
 	// this repo's mail, not the whole shared mailbox. An empty slug (no git
 	// remote, e.g. a headless daemon) counts all unseen.
-	slug := ResolveRepoTag(context.Background(), p.logger, "").Slug
-	unseen, err := client.UnreadCount("INBOX", slug)
+	unseen, err := client.UnreadCount("INBOX", p.repoSlug())
 	if err != nil {
 		p.recordFailure(fmt.Sprintf("unread count: %v", err))
 		p.logger.Warn("poller: unread count", "error", err)
