@@ -98,6 +98,38 @@ func TestDisableRemovesEmptyCLAUDEMD(t *testing.T) {
 		"the .punt-labs/beadle dir stays dormant")
 }
 
+func TestDisableKeepsPreexistingEmptyCLAUDEMD(t *testing.T) {
+	root := t.TempDir()
+	// A user's own empty CLAUDE.md, never enabled: disable finds no import to
+	// prune (wrote==false), so it must not delete a file it did not empty.
+	require.NoError(t, os.WriteFile(hostPath(root), nil, 0o644))
+	require.NoError(t, disableRepo(root, false))
+
+	require.True(t, exists(t, hostPath(root)), "a no-op disable leaves the user's file")
+	assert.Equal(t, "", read(t, hostPath(root)))
+}
+
+func TestDisableKeepsSymlinkedCLAUDEMD(t *testing.T) {
+	root := t.TempDir()
+	// CLAUDE.md is a symlink into a dotfile store. enable appends the import to
+	// the real target; disable prunes it back to empty. The 0-byte target must
+	// not tempt disable into unlinking the symlink — the link and its target
+	// both survive.
+	store := t.TempDir()
+	target := filepath.Join(store, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(target, nil, 0o644))
+	require.NoError(t, os.Symlink(target, hostPath(root)))
+
+	require.NoError(t, enableRepo(root))
+	require.NoError(t, disableRepo(root, false))
+
+	fi, err := os.Lstat(hostPath(root))
+	require.NoError(t, err)
+	assert.NotZero(t, fi.Mode()&os.ModeSymlink, "the symlink survives disable")
+	require.True(t, exists(t, target), "the real target survives disable")
+	assert.Equal(t, "", read(t, target), "the target is empty, import pruned")
+}
+
 func TestDisableWithoutEnableIsClean(t *testing.T) {
 	root := t.TempDir()
 	// Disable on a repo that was never enabled: no marker, no import, no error.

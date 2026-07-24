@@ -107,13 +107,17 @@ func disableRepo(root string, purge bool) error {
 	}
 
 	// When enable created CLAUDE.md from nothing, pruning the sole import line
-	// leaves a 0-byte file. Remove it, but only when exactly empty, so a file
-	// carrying any user content is never deleted.
-	if fi, err := os.Stat(hostPath); err == nil && fi.Size() == 0 {
-		if err := os.Remove(hostPath); err != nil {
-			return fmt.Errorf("removing empty %s: %w", hostPath, err)
+	// leaves a 0-byte file. Remove it, but only when this run actually removed
+	// an import line (wrote) — so a no-op disable never deletes a user's own
+	// empty CLAUDE.md — and only when the path is a regular file, so os.Lstat
+	// leaves a symlinked CLAUDE.md and its link intact.
+	if wrote {
+		if fi, err := os.Lstat(hostPath); err == nil && fi.Mode().IsRegular() && fi.Size() == 0 {
+			if err := os.Remove(hostPath); err != nil {
+				return fmt.Errorf("removing empty %s: %w", hostPath, err)
+			}
+			fmt.Fprintf(os.Stderr, "removed empty %s\n", hostPath)
 		}
-		fmt.Fprintf(os.Stderr, "removed empty %s\n", hostPath)
 	}
 
 	markerPath := filepath.Join(dir, "enabled")
