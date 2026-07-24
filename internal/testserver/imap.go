@@ -64,11 +64,7 @@ func NewIMAPServer(t testing.TB, user, pass string) (*IMAPServer, string) {
 		t.Fatalf("testserver: listen: %v", err)
 	}
 
-	go srv.Serve(ln) //nolint:errcheck
-
-	t.Cleanup(func() {
-		srv.Close()
-	})
+	serveUntilCleanup(t, ln, srv.Serve, srv.Close)
 
 	addr := ln.Addr().String()
 	is := &IMAPServer{server: srv, listener: ln, backend: backend}
