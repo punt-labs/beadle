@@ -176,6 +176,107 @@ func TestPrune(t *testing.T) {
 	}
 }
 
+func TestPruneAndDiscardEmpty(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		wantPruned  bool
+		wantRemoved bool
+		wantExists  bool
+		wantFile    string // checked only when wantExists
+	}{
+		{"sole import removed then file discarded", line + "\n", true, true, false, ""},
+		{"import among content leaves non-empty file", "# T\n" + line + "\n", true, false, true, "# T\n"},
+		{"no import present is a no-op, file kept", "# T\n", false, false, true, "# T\n"},
+		{"pre-existing empty file kept (nothing pruned)", "", false, false, true, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeHost(t, tt.content)
+			pruned, removed, err := PruneAndDiscardEmpty(path, line)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantPruned, pruned, "pruned")
+			assert.Equal(t, tt.wantRemoved, removed, "removed")
+			_, statErr := os.Stat(path)
+			if tt.wantExists {
+				require.NoError(t, statErr, "file must remain")
+				assert.Equal(t, tt.wantFile, readHost(t, path))
+			} else {
+				assert.True(t, os.IsNotExist(statErr), "emptied file must be gone")
+			}
+		})
+	}
+}
+
+func TestPruneAndDiscardEmptyKeepsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real-CLAUDE.md")
+	require.NoError(t, os.WriteFile(real, []byte(line+"\n"), 0o644))
+	link := filepath.Join(dir, "CLAUDE.md")
+	require.NoError(t, os.Symlink(real, link))
+
+	pruned, removed, err := PruneAndDiscardEmpty(link, line)
+	require.NoError(t, err)
+	assert.True(t, pruned)
+	assert.False(t, removed, "a symlinked path is never removed")
+
+	fi, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, fi.Mode()&os.ModeSymlink, "the link survives")
+	assert.Equal(t, "", readHost(t, real), "its target is emptied, not deleted")
+}
+
+// TestPruneAndDiscardEmptyNoTOCTOUWipe proves the removal cannot wipe a
+// concurrent writer's content. A registrar adding a DIFFERENT import races the
+// prune-and-discard of beadle's import on the same file. Because the emptiness
+// check and the removal both hold Lock B, the two serialize: whichever order
+// runs, the registrar's line is present at the end and the file exists.
+func TestPruneAndDiscardEmptyNoTOCTOUWipe(t *testing.T) {
+	const other = "@.punt-labs/other/CLAUDE.md"
+	path := writeHost(t, line+"\n")
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, _, err := PruneAndDiscardEmpty(path, line)
+		assert.NoError(t, err)
+	}()
+	go func() {
+		defer wg.Done()
+		_, err := Register(path, other)
+		assert.NoError(t, err)
+	}()
+	wg.Wait()
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err, "the file exists — a momentary empty removal is refilled by the registrar")
+	assert.Contains(t, string(data), other, "the concurrent registrar's import is never wiped")
+}
+
+func TestCanonicalKeySameForSpellings(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	require.NoError(t, os.Symlink(real, link))
+
+	viaReal, err := canonicalKey(filepath.Join(real, "CLAUDE.md"))
+	require.NoError(t, err)
+	viaLink, err := canonicalKey(filepath.Join(link, "CLAUDE.md"))
+	require.NoError(t, err)
+	assert.Equal(t, viaReal, viaLink, "a symlinked parent keys the same lock as the real path")
+
+	viaDots, err := canonicalKey(filepath.Join(real, "sub", "..", "CLAUDE.md"))
+	require.NoError(t, err)
+	assert.Equal(t, viaReal, viaDots, `"a/../x" keys the same lock as "x"`)
+
+	// Neither the file nor its parent exists: fall back to the cleaned absolute
+	// path so the key is still deterministic rather than an error.
+	deep := filepath.Join(real, "missing-dir", "CLAUDE.md")
+	viaDeep, err := canonicalKey(deep)
+	require.NoError(t, err)
+	assert.Equal(t, deep, viaDeep, "an unresolvable path keys on its cleaned absolute form")
+}
+
 func TestPruneMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "CLAUDE.md")
 	wrote, err := Prune(path, line)

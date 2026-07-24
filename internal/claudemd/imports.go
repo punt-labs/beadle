@@ -83,11 +83,32 @@ func Register(path, importLine string) (bool, error) {
 // path, collapsing an accidental duplicate to zero. It reports whether the file
 // was written. A missing file is left untouched.
 func Prune(path, importLine string) (bool, error) {
+	pruned, _, err := prune(path, importLine, false)
+	return pruned, err
+}
+
+// PruneAndDiscardEmpty prunes importLine and, when that leaves the file empty,
+// removes the file — all under a single hold of the CLAUDE.md flock (Lock B).
+// Doing the "is it now empty?" check and the removal inside the lock closes the
+// TOCTOU an unlocked caller would leave open: between an unlocked prune and an
+// unlocked remove, another tool could append its own import and beadle would
+// then delete the no-longer-empty file, wiping content the flock exists to
+// protect. It reports whether it pruned a line and whether it removed the file.
+// Removal keeps the round-3 guards: only when a line was actually pruned, and
+// only when path is a regular file — never a symlink (removing the real target
+// would strand the link).
+func PruneAndDiscardEmpty(path, importLine string) (pruned, removed bool, err error) {
+	return prune(path, importLine, true)
+}
+
+// prune is the shared body of Prune and PruneAndDiscardEmpty. It holds Lock B
+// for the whole read-modify-write and, when discardEmpty is set and the prune
+// emptied a regular-file target, removes the file under that same lock.
+func prune(path, importLine string, discardEmpty bool) (pruned, removed bool, err error) {
 	if err := validate(importLine); err != nil {
-		return false, err
+		return false, false, err
 	}
-	var wrote bool
-	err := withLock(path, func(target string) error {
+	err = withLock(path, func(target string) error {
 		content, err := read(target)
 		if err != nil {
 			return err
@@ -97,17 +118,33 @@ func Prune(path, importLine string) (bool, error) {
 		if len(kept) == len(lines) {
 			return nil
 		}
-		if err := write(target, strings.Join(kept, "")); err != nil {
+		joined := strings.Join(kept, "")
+		if err := write(target, joined); err != nil {
 			return err
 		}
-		wrote = true
+		pruned = true
+		if !discardEmpty || joined != "" {
+			return nil
+		}
+		// The file is empty. Remove it, but only when path is a regular file:
+		// a symlinked path leaves the link (and its now-empty target) intact.
+		fi, statErr := os.Lstat(path)
+		if statErr != nil {
+			return fmt.Errorf("stat %q: %w", path, statErr)
+		}
+		if fi.Mode().IsRegular() {
+			if err := os.Remove(path); err != nil {
+				return fmt.Errorf("removing emptied %q: %w", path, err)
+			}
+			removed = true
+		}
 		return nil
 	})
-	return wrote, err
+	return pruned, removed, err
 }
 
 // validate rejects any import line that could not be a lone top-level @-import.
-// register and prune splice the line in verbatim, so a padded, multi-line, or
+// Register and Prune splice the line in verbatim, so a padded, multi-line, or
 // non-@ line would inject a blank line, a second import, or stray markdown.
 func validate(line string) error {
 	switch {
@@ -346,23 +383,34 @@ func withLock(path string, fn func(target string) error) error {
 	return WithLock(target, func() error { return fn(target) })
 }
 
-// WithLock runs fn while holding an exclusive flock keyed on key. The lock file
-// lives in the OS temp dir, named by the SHA-256 of key's absolute path, so two
-// processes (or goroutines) that pass the same key are serialized while distinct
-// keys never contend.
+// The enable/disable guidance layer uses two nested locks:
 //
-// It is the shared locking primitive for the enable/disable guidance layer:
-// Register and Prune lock the CLAUDE.md path through it, and enable/disable lock
-// the repo root through it to make the whole operation atomic. Those two uses
-// nest — a repo-root lock is held across a CLAUDE.md-path lock — which is
-// deadlock-free because the acquire order is always operation (repo root) then
-// file (CLAUDE.md), never the reverse, and the two keys are distinct paths.
+//   - Lock A — the per-repo OPERATION lock. It serializes beadle's own enable
+//     against disable so the two never interleave. Key: the canonical repo root.
+//     enable/disable acquire it through WithLock for the whole operation.
+//   - Lock B — the per-CLAUDE.md-path flock. It serializes the CLAUDE.md
+//     read-modify-write across ALL tools, not just beadle. Key: the canonical
+//     CLAUDE.md path. Register and Prune acquire it through withLock.
+//
+// INVARIANT: every observation OR mutation of CLAUDE.md — reading it, appending
+// the import, pruning it, and the "remove the file if pruning emptied it"
+// decision (PruneAndDiscardEmpty) — happens while holding Lock B. Nothing
+// touches CLAUDE.md state outside B.
+//
+// Deadlock freedom: Lock A nests Lock B (never the reverse), and the two keys
+// are always distinct canonical paths (repo root vs repo root + "/CLAUDE.md"),
+// so a fixed acquire order over distinct locks cannot cycle.
+
+// WithLock runs fn while holding an exclusive flock keyed on key. The lock file
+// lives in the OS temp dir, named by the SHA-256 of key's canonical path, so
+// two callers naming the same file by different spellings (a symlinked parent,
+// "./x", "a/../x") take the SAME lock, while distinct files never contend.
 func WithLock(key string, fn func() error) (err error) {
-	abs, err := filepath.Abs(key)
+	canon, err := canonicalKey(key)
 	if err != nil {
-		return fmt.Errorf("resolving %q: %w", key, err)
+		return err
 	}
-	sum := sha256.Sum256([]byte(abs))
+	sum := sha256.Sum256([]byte(canon))
 	lockPath := filepath.Join(os.TempDir(), "beadle-claudemd-"+hex.EncodeToString(sum[:])+".lock")
 	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -378,6 +426,26 @@ func WithLock(key string, fn func() error) (err error) {
 		return fmt.Errorf("locking %q: %w", lockPath, err)
 	}
 	return fn()
+}
+
+// canonicalKey resolves key to a stable absolute path so different spellings of
+// the same file take the same lock. It absolutizes first, then follows symlinks
+// (including symlinked parents). For a path that does not exist yet — a
+// CLAUDE.md about to be created — it canonicalizes the parent, which must exist,
+// and rejoins the base, so the pre-create and post-create keys still agree.
+func canonicalKey(key string) (string, error) {
+	abs, err := filepath.Abs(key)
+	if err != nil {
+		return "", fmt.Errorf("resolving %q: %w", key, err)
+	}
+	if p, err := filepath.EvalSymlinks(abs); err == nil {
+		return p, nil
+	}
+	dir, base := filepath.Split(abs)
+	if d, err := filepath.EvalSymlinks(dir); err == nil {
+		return filepath.Join(d, base), nil
+	}
+	return abs, nil
 }
 
 // resolve returns the real path a write must rename onto. A symlinked target
