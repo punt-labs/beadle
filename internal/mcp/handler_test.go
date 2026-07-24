@@ -455,6 +455,33 @@ func TestHandler_AddContact_PatternAcceptsReadOnly(t *testing.T) {
 	assert.Contains(t, r.text(), "Anthropic Mail")
 }
 
+func TestHandler_ListMessages_ScopesToCurrentRepo(t *testing.T) {
+	slug := email.ResolveRepoTag(context.Background(), nil, "").Slug
+	if slug == "" {
+		t.Skip("no git remote resolved; repo scoping is a no-op here")
+	}
+
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	raw := fmt.Sprintf("From: alice@test.com\r\n%s: %s\r\nSubject: scoped hit\r\n"+
+		"Content-Type: text/plain\r\n\r\nbody", email.HeaderRepo, slug)
+	fix.AddRawMessage("INBOX", []byte(raw))
+	fix.AddMessage("INBOX", "alice@test.com", "untagged miss", "body")
+
+	// Default: only the current repo's mail.
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10})
+	assert.False(t, r.IsError, "list failed: %s", r.text())
+	assert.Contains(t, r.text(), "scoped hit")
+	assert.NotContains(t, r.text(), "untagged miss")
+
+	// Override: every repo.
+	r = callTool(t, s, "list_messages", map[string]any{"count": 10, "all_repos": true})
+	assert.False(t, r.IsError, "list failed: %s", r.text())
+	assert.Contains(t, r.text(), "scoped hit")
+	assert.Contains(t, r.text(), "untagged miss")
+}
+
 func TestHandler_ListMessages_PatternPermissionSurfacesSubject(t *testing.T) {
 	s, env, fix := setupHandler(t)
 
