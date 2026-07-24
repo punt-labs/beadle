@@ -202,6 +202,24 @@ func TestRegisterStatErrorNotSwallowed(t *testing.T) {
 	assert.Contains(t, err.Error(), "stat")
 }
 
+func TestUnterminatedRoundTripGainsOneEOL(t *testing.T) {
+	// The one documented non-byte-preserving case: a file whose last line has
+	// no terminator gains one EOL when Register adds the mandated separator, and
+	// Prune does not strip it back off. The round-trip therefore leaves the
+	// original content plus exactly one trailing "\n"; every other byte matches.
+	path := writeHost(t, "no newline here")
+
+	_, err := Register(path, line)
+	require.NoError(t, err)
+	assert.Equal(t, "no newline here\n"+line+"\n", readHost(t, path))
+
+	wrote, err := Prune(path, line)
+	require.NoError(t, err)
+	require.True(t, wrote)
+	assert.Equal(t, "no newline here\n", readHost(t, path),
+		"original content plus the single mandated trailing EOL")
+}
+
 func TestRemoveTemp(t *testing.T) {
 	dir := t.TempDir()
 	assert.NoError(t, removeTemp(filepath.Join(dir, "gone")), "a missing temp is not an error")

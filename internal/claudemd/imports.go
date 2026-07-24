@@ -1,5 +1,5 @@
 // Package claudemd adds and removes a single @-import line in a user-owned
-// CLAUDE.md without disturbing any other byte of the file.
+// CLAUDE.md, disturbing no other byte — with one mandated exception below.
 //
 // The write is atomic (temp file in the target's own directory, then rename),
 // byte-preserving across LF, CRLF, and lone-CR endings, idempotent by a
@@ -8,6 +8,13 @@
 // exclusive flock for the whole read-modify-write. The correctness contract is
 // ported from GlobalClaudeImports in the vox repo; the flock is the one
 // addition the Tool Enable/Disable Standard (§2.4) requires beyond it.
+//
+// The one exception to byte-preservation: when the host file's final line has
+// no terminator, Register adds a single EOL before the import so the two lines
+// are not glued (§2.4 mandates this separator). Prune cannot attribute that
+// separator to itself, so it does not strip it back off; a Register+Prune
+// round-trip on a previously-unterminated file therefore leaves the original
+// content plus one trailing EOL. Every other case round-trips byte-for-byte.
 package claudemd
 
 import (
@@ -36,7 +43,10 @@ const newFileMode = 0o644
 // already matches it, creating the file if it does not exist. It reports
 // whether the file was written. Re-running is a no-op, so it is the upgrade
 // path. importLine must be a single top-level @-import with no surrounding
-// whitespace.
+// whitespace. When the host file's final line has no terminator, the appended
+// import is preceded by one EOL per the standard; Prune does not remove that
+// added newline, so this is the single case an enable+disable round-trip is
+// not byte-for-byte (see the package comment).
 func Register(path, importLine string) (bool, error) {
 	if err := validate(importLine); err != nil {
 		return false, err
