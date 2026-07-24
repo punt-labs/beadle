@@ -47,6 +47,11 @@ const newFileMode = 0o644
 // import is preceded by one EOL per the standard; Prune does not remove that
 // added newline, so this is the single case an enable+disable round-trip is
 // not byte-for-byte (see the package comment).
+//
+// Register refuses to append when the file ends inside an unclosed code fence:
+// an import written at EOF there would sit inside the fence, where it neither
+// resolves nor matches on re-run — so a retry would append endless duplicates.
+// The caller must close the fence first.
 func Register(path, importLine string) (bool, error) {
 	if err := validate(importLine); err != nil {
 		return false, err
@@ -60,6 +65,9 @@ func Register(path, importLine string) (bool, error) {
 		lines := splitKeepEnds(content)
 		if present(lines, importLine) {
 			return nil
+		}
+		if endsInOpenFence(lines) {
+			return fmt.Errorf("%s ends inside an unclosed code fence; close the fence before enabling so the import stays top-level", path)
 		}
 		next := append(lines, appended(lines, importLine))
 		if err := write(target, strings.Join(next, "")); err != nil {
@@ -150,12 +158,13 @@ func remove(lines []string, importLine string) []string {
 
 // scanTopLevel calls fn(index, body) for each line that resolves at the top
 // level — outside any fenced or indented code block — passing the line net of
-// its terminator. A fence delimiter is a line whose first non-whitespace run is
-// three or more backticks or tildes; each one flips the fenced state. An
-// indented code block line begins with a tab or four or more spaces. This is
-// the code-block definition the Tool Enable/Disable Standard (§2.4) fixes so
-// every implementation agrees.
-func scanTopLevel(lines []string, fn func(i int, body string)) {
+// its terminator, and returns whether the file ends inside an unclosed fence.
+// A fence delimiter is a line whose first non-whitespace run is three or more
+// backticks or tildes; each one flips the fenced state. An indented code block
+// line begins with a tab or four or more spaces. This is the code-block
+// definition the Tool Enable/Disable Standard (§2.4) fixes so every
+// implementation agrees.
+func scanTopLevel(lines []string, fn func(i int, body string)) bool {
 	inFence := false
 	for i, ln := range lines {
 		b := trimTerminator(ln)
@@ -168,6 +177,14 @@ func scanTopLevel(lines []string, fn func(i int, body string)) {
 		}
 		fn(i, b)
 	}
+	return inFence
+}
+
+// endsInOpenFence reports whether lines finish inside an unclosed code fence.
+// Appending an import at EOF then would land it inside the fence — invisible to
+// present and remove — so Register refuses rather than append there.
+func endsInOpenFence(lines []string) bool {
+	return scanTopLevel(lines, func(int, string) {})
 }
 
 func isFence(body string) bool {

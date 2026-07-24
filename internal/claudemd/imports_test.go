@@ -82,6 +82,61 @@ func TestRegisterIdempotent(t *testing.T) {
 	assert.Equal(t, first, readHost(t, path), "re-run must not change bytes")
 }
 
+// TestFenceAudit drives every fence and code-block shape through the core
+// contract: enable is idempotent (a second Register appends no duplicate),
+// disable round-trips (Prune restores the original bytes), and an unclosed
+// fence is refused rather than corrupted. content is the user's file before any
+// import; openFence marks the inputs whose EOF sits inside an unclosed fence.
+func TestFenceAudit(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		openFence bool
+	}{
+		{"balanced backtick fence with info string", "# T\n```go\ncode\n```\n", false},
+		{"balanced tilde fence", "# T\n~~~\ncode\n~~~\n", false},
+		{"balanced tilde fence with info string", "# T\n~~~python\ncode\n~~~\n", false},
+		{"crlf-terminated fence lines", "# T\r\n```\r\ncode\r\n```\r\n", false},
+		{"import-matching line inside a fence", "# T\n```\n" + line + "\n```\n", false},
+		{"indented code block", "# T\n\n    " + line + "\n", false},
+		{"backticks then tildes, balanced", "```\na\n```\n~~~\nb\n~~~\n", false},
+		{"only an unclosed fence", "```\n", true},
+		{"unclosed fence with info string", "# T\n```go\ncode\n", true},
+		{"odd mixed fence count ends open", "~~~\ncode\n```\ncode\n~~~\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeHost(t, tt.content)
+
+			if tt.openFence {
+				_, err := Register(path, line)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "unclosed code fence")
+				assert.Equal(t, tt.content, readHost(t, path), "nothing appended on error")
+				// A retry must still refuse — never accrete duplicates.
+				_, err = Register(path, line)
+				require.Error(t, err)
+				assert.Equal(t, tt.content, readHost(t, path))
+				return
+			}
+
+			wrote, err := Register(path, line)
+			require.NoError(t, err)
+			require.True(t, wrote)
+			afterFirst := readHost(t, path)
+
+			wrote, err = Register(path, line)
+			require.NoError(t, err)
+			assert.False(t, wrote, "second enable must append no duplicate")
+			assert.Equal(t, afterFirst, readHost(t, path), "idempotent re-run")
+
+			_, err = Prune(path, line)
+			require.NoError(t, err)
+			assert.Equal(t, tt.content, readHost(t, path), "disable restores the original bytes")
+		})
+	}
+}
+
 func TestPrune(t *testing.T) {
 	tests := []struct {
 		name      string
