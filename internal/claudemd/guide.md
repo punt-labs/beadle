@@ -12,10 +12,11 @@ signing is configured.
 ## Reading mail
 
 - `list_messages` — list a folder (INBOX by default). Returns a table of
-  message numbers, sender, subject, date, and trust level. Emit the table
+  message IDs, sender, subject, date, and trust level. Emit the table
   verbatim; do not reformat it.
-- `read_message` — read one message by number. Returns headers, body, and
-  the trust classification. Attachments are listed, not inlined.
+- `read_message` — read one message by its ID (the `message_id` from the
+  list). Returns headers, body, and the trust classification. Attachments are
+  listed, not inlined.
 - `list_folders` — enumerate the mailbox folders and their message counts.
 - `move_message` / `batch_move_messages` — file one message, or many, into
   another folder (e.g. archive after handling).
