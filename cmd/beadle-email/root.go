@@ -7,11 +7,6 @@ import (
 	"strings"
 )
 
-func init() {
-	rootCmd.AddCommand(enableCmd)
-	rootCmd.AddCommand(disableCmd)
-}
-
 // repoRoot returns the top-level directory of the git repository containing the
 // working directory. enable and disable write inside that root, so they refuse
 // to run outside a repo rather than depositing files in an arbitrary directory.
