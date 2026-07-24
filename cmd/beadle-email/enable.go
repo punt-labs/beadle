@@ -99,8 +99,28 @@ var disableCmd = &cobra.Command{
 // disableRepo removes the import from <root>/CLAUDE.md and deletes the enabled
 // marker, leaving the rest of .punt-labs/beadle/ dormant. When purge is set it
 // removes the whole directory instead.
+//
+// The order mirrors enable in reverse. enable adds the import then the marker,
+// so "marker present ⟹ import present" (§2.11); disable must therefore clear the
+// marker BEFORE removing the import. A partial failure then leaves at worst an
+// orphan import with no marker (audit-flaggable), never a marker whose import is
+// already gone — the state that would make a repo look enabled while it is not.
 func disableRepo(root string, purge bool) error {
 	dir := filepath.Join(root, ".punt-labs", "beadle")
+
+	// Clear the enabled signal first. Under --purge the whole directory (which
+	// contains the marker) goes now, for the same reason.
+	if purge {
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("purging %s: %w", dir, err)
+		}
+		fmt.Fprintf(os.Stderr, "purged %s\n", dir)
+	} else {
+		markerPath := filepath.Join(dir, "enabled")
+		if err := os.Remove(markerPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("removing %s: %w", markerPath, err)
+		}
+	}
 
 	hostPath := filepath.Join(root, "CLAUDE.md")
 	wrote, err := claudemd.Prune(hostPath, importLine)
@@ -125,17 +145,6 @@ func disableRepo(root string, purge bool) error {
 		}
 	}
 
-	markerPath := filepath.Join(dir, "enabled")
-	if err := os.Remove(markerPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("removing %s: %w", markerPath, err)
-	}
-
-	if purge {
-		if err := os.RemoveAll(dir); err != nil {
-			return fmt.Errorf("purging %s: %w", dir, err)
-		}
-		fmt.Fprintf(os.Stderr, "purged %s\n", dir)
-	}
 	fmt.Fprintln(os.Stderr, "beadle disabled")
 	return nil
 }

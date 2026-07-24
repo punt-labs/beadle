@@ -73,6 +73,20 @@ func TestEnableFailedRegisterLeavesNoMarker(t *testing.T) {
 	assert.False(t, exists(t, markerPath(root)), "a failed enable leaves no marker")
 }
 
+func TestDisableClearsMarkerBeforePruneFailure(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(beadleDir(root), 0o750))
+	require.NoError(t, os.WriteFile(markerPath(root), nil, 0o644))
+	// Make CLAUDE.md a directory so Prune fails on read. disable clears the
+	// marker first, so even when the later prune errors the marker is already
+	// gone — never a marker left present while its import is not (§2.11).
+	require.NoError(t, os.Mkdir(hostPath(root), 0o755))
+
+	err := disableRepo(root, false)
+	require.Error(t, err)
+	assert.False(t, exists(t, markerPath(root)), "marker cleared before the failing prune")
+}
+
 func TestDisableLeavesDirectoryDormant(t *testing.T) {
 	root := t.TempDir()
 	existing := "# Team rules\n"
