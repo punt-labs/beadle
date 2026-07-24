@@ -23,6 +23,27 @@ func init() {
 		"Remove the whole .punt-labs/beadle/ directory, not just the enabled marker")
 }
 
+// progressf writes an enable/disable progress line to stderr unless --quiet is
+// set. It carries only progress, never errors: errors are returned to the
+// caller and surface regardless of --quiet.
+func progressf(format string, a ...any) {
+	if g.Quiet {
+		return
+	}
+	fmt.Fprintf(os.Stderr, format, a...)
+}
+
+// canonicalRoot resolves the repo root through EvalSymlinks so different
+// spellings of the same repo (a symlinked parent) key Lock A identically and
+// the guide, marker, and CLAUDE.md paths are all built from one canonical root.
+func canonicalRoot(root string) (string, error) {
+	canon, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("resolving repo root %q: %w", root, err)
+	}
+	return canon, nil
+}
+
 var enableCmd = &cobra.Command{
 	Use:   "enable",
 	Short: "Enable beadle guidance in this repo",
@@ -45,6 +66,10 @@ var enableCmd = &cobra.Command{
 // into the §2.11-incorrect "marker without import" state; the nested CLAUDE.md
 // lock inside Register is always acquired after this one, never the reverse.
 func enableRepo(root string) error {
+	root, err := canonicalRoot(root)
+	if err != nil {
+		return err
+	}
 	return claudemd.WithLock(root, func() error { return enableLocked(root) })
 }
 
@@ -62,7 +87,7 @@ func enableLocked(root string) error {
 	if err := os.WriteFile(guidePath, claudemd.Guide, 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", guidePath, err)
 	}
-	fmt.Fprintf(os.Stderr, "deposited %s\n", guidePath)
+	progressf("deposited %s\n", guidePath)
 
 	// Register the import BEFORE the marker. The marker is the enabled-iff-import
 	// signal (§2.7/§2.11), so it must be the last write: if Register fails, enable
@@ -74,9 +99,9 @@ func enableLocked(root string) error {
 		return fmt.Errorf("registering import in %s: %w", hostPath, err)
 	}
 	if wrote {
-		fmt.Fprintf(os.Stderr, "added %s to %s\n", importLine, hostPath)
+		progressf("added %s to %s\n", importLine, hostPath)
 	} else {
-		fmt.Fprintf(os.Stderr, "%s already imports beadle\n", hostPath)
+		progressf("%s already imports beadle\n", hostPath)
 	}
 
 	markerPath := filepath.Join(dir, "enabled")
@@ -84,7 +109,7 @@ func enableLocked(root string) error {
 		return fmt.Errorf("writing %s: %w", markerPath, err)
 	}
 
-	fmt.Fprintln(os.Stderr, "beadle enabled")
+	progressf("beadle enabled\n")
 	return nil
 }
 
@@ -116,6 +141,10 @@ var disableCmd = &cobra.Command{
 // It holds the same exclusive per-repo lock as enableRepo, so the two are
 // mutually exclusive and a concurrent pair reaches one consistent end state.
 func disableRepo(root string, purge bool) error {
+	root, err := canonicalRoot(root)
+	if err != nil {
+		return err
+	}
 	return claudemd.WithLock(root, func() error { return disableLocked(root, purge) })
 }
 
@@ -128,7 +157,7 @@ func disableLocked(root string, purge bool) error {
 		if err := os.RemoveAll(dir); err != nil {
 			return fmt.Errorf("purging %s: %w", dir, err)
 		}
-		fmt.Fprintf(os.Stderr, "purged %s\n", dir)
+		progressf("purged %s\n", dir)
 	} else {
 		markerPath := filepath.Join(dir, "enabled")
 		if err := os.Remove(markerPath); err != nil && !os.IsNotExist(err) {
@@ -136,29 +165,22 @@ func disableLocked(root string, purge bool) error {
 		}
 	}
 
+	// Prune the import and, if that empties the file, remove it — both under one
+	// hold of Lock B inside claudemd (round-9 TOCTOU fix). The old cmd-layer
+	// Lstat+Remove ran after the flock was released, so a concurrent registrar
+	// could refill the file before beadle deleted it; that gap is now closed.
 	hostPath := filepath.Join(root, "CLAUDE.md")
-	wrote, err := claudemd.Prune(hostPath, importLine)
+	pruned, removed, err := claudemd.PruneAndDiscardEmpty(hostPath, importLine)
 	if err != nil {
 		return fmt.Errorf("removing import from %s: %w", hostPath, err)
 	}
-	if wrote {
-		fmt.Fprintf(os.Stderr, "removed %s from %s\n", importLine, hostPath)
+	if pruned {
+		progressf("removed %s from %s\n", importLine, hostPath)
+	}
+	if removed {
+		progressf("removed empty %s\n", hostPath)
 	}
 
-	// When enable created CLAUDE.md from nothing, pruning the sole import line
-	// leaves a 0-byte file. Remove it, but only when this run actually removed
-	// an import line (wrote) — so a no-op disable never deletes a user's own
-	// empty CLAUDE.md — and only when the path is a regular file, so os.Lstat
-	// leaves a symlinked CLAUDE.md and its link intact.
-	if wrote {
-		if fi, err := os.Lstat(hostPath); err == nil && fi.Mode().IsRegular() && fi.Size() == 0 {
-			if err := os.Remove(hostPath); err != nil {
-				return fmt.Errorf("removing empty %s: %w", hostPath, err)
-			}
-			fmt.Fprintf(os.Stderr, "removed empty %s\n", hostPath)
-		}
-	}
-
-	fmt.Fprintln(os.Stderr, "beadle disabled")
+	progressf("beadle disabled\n")
 	return nil
 }

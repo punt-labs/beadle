@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,44 @@ func TestEnableFailedRegisterLeavesNoMarker(t *testing.T) {
 	err := enableRepo(root)
 	require.Error(t, err)
 	assert.False(t, exists(t, markerPath(root)), "a failed enable leaves no marker")
+}
+
+// captureStderr redirects os.Stderr for the duration of fn and returns what was
+// written. Tests in this package run sequentially, so the global swap is safe.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+	fn()
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+	return string(out)
+}
+
+func TestEnableDisableQuietSuppressesProgress(t *testing.T) {
+	defer func(prev bool) { g.Quiet = prev }(g.Quiet)
+
+	g.Quiet = false
+	loud := captureStderr(t, func() {
+		require.NoError(t, enableRepo(t.TempDir()))
+	})
+	assert.NotEmpty(t, loud, "default enable prints progress")
+
+	quietRoot := t.TempDir()
+	g.Quiet = true
+	quietEnable := captureStderr(t, func() {
+		require.NoError(t, enableRepo(quietRoot))
+	})
+	assert.Empty(t, quietEnable, "--quiet suppresses enable progress")
+
+	quietDisable := captureStderr(t, func() {
+		require.NoError(t, disableRepo(quietRoot, false))
+	})
+	assert.Empty(t, quietDisable, "--quiet suppresses disable progress")
 }
 
 func TestConcurrentEnableDisableReachConsistentState(t *testing.T) {
