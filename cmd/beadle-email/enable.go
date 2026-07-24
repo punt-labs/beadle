@@ -57,11 +57,10 @@ func enableRepo(root string) error {
 	}
 	fmt.Fprintf(os.Stderr, "deposited %s\n", guidePath)
 
-	markerPath := filepath.Join(dir, "enabled")
-	if err := os.WriteFile(markerPath, nil, 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", markerPath, err)
-	}
-
+	// Register the import BEFORE the marker. The marker is the enabled-iff-import
+	// signal (§2.7/§2.11), so it must be the last write: if Register fails, enable
+	// errors out with no marker, never leaving the repo looking enabled while the
+	// import never landed.
 	hostPath := filepath.Join(root, "CLAUDE.md")
 	wrote, err := claudemd.Register(hostPath, importLine)
 	if err != nil {
@@ -72,6 +71,12 @@ func enableRepo(root string) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "%s already imports beadle\n", hostPath)
 	}
+
+	markerPath := filepath.Join(dir, "enabled")
+	if err := os.WriteFile(markerPath, nil, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", markerPath, err)
+	}
+
 	fmt.Fprintln(os.Stderr, "beadle enabled")
 	return nil
 }

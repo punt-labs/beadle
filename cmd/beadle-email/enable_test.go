@@ -61,6 +61,18 @@ func TestEnableIdempotent(t *testing.T) {
 	assert.Equal(t, first, read(t, hostPath(root)), "no duplicate import line")
 }
 
+func TestEnableFailedRegisterLeavesNoMarker(t *testing.T) {
+	root := t.TempDir()
+	// Force Register to fail by making the host CLAUDE.md a directory, which
+	// cannot be read. The marker is the enabled-iff-import signal, so a failed
+	// import must leave no marker — the repo must never look enabled without it.
+	require.NoError(t, os.Mkdir(hostPath(root), 0o755))
+
+	err := enableRepo(root)
+	require.Error(t, err)
+	assert.False(t, exists(t, markerPath(root)), "a failed enable leaves no marker")
+}
+
 func TestDisableLeavesDirectoryDormant(t *testing.T) {
 	root := t.TempDir()
 	existing := "# Team rules\n"
