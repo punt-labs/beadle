@@ -115,7 +115,7 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 		fetchCount = 20
 		h.logger.Warn("capping message fetch", "newCount", newCount, "cap", fetchCount)
 	}
-	result, err := client.ListMessages("INBOX", fetchCount, true)
+	result, err := client.ListMessages("INBOX", fetchCount, true, "")
 	if err != nil {
 		h.logger.Error("list messages", "error", err)
 		return

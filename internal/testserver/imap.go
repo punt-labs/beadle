@@ -121,6 +121,12 @@ func (s *IMAPServer) AddMessageWithFlags(folder, from, subject, body string, fla
 // AddRawMessage seeds a message with raw RFC822 bytes.
 // Use this when you need custom headers (e.g., Proton trust headers).
 func (s *IMAPServer) AddRawMessage(folder string, raw []byte) uint32 {
+	return s.AddRawMessageWithFlags(folder, raw, nil)
+}
+
+// AddRawMessageWithFlags seeds a message with raw RFC822 bytes and flags.
+// Use it when a test needs both custom headers and a Seen/unread state.
+func (s *IMAPServer) AddRawMessageWithFlags(folder string, raw []byte, flags []imap.Flag) uint32 {
 	s.backend.mu.Lock()
 	defer s.backend.mu.Unlock()
 
@@ -133,12 +139,23 @@ func (s *IMAPServer) AddRawMessage(folder string, raw []byte) uint32 {
 	uid := mb.uidNext
 	mb.messages = append(mb.messages, &memMessage{
 		uid:   imap.UID(uid),
-		flags: []imap.Flag{},
+		flags: append([]imap.Flag(nil), flags...),
 		raw:   append([]byte(nil), raw...), // defensive copy
 		date:  time.Now(),
 	})
 	mb.uidNext++
 	return uid
+}
+
+// SetSearchError installs a predicate that fails a SEARCH when it returns a
+// non-nil error for the given criteria. Pass nil to clear. Use it to exercise
+// the client's SEARCH-error fallbacks; keying on the criteria lets a test fail
+// a scoped search (which carries an OR of repo arms) while letting a widened
+// retry succeed.
+func (s *IMAPServer) SetSearchError(fn func(*imap.SearchCriteria) error) {
+	s.backend.mu.Lock()
+	defer s.backend.mu.Unlock()
+	s.backend.searchErr = fn
 }
 
 func buildRFC822(from, subject, body string) []byte {
@@ -155,6 +172,7 @@ type memBackend struct {
 	user      string
 	pass      string
 	mailboxes map[string]*memMailbox
+	searchErr func(*imap.SearchCriteria) error
 }
 
 type memMailbox struct {
@@ -392,6 +410,12 @@ func (s *memSession) Search(kind imapserver.NumKind, criteria *imap.SearchCriter
 	s.backend.mu.Lock()
 	defer s.backend.mu.Unlock()
 
+	if s.backend.searchErr != nil {
+		if err := s.backend.searchErr(criteria); err != nil {
+			return nil, err
+		}
+	}
+
 	var uids []imap.UID
 	for _, msg := range s.selected.messages {
 		if matchesCriteria(msg, criteria) {
@@ -424,7 +448,42 @@ func matchesCriteria(msg *memMessage, criteria *imap.SearchCriteria) bool {
 			return false
 		}
 	}
+	// HEADER and SUBJECT both arrive as Header fields; IMAP matches a substring
+	// of the header value, case-insensitively.
+	for _, hf := range criteria.Header {
+		if !headerContains(msg.raw, hf.Key, hf.Value) {
+			return false
+		}
+	}
+	// OR pairs: each pair matches when either arm matches.
+	for i := range criteria.Or {
+		if !matchesCriteria(msg, &criteria.Or[i][0]) && !matchesCriteria(msg, &criteria.Or[i][1]) {
+			return false
+		}
+	}
 	return true
+}
+
+// headerContains reports whether raw carries a header named key
+// (case-insensitive) whose value contains value as a case-insensitive
+// substring. An empty value matches any present header.
+func headerContains(raw []byte, key, value string) bool {
+	block := string(raw)
+	if i := strings.Index(block, "\r\n\r\n"); i >= 0 {
+		block = block[:i]
+	}
+	key = strings.ToLower(key)
+	want := strings.ToLower(value)
+	for _, line := range strings.Split(block, "\r\n") {
+		k, v, ok := strings.Cut(line, ":")
+		if !ok || strings.ToLower(strings.TrimSpace(k)) != key {
+			continue
+		}
+		if strings.Contains(strings.ToLower(strings.TrimSpace(v)), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *memSession) Fetch(w *imapserver.FetchWriter, numSet imap.NumSet, options *imap.FetchOptions) error {

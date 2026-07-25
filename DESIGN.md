@@ -2433,6 +2433,25 @@ view rather than left inside the subject. Four ratified points:
 4. **The inbox auto-filters to the current repo**, with an explicit all-repos
    override. Solving the shared-mailbox pain is the whole point.
 
+**Read-side scoping (6i0.3 implementation, operator-ratified 2026-07-24).** The
+filter is one server-side IMAP `UID SEARCH` — `OR (HEADER X-Beadle-Repo <slug>)
+(SUBJECT "[<slug>]")`, composed with unread via a top-level `NOT SEEN` — so it
+matches across the whole mailbox, not a recency window (a client-side filter of
+the last-N would hide the repo's real mail). `list` / `list_messages` and the
+interactive `serve` poller's unread count scope to the current repo (slug via
+`ResolveRepoTag`); an unknown repo shows all, and a SEARCH error falls back to
+show-all with a warning — scoping never silently hides mail. Ratified
+refinements that amend the decision above: the `[owner/repo]` tag is **kept in
+the subject** and a dedicated repo *column* is **deferred** (a column blows the
+80-col budget without a FROM-trim rework) — the inbox is read by humans and
+agents, so the tag stays visible; filtering is **silent** (no indicator line);
+and `read_message` is **never** scoped (a held UID reads regardless of repo;
+per-sender permissions already gate content). The `beadle-daemon` mission poller
+is deliberately **all-repos**, not scoped: owner command mail is untagged and
+the daemon's authority is repo-agnostic (sender permission + transport trust),
+so it must see the entire mailbox — scoping it would silently drop owner
+commands.
+
 Outbound composition (all paths: plain, signed, encrypted) auto-adds the
 subject tag and the headers `X-Beadle-Repo: <owner/repo>` and
 `X-Beadle-Agent: <handle>`. The read side filters on `X-Beadle-Repo` first and

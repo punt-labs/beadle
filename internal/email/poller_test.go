@@ -21,6 +21,14 @@ func testPoller() *Poller {
 	return &Poller{logger: discardLogger()}
 }
 
+func TestNewPoller_NilRepoScopeIgnored(t *testing.T) {
+	// A nil resolver must not clobber the default, so poll() never calls a
+	// nil func.
+	p := NewPoller(nil, nil, discardLogger(), nil, WithRepoScope(nil))
+	require.NotNil(t, p.repoSlug)
+	assert.NotPanics(t, func() { _ = p.repoSlug() })
+}
+
 func TestPoller_SetInterval_Valid(t *testing.T) {
 	p := testPoller()
 	require.NoError(t, p.SetInterval("5m"))
