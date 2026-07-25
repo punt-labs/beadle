@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -106,6 +108,37 @@ func defaultContactsPath() string {
 	return filepath.Join(beadleDir, "contacts.json")
 }
 
+// printMessages renders a message listing for the CLI. With --json it writes
+// the message slice as before. Otherwise it prints the degraded notice, then
+// the status line and rows. The degraded notice prints even under --quiet:
+// the notice's stderr warn is suppressed then, and a fallback silently showing
+// unrelated recent mail is the one thing a quiet caller must still see.
+func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) {
+	if g.JSON {
+		data, _ := json.MarshalIndent(lr.Messages, "", "  ")
+		fmt.Fprintln(w, string(data))
+		return
+	}
+	if lr.Degraded {
+		reason := lr.DegradedReason
+		if reason == "" {
+			reason = "results degraded"
+		}
+		fmt.Fprintln(w, reason)
+	}
+	if g.Quiet {
+		return
+	}
+	fmt.Fprintln(w, lr.StatusLine())
+	for _, m := range lr.Messages {
+		unread := " "
+		if m.Unread {
+			unread = "*"
+		}
+		fmt.Fprintf(w, "%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date)
+	}
+}
+
 // splitAddresses splits a comma-separated address string.
 func splitAddresses(s string) []string {
 	if s == "" {
@@ -166,15 +199,7 @@ var listCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("list messages: %w", err)
 		}
-		g.printResult(lr.Messages, func() {
-			for _, m := range lr.Messages {
-				unread := " "
-				if m.Unread {
-					unread = "*"
-				}
-				fmt.Printf("%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date)
-			}
-		})
+		g.printMessages(os.Stdout, lr)
 		return nil
 	},
 }
@@ -253,15 +278,7 @@ var searchCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("search messages: %w", err)
 		}
-		g.printResult(lr.Messages, func() {
-			for _, m := range lr.Messages {
-				unread := " "
-				if m.Unread {
-					unread = "*"
-				}
-				fmt.Printf("%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date)
-			}
-		})
+		g.printMessages(os.Stdout, lr)
 		return nil
 	},
 }

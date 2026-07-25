@@ -141,6 +141,18 @@ type ListResult struct {
 	DegradedReason string
 }
 
+// StatusLine summarizes a listing page for display: the match count, or a
+// page-past-end hint when a non-empty result has no rows on this page (so a
+// page past the end never reads as an empty mailbox). It is shared by the CLI
+// and the MCP renderer so both surfaces read identically; the degraded notice
+// (DegradedReason) is rendered separately by each.
+func (lr *ListResult) StatusLine() string {
+	if len(lr.Messages) == 0 && lr.Total > 0 {
+		return fmt.Sprintf("showing 0 of %d messages (page past end — reduce offset)", lr.Total)
+	}
+	return fmt.Sprintf("showing %d of %d messages", len(lr.Messages), lr.Total)
+}
+
 // SearchQuery names the criteria for a mailbox search. A zero field is unset;
 // a zero SearchQuery selects the plain recency listing.
 type SearchQuery struct {

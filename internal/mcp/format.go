@@ -87,7 +87,7 @@ func formatMessagesResult(lr *email.ListResult) string {
 	var body string
 	switch {
 	case len(lr.Messages) == 0 && lr.Total > 0:
-		body = fmt.Sprintf("showing 0 of %d messages (page past end — reduce offset)", lr.Total)
+		body = lr.StatusLine()
 	case len(lr.Messages) == 0:
 		body = "No messages."
 	default:
