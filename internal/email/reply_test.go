@@ -2,11 +2,15 @@ package email
 
 import (
 	"bytes"
+	"net/mail"
+	"os/exec"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/punt-labs/beadle/internal/pgp"
 )
 
 func TestThreading_WriteHeaders(t *testing.T) {
@@ -177,4 +181,83 @@ func TestQuoteBody(t *testing.T) {
 		got := QuoteBody("hi", "", time.Time{}, "body")
 		assert.Contains(t, got, "Quoting the original message:\n")
 	})
+}
+
+// TestComposeSignedRaw_ThreadingVerifies is the reply signing invariant: the
+// In-Reply-To/References headers are top-level, outside the signed body, so a
+// signed reply still verifies. gpgHome/gpgGenKey are defined in send_test.go.
+func TestComposeSignedRaw_ThreadingVerifies(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+	home := gpgHome(t)
+	gpgGenKey(t, gpgBin, home, "Reply Test", "replytest@example.com")
+	t.Setenv("GNUPGHOME", home)
+
+	threading := Threading{InReplyTo: "<orig@host>", References: []string{"<root@host>", "<orig@host>"}}
+	raw, err := ComposeSignedRaw(
+		"replytest@example.com",
+		[]string{"recipient@example.com"},
+		nil,
+		"Re: [punt-labs/beadle] Question",
+		"Status is green.\n\nAlice wrote:\n> the original",
+		nil,
+		gpgBin, "replytest@example.com", "",
+		RepoTag{Slug: "punt-labs/beadle", Agent: "claude"},
+		threading,
+	)
+	require.NoError(t, err)
+
+	// Threading (and repo-tag) headers are top-level, outside the signed body.
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+	assert.Equal(t, "<orig@host>", msg.Header.Get("In-Reply-To"))
+	assert.Equal(t, "<root@host> <orig@host>", msg.Header.Get("References"))
+	assert.Equal(t, "Re: [punt-labs/beadle] Question", msg.Header.Get("Subject"))
+	assert.Equal(t, "punt-labs/beadle", msg.Header.Get("X-Beadle-Repo"))
+
+	// The detached signature covers only the body part; top-level headers do
+	// not disturb it, so the message still verifies.
+	result, verifyErr := pgp.Verify(gpgBin, raw)
+	require.NoError(t, verifyErr)
+	assert.True(t, result.Valid, "signed reply must verify with threading headers present")
+}
+
+// TestComposeEncryptedSignedRaw_ThreadingTopLevel proves the encrypted reply
+// path also exposes the threading headers on the outer envelope and still
+// decrypts.
+func TestComposeEncryptedSignedRaw_ThreadingTopLevel(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+	home := gpgHome(t)
+	gpgGenKey(t, gpgBin, home, "Sender", "sender@example.com")
+	gpgGenKey(t, gpgBin, home, "Recipient", "recipient@example.com")
+	t.Setenv("GNUPGHOME", home)
+
+	threading := Threading{InReplyTo: "<orig@host>", References: []string{"<orig@host>"}}
+	raw, err := ComposeEncryptedSignedRaw(
+		"sender@example.com",
+		[]string{"recipient@example.com"},
+		nil,
+		"Re: secret thread",
+		"encrypted reply body",
+		nil,
+		gpgBin, "sender@example.com", "",
+		[]string{"recipient@example.com"},
+		RepoTag{},
+		threading,
+	)
+	require.NoError(t, err)
+
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	require.NoError(t, err)
+	assert.Equal(t, "<orig@host>", msg.Header.Get("In-Reply-To"))
+	assert.Equal(t, "<orig@host>", msg.Header.Get("References"))
+
+	result, err := pgp.Decrypt(gpgBin, "", raw)
+	require.NoError(t, err)
+	assert.Contains(t, string(result.Plaintext), "encrypted reply body")
 }
