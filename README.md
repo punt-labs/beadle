@@ -265,7 +265,7 @@ All permissions are stored explicitly. There are no implicit overrides. Contacts
 ## CLI
 
 ```bash
-beadle-email list [--folder F] [--count N] [--unread]   # List messages
+beadle-email list [--folder F] [--count N] [--unread] [--all-repos]  # List (current repo by default)
 beadle-email read <uid> [--folder F]                    # Read a message
 beadle-email send --to ADDR --subject S --body B        # Send an email
 beadle-email move <uid> [--folder F] [--to DEST]        # Move a message
@@ -297,6 +297,14 @@ working there learns how to drive beadle. `disable` removes that line and the
 marker, leaving the guide dormant; `disable --purge` deletes the
 `.punt-labs/beadle/` directory outright. This follows the org
 [Tool Enable/Disable standard](https://github.com/punt-labs/punt-kit/blob/main/standards/tool-enable-disable.md).
+
+When a single mailbox is shared by an agent across repos, `list` shows only the
+current repo's mail by default (matched by the `X-Beadle-Repo` header or the
+`[owner/repo]` subject tag, with the repo taken from the git `origin` remote).
+Pass `--all-repos` to see the whole mailbox. If the current directory has no
+repo, `list` shows everything. The background new-mail poller's count is scoped
+the same way; the `beadle-daemon` mission runner is not (it processes owner
+commands from every repo).
 
 ## Documentation
 

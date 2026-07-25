@@ -16,6 +16,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   repo context is available the message sends untagged. Tagging is idempotent
   (replies are not double-tagged) and does not affect PGP signature
   verification.
+- Per-repo inbox scoping (DES-033). `beadle-email list` and the `list_messages`
+  MCP tool now show only the current repo's mail by default — the read-side
+  payoff of the tagging above — via one server-side IMAP `SEARCH` matching the
+  `X-Beadle-Repo` header or the `[owner/repo]` subject tag. `--all-repos`
+  (CLI) / `all_repos` (MCP) widens to the whole mailbox; an unknown repo shows
+  all (never hides mail); on a search error the list falls back to show-all with
+  a warning. The background new-mail poller's unread count is likewise scoped to
+  the current repo, so the "you have mail" signal means *your* repo. The
+  `beadle-daemon` mission poller stays all-repos: owner commands are untagged and
+  repo-agnostic, so the daemon must see the entire mailbox.
 - `beadle-email enable` / `disable` — repo-scoped agent guidance per the org
   Tool Enable/Disable standard. `enable`, run in a repo, deposits beadle's
   agent user-guide at `.punt-labs/beadle/CLAUDE.md`, writes an `enabled`
