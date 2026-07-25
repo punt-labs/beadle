@@ -100,7 +100,7 @@ func TestMCPSmoke_ToolRegistration(t *testing.T) {
 
 	expectedTools := []string{
 		"list_messages", "search_messages", "read_message", "list_folders", "send_email",
-		"verify_signature", "show_mime", "check_trust", "move_message",
+		"reply_message", "verify_signature", "show_mime", "check_trust", "move_message",
 		"batch_move_messages", "mark_message", "batch_mark_messages",
 		"download_attachment", "list_contacts",
 		"find_contact", "add_contact", "remove_contact", "whoami",

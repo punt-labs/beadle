@@ -303,6 +303,92 @@ func TestHandler_SendEmail_Denied(t *testing.T) {
 	assert.Contains(t, r.text(), "permission")
 }
 
+// replyOriginal seeds an original message with known threading headers and
+// returns its UID. The Message-ID and References let a reply's threading be
+// asserted exactly.
+func replyOriginal(t *testing.T, fix *testserver.Fixture) uint32 {
+	t.Helper()
+	raw := "From: Alice <alice@test.com>\r\n" +
+		"To: me@test.com\r\n" +
+		"Subject: [punt-labs/beadle] Question\r\n" +
+		"Message-ID: <orig@test>\r\n" +
+		"References: <root@test>\r\n" +
+		"Date: Sat, 25 Jul 2026 09:30:00 +0000\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"What is the status?"
+	return fix.AddRawMessage("INBOX", []byte(raw))
+}
+
+func TestHandler_ReplyMessage_ThreadsAndQuotes(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "-w-")
+	uid := replyOriginal(t, fix)
+
+	r := callTool(t, s, "reply_message", map[string]any{
+		"message_id": fmt.Sprintf("%d", uid),
+		"body":       "Status is green.",
+	})
+	require.False(t, r.IsError, "reply failed: %s", r.text())
+
+	sent := fix.SentMessages()
+	require.Len(t, sent, 1)
+	assert.Contains(t, sent[0].To, "alice@test.com")
+
+	raw := string(sent[0].Raw)
+	// Threading headers are present and correct (References = original chain +
+	// original Message-ID).
+	assert.Contains(t, raw, "In-Reply-To: <orig@test>")
+	assert.Contains(t, raw, "References: <root@test> <orig@test>")
+	// Re: prepended, [owner/repo] tag preserved, not doubled.
+	assert.Contains(t, raw, "Subject: Re: [punt-labs/beadle] Question")
+	assert.NotContains(t, raw, "Re: Re:")
+	// The new text and the quoted original both appear.
+	assert.Contains(t, raw, "Status is green.")
+	assert.Contains(t, raw, "> What is the status?")
+}
+
+func TestHandler_ReplyMessage_DeniedReadOnly(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	// Read-only sender: readable, but not writable — reply must be refused.
+	env.AddContact("Alice", "alice@test.com", "r--")
+	uid := replyOriginal(t, fix)
+
+	r := callTool(t, s, "reply_message", map[string]any{
+		"message_id": fmt.Sprintf("%d", uid),
+		"body":       "trying to reply",
+	})
+	assert.True(t, r.IsError)
+	assert.Contains(t, r.text(), "permission")
+	assert.Empty(t, fix.SentMessages(), "no reply may be sent to an r-- contact")
+}
+
+func TestHandler_ReplyMessage_DeniedUnknown(t *testing.T) {
+	s, _, fix := setupHandler(t)
+	// No contact for the sender at all.
+	uid := replyOriginal(t, fix)
+
+	r := callTool(t, s, "reply_message", map[string]any{
+		"message_id": fmt.Sprintf("%d", uid),
+		"body":       "trying to reply",
+	})
+	assert.True(t, r.IsError)
+	assert.Contains(t, r.text(), "permission")
+	assert.Empty(t, fix.SentMessages())
+}
+
+func TestHandler_ReplyMessage_MissingBody(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "-w-")
+	uid := replyOriginal(t, fix)
+
+	r := callTool(t, s, "reply_message", map[string]any{
+		"message_id": fmt.Sprintf("%d", uid),
+	})
+	assert.True(t, r.IsError)
+	assert.Contains(t, r.text(), "body is required")
+}
+
 func TestHandler_MoveMessage(t *testing.T) {
 	s, env, fix := setupHandler(t)
 	env.AddContact("Alice", "alice@test.com", "r--")
