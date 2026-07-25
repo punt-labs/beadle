@@ -56,7 +56,7 @@ func TestListMessages_Basic(t *testing.T) {
 	f.AddMessage("INBOX", "carol@test.com", "Test", "body 3")
 
 	client := dialFixture(t, f)
-	lr, err := client.ListMessages("INBOX", 10, false)
+	lr, err := client.ListMessages("INBOX", 10, false, "")
 	require.NoError(t, err)
 
 	assert.Equal(t, 3, lr.Total)
@@ -72,7 +72,7 @@ func TestListMessages_UnreadOnly(t *testing.T) {
 	f.AddMessage("INBOX", "carol@test.com", "Unread", "body")
 
 	client := dialFixture(t, f)
-	lr, err := client.ListMessages("INBOX", 10, true)
+	lr, err := client.ListMessages("INBOX", 10, true, "")
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, lr.Total)
@@ -109,7 +109,7 @@ func TestMoveMessage(t *testing.T) {
 	require.NoError(t, err)
 	defer client2.Close()
 
-	lr, err := client2.ListMessages("INBOX", 10, false)
+	lr, err := client2.ListMessages("INBOX", 10, false, "")
 	require.NoError(t, err)
 	assert.Equal(t, 0, lr.Total)
 }

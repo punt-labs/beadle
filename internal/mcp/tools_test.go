@@ -97,6 +97,25 @@ func TestIntParam(t *testing.T) {
 	}
 }
 
+func TestBoolParam(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]any
+		key  string
+		want bool
+	}{
+		{"missing key is false", map[string]any{}, "all_repos", false},
+		{"true", map[string]any{"all_repos": true}, "all_repos", true},
+		{"false", map[string]any{"all_repos": false}, "all_repos", false},
+		{"wrong type is false", map[string]any{"all_repos": "yes"}, "all_repos", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, boolParam(makeRequest(t, tc.args), tc.key))
+		})
+	}
+}
+
 func TestSenderPermission(t *testing.T) {
 	// Create an empty store (nonexistent file, no contacts) to test unknown-sender defaults
 	store := contacts.NewStore("/nonexistent/contacts.json")

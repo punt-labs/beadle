@@ -145,7 +145,12 @@ var runCmd = &cobra.Command{
 		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0, planner, commands)
 		defer handler.Stop()
 
-		poller := email.NewPoller(handler.OnNewMail, resolver, logger, email.DefaultDialer{})
+		// The daemon acts on owner commands — untagged and repo-agnostic,
+		// gated by sender-permission and transport-trust — so its poller must
+		// count the whole mailbox, matching handler.go's unscoped fetch. Repo
+		// scoping applies only to the interactive serve/MCP poller (DES-033).
+		poller := email.NewPoller(handler.OnNewMail, resolver, logger, email.DefaultDialer{},
+			email.WithRepoScope(func() string { return "" }))
 		if err := poller.Start(); err != nil {
 			return fmt.Errorf("start poller: %w", err)
 		}
