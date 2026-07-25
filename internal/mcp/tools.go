@@ -176,6 +176,10 @@ func listMessagesTool() mcplib.Tool {
 			mcplib.Description("Maximum number of messages to return"),
 			mcplib.DefaultNumber(10),
 		),
+		mcplib.WithNumber("offset",
+			mcplib.Description("Skip this many of the most recent messages (paging). 0 is the newest page."),
+			mcplib.DefaultNumber(0),
+		),
 		mcplib.WithBoolean("unread_only",
 			mcplib.Description("Only return unread messages"),
 		),
@@ -495,6 +499,13 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
+	offset, err := intParam(req, "offset", 0)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	if offset < 0 {
+		return mcplib.NewToolResultError("offset must be non-negative"), nil
+	}
 	unreadOnly := boolParam(req, "unread_only")
 
 	// Scope to the current repo unless the caller widens to all repos. An empty
@@ -505,7 +516,7 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		lr, err := c.SearchMessages(folder, email.SearchQuery{RepoSlug: repoSlug, UnreadOnly: unreadOnly}, count, 0)
+		lr, err := c.SearchMessages(folder, email.SearchQuery{RepoSlug: repoSlug, UnreadOnly: unreadOnly}, count, offset)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("list messages: %v", err)), nil
 		}

@@ -548,6 +548,37 @@ func TestHandler_AddContact_PatternAcceptsReadOnly(t *testing.T) {
 	assert.Contains(t, r.text(), "Anthropic Mail")
 }
 
+func TestHandler_ListMessages_OffsetPaging(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	for i := range 25 {
+		fix.AddMessage("INBOX", "alice@test.com", fmt.Sprintf("msg-%02d", i), "body")
+	}
+
+	// Page 0: newest 10 (msg-15..msg-24).
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10, "offset": float64(0), "all_repos": true})
+	assert.False(t, r.IsError, "list failed: %s", r.text())
+	assert.Contains(t, r.text(), "msg-24")
+	assert.Contains(t, r.text(), "msg-15")
+	assert.NotContains(t, r.text(), "msg-14")
+
+	// Page 1: next 10 (msg-05..msg-14).
+	r = callTool(t, s, "list_messages", map[string]any{"count": 10, "offset": float64(10), "all_repos": true})
+	assert.False(t, r.IsError, "list failed: %s", r.text())
+	assert.Contains(t, r.text(), "msg-14")
+	assert.Contains(t, r.text(), "msg-05")
+	assert.NotContains(t, r.text(), "msg-15")
+}
+
+func TestHandler_ListMessages_NegativeOffset(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "list_messages", map[string]any{"offset": float64(-1), "all_repos": true})
+	assert.True(t, r.IsError, "negative offset should error")
+	assert.Contains(t, r.text(), "offset must be non-negative")
+}
+
 func TestHandler_SearchMessages_ByFromAndSubject(t *testing.T) {
 	s, env, fix := setupHandler(t)
 	env.AddContact("Alice", "alice@test.com", "r--")

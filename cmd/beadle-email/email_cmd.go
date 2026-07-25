@@ -126,6 +126,7 @@ func splitAddresses(s string) []string {
 var (
 	listFolder   string
 	listCount    int
+	listOffset   int
 	listUnread   bool
 	listAllRepos bool
 	listConfig   string
@@ -158,7 +159,10 @@ var listCmd = &cobra.Command{
 			repoSlug = email.ResolveRepoTag(cmd.Context(), logger, agent).Slug
 		}
 
-		lr, err := client.ListMessages(listFolder, listCount, listUnread, repoSlug)
+		if listOffset < 0 {
+			return fmt.Errorf("--offset must be non-negative")
+		}
+		lr, err := client.SearchMessages(listFolder, email.SearchQuery{RepoSlug: repoSlug, UnreadOnly: listUnread}, listCount, listOffset)
 		if err != nil {
 			return fmt.Errorf("list messages: %w", err)
 		}
@@ -178,6 +182,7 @@ var listCmd = &cobra.Command{
 func init() {
 	listCmd.Flags().StringVar(&listFolder, "folder", "INBOX", "IMAP folder")
 	listCmd.Flags().IntVar(&listCount, "count", 10, "Maximum messages to return")
+	listCmd.Flags().IntVar(&listOffset, "offset", 0, "Skip this many of the most recent messages")
 	listCmd.Flags().BoolVar(&listUnread, "unread", false, "Show only unread messages")
 	listCmd.Flags().BoolVar(&listAllRepos, "all-repos", false, "Always list mail from every repo (default: current repo when one resolves, otherwise all)")
 	listCmd.Flags().StringVarP(&listConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
