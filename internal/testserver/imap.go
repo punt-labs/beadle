@@ -464,9 +464,9 @@ func matchesCriteria(msg *memMessage, criteria *imap.SearchCriteria) bool {
 	return true
 }
 
-// headerContains reports whether raw carries a header named key (case
-// -insensitive) whose value contains value as a case-insensitive substring. An
-// empty value matches any present header.
+// headerContains reports whether raw carries a header named key
+// (case-insensitive) whose value contains value as a case-insensitive
+// substring. An empty value matches any present header.
 func headerContains(raw []byte, key, value string) bool {
 	block := string(raw)
 	if i := strings.Index(block, "\r\n\r\n"); i >= 0 {

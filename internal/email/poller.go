@@ -53,9 +53,14 @@ type PollerOption func(*Poller)
 
 // WithRepoScope sets how the poller resolves the repo slug it scopes the unread
 // count to. The default resolves the current git remote; a headless deployment
-// or a test can supply a fixed slug, where "" counts every repo.
+// or a test can supply a fixed slug, where "" counts every repo. A nil resolver
+// is ignored, leaving the default in place, so poll() never calls a nil func.
 func WithRepoScope(resolve func() string) PollerOption {
-	return func(p *Poller) { p.repoSlug = resolve }
+	return func(p *Poller) {
+		if resolve != nil {
+			p.repoSlug = resolve
+		}
+	}
 }
 
 // NewPoller creates a poller that is initially stopped.

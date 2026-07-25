@@ -164,7 +164,7 @@ type verifyResult struct {
 
 func listMessagesTool() mcplib.Tool {
 	return mcplib.NewTool("list_messages",
-		mcplib.WithDescription("List messages from a mailbox folder. Returns id, from, date, subject, trust level for each message. By default lists only the current repo's mail (from the git remote); set all_repos to list every repo."),
+		mcplib.WithDescription("List messages from a mailbox folder. Returns id, from, date, subject, trust level for each message. By default lists only the current repo's mail (from the git remote); when there is no repo context, lists all; set all_repos to always list every repo."),
 		mcplib.WithString("folder",
 			mcplib.Description("IMAP folder name (e.g., INBOX, Sent, All Mail)"),
 			mcplib.DefaultString("INBOX"),
@@ -177,7 +177,7 @@ func listMessagesTool() mcplib.Tool {
 			mcplib.Description("Only return unread messages"),
 		),
 		mcplib.WithBoolean("all_repos",
-			mcplib.Description("List mail from every repo. By default only the current repo's mail is shown."),
+			mcplib.Description("Always list mail from every repo. By default only the current repo's mail is shown, or all mail when there is no repo context."),
 		),
 	)
 }

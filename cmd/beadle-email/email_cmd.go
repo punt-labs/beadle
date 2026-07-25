@@ -179,7 +179,7 @@ func init() {
 	listCmd.Flags().StringVar(&listFolder, "folder", "INBOX", "IMAP folder")
 	listCmd.Flags().IntVar(&listCount, "count", 10, "Maximum messages to return")
 	listCmd.Flags().BoolVar(&listUnread, "unread", false, "Show only unread messages")
-	listCmd.Flags().BoolVar(&listAllRepos, "all-repos", false, "List mail from every repo (default: current repo only)")
+	listCmd.Flags().BoolVar(&listAllRepos, "all-repos", false, "Always list mail from every repo (default: current repo when one resolves, otherwise all)")
 	listCmd.Flags().StringVarP(&listConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
 }
 
