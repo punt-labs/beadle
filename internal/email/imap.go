@@ -135,33 +135,61 @@ type ListResult struct {
 	Total    int // total matching messages (before count limit)
 }
 
+// SearchQuery names the criteria for a mailbox search. A zero field is unset;
+// a zero SearchQuery selects the plain recency listing.
+type SearchQuery struct {
+	From       string    // From header substring
+	Subject    string    // Subject header substring
+	Since      time.Time // messages on/after this date (Date header, SENTSINCE)
+	Text       string    // free text over the whole message (IMAP TEXT)
+	RepoSlug   string    // "" = all repos
+	UnreadOnly bool
+}
+
 func (c *Client) ListMessages(folder string, count int, unreadOnly bool, repoSlug string) (*ListResult, error) {
+	return c.SearchMessages(folder, SearchQuery{RepoSlug: repoSlug, UnreadOnly: unreadOnly}, count, 0)
+}
+
+// SearchMessages returns the messages in folder matching q, windowed to count
+// messages ending offset positions back from the most recent match. It is the
+// engine behind ListMessages: an empty query with offset 0 takes the recency
+// fast path; any criterion or a non-zero offset runs one UID SEARCH. Total in
+// the result counts every match, so a caller can page. On a SEARCH error it
+// falls back like the listing does — widen a repo scope, else floor to recency
+// — so a transient failure never returns a misleading empty result.
+func (c *Client) SearchMessages(folder string, q SearchQuery, count, offset int) (*ListResult, error) {
+	if offset < 0 {
+		return nil, fmt.Errorf("offset must be non-negative")
+	}
+
 	mbox, err := c.imap.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {
 		return nil, fmt.Errorf("select %q: %w", folder, err)
 	}
-
-	if mbox.NumMessages == 0 {
+	if mbox.NumMessages == 0 || count <= 0 {
 		return &ListResult{}, nil
 	}
 
-	// Clamp count to a safe range for uint32 conversion.
-	if count <= 0 {
-		return &ListResult{}, nil
-	}
-	if count > int(mbox.NumMessages) {
-		count = int(mbox.NumMessages)
-	}
-
-	numSet, total, err := c.listSet(mbox.NumMessages, count, unreadOnly, repoSlug)
+	numSet, total, err := c.listSet(mbox.NumMessages, q, count, offset)
 	if err != nil {
 		return nil, err
 	}
 	if numSet == nil {
-		// No message matched the filter.
+		// No message matched the query, or the page is past the end.
 		return &ListResult{Total: total}, nil
 	}
 
+	summaries, err := c.fetchSummaries(numSet)
+	if err != nil {
+		return nil, err
+	}
+	return &ListResult{Messages: summaries, Total: total}, nil
+}
+
+// fetchSummaries fetches envelope, flags, and Proton trust headers for numSet
+// and renders them into message summaries. Messages without an envelope are
+// skipped.
+func (c *Client) fetchSummaries(numSet imap.NumSet) ([]channel.MessageSummary, error) {
 	fetchOpts := &imap.FetchOptions{
 		Envelope: true,
 		Flags:    true,
@@ -173,8 +201,7 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool, repoSlu
 		},
 	}
 
-	fetchCmd := c.imap.Fetch(numSet, fetchOpts)
-	msgs, err := fetchCmd.Collect()
+	msgs, err := c.imap.Fetch(numSet, fetchOpts).Collect()
 	if err != nil {
 		return nil, fmt.Errorf("fetch list: %w", err)
 	}
@@ -190,7 +217,6 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool, repoSlu
 			from = formatAddress(msg.Envelope.From[0])
 		}
 
-		// Parse Proton headers for quick trust classification
 		headerBytes := msg.FindBodySection(&imap.FetchItemBodySection{
 			Specifier:    imap.PartSpecifierHeader,
 			HeaderFields: []string{"X-Pm-Content-Encryption", "X-Pm-Origin", "Content-Type"},
@@ -216,56 +242,73 @@ func (c *Client) ListMessages(folder string, count int, unreadOnly bool, repoSlu
 			Unread:     unread,
 		})
 	}
-
-	return &ListResult{Messages: summaries, Total: total}, nil
+	return summaries, nil
 }
 
-// listSet decides which messages ListMessages fetches and reports how many
-// match. With no repo filter and no unread filter it takes the last count by
-// recency. Otherwise it runs one UID SEARCH (repo OR unread, composed) and
-// keeps the last count matching UIDs. On a repo SEARCH error it never hides
-// mail: it warns and falls back to the recency window. A nil NumSet means no
-// message matched.
-func (c *Client) listSet(numMessages uint32, count int, unreadOnly bool, repoSlug string) (imap.NumSet, int, error) {
-	crit := repoSearchCriteria(repoSlug, unreadOnly)
+// listSet decides which messages SearchMessages fetches and reports how many
+// match. With no criteria and offset 0 it takes the last count by recency — the
+// fast path that issues no SEARCH. Any criterion, or a non-zero offset, runs one
+// UID SEARCH and windows the result. On a SEARCH error it delegates to
+// searchFallback. A nil NumSet means nothing matched or the page is past the
+// end.
+func (c *Client) listSet(numMessages uint32, q SearchQuery, count, offset int) (imap.NumSet, int, error) {
+	crit := searchCriteria(q)
+	if crit == nil && offset == 0 {
+		return recencySet(numMessages, clampCount(count, numMessages)), int(numMessages), nil
+	}
 	if crit == nil {
-		return recencySet(numMessages, count), int(numMessages), nil
+		// offset > 0 with no filter: search all messages for exact windowing,
+		// since the sequence-number recency set has no clean offset.
+		crit = &imap.SearchCriteria{}
 	}
 
 	searchData, err := c.imap.UIDSearch(crit, nil).Wait()
 	if err != nil {
-		if repoSlug == "" {
-			return nil, 0, fmt.Errorf("search unseen: %w", err)
-		}
-		// A scoped search failed. Widen the repo scope, but keep the unread
-		// filter: an unread listing must never surface read mail because of a
-		// transient error, matching UnreadCount's fallback.
-		if unreadOnly {
-			c.logger.Warn("repo unread list search failed; listing unread in all repos", "err", err)
-			if retry, err := c.imap.UIDSearch(repoSearchCriteria("", true), nil).Wait(); err == nil {
-				numSet, total := selectUIDs(retry, count)
-				return numSet, total, nil
-			}
-		}
-		// No unread filter, or the unread retry also failed: fall back to the
-		// recency window — the never-empty floor.
-		c.logger.Warn("list search failed; listing all recent mail", "err", err)
-		return recencySet(numMessages, count), int(numMessages), nil
+		return c.searchFallback(numMessages, q, count, offset, err)
 	}
-
-	numSet, total := selectUIDs(searchData, count)
+	numSet, total := selectUIDs(searchData, count, offset)
 	return numSet, total, nil
 }
 
-// selectUIDs turns a SEARCH result into a fetch set: the last count matching
-// UIDs, or a nil set with zero total when nothing matched.
-func selectUIDs(searchData *imap.SearchData, count int) (imap.NumSet, int) {
+// searchFallback recovers from a SEARCH error without hiding mail. A repo-scoped
+// query widens to all repos (keeping unread and content criteria), matching
+// UnreadCount's never-empty policy. If that retry also fails, or the query was
+// never repo-scoped, it floors to the recency window — the never-empty floor.
+// The floor returns the most-recent count and does not honor offset, because a
+// recency window cannot be paged exactly once SEARCH is unavailable.
+func (c *Client) searchFallback(numMessages uint32, q SearchQuery, count, offset int, cause error) (imap.NumSet, int, error) {
+	if q.RepoSlug != "" {
+		wq := q
+		wq.RepoSlug = ""
+		c.logger.Warn("repo search failed; widening to all repos", "err", cause)
+		if retry, err := c.imap.UIDSearch(searchCriteria(wq), nil).Wait(); err == nil {
+			numSet, total := selectUIDs(retry, count, offset)
+			return numSet, total, nil
+		}
+	}
+	c.logger.Warn("search failed; listing all recent mail", "err", cause)
+	return recencySet(numMessages, clampCount(count, numMessages)), int(numMessages), nil
+}
+
+// clampCount bounds count to [0, numMessages] so it is a safe recencySet span.
+func clampCount(count int, numMessages uint32) int {
+	if count > int(numMessages) {
+		return int(numMessages)
+	}
+	return count
+}
+
+// selectUIDs turns a SEARCH result into a fetch set: the page of count matching
+// UIDs ending offset back from the most recent. Total counts every match, even
+// when the requested page is empty (offset past the end), so callers can page.
+func selectUIDs(searchData *imap.SearchData, count, offset int) (imap.NumSet, int) {
 	uids := searchData.AllUIDs()
 	total := len(uids)
-	if total == 0 {
-		return nil, 0
+	page := window(uids, count, offset)
+	if len(page) == 0 {
+		return nil, total
 	}
-	return imap.UIDSetNum(lastN(uids, count)...), total
+	return imap.UIDSetNum(page...), total
 }
 
 // recencySet selects the last count messages by sequence number.
@@ -278,43 +321,83 @@ func recencySet(numMessages uint32, count int) imap.SeqSet {
 	return imap.SeqSet{{Start: start, Stop: numMessages}}
 }
 
-// lastN returns the last count elements of uids, or all of them when count is
-// at least len(uids). count is assumed positive.
-func lastN(uids []imap.UID, count int) []imap.UID {
-	if len(uids) > count {
-		return uids[len(uids)-count:]
+// window returns the page of uids of length count that ends offset positions
+// back from the most recent (last) element. offset 0 is the newest page — the
+// last count elements — so window(uids, count, 0) equals the old lastN. A count
+// or window that runs off the front is clamped; an offset at or past the end
+// yields an empty slice. count and offset are assumed non-negative.
+func window(uids []imap.UID, count, offset int) []imap.UID {
+	end := len(uids) - offset
+	if end <= 0 || count <= 0 {
+		return nil
 	}
-	return uids
+	start := end - count
+	if start < 0 {
+		start = 0
+	}
+	return uids[start:end]
 }
 
-// repoSearchCriteria builds the IMAP SEARCH criteria that scopes a listing to a
-// repo, optionally intersected with "unread". It returns nil when neither
-// filter applies (slug empty and unreadOnly false), signalling the plain
-// recency path. A non-empty slug adds one OR of two arms — the X-Beadle-Repo
-// header and the "[slug]" subject tag — so agent- and GitHub-tagged mail
-// matches via the header while a human reply that kept "Re: [slug] ..." matches
-// via the subject. unreadOnly adds a top-level NotFlag:[FlagSeen]; IMAP ANDs
-// top-level keys, so the two compose in one command.
+// searchCriteria builds the IMAP SEARCH criteria for q. It returns nil when q is
+// entirely empty, signalling the plain recency path. A non-empty RepoSlug adds
+// one OR of two arms — the X-Beadle-Repo header and the "[slug]" subject tag —
+// so agent- and GitHub-tagged mail matches via the header while a human reply
+// that kept "Re: [slug] ..." matches via the subject. UnreadOnly adds a
+// top-level NotFlag:[FlagSeen]; From/Subject add Header substrings; Since adds
+// SENTSINCE; Text adds a whole-message TEXT search. IMAP ANDs top-level keys, so
+// these compose in one command.
 //
-// The header arm is a substring match — IMAP offers no exact-header search — so
-// a slug that is a prefix of another repo's slug would also match that repo's
-// mail. No such colliding repo exists, and the subject arm is bracket-anchored,
-// so this is accepted rather than post-filtered client-side.
-func repoSearchCriteria(slug string, unreadOnly bool) *imap.SearchCriteria {
-	if slug == "" && !unreadOnly {
+// The repo header arm is a substring match — IMAP offers no exact-header search
+// — so a slug that is a prefix of another repo's slug would also match that
+// repo's mail. No such colliding repo exists, and the subject arm is
+// bracket-anchored, so this is accepted rather than post-filtered client-side.
+func searchCriteria(q SearchQuery) *imap.SearchCriteria {
+	if q.RepoSlug == "" && !q.UnreadOnly && q.From == "" && q.Subject == "" &&
+		q.Since.IsZero() && q.Text == "" {
 		return nil
 	}
 	crit := &imap.SearchCriteria{}
-	if unreadOnly {
+	if q.UnreadOnly {
 		crit.NotFlag = []imap.Flag{imap.FlagSeen}
 	}
-	if slug != "" {
+	if q.RepoSlug != "" {
 		crit.Or = [][2]imap.SearchCriteria{{
-			{Header: []imap.SearchCriteriaHeaderField{{Key: HeaderRepo, Value: slug}}},
-			{Header: []imap.SearchCriteriaHeaderField{{Key: "Subject", Value: "[" + slug + "]"}}},
+			{Header: []imap.SearchCriteriaHeaderField{{Key: HeaderRepo, Value: q.RepoSlug}}},
+			{Header: []imap.SearchCriteriaHeaderField{{Key: "Subject", Value: "[" + q.RepoSlug + "]"}}},
 		}}
 	}
+	if q.From != "" {
+		crit.Header = append(crit.Header, imap.SearchCriteriaHeaderField{Key: "From", Value: q.From})
+	}
+	if q.Subject != "" {
+		crit.Header = append(crit.Header, imap.SearchCriteriaHeaderField{Key: "Subject", Value: q.Subject})
+	}
+	if !q.Since.IsZero() {
+		crit.SentSince = q.Since
+	}
+	if q.Text != "" {
+		crit.Text = []string{q.Text}
+	}
 	return crit
+}
+
+// repoSearchCriteria builds the scope-only criteria the poller and listing use:
+// a repo slug, optionally intersected with "unread". It is the two-field caller
+// of searchCriteria, so the recency-path and scope behavior are unchanged.
+func repoSearchCriteria(slug string, unreadOnly bool) *imap.SearchCriteria {
+	return searchCriteria(SearchQuery{RepoSlug: slug, UnreadOnly: unreadOnly})
+}
+
+// ParseSearchSince parses a search "since" date. It accepts a full RFC3339
+// timestamp or a bare YYYY-MM-DD date; the latter is midnight UTC on that day.
+func ParseSearchSince(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("invalid date %q: want RFC3339 or YYYY-MM-DD", s)
 }
 
 // FetchMessage retrieves a full message by UID from the given folder.

@@ -455,6 +455,24 @@ func matchesCriteria(msg *memMessage, criteria *imap.SearchCriteria) bool {
 			return false
 		}
 	}
+	// SENTSINCE compares the Date header (date only). A message with no parseable
+	// Date header does not match.
+	if !criteria.SentSince.IsZero() {
+		sent, ok := parseDateHeader(msg.raw)
+		if !ok || sent.Before(criteria.SentSince) {
+			return false
+		}
+	}
+	// SINCE compares INTERNALDATE, modeled here by the message's stored date.
+	if !criteria.Since.IsZero() && msg.date.Before(criteria.Since) {
+		return false
+	}
+	// TEXT matches a case-insensitive substring over the whole raw message.
+	for _, text := range criteria.Text {
+		if !strings.Contains(strings.ToLower(string(msg.raw)), strings.ToLower(text)) {
+			return false
+		}
+	}
 	// OR pairs: each pair matches when either arm matches.
 	for i := range criteria.Or {
 		if !matchesCriteria(msg, &criteria.Or[i][0]) && !matchesCriteria(msg, &criteria.Or[i][1]) {
@@ -462,6 +480,29 @@ func matchesCriteria(msg *memMessage, criteria *imap.SearchCriteria) bool {
 		}
 	}
 	return true
+}
+
+// parseDateHeader extracts and parses the Date header from raw. It accepts the
+// RFC1123Z and RFC822Z layouts the test message builders use.
+func parseDateHeader(raw []byte) (time.Time, bool) {
+	block := string(raw)
+	if i := strings.Index(block, "\r\n\r\n"); i >= 0 {
+		block = block[:i]
+	}
+	for _, line := range strings.Split(block, "\r\n") {
+		k, v, ok := strings.Cut(line, ":")
+		if !ok || strings.ToLower(strings.TrimSpace(k)) != "date" {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		for _, layout := range []string{time.RFC1123Z, time.RFC1123, time.RFC822Z} {
+			if t, err := time.Parse(layout, v); err == nil {
+				return t, true
+			}
+		}
+		return time.Time{}, false
+	}
+	return time.Time{}, false
 }
 
 // headerContains reports whether raw carries a header named key

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -375,8 +377,13 @@ func TestHandler_BatchMoveMessages_MissingParam(t *testing.T) {
 	assert.Contains(t, r.text(), "message_ids is required")
 }
 
-// isUnread reports whether the list output marks message uid unread. The list
-// table prints "●" in the read column for unread messages.
+// splitLines splits rendered tool output into lines for width assertions.
+func splitLines(s string) []string {
+	return strings.Split(strings.TrimRight(s, "\n"), "\n")
+}
+
+// listUnreadMarker returns the list_messages output, used to assert a message's
+// read state via the "●" marker the table prints for unread mail.
 func listUnreadMarker(t *testing.T, s *server.MCPServer) string {
 	t.Helper()
 	r := callTool(t, s, "list_messages", map[string]any{"count": 10, "all_repos": true})
@@ -539,6 +546,83 @@ func TestHandler_AddContact_PatternAcceptsReadOnly(t *testing.T) {
 	})
 	assert.False(t, r.IsError)
 	assert.Contains(t, r.text(), "Anthropic Mail")
+}
+
+func TestHandler_SearchMessages_ByFromAndSubject(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+	env.AddContact("Bob", "bob@test.com", "r--")
+
+	fix.AddMessage("INBOX", "alice@test.com", "release plan", "body")
+	fix.AddMessage("INBOX", "bob@test.com", "lunch", "body")
+
+	// from filters to alice's mail.
+	r := callTool(t, s, "search_messages", map[string]any{"from": "alice@test.com", "all_repos": true})
+	assert.False(t, r.IsError, "search failed: %s", r.text())
+	assert.Contains(t, r.text(), "release plan")
+	assert.NotContains(t, r.text(), "lunch")
+
+	// subject filters to the release mail.
+	r = callTool(t, s, "search_messages", map[string]any{"subject": "release", "all_repos": true})
+	assert.False(t, r.IsError, "search failed: %s", r.text())
+	assert.Contains(t, r.text(), "release plan")
+	assert.NotContains(t, r.text(), "lunch")
+
+	// Every rendered line fits the 80-rune budget.
+	for _, line := range splitLines(r.text()) {
+		assert.LessOrEqual(t, utf8.RuneCountInString(line), 80, "row over 80 runes: %q", line)
+	}
+}
+
+func TestHandler_SearchMessages_RequiresCriterion(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "search_messages", map[string]any{"all_repos": true})
+	assert.True(t, r.IsError, "empty search should error")
+	assert.Contains(t, r.text(), "at least one of")
+}
+
+func TestHandler_SearchMessages_BadSince(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "search_messages", map[string]any{"since": "last tuesday", "all_repos": true})
+	assert.True(t, r.IsError, "bad since should error")
+	assert.Contains(t, r.text(), "invalid date")
+}
+
+func TestHandler_SearchMessages_NegativeOffset(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "search_messages", map[string]any{"text": "x", "offset": float64(-1), "all_repos": true})
+	assert.True(t, r.IsError, "negative offset should error")
+	assert.Contains(t, r.text(), "offset must be non-negative")
+}
+
+func TestHandler_SearchMessages_ScopesToCurrentRepo(t *testing.T) {
+	slug := email.ResolveRepoTag(context.Background(), nil, "").Slug
+	if slug == "" {
+		t.Skip("no git remote resolved; repo scoping is a no-op here")
+	}
+
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	raw := fmt.Sprintf("From: alice@test.com\r\n%s: %s\r\nSubject: scoped release\r\n"+
+		"Content-Type: text/plain\r\n\r\nbody", email.HeaderRepo, slug)
+	fix.AddRawMessage("INBOX", []byte(raw))
+	fix.AddMessage("INBOX", "alice@test.com", "untagged release", "body")
+
+	// Default scope: only the current repo's matching mail.
+	r := callTool(t, s, "search_messages", map[string]any{"subject": "release"})
+	assert.False(t, r.IsError, "search failed: %s", r.text())
+	assert.Contains(t, r.text(), "scoped release")
+	assert.NotContains(t, r.text(), "untagged release")
+
+	// all_repos widens to every repo.
+	r = callTool(t, s, "search_messages", map[string]any{"subject": "release", "all_repos": true})
+	assert.False(t, r.IsError, "search failed: %s", r.text())
+	assert.Contains(t, r.text(), "scoped release")
+	assert.Contains(t, r.text(), "untagged release")
 }
 
 func TestHandler_ListMessages_ScopesToCurrentRepo(t *testing.T) {

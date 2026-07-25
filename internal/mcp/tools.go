@@ -55,6 +55,7 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 	}
 
 	s.AddTool(listMessagesTool(), h.listMessages)
+	s.AddTool(searchMessagesTool(), h.searchMessages)
 	s.AddTool(readMessageTool(), h.readMessage)
 	s.AddTool(listFoldersTool(), h.listFolders)
 	s.AddTool(sendEmailTool(), h.sendEmail)
@@ -354,6 +355,42 @@ func batchMarkMessagesTool() mcplib.Tool {
 	)
 }
 
+func searchMessagesTool() mcplib.Tool {
+	return mcplib.NewTool("search_messages",
+		mcplib.WithDescription("Search a mailbox folder by sender, subject, date, or free text. At least one of from/subject/since/text is required — use list_messages for a plain recent listing. Like list_messages, searches only the current repo's mail by default; set all_repos to search every repo. Results render as the standard message table."),
+		mcplib.WithString("folder",
+			mcplib.Description("IMAP folder name"),
+			mcplib.DefaultString("INBOX"),
+		),
+		mcplib.WithString("from",
+			mcplib.Description("Sender substring (From header)"),
+		),
+		mcplib.WithString("subject",
+			mcplib.Description("Subject substring"),
+		),
+		mcplib.WithString("since",
+			mcplib.Description("On/after this date: RFC3339 timestamp or YYYY-MM-DD"),
+		),
+		mcplib.WithString("text",
+			mcplib.Description("Free text matched over the whole message (headers and body)"),
+		),
+		mcplib.WithNumber("count",
+			mcplib.Description("Maximum number of messages to return"),
+			mcplib.DefaultNumber(10),
+		),
+		mcplib.WithNumber("offset",
+			mcplib.Description("Skip this many of the most recent matches (paging). 0 is the newest page."),
+			mcplib.DefaultNumber(0),
+		),
+		mcplib.WithBoolean("unread_only",
+			mcplib.Description("Only return unread messages"),
+		),
+		mcplib.WithBoolean("all_repos",
+			mcplib.Description("Search mail from every repo instead of only the current repo."),
+		),
+	)
+}
+
 // --- Contact Tool Definitions ---
 
 func listContactsTool() mcplib.Tool {
@@ -468,46 +505,102 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		lr, err := c.ListMessages(folder, count, unreadOnly, repoSlug)
+		lr, err := c.SearchMessages(folder, email.SearchQuery{RepoSlug: repoSlug, UnreadOnly: unreadOnly}, count, 0)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("list messages: %v", err)), nil
 		}
+		return h.renderMessages(c, cfg, id, store, folder, lr), nil
+	})
+}
 
-		// Verify PGP signatures inline so trust levels are accurate
-		for i := range lr.Messages {
-			if !lr.Messages[i].HasSig {
-				continue
-			}
-			uid, parseErr := strconv.ParseUint(lr.Messages[i].ID, 10, 32)
-			if parseErr != nil {
-				continue
-			}
-			raw, fetchErr := c.FetchRaw(folder, uint32(uid))
-			if fetchErr != nil {
-				h.logger.Warn("pgp: fetch raw failed", "uid", lr.Messages[i].ID, "err", fetchErr)
-				continue
-			}
-			result, verifyErr := pgp.Verify(cfg.GPGBinary, raw)
-			if verifyErr != nil {
-				h.logger.Warn("pgp: verify failed", "uid", lr.Messages[i].ID, "err", verifyErr)
-				continue
-			}
-			if result.Valid {
-				lr.Messages[i].TrustLevel = channel.Verified
-			} else {
-				lr.Messages[i].TrustLevel = channel.Untrusted
-			}
+// renderMessages verifies signatures inline for accurate trust levels, redacts
+// subjects from senders the identity may not read, then renders the standard
+// message table. Both list_messages and search_messages share it so the two
+// surfaces render identically.
+func (h *handler) renderMessages(c *email.Client, cfg *email.Config, id *identity.Identity, store *contacts.Store, folder string, lr *email.ListResult) *mcplib.CallToolResult {
+	for i := range lr.Messages {
+		if !lr.Messages[i].HasSig {
+			continue
 		}
-
-		// Enforce read permission: redact subjects for senders without r
-		for i := range lr.Messages {
-			perm, _ := senderPermission(store, id, lr.Messages[i].From)
-			if !perm.Read {
-				lr.Messages[i].Subject = "[redacted — no read permission]"
-			}
+		uid, parseErr := strconv.ParseUint(lr.Messages[i].ID, 10, 32)
+		if parseErr != nil {
+			continue
 		}
+		raw, fetchErr := c.FetchRaw(folder, uint32(uid))
+		if fetchErr != nil {
+			h.logger.Warn("pgp: fetch raw failed", "uid", lr.Messages[i].ID, "err", fetchErr)
+			continue
+		}
+		result, verifyErr := pgp.Verify(cfg.GPGBinary, raw)
+		if verifyErr != nil {
+			h.logger.Warn("pgp: verify failed", "uid", lr.Messages[i].ID, "err", verifyErr)
+			continue
+		}
+		if result.Valid {
+			lr.Messages[i].TrustLevel = channel.Verified
+		} else {
+			lr.Messages[i].TrustLevel = channel.Untrusted
+		}
+	}
 
-		return textResult(formatMessages(lr.Messages, lr.Total))
+	for i := range lr.Messages {
+		perm, _ := senderPermission(store, id, lr.Messages[i].From)
+		if !perm.Read {
+			lr.Messages[i].Subject = "[redacted — no read permission]"
+		}
+	}
+
+	res, _ := textResult(formatMessages(lr.Messages, lr.Total))
+	return res
+}
+
+func (h *handler) searchMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	id, cfg, store, err := h.resolveContext()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
+	folder := stringParam(req, "folder", "INBOX")
+	q := email.SearchQuery{
+		From:       stringParam(req, "from", ""),
+		Subject:    stringParam(req, "subject", ""),
+		Text:       stringParam(req, "text", ""),
+		UnreadOnly: boolParam(req, "unread_only"),
+	}
+	if since := stringParam(req, "since", ""); since != "" {
+		t, parseErr := email.ParseSearchSince(since)
+		if parseErr != nil {
+			return mcplib.NewToolResultError(parseErr.Error()), nil
+		}
+		q.Since = t
+	}
+	if q.From == "" && q.Subject == "" && q.Text == "" && q.Since.IsZero() {
+		return mcplib.NewToolResultError("search_messages needs at least one of from, subject, since, or text; use list_messages for a recent listing"), nil
+	}
+
+	count, err := intParam(req, "count", 10)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	offset, err := intParam(req, "offset", 0)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	if offset < 0 {
+		return mcplib.NewToolResultError("offset must be non-negative"), nil
+	}
+
+	// Scope to the current repo unless the caller widens to all repos.
+	if !boolParam(req, "all_repos") {
+		q.RepoSlug = email.ResolveRepoTag(ctx, h.logger, id.Handle).Slug
+	}
+
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
+		lr, err := c.SearchMessages(folder, q, count, offset)
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("search messages: %v", err)), nil
+		}
+		return h.renderMessages(c, cfg, id, store, folder, lr), nil
 	})
 }
 

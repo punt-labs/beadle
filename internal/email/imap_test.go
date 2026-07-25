@@ -2,6 +2,7 @@ package email
 
 import (
 	"testing"
+	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/stretchr/testify/assert"
@@ -78,22 +79,110 @@ func TestRecencySet(t *testing.T) {
 	}
 }
 
-func TestLastN(t *testing.T) {
+func TestWindow(t *testing.T) {
 	uids := []imap.UID{1, 2, 3, 4, 5}
 	tests := []struct {
-		name  string
-		in    []imap.UID
-		count int
-		want  []imap.UID
+		name   string
+		in     []imap.UID
+		count  int
+		offset int
+		want   []imap.UID
 	}{
-		{"keep last two", uids, 2, []imap.UID{4, 5}},
-		{"count equals length", uids, 5, uids},
-		{"count above length", uids, 10, uids},
-		{"single", uids, 1, []imap.UID{5}},
+		{"newest page, offset 0", uids, 2, 0, []imap.UID{4, 5}},
+		{"offset 0 equals lastN", uids, 5, 0, uids},
+		{"count above length", uids, 10, 0, uids},
+		{"single newest", uids, 1, 0, []imap.UID{5}},
+		{"mid page", uids, 2, 2, []imap.UID{2, 3}},
+		{"count runs off the front", uids, 4, 3, []imap.UID{1, 2}},
+		{"offset at end is empty", uids, 2, 5, nil},
+		{"offset past end is empty", uids, 2, 9, nil},
+		{"count zero is empty", uids, 0, 0, nil},
+		{"empty input", []imap.UID{}, 3, 0, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, lastN(tt.in, tt.count))
+			assert.Equal(t, tt.want, window(tt.in, tt.count, tt.offset))
+		})
+	}
+}
+
+// TestSearchCriteria covers the generalized builder: each field maps to the
+// matching IMAP criterion, and combinations compose. Pure unit, runs under
+// make check.
+func TestSearchCriteria(t *testing.T) {
+	const slug = "punt-labs/beadle"
+	since := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+
+	t.Run("zero query returns nil", func(t *testing.T) {
+		assert.Nil(t, searchCriteria(SearchQuery{}))
+	})
+
+	t.Run("from maps to a From header", func(t *testing.T) {
+		crit := searchCriteria(SearchQuery{From: "alice@x.com"})
+		require.NotNil(t, crit)
+		require.Len(t, crit.Header, 1)
+		assert.Equal(t, "From", crit.Header[0].Key)
+		assert.Equal(t, "alice@x.com", crit.Header[0].Value)
+	})
+
+	t.Run("subject maps to a Subject header", func(t *testing.T) {
+		crit := searchCriteria(SearchQuery{Subject: "release"})
+		require.NotNil(t, crit)
+		require.Len(t, crit.Header, 1)
+		assert.Equal(t, "Subject", crit.Header[0].Key)
+		assert.Equal(t, "release", crit.Header[0].Value)
+	})
+
+	t.Run("since maps to SentSince", func(t *testing.T) {
+		crit := searchCriteria(SearchQuery{Since: since})
+		require.NotNil(t, crit)
+		assert.Equal(t, since, crit.SentSince)
+	})
+
+	t.Run("text maps to Text", func(t *testing.T) {
+		crit := searchCriteria(SearchQuery{Text: "beadle-6i0"})
+		require.NotNil(t, crit)
+		assert.Equal(t, []string{"beadle-6i0"}, crit.Text)
+	})
+
+	t.Run("all fields compose", func(t *testing.T) {
+		crit := searchCriteria(SearchQuery{
+			From: "alice@x.com", Subject: "release", Since: since,
+			Text: "tok", RepoSlug: slug, UnreadOnly: true,
+		})
+		require.NotNil(t, crit)
+		assert.Equal(t, []imap.Flag{imap.FlagSeen}, crit.NotFlag)
+		assertRepoOr(t, crit, slug)
+		assert.Equal(t, since, crit.SentSince)
+		assert.Equal(t, []string{"tok"}, crit.Text)
+		// From and Subject both land as top-level Header substrings.
+		require.Len(t, crit.Header, 2)
+		assert.Equal(t, "From", crit.Header[0].Key)
+		assert.Equal(t, "Subject", crit.Header[1].Key)
+	})
+}
+
+func TestParseSearchSince(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    time.Time
+		wantErr bool
+	}{
+		{"date only", "2026-07-01", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), false},
+		{"rfc3339", "2026-07-01T12:30:00Z", time.Date(2026, 7, 1, 12, 30, 0, 0, time.UTC), false},
+		{"garbage", "last tuesday", time.Time{}, true},
+		{"empty", "", time.Time{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseSearchSince(tt.in)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.True(t, got.Equal(tt.want), "got %v want %v", got, tt.want)
 		})
 	}
 }

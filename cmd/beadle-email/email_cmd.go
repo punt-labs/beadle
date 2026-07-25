@@ -183,6 +183,97 @@ func init() {
 	listCmd.Flags().StringVarP(&listConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
 }
 
+// --- search ---
+
+var (
+	searchFolder   string
+	searchFrom     string
+	searchSubject  string
+	searchSince    string
+	searchText     string
+	searchCount    int
+	searchOffset   int
+	searchUnread   bool
+	searchAllRepos bool
+	searchConfig   string
+)
+
+var searchCmd = &cobra.Command{
+	Use:   "search",
+	Short: "Search messages",
+	Long: "Search a mailbox folder by sender, subject, date, or free text. " +
+		"At least one of --from/--subject/--since/--text is required.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		q := email.SearchQuery{
+			From:       searchFrom,
+			Subject:    searchSubject,
+			Text:       searchText,
+			UnreadOnly: searchUnread,
+		}
+		if searchSince != "" {
+			t, err := email.ParseSearchSince(searchSince)
+			if err != nil {
+				return err
+			}
+			q.Since = t
+		}
+		if q.From == "" && q.Subject == "" && q.Text == "" && q.Since.IsZero() {
+			return fmt.Errorf("at least one of --from, --subject, --since, or --text is required")
+		}
+		if searchOffset < 0 {
+			return fmt.Errorf("--offset must be non-negative")
+		}
+
+		cfg, id, err := resolveConfig(searchConfig)
+		if err != nil {
+			return err
+		}
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		client, err := email.Dial(cfg, logger)
+		if err != nil {
+			return fmt.Errorf("connect: %w", err)
+		}
+		defer client.Close()
+
+		// Scope to the current repo unless --all-repos is set.
+		if !searchAllRepos {
+			agent := ""
+			if id != nil {
+				agent = id.Handle
+			}
+			q.RepoSlug = email.ResolveRepoTag(cmd.Context(), logger, agent).Slug
+		}
+
+		lr, err := client.SearchMessages(searchFolder, q, searchCount, searchOffset)
+		if err != nil {
+			return fmt.Errorf("search messages: %w", err)
+		}
+		g.printResult(lr.Messages, func() {
+			for _, m := range lr.Messages {
+				unread := " "
+				if m.Unread {
+					unread = "*"
+				}
+				fmt.Printf("%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date)
+			}
+		})
+		return nil
+	},
+}
+
+func init() {
+	searchCmd.Flags().StringVar(&searchFolder, "folder", "INBOX", "IMAP folder")
+	searchCmd.Flags().StringVar(&searchFrom, "from", "", "Sender substring")
+	searchCmd.Flags().StringVar(&searchSubject, "subject", "", "Subject substring")
+	searchCmd.Flags().StringVar(&searchSince, "since", "", "On/after date: RFC3339 or YYYY-MM-DD")
+	searchCmd.Flags().StringVar(&searchText, "text", "", "Free text over the whole message")
+	searchCmd.Flags().IntVar(&searchCount, "count", 10, "Maximum messages to return")
+	searchCmd.Flags().IntVar(&searchOffset, "offset", 0, "Skip this many of the most recent matches")
+	searchCmd.Flags().BoolVar(&searchUnread, "unread", false, "Show only unread messages")
+	searchCmd.Flags().BoolVar(&searchAllRepos, "all-repos", false, "Search mail from every repo (default: current repo when one resolves)")
+	searchCmd.Flags().StringVarP(&searchConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
+}
+
 // --- read ---
 
 var (
