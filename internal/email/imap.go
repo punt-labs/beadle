@@ -618,6 +618,23 @@ func (c *Client) SetSeenBatch(folder string, uids []uint32, seen bool) (int, err
 	return len(msgs), nil
 }
 
+// DedupUIDs returns uids with duplicates removed, preserving first-seen order.
+// An IMAP UID set collapses duplicates and the server reports on distinct UIDs,
+// so a caller that counts the requested UIDs must dedup first — otherwise a
+// repeated UID inflates the request and manufactures a false shortfall.
+func DedupUIDs(uids []uint32) []uint32 {
+	seen := make(map[uint32]struct{}, len(uids))
+	out := make([]uint32, 0, len(uids))
+	for _, u := range uids {
+		if _, dup := seen[u]; dup {
+			continue
+		}
+		seen[u] = struct{}{}
+		out = append(out, u)
+	}
+	return out
+}
+
 // numSetLen counts the UIDs a NumSet enumerates, or 0 when it is nil or dynamic.
 func numSetLen(ns imap.NumSet) int {
 	switch s := ns.(type) {

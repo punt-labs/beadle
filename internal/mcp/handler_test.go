@@ -371,6 +371,40 @@ func TestHandler_BatchMoveMessages_Shortfall(t *testing.T) {
 	assert.Contains(t, r.text(), "moved 2 of 3 messages to Archive (1 not found)")
 }
 
+func TestHandler_BatchMoveMessages_DuplicateUIDNoShortfall(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body")
+	uid2 := fix.AddMessage("INBOX", "alice@test.com", "Msg 2", "body")
+	fix.AddMessage("Archive", "system@test.com", "Placeholder", "x")
+
+	// uid1 appears twice: the request has 2 distinct UIDs, both present, so it
+	// reports "moved 2 messages" — a repeat must not manufacture a shortfall.
+	r := callTool(t, s, "batch_move_messages", map[string]any{
+		"message_ids": []any{fmt.Sprintf("%d", uid1), fmt.Sprintf("%d", uid1), fmt.Sprintf("%d", uid2)},
+		"destination": "Archive",
+	})
+	assert.False(t, r.IsError, "batch move failed: %s", r.text())
+	assert.Contains(t, r.text(), "moved 2 messages to Archive")
+	assert.NotContains(t, r.text(), "not found")
+}
+
+func TestHandler_BatchMarkMessages_DuplicateUIDNoShortfall(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body")
+	uid2 := fix.AddMessage("INBOX", "alice@test.com", "Msg 2", "body")
+
+	r := callTool(t, s, "batch_mark_messages", map[string]any{
+		"message_ids": []any{fmt.Sprintf("%d", uid1), fmt.Sprintf("%d", uid2), fmt.Sprintf("%d", uid1)},
+	})
+	assert.False(t, r.IsError, "batch mark failed: %s", r.text())
+	assert.Contains(t, r.text(), "marked 2 messages read")
+	assert.NotContains(t, r.text(), "not found")
+}
+
 func TestHandler_BatchMoveMessages_InvalidUID(t *testing.T) {
 	s, env, fix := setupHandler(t)
 	env.AddContact("Alice", "alice@test.com", "r--")

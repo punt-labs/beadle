@@ -1340,7 +1340,9 @@ func boolParamDefault(req mcplib.CallToolRequest, key string, fallback bool) boo
 
 // parseUIDs converts message-id strings to UIDs, reporting every invalid id in
 // one message so the caller learns of all bad ids before a connection opens.
-// It returns an empty error string on success.
+// Duplicates are collapsed (first-seen order) to match the IMAP UID set the
+// server acts on, so a repeated id never manufactures a shortfall. It returns
+// an empty error string on success.
 func parseUIDs(ids []string) ([]uint32, string) {
 	uids := make([]uint32, 0, len(ids))
 	var parseErrs []string
@@ -1355,7 +1357,7 @@ func parseUIDs(ids []string) ([]uint32, string) {
 	if len(parseErrs) > 0 {
 		return nil, fmt.Sprintf("invalid message_ids: %s", strings.Join(parseErrs, ", "))
 	}
-	return uids, ""
+	return email.DedupUIDs(uids), ""
 }
 
 // markStatus names the state a mark_message call left a message in.

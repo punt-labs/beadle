@@ -21,6 +21,21 @@ func TestChangeStatus(t *testing.T) {
 	assert.Equal(t, "moved", changeStatus(3, "moved"))
 }
 
+// TestMoveResultMap proves the move JSON schema is consistent: destination is
+// present whether the message moved or was not found, so consumers need not
+// special-case the not-found result.
+func TestMoveResultMap(t *testing.T) {
+	notFound := moveResultMap("9999", "INBOX", "Archive", 0)
+	assert.Equal(t, "not_found", notFound["status"])
+	assert.Equal(t, "Archive", notFound["destination"], "not-found result must still carry destination")
+	assert.Equal(t, 0, notFound["moved"])
+
+	moved := moveResultMap("7", "INBOX", "Archive", 1)
+	assert.Equal(t, "moved", moved["status"])
+	assert.Equal(t, "Archive", moved["destination"])
+	assert.Equal(t, 1, moved["moved"])
+}
+
 // TestListCmd_RejectsBadPaging proves list validates count and offset before
 // opening a connection, so a bad value is a deterministic error, not a silent
 // empty result. The checks run first in RunE, so no server is contacted.

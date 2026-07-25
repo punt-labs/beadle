@@ -155,6 +155,19 @@ func changeStatus(changed int, ok string) string {
 	return ok
 }
 
+// moveResultMap builds the JSON result for a single move. destination is present
+// in both the moved and not-found cases, so a consumer reads one schema
+// regardless of outcome.
+func moveResultMap(uid, source, dest string, moved int) map[string]any {
+	return map[string]any{
+		"status":      changeStatus(moved, "moved"),
+		"uid":         uid,
+		"source":      source,
+		"destination": dest,
+		"moved":       moved,
+	}
+}
+
 // splitAddresses splits a comma-separated address string.
 func splitAddresses(s string) []string {
 	if s == "" {
@@ -475,15 +488,11 @@ var moveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("move: %w", err)
 		}
-		if moved == 0 {
-			result := map[string]any{"status": "not_found", "uid": args[0], "source": moveFolder, "moved": 0}
-			g.printResult(result, func() {
+		g.printResult(moveResultMap(args[0], moveFolder, moveDest, moved), func() {
+			if moved == 0 {
 				fmt.Printf("%s not found in %s — not moved\n", args[0], moveFolder)
-			})
-			return nil
-		}
-		result := map[string]any{"status": "moved", "uid": args[0], "source": moveFolder, "destination": moveDest, "moved": moved}
-		g.printResult(result, func() {
+				return
+			}
 			fmt.Printf("moved %s from %s to %s\n", args[0], moveFolder, moveDest)
 		})
 		return nil
@@ -521,6 +530,8 @@ var markCmd = &cobra.Command{
 		}
 
 		// Parse UIDs up front so an invalid id is reported before connecting.
+		// Dedup (positional arg may repeat a --ids entry, or --ids may repeat
+		// one) so requested counts distinct UIDs, matching the IMAP UID set.
 		uids := make([]uint32, 0, len(ids))
 		for _, id := range ids {
 			n, err := strconv.ParseUint(id, 10, 32)
@@ -529,6 +540,7 @@ var markCmd = &cobra.Command{
 			}
 			uids = append(uids, uint32(n))
 		}
+		uids = email.DedupUIDs(uids)
 
 		cfg, _, err := resolveConfig(markConfig)
 		if err != nil {

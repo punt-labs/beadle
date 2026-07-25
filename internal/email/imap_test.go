@@ -79,6 +79,25 @@ func TestRecencySet(t *testing.T) {
 	}
 }
 
+func TestDedupUIDs(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []uint32
+		want []uint32
+	}{
+		{"no dups unchanged", []uint32{1, 2, 3}, []uint32{1, 2, 3}},
+		{"adjacent dup collapsed", []uint32{1, 1, 2}, []uint32{1, 2}},
+		{"repeat preserves first-seen order", []uint32{3, 1, 3, 2, 1}, []uint32{3, 1, 2}},
+		{"all identical", []uint32{7, 7, 7}, []uint32{7}},
+		{"empty", []uint32{}, []uint32{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, DedupUIDs(tt.in))
+		})
+	}
+}
+
 func TestWindow(t *testing.T) {
 	uids := []imap.UID{1, 2, 3, 4, 5}
 	tests := []struct {
