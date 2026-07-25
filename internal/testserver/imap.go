@@ -455,6 +455,27 @@ func matchesCriteria(msg *memMessage, criteria *imap.SearchCriteria) bool {
 			return false
 		}
 	}
+	// SENTSINCE compares the Date header at DATE precision, per RFC 3501 — the
+	// time of day and zone are ignored on both sides, so a message sent later in
+	// the same day as a non-midnight Since still matches. A message with no
+	// parseable Date header does not match.
+	if !criteria.SentSince.IsZero() {
+		sent, ok := parseDateHeader(msg.raw)
+		if !ok || dayStart(sent).Before(dayStart(criteria.SentSince)) {
+			return false
+		}
+	}
+	// SINCE compares INTERNALDATE (modeled by the message's stored date) at DATE
+	// precision, like SENTSINCE — the time of day is ignored on both sides.
+	if !criteria.Since.IsZero() && dayStart(msg.date).Before(dayStart(criteria.Since)) {
+		return false
+	}
+	// TEXT matches a case-insensitive substring over the whole raw message.
+	for _, text := range criteria.Text {
+		if !strings.Contains(strings.ToLower(string(msg.raw)), strings.ToLower(text)) {
+			return false
+		}
+	}
 	// OR pairs: each pair matches when either arm matches.
 	for i := range criteria.Or {
 		if !matchesCriteria(msg, &criteria.Or[i][0]) && !matchesCriteria(msg, &criteria.Or[i][1]) {
@@ -462,6 +483,36 @@ func matchesCriteria(msg *memMessage, criteria *imap.SearchCriteria) bool {
 		}
 	}
 	return true
+}
+
+// dayStart returns midnight UTC on t's calendar day, so two times compare at
+// DATE precision — the granularity IMAP SENTSINCE/SINCE use.
+func dayStart(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// parseDateHeader extracts and parses the Date header from raw. It accepts the
+// RFC1123Z and RFC822Z layouts the test message builders use.
+func parseDateHeader(raw []byte) (time.Time, bool) {
+	block := string(raw)
+	if i := strings.Index(block, "\r\n\r\n"); i >= 0 {
+		block = block[:i]
+	}
+	for _, line := range strings.Split(block, "\r\n") {
+		k, v, ok := strings.Cut(line, ":")
+		if !ok || strings.ToLower(strings.TrimSpace(k)) != "date" {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		for _, layout := range []string{time.RFC1123Z, time.RFC1123, time.RFC822Z} {
+			if t, err := time.Parse(layout, v); err == nil {
+				return t, true
+			}
+		}
+		return time.Time{}, false
+	}
+	return time.Time{}, false
 }
 
 // headerContains reports whether raw carries a header named key
@@ -647,6 +698,9 @@ func (s *memSession) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags 
 
 		if !flags.Silent {
 			resp := w.CreateMessage(seqNum)
+			// Echo the UID: a UID STORE client correlates the FETCH response by
+			// UID and drops any response without one. Real servers include it.
+			resp.WriteUID(msg.uid)
 			resp.WriteFlags(msg.flags)
 			if err := resp.Close(); err != nil {
 				return err
@@ -711,8 +765,11 @@ func (s *memSession) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest str
 		s.backend.mailboxes[dest] = destMb
 	}
 
+	// Aggregate the moved UIDs into a single COPYUID, as a real MOVE returns.
+	// Writing one CopyData per message would let the client (which keeps only
+	// the last COPYUID) undercount the moved messages.
 	var remaining []*memMessage
-	var expungeSeq uint32
+	var srcUIDs, destUIDs imap.UIDSet
 	for seqIdx, msg := range s.selected.messages {
 		seqNum := uint32(seqIdx + 1)
 		if !numSetContains(numSet, seqNum, msg.uid) {
@@ -728,16 +785,18 @@ func (s *memSession) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest str
 			raw:   append([]byte(nil), msg.raw...),
 			date:  msg.date,
 		})
-
-		expungeSeq++
-		w.WriteCopyData(&imap.CopyData{
-			UIDValidity: 1,
-			SourceUIDs:  imap.UIDSetNum(msg.uid),
-			DestUIDs:    imap.UIDSetNum(newUID),
-		})
+		srcUIDs.AddNum(msg.uid)
+		destUIDs.AddNum(newUID)
 		w.WriteExpunge(seqNum)
 	}
 	s.selected.messages = remaining
+	if len(srcUIDs) > 0 {
+		w.WriteCopyData(&imap.CopyData{
+			UIDValidity: 1,
+			SourceUIDs:  srcUIDs,
+			DestUIDs:    destUIDs,
+		})
+	}
 	return nil
 }
 

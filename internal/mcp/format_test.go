@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/punt-labs/beadle/internal/channel"
+	"github.com/punt-labs/beadle/internal/email"
 )
 
 // assertAllRowsExactWidth asserts every non-empty line in rendered (after
@@ -35,6 +36,52 @@ func assertAllRowsExactWidth(t *testing.T, rendered string, want int) {
 func TestFormatMessages_EmptyListNoTable(t *testing.T) {
 	got := formatMessages(nil, 0)
 	assert.Equal(t, "No messages.", got)
+}
+
+func TestFormatMessagesResult_EmptyMailbox(t *testing.T) {
+	got := formatMessagesResult(&email.ListResult{Total: 0})
+	assert.Equal(t, "No messages.", got)
+}
+
+func TestFormatMessagesResult_PastEndPageKeepsTotal(t *testing.T) {
+	// No messages on this page, but 25 match overall — a page past the end,
+	// not an empty mailbox. The true total must survive.
+	got := formatMessagesResult(&email.ListResult{Total: 25})
+	assert.Contains(t, got, "showing 0 of 25 messages")
+	assert.Contains(t, got, "page past end")
+	assert.NotEqual(t, "No messages.", got)
+}
+
+func TestFormatMessagesResult_DegradedHeader(t *testing.T) {
+	when := time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC)
+	lr := &email.ListResult{
+		Messages: []channel.MessageSummary{{
+			ID: "1", From: "a@b.com", Date: when, Subject: "x",
+			TrustLevel: channel.Unverified,
+		}},
+		Total:          1,
+		Degraded:       true,
+		DegradedReason: "search unavailable; showing recent mail instead",
+	}
+	got := formatMessagesResult(lr)
+	lines := strings.Split(got, "\n")
+	assert.Equal(t, "search unavailable; showing recent mail instead", lines[0],
+		"the degraded reason leads the output")
+	assert.Contains(t, got, "showing 1 of 1 messages")
+}
+
+func TestFormatMessagesResult_NotDegradedNoHeader(t *testing.T) {
+	when := time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC)
+	lr := &email.ListResult{
+		Messages: []channel.MessageSummary{{
+			ID: "1", From: "a@b.com", Date: when, Subject: "x",
+			TrustLevel: channel.Unverified,
+		}},
+		Total: 1,
+	}
+	got := formatMessagesResult(lr)
+	assert.True(t, strings.HasPrefix(got, "showing 1 of 1 messages"),
+		"a normal listing carries no degraded header")
 }
 
 func TestFormatMessages_CountLine(t *testing.T) {

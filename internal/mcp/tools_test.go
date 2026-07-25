@@ -116,6 +116,58 @@ func TestBoolParam(t *testing.T) {
 	}
 }
 
+func TestBoolParamDefault(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     map[string]any
+		fallback bool
+		want     bool
+	}{
+		{"missing key returns fallback true", map[string]any{}, true, true},
+		{"missing key returns fallback false", map[string]any{}, false, false},
+		{"present true overrides fallback", map[string]any{"seen": true}, true, true},
+		{"present false overrides fallback", map[string]any{"seen": false}, true, false},
+		{"wrong type returns fallback", map[string]any{"seen": "yes"}, true, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, boolParamDefault(makeRequest(t, tc.args), "seen", tc.fallback))
+		})
+	}
+}
+
+func TestParseUIDs(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      []string
+		want    []uint32
+		wantErr string
+	}{
+		{"all valid", []string{"1", "2", "42"}, []uint32{1, 2, 42}, ""},
+		{"empty slice", []string{}, []uint32{}, ""},
+		{"non-numeric reported", []string{"1", "x"}, nil, "#x: invalid id"},
+		{"zero rejected", []string{"0"}, nil, "#0: invalid id"},
+		{"all bad ids listed", []string{"a", "b"}, nil, "#a: invalid id, #b: invalid id"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, errMsg := parseUIDs(tc.in)
+			if tc.wantErr != "" {
+				assert.Contains(t, errMsg, tc.wantErr)
+				assert.Nil(t, got)
+				return
+			}
+			assert.Equal(t, "", errMsg)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestMarkStatus(t *testing.T) {
+	assert.Equal(t, "read", markStatus(true))
+	assert.Equal(t, "unread", markStatus(false))
+}
+
 func TestSenderPermission(t *testing.T) {
 	// Create an empty store (nonexistent file, no contacts) to test unknown-sender defaults
 	store := contacts.NewStore("/nonexistent/contacts.json")
