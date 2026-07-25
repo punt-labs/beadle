@@ -42,18 +42,23 @@ func (t Threading) writeHeaders(buf *bytes.Buffer) error {
 }
 
 // headers returns the In-Reply-To/References header map for the Resend JSON
-// path, or nil when t is empty. Values with CR/LF are dropped by the caller's
-// merge into a validated map; the raw-MIME path rejects them in writeHeaders.
-func (t Threading) headers() map[string]string {
+// path, or nil when t is empty. Like writeHeaders on the raw-MIME path, it
+// rejects a value containing CR/LF, so both send paths reject header-injection
+// input identically — threading values come from untrusted inbound mail.
+func (t Threading) headers() (map[string]string, error) {
 	if t.empty() {
-		return nil
+		return nil, nil
+	}
+	refs := strings.Join(t.References, " ")
+	if strings.ContainsAny(t.InReplyTo, "\r\n") || strings.ContainsAny(refs, "\r\n") {
+		return nil, fmt.Errorf("threading header contains CR/LF")
 	}
 	h := make(map[string]string, 2)
 	if t.InReplyTo != "" {
 		h["In-Reply-To"] = t.InReplyTo
 	}
-	if refs := strings.Join(t.References, " "); refs != "" {
+	if refs != "" {
 		h["References"] = refs
 	}
-	return h
+	return h, nil
 }

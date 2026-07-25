@@ -121,7 +121,29 @@ func TestRepoTag_Headers(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, tc.tag.headers())
+			got, err := tc.tag.headers()
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestRepoTag_HeadersRejectCRLF proves the Resend header path rejects a CR/LF
+// value, matching writeHeaders on the raw-MIME path.
+func TestRepoTag_HeadersRejectCRLF(t *testing.T) {
+	tests := []struct {
+		name string
+		tag  RepoTag
+	}{
+		{"slug CRLF", RepoTag{Slug: "punt-labs/beadle\r\nBcc: evil@x"}},
+		{"agent CRLF", RepoTag{Slug: "punt-labs/beadle", Agent: "claude\nBcc: evil@x"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.tag.headers()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "CR/LF")
+			assert.Nil(t, got)
 		})
 	}
 }

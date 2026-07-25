@@ -68,13 +68,21 @@ func TestThreading_WriteHeaders(t *testing.T) {
 }
 
 func TestThreading_Headers(t *testing.T) {
-	assert.Nil(t, Threading{}.headers(), "zero Threading yields no Resend headers")
+	empty, err := Threading{}.headers()
+	require.NoError(t, err)
+	assert.Nil(t, empty, "zero Threading yields no Resend headers")
 
-	h := Threading{InReplyTo: "<b@host>", References: []string{"<a@host>", "<b@host>"}}.headers()
+	h, err := Threading{InReplyTo: "<b@host>", References: []string{"<a@host>", "<b@host>"}}.headers()
+	require.NoError(t, err)
 	assert.Equal(t, map[string]string{
 		"In-Reply-To": "<b@host>",
 		"References":  "<a@host> <b@host>",
 	}, h)
+
+	// Header injection is rejected, matching writeHeaders on the raw-MIME path.
+	_, err = Threading{InReplyTo: "<b@host>\r\nBcc: evil@x"}.headers()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CR/LF")
 }
 
 func TestBuildReferences(t *testing.T) {

@@ -122,7 +122,11 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 		return nil, fmt.Errorf("pgp-signed email requires SMTP transport; Resend API cannot preserve raw MIME")
 	}
 
-	resp, err := Send(cfg, resendRequest(to, cc, bcc, subject, body, html, attachments, tag, threading))
+	req, err := resendRequest(to, cc, bcc, subject, body, html, attachments, tag, threading)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := Send(cfg, req)
 	if err != nil {
 		return nil, err
 	}

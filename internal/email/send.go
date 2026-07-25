@@ -381,7 +381,16 @@ type SendResponse struct {
 // resendRequest assembles the Resend API payload, attaching the repo tag's
 // X-Beadle-* headers and, for a reply, the In-Reply-To/References threading
 // headers. The subject is already repo-tagged by the caller.
-func resendRequest(to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment, tag RepoTag, threading Threading) SendRequest {
+func resendRequest(to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment, tag RepoTag, threading Threading) (SendRequest, error) {
+	tagHeaders, err := tag.headers()
+	if err != nil {
+		return SendRequest{}, err
+	}
+	threadHeaders, err := threading.headers()
+	if err != nil {
+		return SendRequest{}, err
+	}
+
 	var resendAtts []ResendAttachment
 	for _, att := range attachments {
 		resendAtts = append(resendAtts, ResendAttachment{
@@ -397,8 +406,8 @@ func resendRequest(to, cc, bcc []string, subject, body, html string, attachments
 		Text:        body,
 		HTML:        html,
 		Attachments: resendAtts,
-		Headers:     mergeHeaders(tag.headers(), threading.headers()),
-	}
+		Headers:     mergeHeaders(tagHeaders, threadHeaders),
+	}, nil
 }
 
 // mergeHeaders combines the repo-tag and threading header maps for the Resend
