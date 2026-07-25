@@ -165,10 +165,12 @@ func TestListMessages_UnreadScope_SearchErrorKeepsUnread(t *testing.T) {
 	assert.NotContains(t, got, "read beadle", "unread fallback must never surface read mail")
 }
 
-// TestListMessages_UnreadScope_SearchErrorRetryShowsAll asserts that when both
-// the scoped search and the widened unread retry fail, the listing falls
-// through to the recency window — the never-empty floor.
-func TestListMessages_UnreadScope_SearchErrorRetryShowsAll(t *testing.T) {
+// TestListMessages_UnreadScope_SearchErrorRetryFailsClosed asserts that when
+// both the scoped search and the widened unread retry fail, an unread listing
+// fails CLOSED — it returns the error rather than flooring to the recency
+// window, which would surface read mail. The daemon's inbox scan relies on this
+// to abort rather than reprocess already-read messages.
+func TestListMessages_UnreadScope_SearchErrorRetryFailsClosed(t *testing.T) {
 	f := testserver.NewFixture(t)
 	f.AddRawMessage("INBOX", rawMsg("a@test.com", scopeSlug, "unread beadle"))
 	f.AddRawMessageWithFlags("INBOX", rawMsg("b@test.com", scopeSlug, "read beadle"), []imap.Flag{imap.FlagSeen})
@@ -180,9 +182,47 @@ func TestListMessages_UnreadScope_SearchErrorRetryShowsAll(t *testing.T) {
 	})
 
 	client := dialFixture(t, f)
-	lr, err := client.ListMessages("INBOX", 10, true, scopeSlug)
-	require.NoError(t, err)
+	_, err := client.ListMessages("INBOX", 10, true, scopeSlug)
+	require.Error(t, err, "unread fallback must fail closed, never surface read mail")
+}
 
-	require.NotEmpty(t, lr.Messages, "error fallback must never return an empty list")
-	assert.Len(t, lr.Messages, 3, "recency fallback shows all recent mail, read included")
+// TestListMessages_UnreadAllRepos_SearchErrorFailsClosed asserts that an
+// all-repos unread listing (RepoSlug == "") with no narrower query to retry
+// returns the error on a SEARCH failure — it must never floor to recency, which
+// returns read mail. This is the daemon's exact call: ListMessages(INBOX, n,
+// true, "").
+func TestListMessages_UnreadAllRepos_SearchErrorFailsClosed(t *testing.T) {
+	f := testserver.NewFixture(t)
+	f.AddRawMessage("INBOX", rawMsg("a@test.com", "", "unread one"))
+	f.AddRawMessageWithFlags("INBOX", rawMsg("b@test.com", "", "read one"), []imap.Flag{imap.FlagSeen})
+
+	f.SetSearchError(func(*imap.SearchCriteria) error {
+		return fmt.Errorf("forced search failure")
+	})
+
+	client := dialFixture(t, f)
+	_, err := client.ListMessages("INBOX", 10, true, "")
+	require.Error(t, err, "all-repos unread fallback must fail closed")
+}
+
+// TestListMessages_ScopedPlain_SearchErrorFloorsToRecency asserts that a
+// repo-scoped PLAIN listing (unreadOnly false) recovers from a SEARCH error by
+// flooring to the recency window — showing all recent mail, flagged Degraded —
+// without panicking. The widen must never hand a nil criteria to UIDSearch.
+func TestListMessages_ScopedPlain_SearchErrorFloorsToRecency(t *testing.T) {
+	f := testserver.NewFixture(t)
+	f.AddRawMessage("INBOX", rawMsg("a@test.com", scopeSlug, "beadle mail"))
+	f.AddRawMessage("INBOX", rawMsg("b@test.com", "punt-labs/other", "other mail"))
+
+	f.SetSearchError(func(*imap.SearchCriteria) error {
+		return fmt.Errorf("forced search failure")
+	})
+
+	client := dialFixture(t, f)
+	lr, err := client.ListMessages("INBOX", 10, false, scopeSlug)
+	require.NoError(t, err, "scoped plain listing must not panic or error on SEARCH failure")
+
+	assert.Len(t, lr.Messages, 2, "recency floor shows all recent mail")
+	assert.True(t, lr.Degraded, "the fallback listing is flagged degraded")
+	assert.NotEmpty(t, lr.DegradedReason)
 }

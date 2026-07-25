@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -106,6 +108,66 @@ func defaultContactsPath() string {
 	return filepath.Join(beadleDir, "contacts.json")
 }
 
+// printMessages renders a message listing for the CLI. With --json it writes
+// the message slice as before. Otherwise it prints the degraded notice, then
+// the status line and rows. The degraded notice prints even under --quiet:
+// the notice's stderr warn is suppressed then, and a fallback silently showing
+// unrelated recent mail is the one thing a quiet caller must still see. It
+// returns an error only when JSON marshaling fails, so a --json caller never
+// mistakes empty output for an empty result.
+func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) error {
+	if g.JSON {
+		data, err := json.MarshalIndent(lr.Messages, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling messages as JSON: %w", err)
+		}
+		fmt.Fprintln(w, string(data))
+		return nil
+	}
+	if lr.Degraded {
+		reason := lr.DegradedReason
+		if reason == "" {
+			reason = "results degraded"
+		}
+		fmt.Fprintln(w, reason)
+	}
+	if g.Quiet {
+		return nil
+	}
+	fmt.Fprintln(w, lr.StatusLine())
+	for _, m := range lr.Messages {
+		unread := " "
+		if m.Unread {
+			unread = "*"
+		}
+		fmt.Fprintf(w, "%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date)
+	}
+	return nil
+}
+
+// changeStatus returns the JSON status for a mutating command: "not_found" when
+// nothing changed (every UID was absent), else ok. It keeps mark and move
+// truthful — neither reports success for a no-op.
+func changeStatus(changed int, ok string) string {
+	if changed == 0 {
+		return "not_found"
+	}
+	return ok
+}
+
+// moveResultMap builds the JSON result for a single move. destination is present
+// in both the moved and not-found cases, so a consumer reads one schema
+// regardless of outcome.
+func moveResultMap(uid, source, dest string, moved int) map[string]any {
+	return map[string]any{
+		"status":      changeStatus(moved, "moved"),
+		"uid":         uid,
+		"source":      source,
+		"destination": dest,
+		"moved":       moved,
+	}
+}
+
 // splitAddresses splits a comma-separated address string.
 func splitAddresses(s string) []string {
 	if s == "" {
@@ -126,6 +188,7 @@ func splitAddresses(s string) []string {
 var (
 	listFolder   string
 	listCount    int
+	listOffset   int
 	listUnread   bool
 	listAllRepos bool
 	listConfig   string
@@ -136,6 +199,14 @@ var listCmd = &cobra.Command{
 	Short: "List messages",
 	Long:  "List messages from the inbox or a specified IMAP folder.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Validate paging before opening a connection.
+		if listCount <= 0 {
+			return fmt.Errorf("--count must be positive")
+		}
+		if listOffset < 0 {
+			return fmt.Errorf("--offset must be non-negative")
+		}
+
 		cfg, id, err := resolveConfig(listConfig)
 		if err != nil {
 			return err
@@ -158,29 +229,106 @@ var listCmd = &cobra.Command{
 			repoSlug = email.ResolveRepoTag(cmd.Context(), logger, agent).Slug
 		}
 
-		lr, err := client.ListMessages(listFolder, listCount, listUnread, repoSlug)
+		lr, err := client.SearchMessages(listFolder, email.SearchQuery{RepoSlug: repoSlug, UnreadOnly: listUnread}, listCount, listOffset)
 		if err != nil {
 			return fmt.Errorf("list messages: %w", err)
 		}
-		g.printResult(lr.Messages, func() {
-			for _, m := range lr.Messages {
-				unread := " "
-				if m.Unread {
-					unread = "*"
-				}
-				fmt.Printf("%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date)
-			}
-		})
-		return nil
+		return g.printMessages(os.Stdout, lr)
 	},
 }
 
 func init() {
 	listCmd.Flags().StringVar(&listFolder, "folder", "INBOX", "IMAP folder")
 	listCmd.Flags().IntVar(&listCount, "count", 10, "Maximum messages to return")
+	listCmd.Flags().IntVar(&listOffset, "offset", 0, "Skip this many of the most recent messages")
 	listCmd.Flags().BoolVar(&listUnread, "unread", false, "Show only unread messages")
 	listCmd.Flags().BoolVar(&listAllRepos, "all-repos", false, "Always list mail from every repo (default: current repo when one resolves, otherwise all)")
 	listCmd.Flags().StringVarP(&listConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
+}
+
+// --- search ---
+
+var (
+	searchFolder   string
+	searchFrom     string
+	searchSubject  string
+	searchSince    string
+	searchText     string
+	searchCount    int
+	searchOffset   int
+	searchUnread   bool
+	searchAllRepos bool
+	searchConfig   string
+)
+
+var searchCmd = &cobra.Command{
+	Use:   "search",
+	Short: "Search messages",
+	Long: "Search a mailbox folder by sender, subject, date, or free text. " +
+		"At least one of --from/--subject/--since/--text is required.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		q := email.SearchQuery{
+			From:       searchFrom,
+			Subject:    searchSubject,
+			Text:       searchText,
+			UnreadOnly: searchUnread,
+		}
+		if searchSince != "" {
+			t, err := email.ParseSearchSince(searchSince)
+			if err != nil {
+				return err
+			}
+			q.Since = t
+		}
+		if q.From == "" && q.Subject == "" && q.Text == "" && q.Since.IsZero() {
+			return fmt.Errorf("at least one of --from, --subject, --since, or --text is required")
+		}
+		if searchCount <= 0 {
+			return fmt.Errorf("--count must be positive")
+		}
+		if searchOffset < 0 {
+			return fmt.Errorf("--offset must be non-negative")
+		}
+
+		cfg, id, err := resolveConfig(searchConfig)
+		if err != nil {
+			return err
+		}
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		client, err := email.Dial(cfg, logger)
+		if err != nil {
+			return fmt.Errorf("connect: %w", err)
+		}
+		defer client.Close()
+
+		// Scope to the current repo unless --all-repos is set.
+		if !searchAllRepos {
+			agent := ""
+			if id != nil {
+				agent = id.Handle
+			}
+			q.RepoSlug = email.ResolveRepoTag(cmd.Context(), logger, agent).Slug
+		}
+
+		lr, err := client.SearchMessages(searchFolder, q, searchCount, searchOffset)
+		if err != nil {
+			return fmt.Errorf("search messages: %w", err)
+		}
+		return g.printMessages(os.Stdout, lr)
+	},
+}
+
+func init() {
+	searchCmd.Flags().StringVar(&searchFolder, "folder", "INBOX", "IMAP folder")
+	searchCmd.Flags().StringVar(&searchFrom, "from", "", "Sender substring")
+	searchCmd.Flags().StringVar(&searchSubject, "subject", "", "Subject substring")
+	searchCmd.Flags().StringVar(&searchSince, "since", "", "On/after date: RFC3339 or YYYY-MM-DD")
+	searchCmd.Flags().StringVar(&searchText, "text", "", "Free text over the whole message")
+	searchCmd.Flags().IntVar(&searchCount, "count", 10, "Maximum messages to return")
+	searchCmd.Flags().IntVar(&searchOffset, "offset", 0, "Skip this many of the most recent matches")
+	searchCmd.Flags().BoolVar(&searchUnread, "unread", false, "Show only unread messages")
+	searchCmd.Flags().BoolVar(&searchAllRepos, "all-repos", false, "Search mail from every repo (default: current repo when one resolves)")
+	searchCmd.Flags().StringVarP(&searchConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
 }
 
 // --- read ---
@@ -336,11 +484,15 @@ var moveCmd = &cobra.Command{
 		}
 		defer client.Close()
 
-		if err := client.MoveMessage(moveFolder, uint32(uidNum), moveDest); err != nil {
+		moved, err := client.MoveMessage(moveFolder, uint32(uidNum), moveDest)
+		if err != nil {
 			return fmt.Errorf("move: %w", err)
 		}
-		result := map[string]string{"status": "moved", "uid": args[0], "source": moveFolder, "destination": moveDest}
-		g.printResult(result, func() {
+		g.printResult(moveResultMap(args[0], moveFolder, moveDest, moved), func() {
+			if moved == 0 {
+				fmt.Printf("%s not found in %s — not moved\n", args[0], moveFolder)
+				return
+			}
 			fmt.Printf("moved %s from %s to %s\n", args[0], moveFolder, moveDest)
 		})
 		return nil
@@ -351,6 +503,85 @@ func init() {
 	moveCmd.Flags().StringVar(&moveFolder, "folder", "INBOX", "Source IMAP folder")
 	moveCmd.Flags().StringVar(&moveDest, "to", "Archive", "Destination folder")
 	moveCmd.Flags().StringVarP(&moveConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
+}
+
+// --- mark ---
+
+var (
+	markFolder string
+	markIDs    string
+	markUnread bool
+	markConfig string
+)
+
+var markCmd = &cobra.Command{
+	Use:   "mark [uid]",
+	Short: "Mark messages read or unread",
+	Long: "Mark one or more messages read (default) or unread (--unread). " +
+		"Pass a single UID as an argument, or a comma-separated list with --ids.",
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ids := splitAddresses(markIDs)
+		if len(args) == 1 {
+			ids = append(ids, args[0])
+		}
+		if len(ids) == 0 {
+			return fmt.Errorf("a UID argument or --ids is required")
+		}
+
+		// Parse UIDs up front so an invalid id is reported before connecting.
+		// Dedup (positional arg may repeat a --ids entry, or --ids may repeat
+		// one) so requested counts distinct UIDs, matching the IMAP UID set.
+		uids := make([]uint32, 0, len(ids))
+		for _, id := range ids {
+			n, err := strconv.ParseUint(id, 10, 32)
+			if err != nil || n == 0 {
+				return fmt.Errorf("invalid UID %q", id)
+			}
+			uids = append(uids, uint32(n))
+		}
+		uids = email.DedupUIDs(uids)
+
+		cfg, _, err := resolveConfig(markConfig)
+		if err != nil {
+			return err
+		}
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		client, err := email.Dial(cfg, logger)
+		if err != nil {
+			return fmt.Errorf("connect: %w", err)
+		}
+		defer client.Close()
+
+		seen := !markUnread
+		modified, err := client.SetSeenBatch(markFolder, uids, seen)
+		if err != nil {
+			return fmt.Errorf("mark: %w", err)
+		}
+		state := "read"
+		if markUnread {
+			state = "unread"
+		}
+		requested := len(uids)
+		// Mirror move: a status of "marked" would read as success even when
+		// every UID was absent, so report "not_found" when nothing changed.
+		result := map[string]any{"status": changeStatus(modified, "marked"), "state": state, "modified": modified, "requested": requested}
+		g.printResult(result, func() {
+			if modified < requested {
+				fmt.Printf("marked %d of %d message(s) %s (%d not found)\n", modified, requested, state, requested-modified)
+				return
+			}
+			fmt.Printf("marked %d message(s) %s\n", modified, state)
+		})
+		return nil
+	},
+}
+
+func init() {
+	markCmd.Flags().StringVar(&markFolder, "folder", "INBOX", "IMAP folder")
+	markCmd.Flags().StringVar(&markIDs, "ids", "", "Comma-separated UIDs to mark")
+	markCmd.Flags().BoolVar(&markUnread, "unread", false, "Mark unread instead of read")
+	markCmd.Flags().StringVarP(&markConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
 }
 
 // --- folders ---

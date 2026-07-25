@@ -55,6 +55,7 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 	}
 
 	s.AddTool(listMessagesTool(), h.listMessages)
+	s.AddTool(searchMessagesTool(), h.searchMessages)
 	s.AddTool(readMessageTool(), h.readMessage)
 	s.AddTool(listFoldersTool(), h.listFolders)
 	s.AddTool(sendEmailTool(), h.sendEmail)
@@ -63,6 +64,8 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 	s.AddTool(checkTrustTool(), h.checkTrust)
 	s.AddTool(moveMessageTool(), h.moveMessage)
 	s.AddTool(batchMoveMessagesTool(), h.batchMoveMessages)
+	s.AddTool(markMessageTool(), h.markMessage)
+	s.AddTool(batchMarkMessagesTool(), h.batchMarkMessages)
 	s.AddTool(downloadAttachmentTool(), h.downloadAttachment)
 
 	s.AddTool(listContactsTool(), h.listContacts)
@@ -172,6 +175,10 @@ func listMessagesTool() mcplib.Tool {
 		mcplib.WithNumber("count",
 			mcplib.Description("Maximum number of messages to return"),
 			mcplib.DefaultNumber(10),
+		),
+		mcplib.WithNumber("offset",
+			mcplib.Description("Skip this many of the most recent messages (paging). 0 is the newest page."),
+			mcplib.DefaultNumber(0),
 		),
 		mcplib.WithBoolean("unread_only",
 			mcplib.Description("Only return unread messages"),
@@ -315,6 +322,79 @@ func batchMoveMessagesTool() mcplib.Tool {
 	)
 }
 
+func markMessageTool() mcplib.Tool {
+	return mcplib.NewTool("mark_message",
+		mcplib.WithDescription("Mark a message read or unread. Sets the \\Seen flag when seen is true (the default), clears it when false. Reading a message never changes its read state; marking is always explicit."),
+		mcplib.WithString("folder",
+			mcplib.Description("IMAP folder name"),
+			mcplib.DefaultString("INBOX"),
+		),
+		mcplib.WithString("message_id",
+			mcplib.Required(),
+			mcplib.Description("Message UID to mark"),
+		),
+		mcplib.WithBoolean("seen",
+			mcplib.Description("Mark read (true, default) or unread (false)"),
+			mcplib.DefaultBool(true),
+		),
+	)
+}
+
+func batchMarkMessagesTool() mcplib.Tool {
+	return mcplib.NewTool("batch_mark_messages",
+		mcplib.WithDescription("Mark multiple messages read or unread in one call. Returns the count marked."),
+		mcplib.WithArray("message_ids",
+			mcplib.Required(),
+			mcplib.Description("Message UIDs to mark (from list_messages)"),
+			mcplib.WithStringItems(),
+		),
+		mcplib.WithString("folder",
+			mcplib.Description("IMAP folder name"),
+			mcplib.DefaultString("INBOX"),
+		),
+		mcplib.WithBoolean("seen",
+			mcplib.Description("Mark read (true, default) or unread (false)"),
+			mcplib.DefaultBool(true),
+		),
+	)
+}
+
+func searchMessagesTool() mcplib.Tool {
+	return mcplib.NewTool("search_messages",
+		mcplib.WithDescription("Search a mailbox folder by sender, subject, date, or free text. At least one of from/subject/since/text is required — use list_messages for a plain recent listing. Like list_messages, searches only the current repo's mail by default; set all_repos to search every repo. Results render as the standard message table."),
+		mcplib.WithString("folder",
+			mcplib.Description("IMAP folder name"),
+			mcplib.DefaultString("INBOX"),
+		),
+		mcplib.WithString("from",
+			mcplib.Description("Sender substring (From header)"),
+		),
+		mcplib.WithString("subject",
+			mcplib.Description("Subject substring"),
+		),
+		mcplib.WithString("since",
+			mcplib.Description("On/after this date: RFC3339 timestamp or YYYY-MM-DD"),
+		),
+		mcplib.WithString("text",
+			mcplib.Description("Free text matched over the whole message (headers and body)"),
+		),
+		mcplib.WithNumber("count",
+			mcplib.Description("Maximum number of messages to return"),
+			mcplib.DefaultNumber(10),
+		),
+		mcplib.WithNumber("offset",
+			mcplib.Description("Skip this many of the most recent matches (paging). 0 is the newest page."),
+			mcplib.DefaultNumber(0),
+		),
+		mcplib.WithBoolean("unread_only",
+			mcplib.Description("Only return unread messages"),
+		),
+		mcplib.WithBoolean("all_repos",
+			mcplib.Description("Search mail from every repo instead of only the current repo."),
+		),
+	)
+}
+
 // --- Contact Tool Definitions ---
 
 func listContactsTool() mcplib.Tool {
@@ -419,6 +499,16 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
+	if count <= 0 {
+		return mcplib.NewToolResultError("count must be positive"), nil
+	}
+	offset, err := intParam(req, "offset", 0)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	if offset < 0 {
+		return mcplib.NewToolResultError("offset must be non-negative"), nil
+	}
 	unreadOnly := boolParam(req, "unread_only")
 
 	// Scope to the current repo unless the caller widens to all repos. An empty
@@ -429,46 +519,105 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		lr, err := c.ListMessages(folder, count, unreadOnly, repoSlug)
+		lr, err := c.SearchMessages(folder, email.SearchQuery{RepoSlug: repoSlug, UnreadOnly: unreadOnly}, count, offset)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("list messages: %v", err)), nil
 		}
+		return h.renderMessages(c, cfg, id, store, folder, lr), nil
+	})
+}
 
-		// Verify PGP signatures inline so trust levels are accurate
-		for i := range lr.Messages {
-			if !lr.Messages[i].HasSig {
-				continue
-			}
-			uid, parseErr := strconv.ParseUint(lr.Messages[i].ID, 10, 32)
-			if parseErr != nil {
-				continue
-			}
-			raw, fetchErr := c.FetchRaw(folder, uint32(uid))
-			if fetchErr != nil {
-				h.logger.Warn("pgp: fetch raw failed", "uid", lr.Messages[i].ID, "err", fetchErr)
-				continue
-			}
-			result, verifyErr := pgp.Verify(cfg.GPGBinary, raw)
-			if verifyErr != nil {
-				h.logger.Warn("pgp: verify failed", "uid", lr.Messages[i].ID, "err", verifyErr)
-				continue
-			}
-			if result.Valid {
-				lr.Messages[i].TrustLevel = channel.Verified
-			} else {
-				lr.Messages[i].TrustLevel = channel.Untrusted
-			}
+// renderMessages verifies signatures inline for accurate trust levels, redacts
+// subjects from senders the identity may not read, then renders the standard
+// message table. Both list_messages and search_messages share it so the two
+// surfaces render identically.
+func (h *handler) renderMessages(c *email.Client, cfg *email.Config, id *identity.Identity, store *contacts.Store, folder string, lr *email.ListResult) *mcplib.CallToolResult {
+	for i := range lr.Messages {
+		if !lr.Messages[i].HasSig {
+			continue
 		}
-
-		// Enforce read permission: redact subjects for senders without r
-		for i := range lr.Messages {
-			perm, _ := senderPermission(store, id, lr.Messages[i].From)
-			if !perm.Read {
-				lr.Messages[i].Subject = "[redacted — no read permission]"
-			}
+		uid, parseErr := strconv.ParseUint(lr.Messages[i].ID, 10, 32)
+		if parseErr != nil {
+			continue
 		}
+		raw, fetchErr := c.FetchRaw(folder, uint32(uid))
+		if fetchErr != nil {
+			h.logger.Warn("pgp: fetch raw failed", "uid", lr.Messages[i].ID, "err", fetchErr)
+			continue
+		}
+		result, verifyErr := pgp.Verify(cfg.GPGBinary, raw)
+		if verifyErr != nil {
+			h.logger.Warn("pgp: verify failed", "uid", lr.Messages[i].ID, "err", verifyErr)
+			continue
+		}
+		if result.Valid {
+			lr.Messages[i].TrustLevel = channel.Verified
+		} else {
+			lr.Messages[i].TrustLevel = channel.Untrusted
+		}
+	}
 
-		return textResult(formatMessages(lr.Messages, lr.Total))
+	for i := range lr.Messages {
+		perm, _ := senderPermission(store, id, lr.Messages[i].From)
+		if !perm.Read {
+			lr.Messages[i].Subject = "[redacted — no read permission]"
+		}
+	}
+
+	res, _ := textResult(formatMessagesResult(lr))
+	return res
+}
+
+func (h *handler) searchMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	id, cfg, store, err := h.resolveContext()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
+	folder := stringParam(req, "folder", "INBOX")
+	q := email.SearchQuery{
+		From:       stringParam(req, "from", ""),
+		Subject:    stringParam(req, "subject", ""),
+		Text:       stringParam(req, "text", ""),
+		UnreadOnly: boolParam(req, "unread_only"),
+	}
+	if since := stringParam(req, "since", ""); since != "" {
+		t, parseErr := email.ParseSearchSince(since)
+		if parseErr != nil {
+			return mcplib.NewToolResultError(parseErr.Error()), nil
+		}
+		q.Since = t
+	}
+	if q.From == "" && q.Subject == "" && q.Text == "" && q.Since.IsZero() {
+		return mcplib.NewToolResultError("search_messages needs at least one of from, subject, since, or text; use list_messages for a recent listing"), nil
+	}
+
+	count, err := intParam(req, "count", 10)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	if count <= 0 {
+		return mcplib.NewToolResultError("count must be positive"), nil
+	}
+	offset, err := intParam(req, "offset", 0)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	if offset < 0 {
+		return mcplib.NewToolResultError("offset must be non-negative"), nil
+	}
+
+	// Scope to the current repo unless the caller widens to all repos.
+	if !boolParam(req, "all_repos") {
+		q.RepoSlug = email.ResolveRepoTag(ctx, h.logger, id.Handle).Slug
+	}
+
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
+		lr, err := c.SearchMessages(folder, q, count, offset)
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("search messages: %v", err)), nil
+		}
+		return h.renderMessages(c, cfg, id, store, folder, lr), nil
 	})
 }
 
@@ -792,6 +941,7 @@ type moveResult struct {
 	MessageID   string `json:"message_id"`
 	Source      string `json:"source"`
 	Destination string `json:"destination"`
+	Moved       int    `json:"moved"`
 }
 
 func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -813,7 +963,8 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		if err := c.MoveMessage(folder, uint32(uid), destination); err != nil {
+		moved, err := c.MoveMessage(folder, uint32(uid), destination)
+		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("move message: %v", err)), nil
 		}
 		mr := &moveResult{
@@ -821,6 +972,7 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 			MessageID:   msgID,
 			Source:      folder,
 			Destination: destination,
+			Moved:       moved,
 		}
 		return textResult(formatMoveResult(mr))
 	})
@@ -844,34 +996,101 @@ func (h *handler) batchMoveMessages(ctx context.Context, req mcplib.CallToolRequ
 	destination := stringParam(req, "destination", "Archive")
 
 	if len(ids) == 0 {
-		return textResult(formatBatchMoveResult(0, destination))
+		return textResult(formatBatchMoveResult(0, 0, destination))
 	}
 
 	// Parse all UIDs up front so we can report invalid IDs before
 	// opening a connection.
-	uids := make([]uint32, 0, len(ids))
-	var parseErrs []string
-	for _, id := range ids {
-		uid, parseErr := strconv.ParseUint(id, 10, 32)
-		if parseErr != nil {
-			parseErrs = append(parseErrs, fmt.Sprintf("#%s: invalid id", id))
-			continue
-		}
-		if uid == 0 {
-			parseErrs = append(parseErrs, fmt.Sprintf("#%s: invalid id", id))
-			continue
-		}
-		uids = append(uids, uint32(uid))
-	}
-	if len(parseErrs) > 0 {
-		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_ids: %s", strings.Join(parseErrs, ", "))), nil
+	uids, parseErr := parseUIDs(ids)
+	if parseErr != "" {
+		return mcplib.NewToolResultError(parseErr), nil
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		if err := c.MoveMessages(folder, uids, destination); err != nil {
+		moved, err := c.MoveMessages(folder, uids, destination)
+		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("batch move: %v", err)), nil
 		}
-		return textResult(formatBatchMoveResult(len(uids), destination))
+		return textResult(formatBatchMoveResult(moved, len(uids), destination))
+	})
+}
+
+// markResult is the typed response for the mark_message tool.
+type markResult struct {
+	Status    string `json:"status"`
+	MessageID string `json:"message_id"`
+	Folder    string `json:"folder"`
+	Seen      bool   `json:"seen"`
+	Modified  int    `json:"modified"`
+}
+
+func (h *handler) markMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
+	folder := stringParam(req, "folder", "INBOX")
+	msgID, err := req.RequireString("message_id")
+	if err != nil {
+		return mcplib.NewToolResultError("message_id is required"), nil
+	}
+	seen := boolParamDefault(req, "seen", true)
+
+	uid, err := strconv.ParseUint(msgID, 10, 32)
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
+	}
+
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
+		modified, err := c.SetSeen(folder, uint32(uid), seen)
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("mark message: %v", err)), nil
+		}
+		mr := &markResult{
+			Status:    markStatus(seen),
+			MessageID: msgID,
+			Folder:    folder,
+			Seen:      seen,
+			Modified:  modified,
+		}
+		return textResult(formatMarkResult(mr))
+	})
+}
+
+func (h *handler) batchMarkMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
+	ids, err := stringSliceParam(req, "message_ids")
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	if ids == nil {
+		return mcplib.NewToolResultError("message_ids is required"), nil
+	}
+	folder := stringParam(req, "folder", "INBOX")
+	seen := boolParamDefault(req, "seen", true)
+
+	if len(ids) == 0 {
+		return textResult(formatBatchMarkResult(0, 0, seen))
+	}
+
+	// Parse all UIDs up front so an invalid id is reported before a
+	// connection opens.
+	uids, parseErr := parseUIDs(ids)
+	if parseErr != "" {
+		return mcplib.NewToolResultError(parseErr), nil
+	}
+
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
+		modified, err := c.SetSeenBatch(folder, uids, seen)
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("batch mark: %v", err)), nil
+		}
+		return textResult(formatBatchMarkResult(modified, len(uids), seen))
 	})
 }
 
@@ -1104,13 +1323,49 @@ func intParam(req mcplib.CallToolRequest, key string, fallback int) (int, error)
 }
 
 func boolParam(req mcplib.CallToolRequest, key string) bool {
+	return boolParamDefault(req, key, false)
+}
+
+// boolParamDefault reads a boolean argument, returning fallback when the key is
+// absent or not a bool. Use it for flags whose default is true.
+func boolParamDefault(req mcplib.CallToolRequest, key string, fallback bool) bool {
 	args := req.GetArguments()
 	if v, ok := args[key]; ok {
 		if b, ok := v.(bool); ok {
 			return b
 		}
 	}
-	return false
+	return fallback
+}
+
+// parseUIDs converts message-id strings to UIDs, reporting every invalid id in
+// one message so the caller learns of all bad ids before a connection opens.
+// Duplicates are collapsed (first-seen order) to match the IMAP UID set the
+// server acts on, so a repeated id never manufactures a shortfall. It returns
+// an empty error string on success.
+func parseUIDs(ids []string) ([]uint32, string) {
+	uids := make([]uint32, 0, len(ids))
+	var parseErrs []string
+	for _, id := range ids {
+		uid, err := strconv.ParseUint(id, 10, 32)
+		if err != nil || uid == 0 {
+			parseErrs = append(parseErrs, fmt.Sprintf("#%s: invalid id", id))
+			continue
+		}
+		uids = append(uids, uint32(uid))
+	}
+	if len(parseErrs) > 0 {
+		return nil, fmt.Sprintf("invalid message_ids: %s", strings.Join(parseErrs, ", "))
+	}
+	return email.DedupUIDs(uids), ""
+}
+
+// markStatus names the state a mark_message call left a message in.
+func markStatus(seen bool) string {
+	if seen {
+		return "read"
+	}
+	return "unread"
 }
 
 // jsonResult is no longer used — all tools return pre-formatted text via

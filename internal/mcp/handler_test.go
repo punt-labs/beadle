@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -338,6 +340,71 @@ func TestHandler_BatchMoveMessages(t *testing.T) {
 	assert.Contains(t, r.text(), "Archive")
 }
 
+func TestHandler_MoveMessage_NotFound(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+	fix.AddMessage("Archive", "system@test.com", "Placeholder", "x")
+
+	r := callTool(t, s, "move_message", map[string]any{
+		"message_id":  "9999",
+		"destination": "Archive",
+	})
+	assert.False(t, r.IsError, "a missing UID is not an error")
+	assert.Contains(t, r.text(), "not found")
+	assert.NotContains(t, r.text(), "moved #", "must not claim a move that did not happen")
+}
+
+func TestHandler_BatchMoveMessages_Shortfall(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body")
+	uid2 := fix.AddMessage("INBOX", "alice@test.com", "Msg 2", "body")
+	fix.AddMessage("Archive", "system@test.com", "Placeholder", "x")
+
+	// Two present + one absent UID: only two move; the shortfall is reported.
+	r := callTool(t, s, "batch_move_messages", map[string]any{
+		"message_ids": []any{fmt.Sprintf("%d", uid1), fmt.Sprintf("%d", uid2), "9999"},
+		"destination": "Archive",
+	})
+	assert.False(t, r.IsError, "batch move failed: %s", r.text())
+	assert.Contains(t, r.text(), "moved 2 of 3 messages to Archive (1 not found)")
+}
+
+func TestHandler_BatchMoveMessages_DuplicateUIDNoShortfall(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body")
+	uid2 := fix.AddMessage("INBOX", "alice@test.com", "Msg 2", "body")
+	fix.AddMessage("Archive", "system@test.com", "Placeholder", "x")
+
+	// uid1 appears twice: the request has 2 distinct UIDs, both present, so it
+	// reports "moved 2 messages" — a repeat must not manufacture a shortfall.
+	r := callTool(t, s, "batch_move_messages", map[string]any{
+		"message_ids": []any{fmt.Sprintf("%d", uid1), fmt.Sprintf("%d", uid1), fmt.Sprintf("%d", uid2)},
+		"destination": "Archive",
+	})
+	assert.False(t, r.IsError, "batch move failed: %s", r.text())
+	assert.Contains(t, r.text(), "moved 2 messages to Archive")
+	assert.NotContains(t, r.text(), "not found")
+}
+
+func TestHandler_BatchMarkMessages_DuplicateUIDNoShortfall(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body")
+	uid2 := fix.AddMessage("INBOX", "alice@test.com", "Msg 2", "body")
+
+	r := callTool(t, s, "batch_mark_messages", map[string]any{
+		"message_ids": []any{fmt.Sprintf("%d", uid1), fmt.Sprintf("%d", uid2), fmt.Sprintf("%d", uid1)},
+	})
+	assert.False(t, r.IsError, "batch mark failed: %s", r.text())
+	assert.Contains(t, r.text(), "marked 2 messages read")
+	assert.NotContains(t, r.text(), "not found")
+}
+
 func TestHandler_BatchMoveMessages_InvalidUID(t *testing.T) {
 	s, env, fix := setupHandler(t)
 	env.AddContact("Alice", "alice@test.com", "r--")
@@ -371,6 +438,120 @@ func TestHandler_BatchMoveMessages_MissingParam(t *testing.T) {
 	s, _, _ := setupHandler(t)
 
 	r := callTool(t, s, "batch_move_messages", map[string]any{})
+	assert.True(t, r.IsError, "missing message_ids should produce error")
+	assert.Contains(t, r.text(), "message_ids is required")
+}
+
+// splitLines splits rendered tool output into lines for width assertions.
+func splitLines(s string) []string {
+	return strings.Split(strings.TrimRight(s, "\n"), "\n")
+}
+
+// listUnreadMarker returns the list_messages output, used to assert a message's
+// read state via the "●" marker the table prints for unread mail.
+func listUnreadMarker(t *testing.T, s *server.MCPServer) string {
+	t.Helper()
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10, "all_repos": true})
+	require.False(t, r.IsError, "list failed: %s", r.text())
+	return r.text()
+}
+
+func TestHandler_MarkMessage_SetAndClearSeen(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid := fix.AddMessage("INBOX", "alice@test.com", "Mark me", "body")
+
+	// Seeded messages start unread.
+	assert.Contains(t, listUnreadMarker(t, s), "●", "message starts unread")
+
+	// Mark read.
+	r := callTool(t, s, "mark_message", map[string]any{"message_id": fmt.Sprintf("%d", uid)})
+	assert.False(t, r.IsError, "mark read failed: %s", r.text())
+	assert.Contains(t, r.text(), "marked")
+	assert.Contains(t, r.text(), "read")
+	assert.NotContains(t, listUnreadMarker(t, s), "●", "message is read after mark")
+
+	// Mark unread again.
+	r = callTool(t, s, "mark_message", map[string]any{"message_id": fmt.Sprintf("%d", uid), "seen": false})
+	assert.False(t, r.IsError, "mark unread failed: %s", r.text())
+	assert.Contains(t, r.text(), "unread")
+	assert.Contains(t, listUnreadMarker(t, s), "●", "message is unread after clearing Seen")
+}
+
+func TestHandler_ReadMessage_DoesNotMarkSeen(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid := fix.AddMessage("INBOX", "alice@test.com", "Peek me", "body")
+
+	r := callTool(t, s, "read_message", map[string]any{"message_id": fmt.Sprintf("%d", uid)})
+	require.False(t, r.IsError, "read failed: %s", r.text())
+
+	// Reading must not set \Seen — the message is still unread.
+	assert.Contains(t, listUnreadMarker(t, s), "●", "read_message must not mark the message seen")
+}
+
+func TestHandler_BatchMarkMessages(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body")
+	uid2 := fix.AddMessage("INBOX", "alice@test.com", "Msg 2", "body")
+
+	r := callTool(t, s, "batch_mark_messages", map[string]any{
+		"message_ids": []any{fmt.Sprintf("%d", uid1), fmt.Sprintf("%d", uid2)},
+	})
+	assert.False(t, r.IsError, "batch mark failed: %s", r.text())
+	assert.Contains(t, r.text(), "marked 2 messages read")
+	assert.NotContains(t, listUnreadMarker(t, s), "●", "both messages read after batch mark")
+}
+
+func TestHandler_MarkMessage_NotFound(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "mark_message", map[string]any{"message_id": "9999"})
+	assert.False(t, r.IsError, "a missing UID is not an error")
+	assert.Contains(t, r.text(), "not found")
+	assert.NotContains(t, r.text(), "marked #9999 read", "must not claim a mark that did not happen")
+}
+
+func TestHandler_BatchMarkMessages_Shortfall(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body")
+
+	// One present + one absent UID: only one is modified; shortfall reported.
+	r := callTool(t, s, "batch_mark_messages", map[string]any{
+		"message_ids": []any{fmt.Sprintf("%d", uid1), "9999"},
+	})
+	assert.False(t, r.IsError, "batch mark failed: %s", r.text())
+	assert.Contains(t, r.text(), "marked 1 of 2 messages read (1 not found)")
+}
+
+func TestHandler_BatchMarkMessages_InvalidUID(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "batch_mark_messages", map[string]any{
+		"message_ids": []any{"1", "not-a-number"},
+	})
+	assert.True(t, r.IsError, "invalid UID should produce error")
+	assert.Contains(t, r.text(), "#not-a-number")
+}
+
+func TestHandler_BatchMarkMessages_Empty(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "batch_mark_messages", map[string]any{"message_ids": []any{}})
+	assert.False(t, r.IsError, "empty batch failed: %s", r.text())
+	assert.Contains(t, r.text(), "marked 0 messages read")
+}
+
+func TestHandler_BatchMarkMessages_MissingParam(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "batch_mark_messages", map[string]any{})
 	assert.True(t, r.IsError, "missing message_ids should produce error")
 	assert.Contains(t, r.text(), "message_ids is required")
 }
@@ -453,6 +634,151 @@ func TestHandler_AddContact_PatternAcceptsReadOnly(t *testing.T) {
 	})
 	assert.False(t, r.IsError)
 	assert.Contains(t, r.text(), "Anthropic Mail")
+}
+
+func TestHandler_ListMessages_OffsetPaging(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	for i := range 25 {
+		fix.AddMessage("INBOX", "alice@test.com", fmt.Sprintf("msg-%02d", i), "body")
+	}
+
+	// Page 0: newest 10 (msg-15..msg-24).
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10, "offset": float64(0), "all_repos": true})
+	assert.False(t, r.IsError, "list failed: %s", r.text())
+	assert.Contains(t, r.text(), "msg-24")
+	assert.Contains(t, r.text(), "msg-15")
+	assert.NotContains(t, r.text(), "msg-14")
+
+	// Page 1: next 10 (msg-05..msg-14).
+	r = callTool(t, s, "list_messages", map[string]any{"count": 10, "offset": float64(10), "all_repos": true})
+	assert.False(t, r.IsError, "list failed: %s", r.text())
+	assert.Contains(t, r.text(), "msg-14")
+	assert.Contains(t, r.text(), "msg-05")
+	assert.NotContains(t, r.text(), "msg-15")
+}
+
+func TestHandler_ListMessages_PastEndPageShowsTotal(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	for i := range 25 {
+		fix.AddMessage("INBOX", "alice@test.com", fmt.Sprintf("msg-%02d", i), "body")
+	}
+
+	// A page far past the end must show the true total, not read as an empty
+	// mailbox.
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10, "offset": float64(9999), "all_repos": true})
+	assert.False(t, r.IsError, "list failed: %s", r.text())
+	assert.Contains(t, r.text(), "showing 0 of 25 messages")
+	assert.Contains(t, r.text(), "page past end")
+	assert.NotContains(t, r.text(), "No messages.", "a past-end page is not an empty mailbox")
+}
+
+func TestHandler_ListMessages_NegativeOffset(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "list_messages", map[string]any{"offset": float64(-1), "all_repos": true})
+	assert.True(t, r.IsError, "negative offset should error")
+	assert.Contains(t, r.text(), "offset must be non-negative")
+}
+
+func TestHandler_ListMessages_NonPositiveCount(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	for _, c := range []float64{0, -1} {
+		r := callTool(t, s, "list_messages", map[string]any{"count": c, "all_repos": true})
+		assert.True(t, r.IsError, "count %v should error", c)
+		assert.Contains(t, r.text(), "count must be positive")
+	}
+}
+
+func TestHandler_SearchMessages_NonPositiveCount(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	for _, c := range []float64{0, -3} {
+		r := callTool(t, s, "search_messages", map[string]any{"text": "x", "count": c, "all_repos": true})
+		assert.True(t, r.IsError, "count %v should error", c)
+		assert.Contains(t, r.text(), "count must be positive")
+	}
+}
+
+func TestHandler_SearchMessages_ByFromAndSubject(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+	env.AddContact("Bob", "bob@test.com", "r--")
+
+	fix.AddMessage("INBOX", "alice@test.com", "release plan", "body")
+	fix.AddMessage("INBOX", "bob@test.com", "lunch", "body")
+
+	// from filters to alice's mail.
+	r := callTool(t, s, "search_messages", map[string]any{"from": "alice@test.com", "all_repos": true})
+	assert.False(t, r.IsError, "search failed: %s", r.text())
+	assert.Contains(t, r.text(), "release plan")
+	assert.NotContains(t, r.text(), "lunch")
+
+	// subject filters to the release mail.
+	r = callTool(t, s, "search_messages", map[string]any{"subject": "release", "all_repos": true})
+	assert.False(t, r.IsError, "search failed: %s", r.text())
+	assert.Contains(t, r.text(), "release plan")
+	assert.NotContains(t, r.text(), "lunch")
+
+	// Every rendered line fits the 80-rune budget.
+	for _, line := range splitLines(r.text()) {
+		assert.LessOrEqual(t, utf8.RuneCountInString(line), 80, "row over 80 runes: %q", line)
+	}
+}
+
+func TestHandler_SearchMessages_RequiresCriterion(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "search_messages", map[string]any{"all_repos": true})
+	assert.True(t, r.IsError, "empty search should error")
+	assert.Contains(t, r.text(), "at least one of")
+}
+
+func TestHandler_SearchMessages_BadSince(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "search_messages", map[string]any{"since": "last tuesday", "all_repos": true})
+	assert.True(t, r.IsError, "bad since should error")
+	assert.Contains(t, r.text(), "invalid date")
+}
+
+func TestHandler_SearchMessages_NegativeOffset(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "search_messages", map[string]any{"text": "x", "offset": float64(-1), "all_repos": true})
+	assert.True(t, r.IsError, "negative offset should error")
+	assert.Contains(t, r.text(), "offset must be non-negative")
+}
+
+func TestHandler_SearchMessages_ScopesToCurrentRepo(t *testing.T) {
+	slug := email.ResolveRepoTag(context.Background(), nil, "").Slug
+	if slug == "" {
+		t.Skip("no git remote resolved; repo scoping is a no-op here")
+	}
+
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	raw := fmt.Sprintf("From: alice@test.com\r\n%s: %s\r\nSubject: scoped release\r\n"+
+		"Content-Type: text/plain\r\n\r\nbody", email.HeaderRepo, slug)
+	fix.AddRawMessage("INBOX", []byte(raw))
+	fix.AddMessage("INBOX", "alice@test.com", "untagged release", "body")
+
+	// Default scope: only the current repo's matching mail.
+	r := callTool(t, s, "search_messages", map[string]any{"subject": "release"})
+	assert.False(t, r.IsError, "search failed: %s", r.text())
+	assert.Contains(t, r.text(), "scoped release")
+	assert.NotContains(t, r.text(), "untagged release")
+
+	// all_repos widens to every repo.
+	r = callTool(t, s, "search_messages", map[string]any{"subject": "release", "all_repos": true})
+	assert.False(t, r.IsError, "search failed: %s", r.text())
+	assert.Contains(t, r.text(), "scoped release")
+	assert.Contains(t, r.text(), "untagged release")
 }
 
 func TestHandler_ListMessages_ScopesToCurrentRepo(t *testing.T) {

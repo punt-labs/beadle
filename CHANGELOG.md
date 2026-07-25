@@ -35,9 +35,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deletes the `.punt-labs/beadle/` directory. The `CLAUDE.md` edit is atomic,
   lock-serialized, and byte-preserving — it touches only its own import line.
   `install`/`uninstall` are unchanged and remain once-per-machine.
+- Inbox reading — search, mark read/unread, and pagination. `beadle-email search`
+  and the `search_messages` MCP tool query the mailbox by `from` / `subject` /
+  `since` / `text` via server-side IMAP SEARCH (repo-scoped by default,
+  `--all-repos` / `all_repos` to widen). `beadle-email mark [--unread]` and the
+  `mark_message` / `batch_mark_messages` tools set or clear the read flag;
+  reading a message never changes it (kept behind an IMAP Peek), so the scoped
+  new-mail count stays a real worklist. `list` and `search` take `--offset` /
+  `offset` to page beyond the first window.
 
 ### Fixed
 
+- Batch mark and move now report the number of messages actually changed, not
+  the number requested — an operation targeting a stale or absent UID no longer
+  reports a false success (it reports "M of N", naming the shortfall). On a
+  transient IMAP search failure, an unread listing (including the daemon's inbox
+  scan) fails closed rather than surfacing already-read mail, and a page past the
+  end reports the true total instead of reading as an empty mailbox.
 - beadle-email no longer double-registers its MCP server. The beadle plugin
   (which declares the server in its `plugin.json`) is now the single automatic
   source: `beadle-email install`, `install.sh`, and `doctor` all converge on it

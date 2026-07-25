@@ -265,8 +265,10 @@ All permissions are stored explicitly. There are no implicit overrides. Contacts
 ## CLI
 
 ```bash
-beadle-email list [--folder F] [--count N] [--unread] [--all-repos]  # List (current repo by default)
-beadle-email read <uid> [--folder F]                    # Read a message
+beadle-email list [--folder F] [--count N] [--offset N] [--unread] [--all-repos]  # List (current repo by default)
+beadle-email read <uid> [--folder F]                    # Read a message (leaves it unread)
+beadle-email search [--from A] [--subject S] [--since D] [--text T] [--count N] [--offset N] [--unread] [--all-repos]  # Search the mailbox
+beadle-email mark <uid> [--ids a,b,c] [--unread] [--folder F]  # Mark message(s) read/unread
 beadle-email send --to ADDR --subject S --body B        # Send an email
 beadle-email move <uid> [--folder F] [--to DEST]        # Move a message
 beadle-email folders                                    # List IMAP folders
