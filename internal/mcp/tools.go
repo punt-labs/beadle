@@ -880,16 +880,39 @@ func (h *handler) replyMessage(ctx context.Context, req mcplib.CallToolRequest) 
 
 		tag := email.ResolveRepoTag(ctx, h.logger, id.Handle)
 		subject := email.ReplySubject(rc.Subject, tag)
-		threading := email.Threading{InReplyTo: rc.MessageID, References: rc.References}
-		body := email.QuoteBody(replyText, rc.From, rc.Date, rc.Body)
+
+		// The reply promises threading and a quote. When the original cannot
+		// supply either, still send — but surface the gap in the tool output and
+		// the log rather than reporting a clean "sent" that silently did neither.
+		var warnings []string
+
+		var threading email.Threading
+		if rc.MessageID != "" {
+			threading = email.Threading{InReplyTo: rc.MessageID, References: rc.References}
+		} else {
+			h.logger.Warn("reply threading dropped: original has no Message-ID", "folder", folder, "uid", uid)
+			warnings = append(warnings, "reply sent without threading headers: original has no Message-ID")
+		}
+
+		body := replyText
+		if rc.Quotable {
+			body = email.QuoteBody(replyText, rc.From, rc.Date, rc.Body)
+		} else {
+			h.logger.Warn("reply quote omitted: original body could not be extracted", "folder", folder, "uid", uid)
+			warnings = append(warnings, "original body could not be extracted; reply sent without a quote")
+		}
 
 		result, sendErr := email.TrySendChain(cfg, h.logger, to, cc, bcc, subject, body, html, attachments, encryptKeyIDs, tag, threading)
 		if sendErr != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("send reply: %v", sendErr)), nil
 		}
+
 		out := formatSendResult(result)
 		if encryptionWarning != "" {
-			out += "\n" + encryptionWarning
+			warnings = append(warnings, encryptionWarning)
+		}
+		for _, w := range warnings {
+			out += "\n" + w
 		}
 		return textResult(out)
 	})

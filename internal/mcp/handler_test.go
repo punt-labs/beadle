@@ -389,6 +389,69 @@ func TestHandler_ReplyMessage_MissingBody(t *testing.T) {
 	assert.Contains(t, r.text(), "body is required")
 }
 
+func TestHandler_ReplyMessage_NoMessageID_WarnsNoThreading(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "-w-")
+	// No Message-ID header: nothing to thread against.
+	raw := "From: Alice <alice@test.com>\r\n" +
+		"To: me@test.com\r\n" +
+		"Subject: [punt-labs/beadle] Question\r\n" +
+		"Date: Sat, 25 Jul 2026 09:30:00 +0000\r\n" +
+		"Content-Type: text/plain\r\n\r\n" +
+		"What is the status?"
+	uid := fix.AddRawMessage("INBOX", []byte(raw))
+
+	r := callTool(t, s, "reply_message", map[string]any{
+		"message_id": fmt.Sprintf("%d", uid),
+		"body":       "Status is green.",
+	})
+	require.False(t, r.IsError, "reply failed: %s", r.text())
+	assert.Contains(t, r.text(), "without threading headers")
+
+	sent := fix.SentMessages()
+	require.Len(t, sent, 1)
+	delivered := string(sent[0].Raw)
+	assert.NotContains(t, delivered, "In-Reply-To:")
+	assert.NotContains(t, delivered, "References:")
+	// The quote is still assembled — a missing Message-ID does not affect it.
+	assert.Contains(t, delivered, "> What is the status?")
+}
+
+func TestHandler_ReplyMessage_UnquotableBody_OmitsQuote(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "-w-")
+	// Multipart with only an attachment part: ParseMIME yields "(no text body)".
+	raw := "From: Alice <alice@test.com>\r\n" +
+		"To: me@test.com\r\n" +
+		"Subject: [punt-labs/beadle] Question\r\n" +
+		"Message-ID: <orig@test>\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n" +
+		"--b\r\n" +
+		"Content-Type: application/octet-stream\r\n" +
+		"Content-Disposition: attachment; filename=\"x.bin\"\r\n\r\n" +
+		"BINARYDATA\r\n" +
+		"--b--\r\n"
+	uid := fix.AddRawMessage("INBOX", []byte(raw))
+
+	r := callTool(t, s, "reply_message", map[string]any{
+		"message_id": fmt.Sprintf("%d", uid),
+		"body":       "Got it, thanks.",
+	})
+	require.False(t, r.IsError, "reply failed: %s", r.text())
+	assert.Contains(t, r.text(), "could not be extracted")
+
+	sent := fix.SentMessages()
+	require.Len(t, sent, 1)
+	delivered := string(sent[0].Raw)
+	// No diagnostic sentinel is shipped, and no quote block is emitted.
+	assert.NotContains(t, delivered, "(no text body)")
+	assert.NotContains(t, delivered, "> ")
+	assert.Contains(t, delivered, "Got it, thanks.")
+	// Threading is intact — the original has a Message-ID.
+	assert.Contains(t, delivered, "In-Reply-To: <orig@test>")
+}
+
 func TestHandler_MoveMessage(t *testing.T) {
 	s, env, fix := setupHandler(t)
 	env.AddContact("Alice", "alice@test.com", "r--")

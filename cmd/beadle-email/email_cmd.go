@@ -515,8 +515,22 @@ var replyCmd = &cobra.Command{
 		}
 		tag := email.ResolveRepoTag(cmd.Context(), logger, agent)
 		subject := email.ReplySubject(rc.Subject, tag)
-		threading := email.Threading{InReplyTo: rc.MessageID, References: rc.References}
-		body := email.QuoteBody(replyBody, rc.From, rc.Date, rc.Body)
+
+		// Surface a dropped thread link or an unquotable original on stderr,
+		// then send anyway — the same signals the reply_message tool reports.
+		var threading email.Threading
+		if rc.MessageID != "" {
+			threading = email.Threading{InReplyTo: rc.MessageID, References: rc.References}
+		} else {
+			logger.Warn("reply sent without threading headers: original has no Message-ID", "uid", uidNum)
+		}
+
+		body := replyBody
+		if rc.Quotable {
+			body = email.QuoteBody(replyBody, rc.From, rc.Date, rc.Body)
+		} else {
+			logger.Warn("original body could not be extracted; reply sent without a quote", "uid", uidNum)
+		}
 
 		result, err := email.TrySendChain(cfg, logger, []string{rc.ReplyTo}, cc, bcc, subject, body, "", nil, nil, tag, threading)
 		if err != nil {

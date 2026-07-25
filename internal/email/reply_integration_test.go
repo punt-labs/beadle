@@ -85,6 +85,30 @@ func TestReply_FetchThread(t *testing.T) {
 	}
 }
 
+// TestReply_FetchThread_UnquotableAndNoMessageID proves FetchThread reports a
+// non-quotable body (rather than a ParseMIME placeholder) and an empty
+// Message-ID when the original supplies neither.
+func TestReply_FetchThread_UnquotableAndNoMessageID(t *testing.T) {
+	f := testserver.NewFixture(t)
+	// No Message-ID header, and only an attachment part (no text body).
+	raw := "From: Alice <alice@test.com>\r\n" +
+		"Subject: [punt-labs/beadle] Q\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n" +
+		"--b\r\n" +
+		"Content-Type: application/octet-stream\r\n" +
+		"Content-Disposition: attachment; filename=\"x.bin\"\r\n\r\n" +
+		"DATA\r\n--b--\r\n"
+	uid := f.AddRawMessage("INBOX", []byte(raw))
+	client := dialFixture(t, f)
+
+	rc, err := client.FetchThread("INBOX", uid)
+	require.NoError(t, err)
+	assert.Equal(t, "", rc.MessageID)
+	assert.False(t, rc.Quotable, "attachment-only original is not quotable")
+	assert.Equal(t, "", rc.Body, "no placeholder is retained as Body")
+}
+
 // TestReply_SendThreadedUnsigned drives the full reply send through the
 // in-process SMTP server and asserts the threading headers land at the top
 // level of the delivered message, alongside a Re: subject.

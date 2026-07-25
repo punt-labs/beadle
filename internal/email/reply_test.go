@@ -183,6 +183,27 @@ func TestQuoteBody(t *testing.T) {
 	})
 }
 
+func TestExtractionFailed(t *testing.T) {
+	tests := []struct {
+		body string
+		want bool
+	}{
+		{"(parse error)", true},
+		{"(read error)", true},
+		{"(mime parse error)", true},
+		{"(not multipart)", true},
+		{"(no text body)", true},
+		{"", false},
+		{"a real body", false},
+		{"(some other note)", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.body, func(t *testing.T) {
+			assert.Equal(t, tt.want, extractionFailed(tt.body))
+		})
+	}
+}
+
 // TestComposeSignedRaw_ThreadingVerifies is the reply signing invariant: the
 // In-Reply-To/References headers are top-level, outside the signed body, so a
 // signed reply still verifies. gpgHome/gpgGenKey are defined in send_test.go.

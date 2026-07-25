@@ -19,7 +19,8 @@ type ReplyContext struct {
 	From       string    // the original From header, for the quote attribution line
 	Subject    string    // the original subject, for the Re: line
 	Date       time.Time // the original Date, for the quote attribution line
-	Body       string    // the original plain-text body, for quoting
+	Body       string    // the original plain-text body, for quoting (empty when not Quotable)
+	Quotable   bool      // whether Body is a real body, not a ParseMIME failure placeholder
 }
 
 // FetchThread reads the message at uid in folder and returns the context needed
@@ -42,7 +43,16 @@ func (c *Client) FetchThread(folder string, uid uint32) (*ReplyContext, error) {
 		replyTo = ExtractEmailAddress(h.Get("From"))
 	}
 	date, _ := h.Date() // zero when the Date header is absent or unparseable
+
+	// ParseMIME returns a placeholder, never an error, when it cannot extract a
+	// body. A reply must not quote that placeholder into outbound mail, so treat
+	// it as no body: drop it and mark the context not quotable.
 	body, _, _ := ParseMIME(raw)
+	quotable := !extractionFailed(body)
+	if !quotable {
+		body = ""
+	}
+
 	return &ReplyContext{
 		MessageID:  messageID,
 		References: buildReferences(h.Get("References"), h.Get("In-Reply-To"), messageID),
@@ -51,6 +61,7 @@ func (c *Client) FetchThread(folder string, uid uint32) (*ReplyContext, error) {
 		Subject:    h.Get("Subject"),
 		Date:       date,
 		Body:       body,
+		Quotable:   quotable,
 	}, nil
 }
 
