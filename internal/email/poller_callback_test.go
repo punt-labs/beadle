@@ -137,6 +137,30 @@ func TestPoller_ScopedUnreadCount(t *testing.T) {
 	p.Stop()
 }
 
+// TestPoller_DaemonScopeCountsUntaggedMail guards the daemon's poller
+// configuration: owner command emails are untagged (no X-Beadle-Repo, no
+// [slug]), so a repo-scoped count would never see them and OnNewMail would
+// never fire. Configured as cmd/beadle-daemon builds it — WithRepoScope
+// returning "" — the poller must count an untagged unread message. This fails
+// against the CWD-scoped default, which resolves this repo's slug and filters
+// the untagged message out.
+func TestPoller_DaemonScopeCountsUntaggedMail(t *testing.T) {
+	env := testenv.New(t, "test@test.com")
+	fix := testserver.NewFixture(t)
+	writeConfigWithPoll(t, env, fix.Config)
+	dialer := testserver.TestDialer{Password: "testpass"}
+
+	// An owner command email: plain, untagged, unread.
+	fix.AddMessage("INBOX", "owner@example.com", "run the thing", "please")
+
+	p := email.NewPoller(nil, env.Resolver, discardLogger(), dialer, allRepos())
+	before := time.Now()
+	require.NoError(t, p.Start())
+	waitForPollAfter(t, p, before)
+	assert.Equal(t, uint32(1), p.Status().Unseen, "unscoped daemon poller must count untagged owner mail")
+	p.Stop()
+}
+
 // taggedRaw builds a raw RFC822 message carrying an X-Beadle-Repo header for
 // slug. The message has no Seen flag when seeded via AddRawMessage.
 func taggedRaw(from, slug, subject string) []byte {
