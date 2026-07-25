@@ -375,6 +375,92 @@ func TestHandler_BatchMoveMessages_MissingParam(t *testing.T) {
 	assert.Contains(t, r.text(), "message_ids is required")
 }
 
+// isUnread reports whether the list output marks message uid unread. The list
+// table prints "●" in the read column for unread messages.
+func listUnreadMarker(t *testing.T, s *server.MCPServer) string {
+	t.Helper()
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10, "all_repos": true})
+	require.False(t, r.IsError, "list failed: %s", r.text())
+	return r.text()
+}
+
+func TestHandler_MarkMessage_SetAndClearSeen(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid := fix.AddMessage("INBOX", "alice@test.com", "Mark me", "body")
+
+	// Seeded messages start unread.
+	assert.Contains(t, listUnreadMarker(t, s), "●", "message starts unread")
+
+	// Mark read.
+	r := callTool(t, s, "mark_message", map[string]any{"message_id": fmt.Sprintf("%d", uid)})
+	assert.False(t, r.IsError, "mark read failed: %s", r.text())
+	assert.Contains(t, r.text(), "marked")
+	assert.Contains(t, r.text(), "read")
+	assert.NotContains(t, listUnreadMarker(t, s), "●", "message is read after mark")
+
+	// Mark unread again.
+	r = callTool(t, s, "mark_message", map[string]any{"message_id": fmt.Sprintf("%d", uid), "seen": false})
+	assert.False(t, r.IsError, "mark unread failed: %s", r.text())
+	assert.Contains(t, r.text(), "unread")
+	assert.Contains(t, listUnreadMarker(t, s), "●", "message is unread after clearing Seen")
+}
+
+func TestHandler_ReadMessage_DoesNotMarkSeen(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid := fix.AddMessage("INBOX", "alice@test.com", "Peek me", "body")
+
+	r := callTool(t, s, "read_message", map[string]any{"message_id": fmt.Sprintf("%d", uid)})
+	require.False(t, r.IsError, "read failed: %s", r.text())
+
+	// Reading must not set \Seen — the message is still unread.
+	assert.Contains(t, listUnreadMarker(t, s), "●", "read_message must not mark the message seen")
+}
+
+func TestHandler_BatchMarkMessages(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body")
+	uid2 := fix.AddMessage("INBOX", "alice@test.com", "Msg 2", "body")
+
+	r := callTool(t, s, "batch_mark_messages", map[string]any{
+		"message_ids": []any{fmt.Sprintf("%d", uid1), fmt.Sprintf("%d", uid2)},
+	})
+	assert.False(t, r.IsError, "batch mark failed: %s", r.text())
+	assert.Contains(t, r.text(), "marked 2 messages read")
+	assert.NotContains(t, listUnreadMarker(t, s), "●", "both messages read after batch mark")
+}
+
+func TestHandler_BatchMarkMessages_InvalidUID(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "batch_mark_messages", map[string]any{
+		"message_ids": []any{"1", "not-a-number"},
+	})
+	assert.True(t, r.IsError, "invalid UID should produce error")
+	assert.Contains(t, r.text(), "#not-a-number")
+}
+
+func TestHandler_BatchMarkMessages_Empty(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "batch_mark_messages", map[string]any{"message_ids": []any{}})
+	assert.False(t, r.IsError, "empty batch failed: %s", r.text())
+	assert.Contains(t, r.text(), "marked 0 messages read")
+}
+
+func TestHandler_BatchMarkMessages_MissingParam(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "batch_mark_messages", map[string]any{})
+	assert.True(t, r.IsError, "missing message_ids should produce error")
+	assert.Contains(t, r.text(), "message_ids is required")
+}
+
 func TestHandler_Contacts_CRUD(t *testing.T) {
 	s, _, _ := setupHandler(t)
 

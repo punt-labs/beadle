@@ -465,6 +465,46 @@ func (c *Client) MoveMessages(srcFolder string, uids []uint32, dstFolder string)
 	return nil
 }
 
+// SetSeen marks a message read or unread by UID, adding or removing the \Seen
+// flag. It mirrors MoveMessage: select read-write, then STORE. seen true adds
+// \Seen (read); seen false removes it (unread). A UID absent on the server is
+// ignored by the protocol, as with Move.
+func (c *Client) SetSeen(folder string, uid uint32, seen bool) error {
+	return c.SetSeenBatch(folder, []uint32{uid}, seen)
+}
+
+// SetSeenBatch marks multiple messages read or unread by UID in one STORE.
+// A single SELECT precedes the STORE. UIDs absent on the server are silently
+// ignored by the IMAP protocol.
+func (c *Client) SetSeenBatch(folder string, uids []uint32, seen bool) error {
+	if len(uids) == 0 {
+		return nil
+	}
+
+	if _, err := c.imap.Select(folder, &imap.SelectOptions{ReadOnly: false}).Wait(); err != nil {
+		return fmt.Errorf("select %q: %w", folder, err)
+	}
+
+	imapUIDs := make([]imap.UID, len(uids))
+	for i, u := range uids {
+		imapUIDs[i] = imap.UID(u)
+	}
+
+	op := imap.StoreFlagsDel
+	if seen {
+		op = imap.StoreFlagsAdd
+	}
+	store := &imap.StoreFlags{
+		Op:     op,
+		Silent: true,
+		Flags:  []imap.Flag{imap.FlagSeen},
+	}
+	if err := c.imap.Store(imap.UIDSetNum(imapUIDs...), store, nil).Close(); err != nil {
+		return fmt.Errorf("store \\Seen on %d messages: %w", len(uids), err)
+	}
+	return nil
+}
+
 func formatAddress(addr imap.Address) string {
 	if addr.Name != "" {
 		return fmt.Sprintf("%s <%s@%s>", addr.Name, addr.Mailbox, addr.Host)

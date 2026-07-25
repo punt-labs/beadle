@@ -278,6 +278,16 @@ func formatBatchMoveResult(count int, destination string) string {
 	return fmt.Sprintf("moved %d messages to %s", count, destination)
 }
 
+// formatMarkResult formats a mark operation result.
+func formatMarkResult(r *markResult) string {
+	return fmt.Sprintf("marked #%s %s", r.MessageID, markStatus(r.Seen))
+}
+
+// formatBatchMarkResult formats a batch mark summary.
+func formatBatchMarkResult(count int, seen bool) string {
+	return fmt.Sprintf("marked %d messages %s", count, markStatus(seen))
+}
+
 // formatDownloadResult formats a download result.
 func formatDownloadResult(r *downloadResult) string {
 	return fmt.Sprintf("%s: %s (%d bytes)\n%s", r.Status, r.Filename, r.Size, r.Path)

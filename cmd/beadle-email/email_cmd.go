@@ -353,6 +353,74 @@ func init() {
 	moveCmd.Flags().StringVarP(&moveConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
 }
 
+// --- mark ---
+
+var (
+	markFolder string
+	markIDs    string
+	markUnread bool
+	markConfig string
+)
+
+var markCmd = &cobra.Command{
+	Use:   "mark [uid]",
+	Short: "Mark messages read or unread",
+	Long: "Mark one or more messages read (default) or unread (--unread). " +
+		"Pass a single UID as an argument, or a comma-separated list with --ids.",
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ids := splitAddresses(markIDs)
+		if len(args) == 1 {
+			ids = append(ids, args[0])
+		}
+		if len(ids) == 0 {
+			return fmt.Errorf("a UID argument or --ids is required")
+		}
+
+		// Parse UIDs up front so an invalid id is reported before connecting.
+		uids := make([]uint32, 0, len(ids))
+		for _, id := range ids {
+			n, err := strconv.ParseUint(id, 10, 32)
+			if err != nil || n == 0 {
+				return fmt.Errorf("invalid UID %q", id)
+			}
+			uids = append(uids, uint32(n))
+		}
+
+		cfg, _, err := resolveConfig(markConfig)
+		if err != nil {
+			return err
+		}
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		client, err := email.Dial(cfg, logger)
+		if err != nil {
+			return fmt.Errorf("connect: %w", err)
+		}
+		defer client.Close()
+
+		seen := !markUnread
+		if err := client.SetSeenBatch(markFolder, uids, seen); err != nil {
+			return fmt.Errorf("mark: %w", err)
+		}
+		state := "read"
+		if markUnread {
+			state = "unread"
+		}
+		result := map[string]any{"status": "marked", "state": state, "count": len(uids)}
+		g.printResult(result, func() {
+			fmt.Printf("marked %d message(s) %s\n", len(uids), state)
+		})
+		return nil
+	},
+}
+
+func init() {
+	markCmd.Flags().StringVar(&markFolder, "folder", "INBOX", "IMAP folder")
+	markCmd.Flags().StringVar(&markIDs, "ids", "", "Comma-separated UIDs to mark")
+	markCmd.Flags().BoolVar(&markUnread, "unread", false, "Mark unread instead of read")
+	markCmd.Flags().StringVarP(&markConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
+}
+
 // --- folders ---
 
 var foldersConfig string

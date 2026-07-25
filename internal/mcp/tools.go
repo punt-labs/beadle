@@ -63,6 +63,8 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 	s.AddTool(checkTrustTool(), h.checkTrust)
 	s.AddTool(moveMessageTool(), h.moveMessage)
 	s.AddTool(batchMoveMessagesTool(), h.batchMoveMessages)
+	s.AddTool(markMessageTool(), h.markMessage)
+	s.AddTool(batchMarkMessagesTool(), h.batchMarkMessages)
 	s.AddTool(downloadAttachmentTool(), h.downloadAttachment)
 
 	s.AddTool(listContactsTool(), h.listContacts)
@@ -311,6 +313,43 @@ func batchMoveMessagesTool() mcplib.Tool {
 		mcplib.WithString("destination",
 			mcplib.Description("Destination folder name"),
 			mcplib.DefaultString("Archive"),
+		),
+	)
+}
+
+func markMessageTool() mcplib.Tool {
+	return mcplib.NewTool("mark_message",
+		mcplib.WithDescription("Mark a message read or unread. Sets the \\Seen flag when seen is true (the default), clears it when false. Reading a message never changes its read state; marking is always explicit."),
+		mcplib.WithString("folder",
+			mcplib.Description("IMAP folder name"),
+			mcplib.DefaultString("INBOX"),
+		),
+		mcplib.WithString("message_id",
+			mcplib.Required(),
+			mcplib.Description("Message UID to mark"),
+		),
+		mcplib.WithBoolean("seen",
+			mcplib.Description("Mark read (true, default) or unread (false)"),
+			mcplib.DefaultBool(true),
+		),
+	)
+}
+
+func batchMarkMessagesTool() mcplib.Tool {
+	return mcplib.NewTool("batch_mark_messages",
+		mcplib.WithDescription("Mark multiple messages read or unread in one call. Returns the count marked."),
+		mcplib.WithArray("message_ids",
+			mcplib.Required(),
+			mcplib.Description("Message UIDs to mark (from list_messages)"),
+			mcplib.WithStringItems(),
+		),
+		mcplib.WithString("folder",
+			mcplib.Description("IMAP folder name"),
+			mcplib.DefaultString("INBOX"),
+		),
+		mcplib.WithBoolean("seen",
+			mcplib.Description("Mark read (true, default) or unread (false)"),
+			mcplib.DefaultBool(true),
 		),
 	)
 }
@@ -849,22 +888,9 @@ func (h *handler) batchMoveMessages(ctx context.Context, req mcplib.CallToolRequ
 
 	// Parse all UIDs up front so we can report invalid IDs before
 	// opening a connection.
-	uids := make([]uint32, 0, len(ids))
-	var parseErrs []string
-	for _, id := range ids {
-		uid, parseErr := strconv.ParseUint(id, 10, 32)
-		if parseErr != nil {
-			parseErrs = append(parseErrs, fmt.Sprintf("#%s: invalid id", id))
-			continue
-		}
-		if uid == 0 {
-			parseErrs = append(parseErrs, fmt.Sprintf("#%s: invalid id", id))
-			continue
-		}
-		uids = append(uids, uint32(uid))
-	}
-	if len(parseErrs) > 0 {
-		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_ids: %s", strings.Join(parseErrs, ", "))), nil
+	uids, parseErr := parseUIDs(ids)
+	if parseErr != "" {
+		return mcplib.NewToolResultError(parseErr), nil
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
@@ -872,6 +898,81 @@ func (h *handler) batchMoveMessages(ctx context.Context, req mcplib.CallToolRequ
 			return mcplib.NewToolResultError(fmt.Sprintf("batch move: %v", err)), nil
 		}
 		return textResult(formatBatchMoveResult(len(uids), destination))
+	})
+}
+
+// markResult is the typed response for the mark_message tool.
+type markResult struct {
+	Status    string `json:"status"`
+	MessageID string `json:"message_id"`
+	Folder    string `json:"folder"`
+	Seen      bool   `json:"seen"`
+}
+
+func (h *handler) markMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
+	folder := stringParam(req, "folder", "INBOX")
+	msgID, err := req.RequireString("message_id")
+	if err != nil {
+		return mcplib.NewToolResultError("message_id is required"), nil
+	}
+	seen := boolParamDefault(req, "seen", true)
+
+	uid, err := strconv.ParseUint(msgID, 10, 32)
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
+	}
+
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
+		if err := c.SetSeen(folder, uint32(uid), seen); err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("mark message: %v", err)), nil
+		}
+		mr := &markResult{
+			Status:    markStatus(seen),
+			MessageID: msgID,
+			Folder:    folder,
+			Seen:      seen,
+		}
+		return textResult(formatMarkResult(mr))
+	})
+}
+
+func (h *handler) batchMarkMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	_, cfg, _, err := h.resolveIdentityAndConfig()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
+	ids, err := stringSliceParam(req, "message_ids")
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	if ids == nil {
+		return mcplib.NewToolResultError("message_ids is required"), nil
+	}
+	folder := stringParam(req, "folder", "INBOX")
+	seen := boolParamDefault(req, "seen", true)
+
+	if len(ids) == 0 {
+		return textResult(formatBatchMarkResult(0, seen))
+	}
+
+	// Parse all UIDs up front so an invalid id is reported before a
+	// connection opens.
+	uids, parseErr := parseUIDs(ids)
+	if parseErr != "" {
+		return mcplib.NewToolResultError(parseErr), nil
+	}
+
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
+		if err := c.SetSeenBatch(folder, uids, seen); err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("batch mark: %v", err)), nil
+		}
+		return textResult(formatBatchMarkResult(len(uids), seen))
 	})
 }
 
@@ -1104,13 +1205,47 @@ func intParam(req mcplib.CallToolRequest, key string, fallback int) (int, error)
 }
 
 func boolParam(req mcplib.CallToolRequest, key string) bool {
+	return boolParamDefault(req, key, false)
+}
+
+// boolParamDefault reads a boolean argument, returning fallback when the key is
+// absent or not a bool. Use it for flags whose default is true.
+func boolParamDefault(req mcplib.CallToolRequest, key string, fallback bool) bool {
 	args := req.GetArguments()
 	if v, ok := args[key]; ok {
 		if b, ok := v.(bool); ok {
 			return b
 		}
 	}
-	return false
+	return fallback
+}
+
+// parseUIDs converts message-id strings to UIDs, reporting every invalid id in
+// one message so the caller learns of all bad ids before a connection opens.
+// It returns an empty error string on success.
+func parseUIDs(ids []string) ([]uint32, string) {
+	uids := make([]uint32, 0, len(ids))
+	var parseErrs []string
+	for _, id := range ids {
+		uid, err := strconv.ParseUint(id, 10, 32)
+		if err != nil || uid == 0 {
+			parseErrs = append(parseErrs, fmt.Sprintf("#%s: invalid id", id))
+			continue
+		}
+		uids = append(uids, uint32(uid))
+	}
+	if len(parseErrs) > 0 {
+		return nil, fmt.Sprintf("invalid message_ids: %s", strings.Join(parseErrs, ", "))
+	}
+	return uids, ""
+}
+
+// markStatus names the state a mark_message call left a message in.
+func markStatus(seen bool) string {
+	if seen {
+		return "read"
+	}
+	return "unread"
 }
 
 // jsonResult is no longer used — all tools return pre-formatted text via
