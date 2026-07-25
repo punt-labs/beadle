@@ -78,6 +78,31 @@ func formatMessages(msgs []channel.MessageSummary, total int) string {
 	return fmt.Sprintf("showing %d of %d messages\n%s", len(msgs), total, table)
 }
 
+// formatMessagesResult renders a list result for a tool: the message table,
+// preceded by a one-line degraded notice when a SEARCH error forced a fallback,
+// and distinguishing an empty page past the end (Total > 0) from a truly empty
+// mailbox (Total == 0). A past-end page keeps the real total visible so the
+// caller knows to reduce its offset rather than concluding there is no mail.
+func formatMessagesResult(lr *email.ListResult) string {
+	var body string
+	switch {
+	case len(lr.Messages) == 0 && lr.Total > 0:
+		body = fmt.Sprintf("showing 0 of %d messages (page past end — reduce offset)", lr.Total)
+	case len(lr.Messages) == 0:
+		body = "No messages."
+	default:
+		body = formatMessages(lr.Messages, lr.Total)
+	}
+	if lr.Degraded {
+		reason := lr.DegradedReason
+		if reason == "" {
+			reason = "results degraded"
+		}
+		return reason + "\n" + body
+	}
+	return body
+}
+
 // splitSender returns the display name and email address for a raw
 // From header value. The display name is empty when the header carries
 // only a bare address, so the FROM column does not duplicate the email.
@@ -268,24 +293,44 @@ func formatTrustResult(r email.TrustResult) string {
 	return s
 }
 
-// formatMoveResult formats a move operation result.
+// formatMoveResult formats a single move result, surfacing a UID that was not
+// found rather than reporting a false success.
 func formatMoveResult(r *moveResult) string {
+	if r.Moved == 0 {
+		return fmt.Sprintf("#%s not found — not moved", r.MessageID)
+	}
 	return fmt.Sprintf("moved #%s → %s", r.MessageID, r.Destination)
 }
 
-// formatBatchMoveResult formats a batch move summary.
-func formatBatchMoveResult(count int, destination string) string {
-	return fmt.Sprintf("moved %d messages to %s", count, destination)
+// formatBatchMoveResult formats a batch move summary. When fewer messages moved
+// than were requested, it reports the shortfall — absent or expunged UIDs are
+// never counted as moved.
+func formatBatchMoveResult(moved, requested int, destination string) string {
+	if moved < requested {
+		return fmt.Sprintf("moved %d of %d messages to %s (%d not found)",
+			moved, requested, destination, requested-moved)
+	}
+	return fmt.Sprintf("moved %d messages to %s", moved, destination)
 }
 
-// formatMarkResult formats a mark operation result.
+// formatMarkResult formats a single mark result, surfacing a UID that was not
+// found rather than reporting a false success.
 func formatMarkResult(r *markResult) string {
+	if r.Modified == 0 {
+		return fmt.Sprintf("#%s not found — not marked", r.MessageID)
+	}
 	return fmt.Sprintf("marked #%s %s", r.MessageID, markStatus(r.Seen))
 }
 
-// formatBatchMarkResult formats a batch mark summary.
-func formatBatchMarkResult(count int, seen bool) string {
-	return fmt.Sprintf("marked %d messages %s", count, markStatus(seen))
+// formatBatchMarkResult formats a batch mark summary. When fewer messages were
+// modified than requested, it reports the shortfall — absent UIDs are never
+// counted as marked.
+func formatBatchMarkResult(modified, requested int, seen bool) string {
+	if modified < requested {
+		return fmt.Sprintf("marked %d of %d messages %s (%d not found)",
+			modified, requested, markStatus(seen), requested-modified)
+	}
+	return fmt.Sprintf("marked %d messages %s", modified, markStatus(seen))
 }
 
 // formatDownloadResult formats a download result.

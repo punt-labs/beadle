@@ -158,13 +158,17 @@ func TestSetSeen_RoundTrip(t *testing.T) {
 	assert.Equal(t, 1, lr.Total, "starts unread")
 
 	// Mark read: it drops out of an unread listing.
-	require.NoError(t, client.SetSeen("INBOX", uid, true))
+	n, err := client.SetSeen("INBOX", uid, true)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "one message marked read")
 	lr, err = client.ListMessages("INBOX", 10, true, "")
 	require.NoError(t, err)
 	assert.Equal(t, 0, lr.Total, "read after SetSeen(true)")
 
 	// Mark unread again: it returns.
-	require.NoError(t, client.SetSeen("INBOX", uid, false))
+	n, err = client.SetSeen("INBOX", uid, false)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "one message marked unread")
 	lr, err = client.ListMessages("INBOX", 10, true, "")
 	require.NoError(t, err)
 	assert.Equal(t, 1, lr.Total, "unread after SetSeen(false)")
@@ -193,11 +197,52 @@ func TestSetSeenBatch_RoundTrip(t *testing.T) {
 	client := dialFixture(t, f)
 
 	// Mark two read, including one absent UID (silently ignored by the protocol).
-	require.NoError(t, client.SetSeenBatch("INBOX", []uint32{uid1, uid2, 9999}, true))
+	n, err := client.SetSeenBatch("INBOX", []uint32{uid1, uid2, 9999}, true)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n, "two present UIDs modified, absent UID not counted")
 	lr, err := client.ListMessages("INBOX", 10, true, "")
 	require.NoError(t, err)
 	assert.Equal(t, 1, lr.Total, "only the third stays unread")
 	assert.Equal(t, []string{"three"}, subjects(lr))
 
 	_ = uid3
+}
+
+func TestMoveMessages_CountsActualMoved(t *testing.T) {
+	f := testserver.NewFixture(t)
+	uid1 := f.AddMessage("INBOX", "alice@test.com", "one", "body")
+	uid2 := f.AddMessage("INBOX", "alice@test.com", "two", "body")
+	f.AddMessage("Archive", "system@test.com", "placeholder", "body")
+
+	client := dialFixture(t, f)
+
+	// Two present + one absent UID: only the present two move.
+	moved, err := client.MoveMessages("INBOX", []uint32{uid1, uid2, 9999}, "Archive")
+	require.NoError(t, err)
+	assert.Equal(t, 2, moved, "absent UID is not counted as moved")
+
+	// A move of an already-gone UID moves nothing.
+	moved, err = client.MoveMessages("INBOX", []uint32{9999}, "Archive")
+	require.NoError(t, err)
+	assert.Equal(t, 0, moved, "a stale UID moves nothing")
+}
+
+// TestSearchMessages_SinceIsDateOnly proves SENTSINCE matches at DATE precision:
+// a non-midnight Since (which ParseSearchSince accepts as RFC3339) still matches
+// a message sent earlier in the same day.
+func TestSearchMessages_SinceIsDateOnly(t *testing.T) {
+	f := testserver.NewFixture(t)
+	sameDayMorning := time.Date(2026, 7, 10, 6, 0, 0, 0, time.UTC)
+	dayBefore := time.Date(2026, 7, 9, 23, 0, 0, 0, time.UTC)
+	f.AddRawMessage("INBOX", rawDated("a@test.com", "same day", sameDayMorning))
+	f.AddRawMessage("INBOX", rawDated("b@test.com", "day before", dayBefore))
+
+	client := dialFixture(t, f)
+
+	// Since is 2026-07-10 at 18:00 — later in the day than the 06:00 message,
+	// yet the message still matches because SENTSINCE ignores the time of day.
+	since := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
+	lr, err := client.SearchMessages("INBOX", email.SearchQuery{Since: since}, 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"same day"}, subjects(lr), "date-only match includes the same-day message, excludes the day before")
 }

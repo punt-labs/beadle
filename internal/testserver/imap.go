@@ -455,11 +455,13 @@ func matchesCriteria(msg *memMessage, criteria *imap.SearchCriteria) bool {
 			return false
 		}
 	}
-	// SENTSINCE compares the Date header (date only). A message with no parseable
-	// Date header does not match.
+	// SENTSINCE compares the Date header at DATE precision, per RFC 3501 — the
+	// time of day and zone are ignored on both sides, so a message sent later in
+	// the same day as a non-midnight Since still matches. A message with no
+	// parseable Date header does not match.
 	if !criteria.SentSince.IsZero() {
 		sent, ok := parseDateHeader(msg.raw)
-		if !ok || sent.Before(criteria.SentSince) {
+		if !ok || dayStart(sent).Before(dayStart(criteria.SentSince)) {
 			return false
 		}
 	}
@@ -480,6 +482,13 @@ func matchesCriteria(msg *memMessage, criteria *imap.SearchCriteria) bool {
 		}
 	}
 	return true
+}
+
+// dayStart returns midnight UTC on t's calendar day, so two times compare at
+// DATE precision — the granularity IMAP SENTSINCE/SINCE use.
+func dayStart(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 // parseDateHeader extracts and parses the Date header from raw. It accepts the
@@ -688,6 +697,9 @@ func (s *memSession) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags 
 
 		if !flags.Silent {
 			resp := w.CreateMessage(seqNum)
+			// Echo the UID: a UID STORE client correlates the FETCH response by
+			// UID and drops any response without one. Real servers include it.
+			resp.WriteUID(msg.uid)
 			resp.WriteFlags(msg.flags)
 			if err := resp.Close(); err != nil {
 				return err
@@ -752,8 +764,11 @@ func (s *memSession) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest str
 		s.backend.mailboxes[dest] = destMb
 	}
 
+	// Aggregate the moved UIDs into a single COPYUID, as a real MOVE returns.
+	// Writing one CopyData per message would let the client (which keeps only
+	// the last COPYUID) undercount the moved messages.
 	var remaining []*memMessage
-	var expungeSeq uint32
+	var srcUIDs, destUIDs imap.UIDSet
 	for seqIdx, msg := range s.selected.messages {
 		seqNum := uint32(seqIdx + 1)
 		if !numSetContains(numSet, seqNum, msg.uid) {
@@ -769,16 +784,18 @@ func (s *memSession) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest str
 			raw:   append([]byte(nil), msg.raw...),
 			date:  msg.date,
 		})
-
-		expungeSeq++
-		w.WriteCopyData(&imap.CopyData{
-			UIDValidity: 1,
-			SourceUIDs:  imap.UIDSetNum(msg.uid),
-			DestUIDs:    imap.UIDSetNum(newUID),
-		})
+		srcUIDs.AddNum(msg.uid)
+		destUIDs.AddNum(newUID)
 		w.WriteExpunge(seqNum)
 	}
 	s.selected.messages = remaining
+	if len(srcUIDs) > 0 {
+		w.WriteCopyData(&imap.CopyData{
+			UIDValidity: 1,
+			SourceUIDs:  srcUIDs,
+			DestUIDs:    destUIDs,
+		})
+	}
 	return nil
 }
 

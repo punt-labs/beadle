@@ -340,6 +340,37 @@ func TestHandler_BatchMoveMessages(t *testing.T) {
 	assert.Contains(t, r.text(), "Archive")
 }
 
+func TestHandler_MoveMessage_NotFound(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+	fix.AddMessage("Archive", "system@test.com", "Placeholder", "x")
+
+	r := callTool(t, s, "move_message", map[string]any{
+		"message_id":  "9999",
+		"destination": "Archive",
+	})
+	assert.False(t, r.IsError, "a missing UID is not an error")
+	assert.Contains(t, r.text(), "not found")
+	assert.NotContains(t, r.text(), "moved #", "must not claim a move that did not happen")
+}
+
+func TestHandler_BatchMoveMessages_Shortfall(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body")
+	uid2 := fix.AddMessage("INBOX", "alice@test.com", "Msg 2", "body")
+	fix.AddMessage("Archive", "system@test.com", "Placeholder", "x")
+
+	// Two present + one absent UID: only two move; the shortfall is reported.
+	r := callTool(t, s, "batch_move_messages", map[string]any{
+		"message_ids": []any{fmt.Sprintf("%d", uid1), fmt.Sprintf("%d", uid2), "9999"},
+		"destination": "Archive",
+	})
+	assert.False(t, r.IsError, "batch move failed: %s", r.text())
+	assert.Contains(t, r.text(), "moved 2 of 3 messages to Archive (1 not found)")
+}
+
 func TestHandler_BatchMoveMessages_InvalidUID(t *testing.T) {
 	s, env, fix := setupHandler(t)
 	env.AddContact("Alice", "alice@test.com", "r--")
@@ -440,6 +471,29 @@ func TestHandler_BatchMarkMessages(t *testing.T) {
 	assert.False(t, r.IsError, "batch mark failed: %s", r.text())
 	assert.Contains(t, r.text(), "marked 2 messages read")
 	assert.NotContains(t, listUnreadMarker(t, s), "●", "both messages read after batch mark")
+}
+
+func TestHandler_MarkMessage_NotFound(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	r := callTool(t, s, "mark_message", map[string]any{"message_id": "9999"})
+	assert.False(t, r.IsError, "a missing UID is not an error")
+	assert.Contains(t, r.text(), "not found")
+	assert.NotContains(t, r.text(), "marked #9999 read", "must not claim a mark that did not happen")
+}
+
+func TestHandler_BatchMarkMessages_Shortfall(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	uid1 := fix.AddMessage("INBOX", "alice@test.com", "Msg 1", "body")
+
+	// One present + one absent UID: only one is modified; shortfall reported.
+	r := callTool(t, s, "batch_mark_messages", map[string]any{
+		"message_ids": []any{fmt.Sprintf("%d", uid1), "9999"},
+	})
+	assert.False(t, r.IsError, "batch mark failed: %s", r.text())
+	assert.Contains(t, r.text(), "marked 1 of 2 messages read (1 not found)")
 }
 
 func TestHandler_BatchMarkMessages_InvalidUID(t *testing.T) {
@@ -569,6 +623,23 @@ func TestHandler_ListMessages_OffsetPaging(t *testing.T) {
 	assert.Contains(t, r.text(), "msg-14")
 	assert.Contains(t, r.text(), "msg-05")
 	assert.NotContains(t, r.text(), "msg-15")
+}
+
+func TestHandler_ListMessages_PastEndPageShowsTotal(t *testing.T) {
+	s, env, fix := setupHandler(t)
+	env.AddContact("Alice", "alice@test.com", "r--")
+
+	for i := range 25 {
+		fix.AddMessage("INBOX", "alice@test.com", fmt.Sprintf("msg-%02d", i), "body")
+	}
+
+	// A page far past the end must show the true total, not read as an empty
+	// mailbox.
+	r := callTool(t, s, "list_messages", map[string]any{"count": 10, "offset": float64(9999), "all_repos": true})
+	assert.False(t, r.IsError, "list failed: %s", r.text())
+	assert.Contains(t, r.text(), "showing 0 of 25 messages")
+	assert.Contains(t, r.text(), "page past end")
+	assert.NotContains(t, r.text(), "No messages.", "a past-end page is not an empty mailbox")
 }
 
 func TestHandler_ListMessages_NegativeOffset(t *testing.T) {

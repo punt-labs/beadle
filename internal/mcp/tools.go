@@ -561,7 +561,7 @@ func (h *handler) renderMessages(c *email.Client, cfg *email.Config, id *identit
 		}
 	}
 
-	res, _ := textResult(formatMessages(lr.Messages, lr.Total))
+	res, _ := textResult(formatMessagesResult(lr))
 	return res
 }
 
@@ -935,6 +935,7 @@ type moveResult struct {
 	MessageID   string `json:"message_id"`
 	Source      string `json:"source"`
 	Destination string `json:"destination"`
+	Moved       int    `json:"moved"`
 }
 
 func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -956,7 +957,8 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		if err := c.MoveMessage(folder, uint32(uid), destination); err != nil {
+		moved, err := c.MoveMessage(folder, uint32(uid), destination)
+		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("move message: %v", err)), nil
 		}
 		mr := &moveResult{
@@ -964,6 +966,7 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 			MessageID:   msgID,
 			Source:      folder,
 			Destination: destination,
+			Moved:       moved,
 		}
 		return textResult(formatMoveResult(mr))
 	})
@@ -987,7 +990,7 @@ func (h *handler) batchMoveMessages(ctx context.Context, req mcplib.CallToolRequ
 	destination := stringParam(req, "destination", "Archive")
 
 	if len(ids) == 0 {
-		return textResult(formatBatchMoveResult(0, destination))
+		return textResult(formatBatchMoveResult(0, 0, destination))
 	}
 
 	// Parse all UIDs up front so we can report invalid IDs before
@@ -998,10 +1001,11 @@ func (h *handler) batchMoveMessages(ctx context.Context, req mcplib.CallToolRequ
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		if err := c.MoveMessages(folder, uids, destination); err != nil {
+		moved, err := c.MoveMessages(folder, uids, destination)
+		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("batch move: %v", err)), nil
 		}
-		return textResult(formatBatchMoveResult(len(uids), destination))
+		return textResult(formatBatchMoveResult(moved, len(uids), destination))
 	})
 }
 
@@ -1011,6 +1015,7 @@ type markResult struct {
 	MessageID string `json:"message_id"`
 	Folder    string `json:"folder"`
 	Seen      bool   `json:"seen"`
+	Modified  int    `json:"modified"`
 }
 
 func (h *handler) markMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
@@ -1032,7 +1037,8 @@ func (h *handler) markMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		if err := c.SetSeen(folder, uint32(uid), seen); err != nil {
+		modified, err := c.SetSeen(folder, uint32(uid), seen)
+		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("mark message: %v", err)), nil
 		}
 		mr := &markResult{
@@ -1040,6 +1046,7 @@ func (h *handler) markMessage(ctx context.Context, req mcplib.CallToolRequest) (
 			MessageID: msgID,
 			Folder:    folder,
 			Seen:      seen,
+			Modified:  modified,
 		}
 		return textResult(formatMarkResult(mr))
 	})
@@ -1062,7 +1069,7 @@ func (h *handler) batchMarkMessages(ctx context.Context, req mcplib.CallToolRequ
 	seen := boolParamDefault(req, "seen", true)
 
 	if len(ids) == 0 {
-		return textResult(formatBatchMarkResult(0, seen))
+		return textResult(formatBatchMarkResult(0, 0, seen))
 	}
 
 	// Parse all UIDs up front so an invalid id is reported before a
@@ -1073,10 +1080,11 @@ func (h *handler) batchMarkMessages(ctx context.Context, req mcplib.CallToolRequ
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		if err := c.SetSeenBatch(folder, uids, seen); err != nil {
+		modified, err := c.SetSeenBatch(folder, uids, seen)
+		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("batch mark: %v", err)), nil
 		}
-		return textResult(formatBatchMarkResult(len(uids), seen))
+		return textResult(formatBatchMarkResult(modified, len(uids), seen))
 	})
 }
 

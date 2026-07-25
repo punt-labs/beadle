@@ -432,10 +432,18 @@ var moveCmd = &cobra.Command{
 		}
 		defer client.Close()
 
-		if err := client.MoveMessage(moveFolder, uint32(uidNum), moveDest); err != nil {
+		moved, err := client.MoveMessage(moveFolder, uint32(uidNum), moveDest)
+		if err != nil {
 			return fmt.Errorf("move: %w", err)
 		}
-		result := map[string]string{"status": "moved", "uid": args[0], "source": moveFolder, "destination": moveDest}
+		if moved == 0 {
+			result := map[string]any{"status": "not_found", "uid": args[0], "source": moveFolder, "moved": 0}
+			g.printResult(result, func() {
+				fmt.Printf("%s not found in %s — not moved\n", args[0], moveFolder)
+			})
+			return nil
+		}
+		result := map[string]any{"status": "moved", "uid": args[0], "source": moveFolder, "destination": moveDest, "moved": moved}
 		g.printResult(result, func() {
 			fmt.Printf("moved %s from %s to %s\n", args[0], moveFolder, moveDest)
 		})
@@ -495,16 +503,22 @@ var markCmd = &cobra.Command{
 		defer client.Close()
 
 		seen := !markUnread
-		if err := client.SetSeenBatch(markFolder, uids, seen); err != nil {
+		modified, err := client.SetSeenBatch(markFolder, uids, seen)
+		if err != nil {
 			return fmt.Errorf("mark: %w", err)
 		}
 		state := "read"
 		if markUnread {
 			state = "unread"
 		}
-		result := map[string]any{"status": "marked", "state": state, "count": len(uids)}
+		requested := len(uids)
+		result := map[string]any{"status": "marked", "state": state, "modified": modified, "requested": requested}
 		g.printResult(result, func() {
-			fmt.Printf("marked %d message(s) %s\n", len(uids), state)
+			if modified < requested {
+				fmt.Printf("marked %d of %d message(s) %s (%d not found)\n", modified, requested, state, requested-modified)
+				return
+			}
+			fmt.Printf("marked %d message(s) %s\n", modified, state)
 		})
 		return nil
 	},

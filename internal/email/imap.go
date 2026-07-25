@@ -133,6 +133,12 @@ func (c *Client) ListFolders() ([]channel.Folder, error) {
 type ListResult struct {
 	Messages []channel.MessageSummary
 	Total    int // total matching messages (before count limit)
+	// Degraded is set when a SEARCH error forced a fallback listing that does
+	// not answer the requested query — recent mail shown in place of a search.
+	// DegradedReason is a short, caller-facing explanation. A normal scoped
+	// listing is never degraded; only an actual error fallback sets these.
+	Degraded       bool
+	DegradedReason string
 }
 
 // SearchQuery names the criteria for a mailbox search. A zero field is unset;
@@ -170,20 +176,20 @@ func (c *Client) SearchMessages(folder string, q SearchQuery, count, offset int)
 		return &ListResult{}, nil
 	}
 
-	numSet, total, err := c.listSet(mbox.NumMessages, q, count, offset)
+	numSet, total, degraded, err := c.listSet(mbox.NumMessages, q, count, offset)
 	if err != nil {
 		return nil, err
 	}
 	if numSet == nil {
 		// No message matched the query, or the page is past the end.
-		return &ListResult{Total: total}, nil
+		return &ListResult{Total: total, Degraded: degraded != "", DegradedReason: degraded}, nil
 	}
 
 	summaries, err := c.fetchSummaries(numSet)
 	if err != nil {
 		return nil, err
 	}
-	return &ListResult{Messages: summaries, Total: total}, nil
+	return &ListResult{Messages: summaries, Total: total, Degraded: degraded != "", DegradedReason: degraded}, nil
 }
 
 // fetchSummaries fetches envelope, flags, and Proton trust headers for numSet
@@ -251,10 +257,10 @@ func (c *Client) fetchSummaries(numSet imap.NumSet) ([]channel.MessageSummary, e
 // UID SEARCH and windows the result. On a SEARCH error it delegates to
 // searchFallback. A nil NumSet means nothing matched or the page is past the
 // end.
-func (c *Client) listSet(numMessages uint32, q SearchQuery, count, offset int) (imap.NumSet, int, error) {
+func (c *Client) listSet(numMessages uint32, q SearchQuery, count, offset int) (imap.NumSet, int, string, error) {
 	crit := searchCriteria(q)
 	if crit == nil && offset == 0 {
-		return recencySet(numMessages, clampCount(count, numMessages)), int(numMessages), nil
+		return recencySet(numMessages, clampCount(count, numMessages)), int(numMessages), "", nil
 	}
 	if crit == nil {
 		// offset > 0 with no filter: search all messages for exact windowing,
@@ -267,27 +273,46 @@ func (c *Client) listSet(numMessages uint32, q SearchQuery, count, offset int) (
 		return c.searchFallback(numMessages, q, count, offset, err)
 	}
 	numSet, total := selectUIDs(searchData, count, offset)
-	return numSet, total, nil
+	return numSet, total, "", nil
 }
 
-// searchFallback recovers from a SEARCH error without hiding mail. A repo-scoped
-// query widens to all repos (keeping unread and content criteria), matching
-// UnreadCount's never-empty policy. If that retry also fails, or the query was
-// never repo-scoped, it floors to the recency window — the never-empty floor.
-// The floor returns the most-recent count and does not honor offset, because a
-// recency window cannot be paged exactly once SEARCH is unavailable.
-func (c *Client) searchFallback(numMessages uint32, q SearchQuery, count, offset int, cause error) (imap.NumSet, int, error) {
-	if q.RepoSlug != "" {
-		wq := q
-		wq.RepoSlug = ""
-		c.logger.Warn("repo search failed; widening to all repos", "err", cause)
-		if retry, err := c.imap.UIDSearch(searchCriteria(wq), nil).Wait(); err == nil {
-			numSet, total := selectUIDs(retry, count, offset)
-			return numSet, total, nil
+// degradedListing is the caller-facing reason set on a non-unread error
+// fallback, so the model learns the rows are recent mail, not the search.
+const degradedListing = "search unavailable; showing recent mail instead"
+
+// searchFallback recovers from a SEARCH error. Its policy splits on unreadOnly:
+//
+//   - An unread-only listing fails CLOSED — it must never surface read mail. If
+//     the failed query was repo-scoped it retries once with the repo arm dropped
+//     but \Seen still excluded (a genuinely different, safe unread search); if
+//     that retry also fails, or there was no repo arm to drop, it returns the
+//     error. The daemon's inbox scan depends on this: on error it aborts rather
+//     than reprocessing already-read mail.
+//   - A non-unread listing floors to the recency window — the never-hide,
+//     show-all floor — and reports a degraded reason. It never widens to a nil
+//     criteria (an all-empty query), which the IMAP client would dereference and
+//     panic on.
+//
+// The returned string is the degraded reason ("" when not degraded). Offset is
+// not honored by the recency floor: a recency window cannot be paged once SEARCH
+// is unavailable.
+func (c *Client) searchFallback(numMessages uint32, q SearchQuery, count, offset int, cause error) (imap.NumSet, int, string, error) {
+	if q.UnreadOnly {
+		if q.RepoSlug != "" {
+			wq := q
+			wq.RepoSlug = ""
+			c.logger.Warn("repo unread search failed; retrying unread across all repos", "err", cause)
+			if retry, err := c.imap.UIDSearch(searchCriteria(wq), nil).Wait(); err == nil {
+				numSet, total := selectUIDs(retry, count, offset)
+				return numSet, total, "", nil
+			}
 		}
+		// No safe narrower unread query remains: fail closed.
+		return nil, 0, "", fmt.Errorf("search unread mail: %w", cause)
 	}
-	c.logger.Warn("search failed; listing all recent mail", "err", cause)
-	return recencySet(numMessages, clampCount(count, numMessages)), int(numMessages), nil
+
+	c.logger.Warn("search failed; listing recent mail instead", "err", cause)
+	return recencySet(numMessages, clampCount(count, numMessages)), int(numMessages), degradedListing, nil
 }
 
 // clampCount bounds count to [0, numMessages] so it is a safe recencySet span.
@@ -507,33 +532,29 @@ func (c *Client) parseMessage(buf *imapclient.FetchMessageBuffer, raw []byte) (*
 	}, nil
 }
 
-// MoveMessage moves a message by UID from one folder to another.
-// The go-imap/v2 Move command handles the MOVE extension (RFC 6851) with
-// automatic fallback to COPY+STORE+EXPUNGE for older servers.
-func (c *Client) MoveMessage(srcFolder string, uid uint32, dstFolder string) error {
-	_, err := c.imap.Select(srcFolder, &imap.SelectOptions{ReadOnly: false}).Wait()
-	if err != nil {
-		return fmt.Errorf("select %q: %w", srcFolder, err)
-	}
-
-	_, err = c.imap.Move(imap.UIDSetNum(imap.UID(uid)), dstFolder).Wait()
-	if err != nil {
-		return fmt.Errorf("move uid %d to %q: %w", uid, dstFolder, err)
-	}
-	return nil
+// MoveMessage moves a message by UID from one folder to another. It returns 1
+// when the message existed and moved, 0 when the UID was not found. See
+// MoveMessages for how the count is determined.
+func (c *Client) MoveMessage(srcFolder string, uid uint32, dstFolder string) (int, error) {
+	return c.MoveMessages(srcFolder, []uint32{uid}, dstFolder)
 }
 
-// MoveMessages moves multiple messages by UID from one folder to another.
-// Issues a single SELECT followed by a single MOVE command. UIDs that
-// don't exist on the server are silently ignored by the IMAP protocol.
-func (c *Client) MoveMessages(srcFolder string, uids []uint32, dstFolder string) error {
+// MoveMessages moves messages by UID from one folder to another and returns how
+// many were actually moved. Issues a single SELECT then a single MOVE. UIDs
+// absent on the server are ignored by the protocol, so the requested count can
+// exceed the moved count; the moved count is read from the MOVE/COPYUID response
+// (SourceUIDs), which a UIDPLUS or IMAP4rev2 server sends only for messages that
+// actually moved. A server without UIDPLUS returns no COPYUID and so reports 0 —
+// undercounting rather than ever claiming a move that did not happen. Every
+// server beadle targets (Proton Bridge, Fastmail) supports UIDPLUS.
+func (c *Client) MoveMessages(srcFolder string, uids []uint32, dstFolder string) (int, error) {
 	if len(uids) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	_, err := c.imap.Select(srcFolder, &imap.SelectOptions{ReadOnly: false}).Wait()
 	if err != nil {
-		return fmt.Errorf("select %q: %w", srcFolder, err)
+		return 0, fmt.Errorf("select %q: %w", srcFolder, err)
 	}
 
 	imapUIDs := make([]imap.UID, len(uids))
@@ -541,31 +562,31 @@ func (c *Client) MoveMessages(srcFolder string, uids []uint32, dstFolder string)
 		imapUIDs[i] = imap.UID(u)
 	}
 
-	_, err = c.imap.Move(imap.UIDSetNum(imapUIDs...), dstFolder).Wait()
+	data, err := c.imap.Move(imap.UIDSetNum(imapUIDs...), dstFolder).Wait()
 	if err != nil {
-		return fmt.Errorf("move %d messages to %q: %w", len(uids), dstFolder, err)
+		return 0, fmt.Errorf("move %d messages to %q: %w", len(uids), dstFolder, err)
 	}
-	return nil
+	return numSetLen(data.SourceUIDs), nil
 }
 
-// SetSeen marks a message read or unread by UID, adding or removing the \Seen
-// flag. It mirrors MoveMessage: select read-write, then STORE. seen true adds
-// \Seen (read); seen false removes it (unread). A UID absent on the server is
-// ignored by the protocol, as with Move.
-func (c *Client) SetSeen(folder string, uid uint32, seen bool) error {
+// SetSeen marks a message read or unread by UID. It returns 1 when the message
+// existed and its flag was stored, 0 when the UID was not found.
+func (c *Client) SetSeen(folder string, uid uint32, seen bool) (int, error) {
 	return c.SetSeenBatch(folder, []uint32{uid}, seen)
 }
 
-// SetSeenBatch marks multiple messages read or unread by UID in one STORE.
-// A single SELECT precedes the STORE. UIDs absent on the server are silently
-// ignored by the IMAP protocol.
-func (c *Client) SetSeenBatch(folder string, uids []uint32, seen bool) error {
+// SetSeenBatch marks messages read or unread by UID in one STORE and returns how
+// many were actually modified. The STORE is not Silent: the server echoes one
+// FETCH per message it touched, so the collected count is the true number
+// modified. UIDs absent on the server produce no echo and are not counted, so a
+// mark on a stale UID reports 0, never a false success.
+func (c *Client) SetSeenBatch(folder string, uids []uint32, seen bool) (int, error) {
 	if len(uids) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	if _, err := c.imap.Select(folder, &imap.SelectOptions{ReadOnly: false}).Wait(); err != nil {
-		return fmt.Errorf("select %q: %w", folder, err)
+		return 0, fmt.Errorf("select %q: %w", folder, err)
 	}
 
 	imapUIDs := make([]imap.UID, len(uids))
@@ -577,15 +598,27 @@ func (c *Client) SetSeenBatch(folder string, uids []uint32, seen bool) error {
 	if seen {
 		op = imap.StoreFlagsAdd
 	}
-	store := &imap.StoreFlags{
-		Op:     op,
-		Silent: true,
-		Flags:  []imap.Flag{imap.FlagSeen},
+	store := &imap.StoreFlags{Op: op, Flags: []imap.Flag{imap.FlagSeen}}
+	msgs, err := c.imap.Store(imap.UIDSetNum(imapUIDs...), store, nil).Collect()
+	if err != nil {
+		return 0, fmt.Errorf("store \\Seen on %d messages: %w", len(uids), err)
 	}
-	if err := c.imap.Store(imap.UIDSetNum(imapUIDs...), store, nil).Close(); err != nil {
-		return fmt.Errorf("store \\Seen on %d messages: %w", len(uids), err)
+	return len(msgs), nil
+}
+
+// numSetLen counts the UIDs a NumSet enumerates, or 0 when it is nil or dynamic.
+func numSetLen(ns imap.NumSet) int {
+	switch s := ns.(type) {
+	case imap.UIDSet:
+		if nums, ok := s.Nums(); ok {
+			return len(nums)
+		}
+	case imap.SeqSet:
+		if nums, ok := s.Nums(); ok {
+			return len(nums)
+		}
 	}
-	return nil
+	return 0
 }
 
 func formatAddress(addr imap.Address) string {

@@ -100,8 +100,9 @@ func TestMoveMessage(t *testing.T) {
 
 	client := dialFixture(t, f)
 
-	err := client.MoveMessage("INBOX", uid, "Archive")
+	moved, err := client.MoveMessage("INBOX", uid, "Archive")
 	require.NoError(t, err)
+	assert.Equal(t, 1, moved)
 
 	// Verify INBOX is now empty (need a fresh client since Select changes state).
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
