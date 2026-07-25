@@ -273,7 +273,7 @@ beadle-email read <uid> [--folder F]                    # Read a message (leaves
 beadle-email search [--from A] [--subject S] [--since D] [--text T] [--count N] [--offset N] [--unread] [--all-repos]  # Search the mailbox
 beadle-email mark <uid> [--ids a,b,c] [--unread] [--folder F]  # Mark message(s) read/unread
 beadle-email send --to ADDR --subject S --body B        # Send an email
-beadle-email reply <uid> --body B [--folder F]          # Reply (threaded, quoted, write-gated)
+beadle-email reply <uid> --body B [--folder F]          # Reply to a message (threaded, quoted)
 beadle-email move <uid> [--folder F] [--to DEST]        # Move a message
 beadle-email folders                                    # List IMAP folders
 beadle-email contact list|add|remove|find               # Manage contacts
