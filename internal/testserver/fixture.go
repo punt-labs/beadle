@@ -131,6 +131,12 @@ func (f *Fixture) AddRawMessageWithFlags(folder string, raw []byte, flags []imap
 	return f.IMAP.AddRawMessageWithFlags(folder, raw, flags)
 }
 
+// SetSearchError installs a predicate that fails a SEARCH for matching
+// criteria. Pass nil to clear.
+func (f *Fixture) SetSearchError(fn func(*imap.SearchCriteria) error) {
+	f.IMAP.SetSearchError(fn)
+}
+
 // SentMessages returns all messages captured by the SMTP server.
 func (f *Fixture) SentMessages() []SentMessage {
 	return f.SMTP.SentMessages()

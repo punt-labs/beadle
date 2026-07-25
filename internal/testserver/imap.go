@@ -147,6 +147,17 @@ func (s *IMAPServer) AddRawMessageWithFlags(folder string, raw []byte, flags []i
 	return uid
 }
 
+// SetSearchError installs a predicate that fails a SEARCH when it returns a
+// non-nil error for the given criteria. Pass nil to clear. Use it to exercise
+// the client's SEARCH-error fallbacks; keying on the criteria lets a test fail
+// a scoped search (which carries an OR of repo arms) while letting a widened
+// retry succeed.
+func (s *IMAPServer) SetSearchError(fn func(*imap.SearchCriteria) error) {
+	s.backend.mu.Lock()
+	defer s.backend.mu.Unlock()
+	s.backend.searchErr = fn
+}
+
 func buildRFC822(from, subject, body string) []byte {
 	return []byte(fmt.Sprintf(
 		"From: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: <%d@test>\r\nContent-Type: text/plain\r\n\r\n%s",
@@ -161,6 +172,7 @@ type memBackend struct {
 	user      string
 	pass      string
 	mailboxes map[string]*memMailbox
+	searchErr func(*imap.SearchCriteria) error
 }
 
 type memMailbox struct {
@@ -397,6 +409,12 @@ func (s *memSession) Search(kind imapserver.NumKind, criteria *imap.SearchCriter
 	}
 	s.backend.mu.Lock()
 	defer s.backend.mu.Unlock()
+
+	if s.backend.searchErr != nil {
+		if err := s.backend.searchErr(criteria); err != nil {
+			return nil, err
+		}
+	}
 
 	var uids []imap.UID
 	for _, msg := range s.selected.messages {

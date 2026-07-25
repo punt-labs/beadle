@@ -237,16 +237,35 @@ func (c *Client) listSet(numMessages uint32, count int, unreadOnly bool, repoSlu
 		if repoSlug == "" {
 			return nil, 0, fmt.Errorf("search unseen: %w", err)
 		}
-		c.logger.Warn("repo list search failed; listing all repos", "err", err)
+		// A scoped search failed. Widen the repo scope, but keep the unread
+		// filter: an unread listing must never surface read mail because of a
+		// transient error, matching UnreadCount's fallback.
+		if unreadOnly {
+			c.logger.Warn("repo unread list search failed; listing unread in all repos", "err", err)
+			if retry, err := c.imap.UIDSearch(repoSearchCriteria("", true), nil).Wait(); err == nil {
+				numSet, total := selectUIDs(retry, count)
+				return numSet, total, nil
+			}
+		}
+		// No unread filter, or the unread retry also failed: fall back to the
+		// recency window — the never-empty floor.
+		c.logger.Warn("list search failed; listing all recent mail", "err", err)
 		return recencySet(numMessages, count), int(numMessages), nil
 	}
 
+	numSet, total := selectUIDs(searchData, count)
+	return numSet, total, nil
+}
+
+// selectUIDs turns a SEARCH result into a fetch set: the last count matching
+// UIDs, or a nil set with zero total when nothing matched.
+func selectUIDs(searchData *imap.SearchData, count int) (imap.NumSet, int) {
 	uids := searchData.AllUIDs()
 	total := len(uids)
 	if total == 0 {
-		return nil, 0, nil
+		return nil, 0
 	}
-	return imap.UIDSetNum(lastN(uids, count)...), total, nil
+	return imap.UIDSetNum(lastN(uids, count)...), total
 }
 
 // recencySet selects the last count messages by sequence number.

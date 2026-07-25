@@ -137,3 +137,52 @@ func TestUnreadCount_RepoScoped(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint32(3), all, "empty slug counts all unseen")
 }
+
+// TestListMessages_UnreadScope_SearchErrorKeepsUnread asserts that when a scoped
+// unread listing's SEARCH fails, the fallback widens the repo scope but keeps
+// the unread filter — it never surfaces read mail on a transient error.
+func TestListMessages_UnreadScope_SearchErrorKeepsUnread(t *testing.T) {
+	f := testserver.NewFixture(t)
+	f.AddRawMessage("INBOX", rawMsg("a@test.com", scopeSlug, "unread beadle"))
+	f.AddRawMessageWithFlags("INBOX", rawMsg("b@test.com", scopeSlug, "read beadle"), []imap.Flag{imap.FlagSeen})
+	f.AddRawMessage("INBOX", rawMsg("c@test.com", "punt-labs/other", "unread other"))
+
+	// Fail the scoped search — it carries the repo OR arms — while letting the
+	// widened unread-all retry (NotFlag, no OR) succeed.
+	f.SetSearchError(func(crit *imap.SearchCriteria) error {
+		if len(crit.Or) > 0 {
+			return fmt.Errorf("forced scoped search failure")
+		}
+		return nil
+	})
+
+	client := dialFixture(t, f)
+	lr, err := client.ListMessages("INBOX", 10, true, scopeSlug)
+	require.NoError(t, err)
+
+	got := subjects(lr)
+	assert.ElementsMatch(t, []string{"unread beadle", "unread other"}, got)
+	assert.NotContains(t, got, "read beadle", "unread fallback must never surface read mail")
+}
+
+// TestListMessages_UnreadScope_SearchErrorRetryShowsAll asserts that when both
+// the scoped search and the widened unread retry fail, the listing falls
+// through to the recency window — the never-empty floor.
+func TestListMessages_UnreadScope_SearchErrorRetryShowsAll(t *testing.T) {
+	f := testserver.NewFixture(t)
+	f.AddRawMessage("INBOX", rawMsg("a@test.com", scopeSlug, "unread beadle"))
+	f.AddRawMessageWithFlags("INBOX", rawMsg("b@test.com", scopeSlug, "read beadle"), []imap.Flag{imap.FlagSeen})
+	f.AddRawMessage("INBOX", rawMsg("c@test.com", "punt-labs/other", "unread other"))
+
+	// Every search fails, including the widened retry.
+	f.SetSearchError(func(*imap.SearchCriteria) error {
+		return fmt.Errorf("forced search failure")
+	})
+
+	client := dialFixture(t, f)
+	lr, err := client.ListMessages("INBOX", 10, true, scopeSlug)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, lr.Messages, "error fallback must never return an empty list")
+	assert.Len(t, lr.Messages, 3, "recency fallback shows all recent mail, read included")
+}
