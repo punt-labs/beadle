@@ -431,7 +431,7 @@ var sendCmd = &cobra.Command{
 			agent = id.Handle
 		}
 		tag := email.ResolveRepoTag(cmd.Context(), logger, agent)
-		result, err := email.TrySendChain(cfg, logger, to, cc, bcc, sendSubject, sendBody, "", nil, nil, tag)
+		result, err := email.TrySendChain(cfg, logger, to, cc, bcc, sendSubject, sendBody, "", nil, nil, tag, email.Threading{})
 		if err != nil {
 			return fmt.Errorf("send: %w", err)
 		}

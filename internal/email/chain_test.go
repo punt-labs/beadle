@@ -24,6 +24,7 @@ func TestTrySendChain_SignedBlocksResendFallback(t *testing.T) {
 		[]string{"to@example.com"}, nil, nil,
 		"Subject", "Body", "",
 		nil, nil, RepoTag{},
+		Threading{},
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pgp-signed email requires SMTP")
@@ -43,6 +44,7 @@ func TestTrySendChain_EncryptionRequiresSigning(t *testing.T) {
 		[]string{"to@example.com"}, nil, nil,
 		"Subject", "Body", "",
 		nil, []string{"ABCD1234"}, RepoTag{},
+		Threading{},
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "encryption requires signing")
@@ -53,6 +55,7 @@ func TestResendRequest_RepoTagHeaders(t *testing.T) {
 	req := resendRequest(
 		[]string{"to@example.com"}, nil, nil,
 		"[punt-labs/beadle] Hi", "body", "", nil, tag,
+		Threading{},
 	)
 	assert.Equal(t,
 		map[string]string{HeaderRepo: "punt-labs/beadle", HeaderAgent: "claude"},
@@ -64,6 +67,7 @@ func TestResendRequest_RepoTagHeaders(t *testing.T) {
 	req = resendRequest(
 		[]string{"to@example.com"}, nil, nil,
 		"Hi", "body", "", nil, RepoTag{},
+		Threading{},
 	)
 	assert.Nil(t, req.Headers, "empty tag must not set Resend headers")
 }

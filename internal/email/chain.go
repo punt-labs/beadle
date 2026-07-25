@@ -34,7 +34,11 @@ type SendResult struct {
 // signed then encrypted (RFC 3156 multipart/encrypted).
 // Resend fallback is blocked when signing is configured because Resend cannot
 // preserve raw MIME.
-func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment, recipientKeyIDs []string, tag RepoTag) (*SendResult, error) {
+//
+// A non-empty threading value adds the In-Reply-To/References reply headers
+// (top-level, outside any signed body) on every transport. A zero threading is
+// the send-a-new-message case and leaves the message unthreaded.
+func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment, recipientKeyIDs []string, tag RepoTag, threading Threading) (*SendResult, error) {
 	// Validate BCC addresses for CR/LF injection.
 	for _, addr := range bcc {
 		if strings.ContainsAny(addr, "\r\n") {
@@ -82,11 +86,11 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 
 		switch {
 		case encrypting:
-			raw, composeErr = ComposeEncryptedSignedRaw(cfg.FromAddress, to, cc, subject, body, attachments, cfg.GPGBinary, cfg.GPGSigner, passphrase, recipientKeyIDs, tag)
+			raw, composeErr = ComposeEncryptedSignedRaw(cfg.FromAddress, to, cc, subject, body, attachments, cfg.GPGBinary, cfg.GPGSigner, passphrase, recipientKeyIDs, tag, threading)
 		case signing:
-			raw, composeErr = ComposeSignedRaw(cfg.FromAddress, to, cc, subject, body, attachments, cfg.GPGBinary, cfg.GPGSigner, passphrase, tag)
+			raw, composeErr = ComposeSignedRaw(cfg.FromAddress, to, cc, subject, body, attachments, cfg.GPGBinary, cfg.GPGSigner, passphrase, tag, threading)
 		default:
-			raw, composeErr = ComposeRaw(cfg.FromAddress, to, cc, subject, body, attachments, tag)
+			raw, composeErr = ComposeRaw(cfg.FromAddress, to, cc, subject, body, attachments, tag, threading)
 		}
 		if composeErr != nil {
 			return nil, composeErr
@@ -118,7 +122,7 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 		return nil, fmt.Errorf("pgp-signed email requires SMTP transport; Resend API cannot preserve raw MIME")
 	}
 
-	resp, err := Send(cfg, resendRequest(to, cc, bcc, subject, body, html, attachments, tag))
+	resp, err := Send(cfg, resendRequest(to, cc, bcc, subject, body, html, attachments, tag, threading))
 	if err != nil {
 		return nil, err
 	}
