@@ -112,12 +112,17 @@ func defaultContactsPath() string {
 // the message slice as before. Otherwise it prints the degraded notice, then
 // the status line and rows. The degraded notice prints even under --quiet:
 // the notice's stderr warn is suppressed then, and a fallback silently showing
-// unrelated recent mail is the one thing a quiet caller must still see.
-func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) {
+// unrelated recent mail is the one thing a quiet caller must still see. It
+// returns an error only when JSON marshaling fails, so a --json caller never
+// mistakes empty output for an empty result.
+func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) error {
 	if g.JSON {
-		data, _ := json.MarshalIndent(lr.Messages, "", "  ")
+		data, err := json.MarshalIndent(lr.Messages, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling messages as JSON: %w", err)
+		}
 		fmt.Fprintln(w, string(data))
-		return
+		return nil
 	}
 	if lr.Degraded {
 		reason := lr.DegradedReason
@@ -127,7 +132,7 @@ func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) {
 		fmt.Fprintln(w, reason)
 	}
 	if g.Quiet {
-		return
+		return nil
 	}
 	fmt.Fprintln(w, lr.StatusLine())
 	for _, m := range lr.Messages {
@@ -137,6 +142,17 @@ func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) {
 		}
 		fmt.Fprintf(w, "%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date)
 	}
+	return nil
+}
+
+// changeStatus returns the JSON status for a mutating command: "not_found" when
+// nothing changed (every UID was absent), else ok. It keeps mark and move
+// truthful — neither reports success for a no-op.
+func changeStatus(changed int, ok string) string {
+	if changed == 0 {
+		return "not_found"
+	}
+	return ok
 }
 
 // splitAddresses splits a comma-separated address string.
@@ -170,6 +186,14 @@ var listCmd = &cobra.Command{
 	Short: "List messages",
 	Long:  "List messages from the inbox or a specified IMAP folder.",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Validate paging before opening a connection.
+		if listCount <= 0 {
+			return fmt.Errorf("--count must be positive")
+		}
+		if listOffset < 0 {
+			return fmt.Errorf("--offset must be non-negative")
+		}
+
 		cfg, id, err := resolveConfig(listConfig)
 		if err != nil {
 			return err
@@ -192,15 +216,11 @@ var listCmd = &cobra.Command{
 			repoSlug = email.ResolveRepoTag(cmd.Context(), logger, agent).Slug
 		}
 
-		if listOffset < 0 {
-			return fmt.Errorf("--offset must be non-negative")
-		}
 		lr, err := client.SearchMessages(listFolder, email.SearchQuery{RepoSlug: repoSlug, UnreadOnly: listUnread}, listCount, listOffset)
 		if err != nil {
 			return fmt.Errorf("list messages: %w", err)
 		}
-		g.printMessages(os.Stdout, lr)
-		return nil
+		return g.printMessages(os.Stdout, lr)
 	},
 }
 
@@ -250,6 +270,9 @@ var searchCmd = &cobra.Command{
 		if q.From == "" && q.Subject == "" && q.Text == "" && q.Since.IsZero() {
 			return fmt.Errorf("at least one of --from, --subject, --since, or --text is required")
 		}
+		if searchCount <= 0 {
+			return fmt.Errorf("--count must be positive")
+		}
 		if searchOffset < 0 {
 			return fmt.Errorf("--offset must be non-negative")
 		}
@@ -278,8 +301,7 @@ var searchCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("search messages: %w", err)
 		}
-		g.printMessages(os.Stdout, lr)
-		return nil
+		return g.printMessages(os.Stdout, lr)
 	},
 }
 
@@ -529,7 +551,9 @@ var markCmd = &cobra.Command{
 			state = "unread"
 		}
 		requested := len(uids)
-		result := map[string]any{"status": "marked", "state": state, "modified": modified, "requested": requested}
+		// Mirror move: a status of "marked" would read as success even when
+		// every UID was absent, so report "not_found" when nothing changed.
+		result := map[string]any{"status": changeStatus(modified, "marked"), "state": state, "modified": modified, "requested": requested}
 		g.printResult(result, func() {
 			if modified < requested {
 				fmt.Printf("marked %d of %d message(s) %s (%d not found)\n", modified, requested, state, requested-modified)

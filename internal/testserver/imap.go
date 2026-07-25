@@ -465,8 +465,9 @@ func matchesCriteria(msg *memMessage, criteria *imap.SearchCriteria) bool {
 			return false
 		}
 	}
-	// SINCE compares INTERNALDATE, modeled here by the message's stored date.
-	if !criteria.Since.IsZero() && msg.date.Before(criteria.Since) {
+	// SINCE compares INTERNALDATE (modeled by the message's stored date) at DATE
+	// precision, like SENTSINCE — the time of day is ignored on both sides.
+	if !criteria.Since.IsZero() && dayStart(msg.date).Before(dayStart(criteria.Since)) {
 		return false
 	}
 	// TEXT matches a case-insensitive substring over the whole raw message.

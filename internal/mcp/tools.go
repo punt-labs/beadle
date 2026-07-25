@@ -499,6 +499,9 @@ func (h *handler) listMessages(ctx context.Context, req mcplib.CallToolRequest) 
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
+	if count <= 0 {
+		return mcplib.NewToolResultError("count must be positive"), nil
+	}
 	offset, err := intParam(req, "offset", 0)
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -592,6 +595,9 @@ func (h *handler) searchMessages(ctx context.Context, req mcplib.CallToolRequest
 	count, err := intParam(req, "count", 10)
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
+	}
+	if count <= 0 {
+		return mcplib.NewToolResultError("count must be positive"), nil
 	}
 	offset, err := intParam(req, "offset", 0)
 	if err != nil {

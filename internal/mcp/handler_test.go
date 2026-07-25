@@ -650,6 +650,26 @@ func TestHandler_ListMessages_NegativeOffset(t *testing.T) {
 	assert.Contains(t, r.text(), "offset must be non-negative")
 }
 
+func TestHandler_ListMessages_NonPositiveCount(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	for _, c := range []float64{0, -1} {
+		r := callTool(t, s, "list_messages", map[string]any{"count": c, "all_repos": true})
+		assert.True(t, r.IsError, "count %v should error", c)
+		assert.Contains(t, r.text(), "count must be positive")
+	}
+}
+
+func TestHandler_SearchMessages_NonPositiveCount(t *testing.T) {
+	s, _, _ := setupHandler(t)
+
+	for _, c := range []float64{0, -3} {
+		r := callTool(t, s, "search_messages", map[string]any{"text": "x", "count": c, "all_repos": true})
+		assert.True(t, r.IsError, "count %v should error", c)
+		assert.Contains(t, r.text(), "count must be positive")
+	}
+}
+
 func TestHandler_SearchMessages_ByFromAndSubject(t *testing.T) {
 	s, env, fix := setupHandler(t)
 	env.AddContact("Alice", "alice@test.com", "r--")

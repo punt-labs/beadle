@@ -6,10 +6,62 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/email"
 )
+
+// TestChangeStatus proves a mutating command reports "not_found" when nothing
+// changed, so mark/move JSON never reads as success for a stale UID.
+func TestChangeStatus(t *testing.T) {
+	assert.Equal(t, "not_found", changeStatus(0, "marked"))
+	assert.Equal(t, "marked", changeStatus(1, "marked"))
+	assert.Equal(t, "not_found", changeStatus(0, "moved"))
+	assert.Equal(t, "moved", changeStatus(3, "moved"))
+}
+
+// TestListCmd_RejectsBadPaging proves list validates count and offset before
+// opening a connection, so a bad value is a deterministic error, not a silent
+// empty result. The checks run first in RunE, so no server is contacted.
+func TestListCmd_RejectsBadPaging(t *testing.T) {
+	orig := struct {
+		count, offset int
+	}{listCount, listOffset}
+	t.Cleanup(func() { listCount, listOffset = orig.count, orig.offset })
+
+	listOffset = 0
+	listCount = 0
+	require.ErrorContains(t, listCmd.RunE(listCmd, nil), "--count must be positive")
+
+	listCount = -5
+	require.ErrorContains(t, listCmd.RunE(listCmd, nil), "--count must be positive")
+
+	listCount = 10
+	listOffset = -1
+	require.ErrorContains(t, listCmd.RunE(listCmd, nil), "--offset must be non-negative")
+}
+
+// TestSearchCmd_RejectsBadPaging proves search validates count and offset up
+// front, after the criteria check and before connecting.
+func TestSearchCmd_RejectsBadPaging(t *testing.T) {
+	orig := struct {
+		from          string
+		count, offset int
+	}{searchFrom, searchCount, searchOffset}
+	t.Cleanup(func() {
+		searchFrom, searchCount, searchOffset = orig.from, orig.count, orig.offset
+	})
+
+	searchFrom = "alice@test.com" // satisfy the "at least one criterion" gate
+	searchOffset = 0
+	searchCount = 0
+	require.ErrorContains(t, searchCmd.RunE(searchCmd, nil), "--count must be positive")
+
+	searchCount = 10
+	searchOffset = -2
+	require.ErrorContains(t, searchCmd.RunE(searchCmd, nil), "--offset must be non-negative")
+}
 
 func sampleMessages() []channel.MessageSummary {
 	when := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
