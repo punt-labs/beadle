@@ -29,10 +29,11 @@ const resendAPIURL = "https://api.resend.com/emails"
 // ComposeRaw builds an RFC 822 message for SMTP delivery.
 // When attachments is empty, produces a simple text/plain message.
 // When attachments is non-empty, produces a multipart/mixed message.
-// The repo tag, when non-empty, adds the X-Beadle-* headers.
+// The repo tag, when non-empty, adds the X-Beadle-* headers; the threading
+// value, when non-empty, adds the In-Reply-To/References reply headers.
 // Returns an error if header fields contain CR/LF (header injection).
 // Bcc recipients are intentionally excluded from headers per RFC 822.
-func ComposeRaw(from string, to, cc []string, subject, textBody string, attachments []OutboundAttachment, tag RepoTag) ([]byte, error) {
+func ComposeRaw(from string, to, cc []string, subject, textBody string, attachments []OutboundAttachment, tag RepoTag, threading Threading) ([]byte, error) {
 	allAddrs := make([]string, 0, len(to)+len(cc))
 	allAddrs = append(allAddrs, to...)
 	allAddrs = append(allAddrs, cc...)
@@ -50,6 +51,9 @@ func ComposeRaw(from string, to, cc []string, subject, textBody string, attachme
 	}
 	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
 	if err := tag.writeHeaders(&msg); err != nil {
+		return nil, err
+	}
+	if err := threading.writeHeaders(&msg); err != nil {
 		return nil, err
 	}
 	fmt.Fprintf(&msg, "MIME-Version: 1.0\r\n")
@@ -113,7 +117,7 @@ func ComposeRaw(from string, to, cc []string, subject, textBody string, attachme
 // gpg --detach-sign, then wrapped in a multipart/signed envelope. The repo
 // tag, when non-empty, adds the X-Beadle-* headers to the top-level envelope,
 // outside the signed body, so the signature is unaffected.
-func ComposeSignedRaw(from string, to, cc []string, subject, textBody string, attachments []OutboundAttachment, gpgBinary, signer, passphrase string, tag RepoTag) ([]byte, error) {
+func ComposeSignedRaw(from string, to, cc []string, subject, textBody string, attachments []OutboundAttachment, gpgBinary, signer, passphrase string, tag RepoTag, threading Threading) ([]byte, error) {
 	allAddrs := make([]string, 0, len(to)+len(cc))
 	allAddrs = append(allAddrs, to...)
 	allAddrs = append(allAddrs, cc...)
@@ -160,6 +164,9 @@ func ComposeSignedRaw(from string, to, cc []string, subject, textBody string, at
 	}
 	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
 	if err := tag.writeHeaders(&msg); err != nil {
+		return nil, err
+	}
+	if err := threading.writeHeaders(&msg); err != nil {
 		return nil, err
 	}
 	fmt.Fprintf(&msg, "MIME-Version: 1.0\r\n")
@@ -250,7 +257,7 @@ func buildMixedBodyPart(textBody string, attachments []OutboundAttachment) ([]by
 // is affected.
 func ComposeEncryptedSignedRaw(from string, to, cc []string, subject, textBody string,
 	attachments []OutboundAttachment, gpgBinary, signer, passphrase string,
-	recipientKeyIDs []string, tag RepoTag) ([]byte, error) {
+	recipientKeyIDs []string, tag RepoTag, threading Threading) ([]byte, error) {
 
 	allAddrs := make([]string, 0, len(to)+len(cc))
 	allAddrs = append(allAddrs, to...)
@@ -325,6 +332,9 @@ func ComposeEncryptedSignedRaw(from string, to, cc []string, subject, textBody s
 	if err := tag.writeHeaders(&msg); err != nil {
 		return nil, err
 	}
+	if err := threading.writeHeaders(&msg); err != nil {
+		return nil, err
+	}
 	fmt.Fprintf(&msg, "MIME-Version: 1.0\r\n")
 	fmt.Fprintf(&msg, "Content-Type: multipart/encrypted; boundary=%q; protocol=\"application/pgp-encrypted\"\r\n", encBoundary)
 	fmt.Fprintf(&msg, "\r\n")
@@ -369,8 +379,18 @@ type SendResponse struct {
 }
 
 // resendRequest assembles the Resend API payload, attaching the repo tag's
-// X-Beadle-* headers. The subject is already repo-tagged by the caller.
-func resendRequest(to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment, tag RepoTag) SendRequest {
+// X-Beadle-* headers and, for a reply, the In-Reply-To/References threading
+// headers. The subject is already repo-tagged by the caller.
+func resendRequest(to, cc, bcc []string, subject, body, html string, attachments []OutboundAttachment, tag RepoTag, threading Threading) (SendRequest, error) {
+	tagHeaders, err := tag.headers()
+	if err != nil {
+		return SendRequest{}, err
+	}
+	threadHeaders, err := threading.headers()
+	if err != nil {
+		return SendRequest{}, err
+	}
+
 	var resendAtts []ResendAttachment
 	for _, att := range attachments {
 		resendAtts = append(resendAtts, ResendAttachment{
@@ -386,8 +406,25 @@ func resendRequest(to, cc, bcc []string, subject, body, html string, attachments
 		Text:        body,
 		HTML:        html,
 		Attachments: resendAtts,
-		Headers:     tag.headers(),
+		Headers:     mergeHeaders(tagHeaders, threadHeaders),
+	}, nil
+}
+
+// mergeHeaders combines the repo-tag and threading header maps for the Resend
+// path. It returns nil when both are empty, so an untagged, non-reply message
+// sets no custom headers.
+func mergeHeaders(a, b map[string]string) map[string]string {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
 	}
+	out := make(map[string]string, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }
 
 // Send delivers an email via the Resend API.

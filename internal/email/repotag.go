@@ -166,16 +166,21 @@ func splitSlug(s string) (owner, repo string, ok bool) {
 }
 
 // headers returns the X-Beadle-* header map for the Resend JSON path, or nil
-// when the tag carries no repo context.
-func (t RepoTag) headers() map[string]string {
+// when the tag carries no repo context. Like writeHeaders on the raw-MIME path,
+// it rejects a value containing CR/LF, so both send paths defend against header
+// injection identically.
+func (t RepoTag) headers() (map[string]string, error) {
 	if t.empty() {
-		return nil
+		return nil, nil
+	}
+	if strings.ContainsAny(t.Slug, "\r\n") || strings.ContainsAny(t.Agent, "\r\n") {
+		return nil, fmt.Errorf("repo tag header contains CR/LF")
 	}
 	h := map[string]string{HeaderRepo: t.Slug}
 	if t.Agent != "" {
 		h[HeaderAgent] = t.Agent
 	}
-	return h
+	return h, nil
 }
 
 // writeHeaders appends the X-Beadle-* header lines to buf for the raw-MIME

@@ -43,6 +43,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reading a message never changes it (kept behind an IMAP Peek), so the scoped
   new-mail count stays a real worklist. `list` and `search` take `--offset` /
   `offset` to page beyond the first window.
+- Reply to a message — `beadle-email reply <uid>` and the `reply_message` MCP
+  tool. Threads the reply via `In-Reply-To` / `References` (written as top-level
+  headers outside the signed body, so a PGP signature still verifies), preserves
+  the `Re:` prefix and the `[owner/repo]` tag idempotently, and quotes the
+  original beneath the new text. Replying is write-gated like `send_email` —
+  beadle replies only to contacts granted `w`.
 
 ### Fixed
 

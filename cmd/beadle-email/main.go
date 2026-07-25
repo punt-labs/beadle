@@ -37,6 +37,7 @@ func init() {
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(readCmd)
 	rootCmd.AddCommand(sendCmd)
+	rootCmd.AddCommand(replyCmd)
 	rootCmd.AddCommand(moveCmd)
 	rootCmd.AddCommand(markCmd)
 	rootCmd.AddCommand(foldersCmd)

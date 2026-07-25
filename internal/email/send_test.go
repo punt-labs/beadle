@@ -65,7 +65,7 @@ Expire-Date: 0
 }
 
 func TestComposeRaw_NoAttachments(t *testing.T) {
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil, RepoTag{})
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil, RepoTag{}, Threading{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -83,7 +83,7 @@ func TestComposeRaw_NoAttachments(t *testing.T) {
 }
 
 func TestComposeRaw_EmptyAttachments(t *testing.T) {
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", []OutboundAttachment{}, RepoTag{})
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", []OutboundAttachment{}, RepoTag{}, Threading{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -92,7 +92,7 @@ func TestComposeRaw_EmptyAttachments(t *testing.T) {
 }
 
 func TestComposeRaw_MultipleToRecipients(t *testing.T) {
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com", "e@f.com"}, nil, "Hi", "Hello", nil, RepoTag{})
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com", "e@f.com"}, nil, "Hi", "Hello", nil, RepoTag{}, Threading{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -103,7 +103,7 @@ func TestComposeRaw_MultipleToRecipients(t *testing.T) {
 }
 
 func TestComposeRaw_WithCc(t *testing.T) {
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"x@y.com", "z@w.com"}, "Hi", "Hello", nil, RepoTag{})
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"x@y.com", "z@w.com"}, "Hi", "Hello", nil, RepoTag{}, Threading{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -117,7 +117,7 @@ func TestComposeRaw_BccNotInHeaders(t *testing.T) {
 	// Bcc recipients should never appear in the message headers.
 	// ComposeRaw does not accept bcc — they are envelope-only (handled by SMTPSend).
 	// This test verifies that even with Cc, no Bcc header is written.
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"cc@example.com"}, "Hi", "Hello", nil, RepoTag{})
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"cc@example.com"}, "Hi", "Hello", nil, RepoTag{}, Threading{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -133,7 +133,7 @@ func TestComposeRaw_OneAttachment(t *testing.T) {
 		Data:        []byte("fake-pdf-content"),
 	}}
 
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Report", "See attached.", atts, RepoTag{})
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Report", "See attached.", atts, RepoTag{}, Threading{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -179,7 +179,7 @@ func TestComposeRaw_MultipleAttachments(t *testing.T) {
 		{Filename: "c.bin", ContentType: "application/octet-stream", Data: []byte("binary")},
 	}
 
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Files", "Here are files.", atts, RepoTag{})
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Files", "Here are files.", atts, RepoTag{}, Threading{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -222,7 +222,7 @@ func TestComposeRaw_HeaderInjectionWithAttachments(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ComposeRaw(tc.from, tc.to, nil, tc.subject, "body", atts, RepoTag{})
+			_, err := ComposeRaw(tc.from, tc.to, nil, tc.subject, "body", atts, RepoTag{}, Threading{})
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "CR/LF")
 		})
@@ -230,7 +230,7 @@ func TestComposeRaw_HeaderInjectionWithAttachments(t *testing.T) {
 }
 
 func TestComposeRaw_HeaderInjectionInCc(t *testing.T) {
-	_, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"evil\r\n@hack.com"}, "Hi", "body", nil, RepoTag{})
+	_, err := ComposeRaw("a@b.com", []string{"c@d.com"}, []string{"evil\r\n@hack.com"}, "Hi", "body", nil, RepoTag{}, Threading{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "CR/LF")
 }
@@ -252,7 +252,7 @@ func TestComposeRaw_AttachmentHeaderInjection(t *testing.T) {
 				ContentType: tc.contentType,
 				Data:        []byte("data"),
 			}}
-			_, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "body", atts, RepoTag{})
+			_, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "body", atts, RepoTag{}, Threading{})
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "CR/LF")
 		})
@@ -266,7 +266,7 @@ func TestComposeRaw_NonASCIIFilename(t *testing.T) {
 		Data:        []byte("pdf-data"),
 	}}
 
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Report", "See attached.", atts, RepoTag{})
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Report", "See attached.", atts, RepoTag{}, Threading{})
 	require.NoError(t, err)
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
@@ -307,6 +307,7 @@ func TestComposeSignedRaw_ProducesVerifiableMessage(t *testing.T) {
 		nil,
 		gpgBin, "sendtest@example.com", "",
 		RepoTag{},
+		Threading{},
 	)
 	require.NoError(t, err)
 
@@ -350,6 +351,7 @@ func TestComposeSignedRaw_WithCc(t *testing.T) {
 		nil,
 		gpgBin, "cctest@example.com", "",
 		RepoTag{},
+		Threading{},
 	)
 	require.NoError(t, err)
 
@@ -383,6 +385,7 @@ func TestComposeSignedRaw_WithAttachments(t *testing.T) {
 		atts,
 		gpgBin, "att@example.com", "",
 		RepoTag{},
+		Threading{},
 	)
 	require.NoError(t, err)
 
@@ -439,6 +442,7 @@ func TestComposeSignedRaw_NonExpiringKeyRejected(t *testing.T) {
 		nil,
 		gpgBin, "noexpiry@example.com", "",
 		RepoTag{},
+		Threading{},
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "signing key rejected")
@@ -464,7 +468,7 @@ func TestComposeSignedRaw_HeaderInjection(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ComposeSignedRaw(tc.from, tc.to, nil, tc.subject, "body", nil,
-				gpgBin, "signer@example.com", "", RepoTag{})
+				gpgBin, "signer@example.com", "", RepoTag{}, Threading{})
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "CR/LF")
 		})
@@ -492,6 +496,7 @@ func TestComposeEncryptedSignedRaw_RoundTrip(t *testing.T) {
 		gpgBin, "sender@example.com", "",
 		[]string{"recipient@example.com"},
 		RepoTag{},
+		Threading{},
 	)
 	require.NoError(t, err)
 
@@ -540,6 +545,7 @@ func TestComposeEncryptedSignedRaw_WithAttachments(t *testing.T) {
 		gpgBin, "sender@example.com", "",
 		[]string{"recipient@example.com"},
 		RepoTag{},
+		Threading{},
 	)
 	require.NoError(t, err)
 
@@ -571,7 +577,7 @@ func TestComposeEncryptedSignedRaw_HeaderInjection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ComposeEncryptedSignedRaw(tc.from, tc.to, nil, tc.subject, "body", nil,
 				gpgBin, "signer@example.com", "",
-				[]string{"ABCD1234"}, RepoTag{})
+				[]string{"ABCD1234"}, RepoTag{}, Threading{})
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "CR/LF")
 		})
@@ -584,7 +590,7 @@ func TestComposeEncryptedSignedRaw_HeaderInjection(t *testing.T) {
 // is present and none when it is empty (the missing-repo-context fallback).
 func TestComposeRaw_RepoTag(t *testing.T) {
 	tag := RepoTag{Slug: "punt-labs/beadle", Agent: "claude"}
-	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil, tag)
+	raw, err := ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil, tag, Threading{})
 	require.NoError(t, err)
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
 	require.NoError(t, err)
@@ -592,7 +598,7 @@ func TestComposeRaw_RepoTag(t *testing.T) {
 	assert.Equal(t, "claude", msg.Header.Get("X-Beadle-Agent"))
 
 	// Missing repo context: no headers, still composes.
-	raw, err = ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil, RepoTag{})
+	raw, err = ComposeRaw("a@b.com", []string{"c@d.com"}, nil, "Hi", "Hello", nil, RepoTag{}, Threading{})
 	require.NoError(t, err)
 	msg, err = mail.ReadMessage(bytes.NewReader(raw))
 	require.NoError(t, err)
@@ -622,6 +628,7 @@ func TestComposeSignedRaw_RepoTagVerifies(t *testing.T) {
 		nil,
 		gpgBin, "tagtest@example.com", "",
 		tag,
+		Threading{},
 	)
 	require.NoError(t, err)
 
@@ -659,6 +666,7 @@ func TestComposeEncryptedSignedRaw_RepoTag(t *testing.T) {
 		gpgBin, "sender@example.com", "",
 		[]string{"recipient@example.com"},
 		tag,
+		Threading{},
 	)
 	require.NoError(t, err)
 

@@ -431,7 +431,7 @@ var sendCmd = &cobra.Command{
 			agent = id.Handle
 		}
 		tag := email.ResolveRepoTag(cmd.Context(), logger, agent)
-		result, err := email.TrySendChain(cfg, logger, to, cc, bcc, sendSubject, sendBody, "", nil, nil, tag)
+		result, err := email.TrySendChain(cfg, logger, to, cc, bcc, sendSubject, sendBody, "", nil, nil, tag, email.Threading{})
 		if err != nil {
 			return fmt.Errorf("send: %w", err)
 		}
@@ -452,6 +452,104 @@ func init() {
 	_ = sendCmd.MarkFlagRequired("to")
 	_ = sendCmd.MarkFlagRequired("subject")
 	_ = sendCmd.MarkFlagRequired("body")
+}
+
+// --- reply ---
+
+var (
+	replyFolder string
+	replyBody   string
+	replyCc     string
+	replyBcc    string
+	replyConfig string
+)
+
+var replyCmd = &cobra.Command{
+	Use:   "reply <uid>",
+	Short: "Reply to a message",
+	Long: "Reply to a message by UID. Threads the reply to the original " +
+		"(In-Reply-To/References), prefixes the subject with Re: preserving the " +
+		"[owner/repo] tag, and quotes the original body beneath your text.",
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		uidNum, err := strconv.ParseUint(args[0], 10, 32)
+		if err != nil {
+			return fmt.Errorf("invalid UID %q", args[0])
+		}
+
+		contactsPath := resolveContactsPath()
+		store, storeErr := email.LoadContactsIfNeeded(contactsPath, replyCc, replyBcc)
+		ccResolved, err := email.ResolveField(store, storeErr, replyCc)
+		if err != nil {
+			return fmt.Errorf("cc: %w", err)
+		}
+		bccResolved, err := email.ResolveField(store, storeErr, replyBcc)
+		if err != nil {
+			return fmt.Errorf("bcc: %w", err)
+		}
+		cc := splitAddresses(ccResolved)
+		bcc := splitAddresses(bccResolved)
+
+		cfg, id, err := resolveConfig(replyConfig)
+		if err != nil {
+			return err
+		}
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		client, err := email.Dial(cfg, logger)
+		if err != nil {
+			return fmt.Errorf("connect: %w", err)
+		}
+		defer client.Close()
+
+		rc, err := client.FetchThread(replyFolder, uint32(uidNum))
+		if err != nil {
+			return fmt.Errorf("fetch original: %w", err)
+		}
+		if rc.ReplyTo == "" {
+			return fmt.Errorf("cannot reply: original has no Reply-To or From address")
+		}
+
+		agent := ""
+		if id != nil {
+			agent = id.Handle
+		}
+		tag := email.ResolveRepoTag(cmd.Context(), logger, agent)
+		subject := email.ReplySubject(rc.Subject, tag)
+
+		// Surface a dropped thread link or an unquotable original on stderr,
+		// then send anyway — the same signals the reply_message tool reports.
+		var threading email.Threading
+		if rc.MessageID != "" {
+			threading = email.Threading{InReplyTo: rc.MessageID, References: rc.References}
+		} else {
+			logger.Warn("reply sent without threading headers: original has no Message-ID", "uid", uidNum)
+		}
+
+		body := replyBody
+		if rc.Quotable {
+			body = email.QuoteBody(replyBody, rc.From, rc.Date, rc.Body)
+		} else {
+			logger.Warn("original body could not be extracted; reply sent without a quote", "uid", uidNum)
+		}
+
+		result, err := email.TrySendChain(cfg, logger, []string{rc.ReplyTo}, cc, bcc, subject, body, "", nil, nil, tag, threading)
+		if err != nil {
+			return fmt.Errorf("reply: %w", err)
+		}
+		g.printResult(result, func() {
+			fmt.Printf("replied to %s via %s\n", result.To, result.Method)
+		})
+		return nil
+	},
+}
+
+func init() {
+	replyCmd.Flags().StringVar(&replyFolder, "folder", "INBOX", "IMAP folder holding the original")
+	replyCmd.Flags().StringVar(&replyBody, "body", "", "Reply text (required)")
+	replyCmd.Flags().StringVar(&replyCc, "cc", "", "Additional CC address")
+	replyCmd.Flags().StringVar(&replyBcc, "bcc", "", "Additional BCC address")
+	replyCmd.Flags().StringVarP(&replyConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
+	_ = replyCmd.MarkFlagRequired("body")
 }
 
 // --- move ---

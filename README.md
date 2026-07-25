@@ -111,7 +111,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 
 ## Features
 
-- **18 MCP tools** --- list, read, send, move/archive, batch move, download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts), whoami, `switch_identity`, inbox polling (set interval, get status)
+- **22 MCP tools** (20 always-on + 2 poll tools gated on config) --- list, search, read, reply, send, mark read/unread (single + batch), move/archive (single + batch), download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts), whoami, `switch_identity`, inbox polling (set interval, get status)
 - **Multi-identity via ethos** --- identity resolved per-request from ethos sidecar. Repo-local config pins identity. Mid-session switching via `switch_identity` tool. Fallback to `default-identity` file
 - **Two-dimensional trust** --- transport trust (trusted/verified/untrusted/unverified) + identity permissions (rwx per contact per identity). Both must pass before autonomous action
 - **Four-level transport trust** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
@@ -126,11 +126,14 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 
 | Tool | Purpose |
 |------|--------|
-| `list_messages` | List messages with trust levels. PGP signatures verified inline. |
-| `read_message` | Read full message body, headers, attachments, and trust classification. |
+| `list_messages` | List messages with trust levels. PGP signatures verified inline. Repo-scoped by default; `all_repos` widens. Paginate with `offset`. |
+| `search_messages` | Search the mailbox by from / subject / since / text (server-side IMAP SEARCH). Repo-scoped by default; `all_repos` widens. |
+| `read_message` | Read full message body, headers, attachments, and trust classification. Does not mark the message read. |
+| `reply_message` | Reply to a message: threads via In-Reply-To/References, preserves the `Re:` + repo tag, quotes the original. Write-gated like `send_email`. |
 | `send_email` | Send via Proton Bridge SMTP (primary) or Resend API (fallback). Resolves contact names inline. |
+| `mark_message` / `batch_mark_messages` | Mark one or many messages read (or `\Seen` cleared with unread). Reports the count actually changed. |
 | `move_message` | Move a message to another folder. Defaults to Archive. |
-| `batch_move_messages` | Move multiple messages to another folder in one call. Returns the count of messages moved. |
+| `batch_move_messages` | Move multiple messages to another folder in one call. Returns the count actually moved. |
 | `list_folders` | List all IMAP mailbox folders. |
 | `show_mime` | Inspect multipart MIME structure, PGP parts, and attachments. |
 | `verify_signature` | Verify PGP signature on a message. Returns signer info and key ID. |
@@ -270,6 +273,7 @@ beadle-email read <uid> [--folder F]                    # Read a message (leaves
 beadle-email search [--from A] [--subject S] [--since D] [--text T] [--count N] [--offset N] [--unread] [--all-repos]  # Search the mailbox
 beadle-email mark <uid> [--ids a,b,c] [--unread] [--folder F]  # Mark message(s) read/unread
 beadle-email send --to ADDR --subject S --body B        # Send an email
+beadle-email reply <uid> --body B [--folder F]          # Reply to a message (threaded, quoted)
 beadle-email move <uid> [--folder F] [--to DEST]        # Move a message
 beadle-email folders                                    # List IMAP folders
 beadle-email contact list|add|remove|find               # Manage contacts

@@ -85,6 +85,19 @@ func ParseMIME(raw []byte) (body string, attachments []channel.Attachment, heade
 	return body, attachments, headers
 }
 
+// extractionFailed reports whether body is a diagnostic placeholder ParseMIME
+// returns in place of a real body. ParseMIME never returns an error; on failure
+// it returns one of these strings. A caller that forwards the body to a human
+// or into outbound mail — a reply that quotes the original — must not treat a
+// placeholder as content. Kept beside ParseMIME so the two stay in sync.
+func extractionFailed(body string) bool {
+	switch body {
+	case "(parse error)", "(read error)", "(mime parse error)", "(not multipart)", "(no text body)":
+		return true
+	}
+	return false
+}
+
 // walkParts recursively extracts text body and attachments from a multipart entity.
 func walkParts(mr message.MultipartReader, plainBody, htmlBody *string, attachments *[]channel.Attachment) {
 	for {

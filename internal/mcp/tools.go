@@ -59,6 +59,7 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 	s.AddTool(readMessageTool(), h.readMessage)
 	s.AddTool(listFoldersTool(), h.listFolders)
 	s.AddTool(sendEmailTool(), h.sendEmail)
+	s.AddTool(replyMessageTool(), h.replyMessage)
 	s.AddTool(verifySignatureTool(), h.verifySignature)
 	s.AddTool(showMIMETool(), h.showMIME)
 	s.AddTool(checkTrustTool(), h.checkTrust)
@@ -235,6 +236,37 @@ func sendEmailTool() mcplib.Tool {
 		),
 		mcplib.WithString("html",
 			mcplib.Description("Optional HTML body"),
+		),
+		mcplib.WithArray("attachments",
+			mcplib.Description("Absolute file paths to attach (max 25 MB total)"),
+			mcplib.WithStringItems(),
+		),
+	)
+}
+
+func replyMessageTool() mcplib.Tool {
+	return mcplib.NewTool("reply_message",
+		mcplib.WithDescription("Reply to a message by UID. Threads the reply (In-Reply-To/References) to the original, prefixes the subject with Re: preserving the [owner/repo] tag, and quotes the original body beneath your text. Replies to the original's Reply-To address (or its From). Requires write permission on the recipient, exactly like send_email."),
+		mcplib.WithString("folder",
+			mcplib.Description("IMAP folder holding the original message"),
+			mcplib.DefaultString("INBOX"),
+		),
+		mcplib.WithString("message_id",
+			mcplib.Required(),
+			mcplib.Description("UID of the message to reply to (from list_messages)"),
+		),
+		mcplib.WithString("body",
+			mcplib.Required(),
+			mcplib.Description("Your reply text. The original message is quoted beneath it."),
+		),
+		mcplib.WithString("cc",
+			mcplib.Description("Additional CC recipient(s), comma-separated. Accepts email addresses or contact names/aliases"),
+		),
+		mcplib.WithString("bcc",
+			mcplib.Description("Additional BCC recipient(s), comma-separated. Accepts email addresses or contact names/aliases"),
+		),
+		mcplib.WithString("html",
+			mcplib.Description("Optional HTML body (used only on the Resend fallback transport)"),
 		),
 		mcplib.WithArray("attachments",
 			mcplib.Description("Absolute file paths to attach (max 25 MB total)"),
@@ -751,29 +783,12 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	cc := splitAddresses(ccResolved)
 	bcc := splitAddresses(bccResolved)
 
-	// Enforce write permission for all recipients
+	// Enforce write permission for all recipients.
 	allRecipients := make([]string, 0, len(to)+len(cc)+len(bcc))
 	allRecipients = append(allRecipients, to...)
 	allRecipients = append(allRecipients, cc...)
 	allRecipients = append(allRecipients, bcc...)
-	var denied []string
-	for _, addr := range allRecipients {
-		recipientEmail := email.ExtractEmailAddress(addr)
-		if recipientEmail == "" {
-			denied = append(denied, addr+" (invalid address)")
-			continue
-		}
-		match, ok := findByEmail(store, recipientEmail)
-		if !ok {
-			denied = append(denied, recipientEmail+" (unknown contact)")
-			continue
-		}
-		perm := contacts.CheckPermission(match, id.Email)
-		if !perm.Write {
-			denied = append(denied, recipientEmail+" (no write permission)")
-		}
-	}
-	if len(denied) > 0 {
+	if denied := enforceWritePermission(store, id.Email, allRecipients); len(denied) > 0 {
 		return mcplib.NewToolResultError(
 			fmt.Sprintf("permission denied: no write permission for: %s", strings.Join(denied, ", ")),
 		), nil
@@ -784,33 +799,10 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
 
-	// Collect GPG key IDs for recipients that have them.
-	var recipientKeyIDs []string
-	var missingKeyAddrs []string
-	for _, addr := range allRecipients {
-		recipientEmail := email.ExtractEmailAddress(addr)
-		if recipientEmail == "" {
-			continue
-		}
-		match, ok := findByEmail(store, recipientEmail)
-		if ok && match.GPGKeyID != "" {
-			recipientKeyIDs = append(recipientKeyIDs, match.GPGKeyID)
-		} else {
-			missingKeyAddrs = append(missingKeyAddrs, recipientEmail)
-		}
-	}
-
-	// Encrypt only when ALL recipients have GPG keys.
-	var encryptKeyIDs []string
-	var encryptionWarning string
-	if len(recipientKeyIDs) > 0 && len(missingKeyAddrs) == 0 {
-		encryptKeyIDs = recipientKeyIDs
-	} else if len(recipientKeyIDs) > 0 && len(missingKeyAddrs) > 0 {
-		encryptionWarning = fmt.Sprintf("encryption skipped: not all recipients have GPG keys (missing: %s)", strings.Join(missingKeyAddrs, ", "))
-	}
+	encryptKeyIDs, encryptionWarning := encryptKeysFor(store, allRecipients)
 
 	tag := email.ResolveRepoTag(ctx, h.logger, id.Handle)
-	result, sendErr := email.TrySendChain(cfg, h.logger, to, cc, bcc, subject, body, html, attachments, encryptKeyIDs, tag)
+	result, sendErr := email.TrySendChain(cfg, h.logger, to, cc, bcc, subject, body, html, attachments, encryptKeyIDs, tag, email.Threading{})
 	if sendErr != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("send email: %v", sendErr)), nil
 	}
@@ -822,6 +814,109 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 }
 
 // trySendChain is now email.TrySendChain — called directly above.
+
+func (h *handler) replyMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	id, cfg, store, err := h.resolveContext()
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
+	folder := stringParam(req, "folder", "INBOX")
+	msgID, err := req.RequireString("message_id")
+	if err != nil {
+		return mcplib.NewToolResultError("message_id is required"), nil
+	}
+	uid, err := strconv.ParseUint(msgID, 10, 32)
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
+	}
+	replyText, err := req.RequireString("body")
+	if err != nil {
+		return mcplib.NewToolResultError("body is required"), nil
+	}
+	html := stringParam(req, "html", "")
+
+	// Resolve any extra cc/bcc contacts before opening a connection.
+	ccResolved, err := email.ResolveField(store, nil, stringParam(req, "cc", ""))
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("cc: %v", err)), nil
+	}
+	bccResolved, err := email.ResolveField(store, nil, stringParam(req, "bcc", ""))
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("bcc: %v", err)), nil
+	}
+	cc := splitAddresses(ccResolved)
+	bcc := splitAddresses(bccResolved)
+
+	attachments, err := readAttachments(req)
+	if err != nil {
+		return mcplib.NewToolResultError(err.Error()), nil
+	}
+
+	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
+		rc, err := c.FetchThread(folder, uint32(uid))
+		if err != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("fetch original: %v", err)), nil
+		}
+		if rc.ReplyTo == "" {
+			return mcplib.NewToolResultError("cannot reply: original has no Reply-To or From address"), nil
+		}
+
+		to := []string{rc.ReplyTo}
+		allRecipients := make([]string, 0, 1+len(cc)+len(bcc))
+		allRecipients = append(allRecipients, to...)
+		allRecipients = append(allRecipients, cc...)
+		allRecipients = append(allRecipients, bcc...)
+
+		// Reply is a send: enforce the same write-permission gate. A read-only
+		// (r--) sender can be read but not replied to.
+		if denied := enforceWritePermission(store, id.Email, allRecipients); len(denied) > 0 {
+			return mcplib.NewToolResultError(
+				fmt.Sprintf("permission denied: no write permission for: %s", strings.Join(denied, ", ")),
+			), nil
+		}
+
+		encryptKeyIDs, encryptionWarning := encryptKeysFor(store, allRecipients)
+
+		tag := email.ResolveRepoTag(ctx, h.logger, id.Handle)
+		subject := email.ReplySubject(rc.Subject, tag)
+
+		// The reply promises threading and a quote. When the original cannot
+		// supply either, still send — but surface the gap in the tool output and
+		// the log rather than reporting a clean "sent" that silently did neither.
+		var warnings []string
+
+		var threading email.Threading
+		if rc.MessageID != "" {
+			threading = email.Threading{InReplyTo: rc.MessageID, References: rc.References}
+		} else {
+			h.logger.Warn("reply threading dropped: original has no Message-ID", "folder", folder, "uid", uid)
+			warnings = append(warnings, "reply sent without threading headers: original has no Message-ID")
+		}
+
+		body := replyText
+		if rc.Quotable {
+			body = email.QuoteBody(replyText, rc.From, rc.Date, rc.Body)
+		} else {
+			h.logger.Warn("reply quote omitted: original body could not be extracted", "folder", folder, "uid", uid)
+			warnings = append(warnings, "original body could not be extracted; reply sent without a quote")
+		}
+
+		result, sendErr := email.TrySendChain(cfg, h.logger, to, cc, bcc, subject, body, html, attachments, encryptKeyIDs, tag, threading)
+		if sendErr != nil {
+			return mcplib.NewToolResultError(fmt.Sprintf("send reply: %v", sendErr)), nil
+		}
+
+		out := formatSendResult(result)
+		if encryptionWarning != "" {
+			warnings = append(warnings, encryptionWarning)
+		}
+		for _, w := range warnings {
+			out += "\n" + w
+		}
+		return textResult(out)
+	})
+}
 
 func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
@@ -1391,6 +1486,56 @@ func senderPermission(store *contacts.Store, id *identity.Identity, from string)
 // full precedence rules.
 func findByEmail(store *contacts.Store, addr string) (contacts.Contact, bool) {
 	return store.FindByAddress(addr)
+}
+
+// enforceWritePermission returns the recipients that may not be written to for
+// the active identity — an invalid address, an unknown contact, or a contact
+// without write permission. An empty result means every recipient is writable.
+// It is the shared send-path gate for send_email and reply_message.
+func enforceWritePermission(store *contacts.Store, identityEmail string, recipients []string) []string {
+	var denied []string
+	for _, addr := range recipients {
+		recipientEmail := email.ExtractEmailAddress(addr)
+		if recipientEmail == "" {
+			denied = append(denied, addr+" (invalid address)")
+			continue
+		}
+		match, ok := findByEmail(store, recipientEmail)
+		if !ok {
+			denied = append(denied, recipientEmail+" (unknown contact)")
+			continue
+		}
+		if !contacts.CheckPermission(match, identityEmail).Write {
+			denied = append(denied, recipientEmail+" (no write permission)")
+		}
+	}
+	return denied
+}
+
+// encryptKeysFor applies the encrypt-only-when-all-recipients-have-keys policy:
+// it returns the key IDs to encrypt to (nil unless every recipient has one) and
+// a warning when encryption was skipped because a recipient lacked a key.
+func encryptKeysFor(store *contacts.Store, recipients []string) (keyIDs []string, warning string) {
+	var have, missing []string
+	for _, addr := range recipients {
+		recipientEmail := email.ExtractEmailAddress(addr)
+		if recipientEmail == "" {
+			continue
+		}
+		if match, ok := findByEmail(store, recipientEmail); ok && match.GPGKeyID != "" {
+			have = append(have, match.GPGKeyID)
+		} else {
+			missing = append(missing, recipientEmail)
+		}
+	}
+	switch {
+	case len(have) > 0 && len(missing) == 0:
+		return have, ""
+	case len(have) > 0:
+		return nil, fmt.Sprintf("encryption skipped: not all recipients have GPG keys (missing: %s)", strings.Join(missing, ", "))
+	default:
+		return nil, ""
+	}
 }
 
 // --- Contact Handlers ---
