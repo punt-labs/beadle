@@ -49,8 +49,10 @@ func getPollStatusTool(marker string) mcplib.Tool {
 
 // unreadBucket renders an unread count into the marker appended to
 // get_poll_status's description. Bucketing bounds prompt-cache churn: only a
-// change of bucket re-registers the tool, so a steady count causes none. The
-// empty string means no unread mail and no marker.
+// change of bucket re-registers the tool, so a steady count causes none. Counts
+// 1-9 render the exact number — at that scale each new message is worth a
+// distinct signal — and coarsen to thresholds above. The empty string means no
+// unread mail and no marker.
 func unreadBucket(n uint32) string {
 	switch {
 	case n == 0:
@@ -91,15 +93,23 @@ func newUnreadMarker(srv *server.MCPServer, fn server.ToolHandlerFunc, n uint32)
 // Update re-registers get_poll_status when n falls in a different bucket than
 // the current marker. Calls that leave the bucket unchanged do nothing, so a
 // steady inbox produces no churn; a zero count clears the marker.
+//
+// The whole check-set-register runs under m.mu: onNewMail and the
+// get_poll_status handler call Update from different goroutines, so committing
+// m.cur and registering the matching description must be atomic. Splitting them
+// would let two bucket changes commit m.cur in one order and AddTool in the
+// opposite one, leaving the registered description diverged from m.cur — and,
+// because change detection keys off m.cur, stuck there until the next change.
+// The lock order is m.mu → mcp-go's internal tool locks; SendNotificationToAllClients
+// never re-enters Update, so there is no cycle.
 func (m *UnreadMarker) Update(n uint32) {
 	marker := unreadBucket(n)
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	if marker == m.cur {
-		m.mu.Unlock()
 		return
 	}
 	m.cur = marker
-	m.mu.Unlock()
 	m.srv.AddTool(getPollStatusTool(marker), m.fn)
 }
 

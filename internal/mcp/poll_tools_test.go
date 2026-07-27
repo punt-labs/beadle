@@ -159,6 +159,35 @@ func drain(ch <-chan mcplib.JSONRPCNotification) {
 	}
 }
 
+// TestUnreadMarker_RegisteredDescriptionMatchesLastUpdate proves the invariant
+// the F1 fix protects: after a sequence of Updates the registered
+// get_poll_status description equals the marker for the last count, never a
+// stale earlier one. Update holds its mutex across the m.cur write and the
+// AddTool call, so the registration can never lag m.cur.
+func TestUnreadMarker_RegisteredDescriptionMatchesLastUpdate(t *testing.T) {
+	const base = "Show background inbox poller state: interval, active, last check time, unread count."
+
+	tests := []struct {
+		name   string
+		counts []uint32
+		want   string
+	}{
+		{"ends mid-bucket", []uint32{3, 7, 12, 40, 60}, base + " (50+ unread)"},
+		{"ends on exact count", []uint32{60, 200, 5}, base + " (5 unread)"},
+		{"ends cleared", []uint32{3, 200, 0}, base},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, marker := newMarkerServer(t)
+			callMCP(t, s, "initialize", 0, initParams())
+			for _, n := range tt.counts {
+				marker.Update(n)
+			}
+			assert.Equal(t, tt.want, pollStatusDesc(t, s))
+		})
+	}
+}
+
 // TestUnreadMarker_DescriptionCarriesCount proves the count a client reads from
 // get_poll_status's description tracks the marker, and clears at zero.
 func TestUnreadMarker_DescriptionCarriesCount(t *testing.T) {
