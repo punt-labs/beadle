@@ -47,8 +47,10 @@ func WithPoller(p *email.Poller) HandlerOption {
 	return func(h *handler) { h.poller = p }
 }
 
-// RegisterTools adds all email channel tools to the MCP server.
-func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slog.Logger, opts ...HandlerOption) {
+// RegisterTools adds all email channel tools to the MCP server. When a poller
+// is configured it returns the UnreadMarker that carries the repo's unread
+// count on get_poll_status's description; otherwise it returns nil.
+func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slog.Logger, opts ...HandlerOption) *UnreadMarker {
 	h := &handler{resolver: resolver, logger: logger, dialer: email.DefaultDialer{}}
 	for _, o := range opts {
 		o(h)
@@ -77,10 +79,12 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 	s.AddTool(whoamiTool(), h.whoami)
 	s.AddTool(switchIdentityTool(), h.switchIdentity)
 
+	var marker *UnreadMarker
 	if h.poller != nil {
 		s.AddTool(setPollIntervalTool(), h.setPollInterval)
-		s.AddTool(getPollStatusTool(), h.getPollStatus)
+		marker = newUnreadMarker(s, h.getPollStatus, h.poller.Status().Unseen)
 	}
+	return marker
 }
 
 type handler struct {
