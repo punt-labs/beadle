@@ -66,9 +66,6 @@ func Register(path, importLine string) (bool, error) {
 		if present(lines, importLine) {
 			return nil
 		}
-		if endsInOpenFence(lines) {
-			return fmt.Errorf("%s ends inside an unclosed code fence; close the fence before enabling so the import stays top-level", path)
-		}
 		next := append(lines, appended(lines, importLine))
 		if err := write(target, strings.Join(next, "")); err != nil {
 			return err
@@ -195,42 +192,96 @@ func remove(lines []string, importLine string) []string {
 
 // scanTopLevel calls fn(index, body) for each line that resolves at the top
 // level — outside any fenced or indented code block — passing the line net of
-// its terminator, and returns whether the file ends inside an unclosed fence.
-// A fence delimiter is a line whose first non-whitespace run is three or more
-// backticks or tildes; each one flips the fenced state. An indented code block
-// line begins with a tab or four or more spaces. This is the code-block
-// definition the Tool Enable/Disable Standard (§2.4) fixes so every
-// implementation agrees.
-func scanTopLevel(lines []string, fn func(i int, body string)) bool {
-	inFence := false
+// its terminator. This is the code-block definition the Tool Enable/Disable
+// Standard (§2.4) fixes so every implementation agrees, ported from the named
+// reference ClaudeMdImport in punt-labs/biff #312. A line is non-top-level when
+// it lies inside a matched fenced block (fencedRanges) or is itself an indented
+// code line — a tab or four or more leading spaces. beadle's own import is
+// written at column 0 with no info string, so it is top-level by construction
+// unless it sits inside a genuine fenced block.
+func scanTopLevel(lines []string, fn func(i int, body string)) {
+	bodies := make([]string, len(lines))
 	for i, ln := range lines {
-		b := trimTerminator(ln)
-		if isFence(b) {
-			inFence = !inFence
-			continue
+		bodies[i] = trimTerminator(ln)
+	}
+	inside := make(map[int]bool)
+	for _, r := range fencedRanges(bodies) {
+		// The content and the closing delimiter are inside; the opener is not.
+		for i := r[0] + 1; i <= r[1]; i++ {
+			inside[i] = true
 		}
-		if inFence || isIndented(b) {
+	}
+	for i, b := range bodies {
+		if inside[i] || isIndented(b) {
 			continue
 		}
 		fn(i, b)
 	}
-	return inFence
 }
 
-// endsInOpenFence reports whether lines finish inside an unclosed code fence.
-// Appending an import at EOF then would land it inside the fence — invisible to
-// present and remove — so Register refuses rather than append there.
-func endsInOpenFence(lines []string) bool {
-	return scanTopLevel(lines, func(int, string) {})
+// fencedRanges returns the [open, close] index pairs of matched fenced blocks
+// among the terminator-stripped bodies. A block opened by a run of N of a marker
+// closes only on a later same-marker delimiter whose run is at least N: a ```
+// block cannot be closed by ~~~ or by a shorter run, so a mismatched or shorter
+// delimiter inside the block is content, not a close. Blocks do not nest — once
+// open, every line up to the matching close is content. An unterminated opener
+// is dropped (it delimits nothing), so a dangling fence in the user's prose
+// above the import never swallows the rest of the file.
+func fencedRanges(bodies []string) [][2]int {
+	var ranges [][2]int
+	open := -1
+	var openMarker byte
+	var openLen int
+	for i, b := range bodies {
+		marker, run, ok := parseFence(b)
+		if open < 0 {
+			if ok {
+				open, openMarker, openLen = i, marker, run
+			}
+			continue
+		}
+		if ok && marker == openMarker && run >= openLen {
+			ranges = append(ranges, [2]int{open, i})
+			open = -1
+		}
+	}
+	return ranges
 }
 
-func isFence(body string) bool {
-	s := strings.TrimLeft(body, " \t")
-	return strings.HasPrefix(s, "```") || strings.HasPrefix(s, "~~~")
+// parseFence reports whether body is a fence delimiter and, if so, its marker
+// character and run length. A delimiter is a non-indented line — no leading tab,
+// at most three leading spaces (CommonMark) — whose first non-blank run is three
+// or more of a single marker character (a backtick or a tilde), optionally
+// followed by an info string. A tab- or four-or-more-space-indented ```/~~~ line
+// is an inert indented-code line, never a delimiter (§2.4).
+func parseFence(body string) (marker byte, run int, ok bool) {
+	if strings.HasPrefix(body, "\t") {
+		return 0, 0, false
+	}
+	stripped := strings.TrimLeft(body, " ")
+	if len(body)-len(stripped) >= 4 {
+		return 0, 0, false
+	}
+	if stripped == "" || (stripped[0] != '`' && stripped[0] != '~') {
+		return 0, 0, false
+	}
+	marker = stripped[0]
+	for run < len(stripped) && stripped[run] == marker {
+		run++
+	}
+	if run < 3 {
+		return 0, 0, false
+	}
+	return marker, run, true
 }
 
+// isIndented reports whether body is an indented code line — a leading tab or
+// four or more leading spaces (§2.4).
 func isIndented(body string) bool {
-	return strings.HasPrefix(body, "\t") || strings.HasPrefix(body, "    ")
+	if strings.HasPrefix(body, "\t") {
+		return true
+	}
+	return len(body)-len(strings.TrimLeft(body, " ")) >= 4
 }
 
 // appended returns importLine terminated with the host file's EOL, prefixed
