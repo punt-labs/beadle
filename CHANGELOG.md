@@ -57,6 +57,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the `Re:` prefix and the `[owner/repo]` tag idempotently, and quotes the
   original beneath the new text. Replying is write-gated like `send_email` —
   beadle replies only to contacts granted `w`.
+- `/beadle enable` / `disable` and an `enable` MCP tool — the Claude Code
+  surface for the enable/disable above (Tool Enable/Disable standard §2.14).
+  Both write the same `.punt-labs/beadle/enabled` marker as the CLI through one
+  shared implementation, so a repo enabled from either surface is identical. The
+  MCP tool takes an `action` of `enable` or `disable` (a verb, not a boolean);
+  neither surface runs git — the marker is a working-tree change committed via a
+  PR.
 
 ### Fixed
 
@@ -79,6 +86,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   load: the last step's stdout was read from a pipe that a concurrent `Wait()`
   could close mid-read. The last step's output is now captured into a buffer
   that `Wait()` completes before it is read, so compound results are reliable.
+- `disable` no longer strands a dead `@.punt-labs/beadle/CLAUDE.md` import when
+  an unclosed code fence sits above it in the host `CLAUDE.md`. The scanner now
+  uses balanced-pair fence detection (a dangling opener delimits nothing,
+  matching the reference parser), so beadle always recognizes and prunes its own
+  top-level import. The `CLAUDE.md` write lock also moved to the standard's
+  tool-agnostic sibling path (`.CLAUDE.md.punt-import.lock`), so beadle
+  serializes against the other Punt Labs tools that edit the same file, not just
+  against itself.
 
 ## [0.15.0] - 2026-04-18
 
