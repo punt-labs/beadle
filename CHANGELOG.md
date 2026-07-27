@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- New-mail signal for agents (completes DES-015). The `get_poll_status` MCP
+  tool's description now carries the current repo-scoped unread count (e.g.
+  `(3 unread)`), updated in place by the background poller and cleared once the
+  inbox is read down, so a connected agent sees new mail on its next turn. The
+  MCP server also advertises an `instructions` string describing the inbox/poll
+  protocol (process with `/inbox`, or set a poll interval). The count is
+  bucketed (exact 1–9, then `10+`/`50+`/`100+`) and re-registered only on a
+  bucket change to bound prompt-cache cost.
 - Automatic repo/agent tagging on outbound email (DES-033). Every message now
   carries a `[owner/repo]` subject tag (matching the GitHub convention, and
   inserted after any `Re:`/`Fwd:` marker) plus `X-Beadle-Repo` and
