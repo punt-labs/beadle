@@ -47,7 +47,7 @@ var enableCmd = &cobra.Command{
 		"enabled, and add the @.punt-labs/beadle/CLAUDE.md import to the repo\n" +
 		"CLAUDE.md. Idempotent: re-running is the upgrade path.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := repoRoot()
+		root, err := enable.RepoRoot()
 		if err != nil {
 			return err
 		}
@@ -62,7 +62,7 @@ var disableCmd = &cobra.Command{
 		"and delete the enabled marker, leaving .punt-labs/beadle/ dormant. Pass\n" +
 		"--purge to remove the whole directory.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := repoRoot()
+		root, err := enable.RepoRoot()
 		if err != nil {
 			return err
 		}
