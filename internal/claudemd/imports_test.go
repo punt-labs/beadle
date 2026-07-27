@@ -83,42 +83,31 @@ func TestRegisterIdempotent(t *testing.T) {
 }
 
 // TestFenceAudit drives every fence and code-block shape through the core
-// contract: enable is idempotent (a second Register appends no duplicate),
-// disable round-trips (Prune restores the original bytes), and an unclosed
-// fence is refused rather than corrupted. content is the user's file before any
-// import; openFence marks the inputs whose EOF sits inside an unclosed fence.
+// contract: enable is idempotent (a second Register appends no duplicate) and
+// disable round-trips (Prune restores the original bytes). content is the user's
+// file before any import; the column-0 import beadle appends is always
+// top-level, so a dangling opener never hides it — it delimits nothing (§2.4).
 func TestFenceAudit(t *testing.T) {
 	tests := []struct {
-		name      string
-		content   string
-		openFence bool
+		name    string
+		content string
 	}{
-		{"balanced backtick fence with info string", "# T\n```go\ncode\n```\n", false},
-		{"balanced tilde fence", "# T\n~~~\ncode\n~~~\n", false},
-		{"balanced tilde fence with info string", "# T\n~~~python\ncode\n~~~\n", false},
-		{"crlf-terminated fence lines", "# T\r\n```\r\ncode\r\n```\r\n", false},
-		{"import-matching line inside a fence", "# T\n```\n" + line + "\n```\n", false},
-		{"indented code block", "# T\n\n    " + line + "\n", false},
-		{"backticks then tildes, balanced", "```\na\n```\n~~~\nb\n~~~\n", false},
-		{"only an unclosed fence", "```\n", true},
-		{"unclosed fence with info string", "# T\n```go\ncode\n", true},
-		{"odd mixed fence count ends open", "~~~\ncode\n```\ncode\n~~~\n", true},
+		{"balanced backtick fence with info string", "# T\n```go\ncode\n```\n"},
+		{"balanced tilde fence", "# T\n~~~\ncode\n~~~\n"},
+		{"balanced tilde fence with info string", "# T\n~~~python\ncode\n~~~\n"},
+		{"crlf-terminated fence lines", "# T\r\n```\r\ncode\r\n```\r\n"},
+		{"import-matching line inside a fence", "# T\n```\n" + line + "\n```\n"},
+		{"indented code block", "# T\n\n    " + line + "\n"},
+		{"backticks then tildes, balanced", "```\na\n```\n~~~\nb\n~~~\n"},
+		// A dangling opener delimits nothing: the appended import stays top-level.
+		{"only a dangling fence", "```\n"},
+		{"dangling fence with info string", "# T\n```go\ncode\n"},
+		// ``` cannot close a ~~~ block, but a later ~~~ can, so this closes.
+		{"tilde block with an inner backtick line, balanced", "~~~\ncode\n```\ncode\n~~~\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := writeHost(t, tt.content)
-
-			if tt.openFence {
-				_, err := Register(path, line)
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "unclosed code fence")
-				assert.Equal(t, tt.content, readHost(t, path), "nothing appended on error")
-				// A retry must still refuse — never accrete duplicates.
-				_, err = Register(path, line)
-				require.Error(t, err)
-				assert.Equal(t, tt.content, readHost(t, path))
-				return
-			}
 
 			wrote, err := Register(path, line)
 			require.NoError(t, err)
@@ -135,6 +124,74 @@ func TestFenceAudit(t *testing.T) {
 			assert.Equal(t, tt.content, readHost(t, path), "disable restores the original bytes")
 		})
 	}
+}
+
+// TestPresentFenceSemantics pins the balanced-pair fence rules (§2.4) at the
+// present() boundary: an import inside a real fenced block is hidden, but a
+// dangling or mismatched opener delimits nothing and leaves the import visible.
+func TestPresentFenceSemantics(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"import inside a real fenced block is hidden", "# T\n```\n" + line + "\n```\n", false},
+		{"import inside a tilde block is hidden", "# T\n~~~\n" + line + "\n~~~\n", false},
+		{"dangling opener above import leaves it visible", "```\n" + line + "\n", true},
+		{"indented fences are inert, import top-level", "    ```\n" + line + "\n    ```\n", true},
+		{"backtick cannot close a tilde block, opener dangles", "~~~\n" + line + "\n```\n", true},
+		{"shorter run cannot close, longer opener dangles", "````\n" + line + "\n```\n", true},
+		{"inner tilde does not toggle a backtick block", "```\n~~~\n" + line + "\n```\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := present(splitKeepEnds(tt.content), line)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestDanglingFenceAboveImportStillPruned is the regression proving GAP 2 fixed.
+// A stray ``` in the user's prose above a registered import used to flip the
+// naive parity scan for the rest of the file: beadle misread its own column-0
+// import as fenced and disable left it — a dead @-import that 404s every
+// session. The balanced-pair scan treats the dangling opener as delimiting
+// nothing, so the import stays top-level and Prune removes it. Under the old
+// logic Prune would report no change and strand the import.
+func TestDanglingFenceAboveImportStillPruned(t *testing.T) {
+	content := "# Notes\n\n```\nsome unclosed snippet\n\n" + line + "\n"
+	path := writeHost(t, content)
+
+	pruned, err := Prune(path, line)
+	require.NoError(t, err)
+	assert.True(t, pruned, "the import below a dangling fence is top-level and is pruned")
+	assert.Equal(t, "# Notes\n\n```\nsome unclosed snippet\n\n", readHost(t, path),
+		"only the import line is removed; the user's dangling fence is left intact")
+}
+
+// TestDanglingFenceEnableAppendsTopLevel is the enable-direction counterpart:
+// a host CLAUDE.md ending in a dangling ``` opener. We follow §2.4 — the opener
+// delimits nothing — so Register appends the import at column 0 (top-level), a
+// re-run is idempotent, and a subsequent Prune re-matches and removes it. The
+// old endsInOpenFence refusal is gone; the import must land, not be rejected.
+func TestDanglingFenceEnableAppendsTopLevel(t *testing.T) {
+	content := "# Notes\n\n```\nunclosed snippet\n"
+	path := writeHost(t, content)
+
+	wrote, err := Register(path, line)
+	require.NoError(t, err)
+	require.True(t, wrote, "enable appends the import even under a dangling opener")
+	assert.Equal(t, content+line+"\n", readHost(t, path),
+		"the import lands at column 0, below the dangling fence")
+
+	wrote, err = Register(path, line)
+	require.NoError(t, err)
+	assert.False(t, wrote, "re-run is idempotent: the appended line is top-level, so it is seen")
+
+	pruned, err := Prune(path, line)
+	require.NoError(t, err)
+	assert.True(t, pruned, "disable re-matches the top-level import and removes it")
+	assert.Equal(t, content, readHost(t, path), "the user's dangling fence is left intact")
 }
 
 func TestPrune(t *testing.T) {
@@ -275,6 +332,34 @@ func TestCanonicalKeySameForSpellings(t *testing.T) {
 	viaDeep, err := canonicalKey(deep)
 	require.NoError(t, err)
 	assert.Equal(t, deep, viaDeep, "an unresolvable path keys on its cleaned absolute form")
+}
+
+func TestSiblingLockPath(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(host, []byte("x\n"), 0o644))
+
+	got, err := siblingLockPath(host)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, ".CLAUDE.md.punt-import.lock"), got,
+		"Lock B is the tool-agnostic sibling in the host's own directory (§2.4)")
+}
+
+func TestSiblingLockPathCanonicalizes(t *testing.T) {
+	// A CLAUDE.md symlinked into a dotfile store keys its lock next to the real
+	// file, so a tool naming the file through the link and one naming it directly
+	// take the identical lock — the cross-tool serialization §2.4 requires.
+	store := t.TempDir()
+	real := filepath.Join(store, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(real, []byte("x\n"), 0o644))
+	link := filepath.Join(t.TempDir(), "CLAUDE.md")
+	require.NoError(t, os.Symlink(real, link))
+
+	viaReal, err := siblingLockPath(real)
+	require.NoError(t, err)
+	viaLink, err := siblingLockPath(link)
+	require.NoError(t, err)
+	assert.Equal(t, viaReal, viaLink, "a symlinked host keys the same lock as its real target")
 }
 
 func TestPruneMissingFile(t *testing.T) {

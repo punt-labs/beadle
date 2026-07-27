@@ -48,10 +48,10 @@ const newFileMode = 0o644
 // added newline, so this is the single case an enable+disable round-trip is
 // not byte-for-byte (see the package comment).
 //
-// Register refuses to append when the file ends inside an unclosed code fence:
-// an import written at EOF there would sit inside the fence, where it neither
-// resolves nor matches on re-run — so a retry would append endless duplicates.
-// The caller must close the fence first.
+// The import is always written at column 0, so it is top-level by construction
+// (§2.4). A dangling code fence in the user's prose delimits nothing, so it
+// never hides the appended line — Register appends it top-level and Prune
+// re-matches it regardless of an unterminated opener above.
 func Register(path, importLine string) (bool, error) {
 	if err := validate(importLine); err != nil {
 		return false, err
@@ -65,9 +65,6 @@ func Register(path, importLine string) (bool, error) {
 		lines := splitKeepEnds(content)
 		if present(lines, importLine) {
 			return nil
-		}
-		if endsInOpenFence(lines) {
-			return fmt.Errorf("%s ends inside an unclosed code fence; close the fence before enabling so the import stays top-level", path)
 		}
 		next := append(lines, appended(lines, importLine))
 		if err := write(target, strings.Join(next, "")); err != nil {
@@ -195,42 +192,96 @@ func remove(lines []string, importLine string) []string {
 
 // scanTopLevel calls fn(index, body) for each line that resolves at the top
 // level — outside any fenced or indented code block — passing the line net of
-// its terminator, and returns whether the file ends inside an unclosed fence.
-// A fence delimiter is a line whose first non-whitespace run is three or more
-// backticks or tildes; each one flips the fenced state. An indented code block
-// line begins with a tab or four or more spaces. This is the code-block
-// definition the Tool Enable/Disable Standard (§2.4) fixes so every
-// implementation agrees.
-func scanTopLevel(lines []string, fn func(i int, body string)) bool {
-	inFence := false
+// its terminator. This is the code-block definition the Tool Enable/Disable
+// Standard (§2.4) fixes so every implementation agrees, ported from the named
+// reference ClaudeMdImport in punt-labs/biff #312. A line is non-top-level when
+// it lies inside a matched fenced block (fencedRanges) or is itself an indented
+// code line — a tab or four or more leading spaces. beadle's own import is
+// written at column 0 with no info string, so it is top-level by construction
+// unless it sits inside a genuine fenced block.
+func scanTopLevel(lines []string, fn func(i int, body string)) {
+	bodies := make([]string, len(lines))
 	for i, ln := range lines {
-		b := trimTerminator(ln)
-		if isFence(b) {
-			inFence = !inFence
-			continue
+		bodies[i] = trimTerminator(ln)
+	}
+	inside := make(map[int]bool)
+	for _, r := range fencedRanges(bodies) {
+		// The content and the closing delimiter are inside; the opener is not.
+		for i := r[0] + 1; i <= r[1]; i++ {
+			inside[i] = true
 		}
-		if inFence || isIndented(b) {
+	}
+	for i, b := range bodies {
+		if inside[i] || isIndented(b) {
 			continue
 		}
 		fn(i, b)
 	}
-	return inFence
 }
 
-// endsInOpenFence reports whether lines finish inside an unclosed code fence.
-// Appending an import at EOF then would land it inside the fence — invisible to
-// present and remove — so Register refuses rather than append there.
-func endsInOpenFence(lines []string) bool {
-	return scanTopLevel(lines, func(int, string) {})
+// fencedRanges returns the [open, close] index pairs of matched fenced blocks
+// among the terminator-stripped bodies. A block opened by a run of N of a marker
+// closes only on a later same-marker delimiter whose run is at least N: a ```
+// block cannot be closed by ~~~ or by a shorter run, so a mismatched or shorter
+// delimiter inside the block is content, not a close. Blocks do not nest — once
+// open, every line up to the matching close is content. An unterminated opener
+// is dropped (it delimits nothing), so a dangling fence in the user's prose
+// above the import never swallows the rest of the file.
+func fencedRanges(bodies []string) [][2]int {
+	var ranges [][2]int
+	open := -1
+	var openMarker byte
+	var openLen int
+	for i, b := range bodies {
+		marker, run, ok := parseFence(b)
+		if open < 0 {
+			if ok {
+				open, openMarker, openLen = i, marker, run
+			}
+			continue
+		}
+		if ok && marker == openMarker && run >= openLen {
+			ranges = append(ranges, [2]int{open, i})
+			open = -1
+		}
+	}
+	return ranges
 }
 
-func isFence(body string) bool {
-	s := strings.TrimLeft(body, " \t")
-	return strings.HasPrefix(s, "```") || strings.HasPrefix(s, "~~~")
+// parseFence reports whether body is a fence delimiter and, if so, its marker
+// character and run length. A delimiter is a non-indented line — no leading tab,
+// at most three leading spaces (CommonMark) — whose first non-blank run is three
+// or more of a single marker character (a backtick or a tilde), optionally
+// followed by an info string. A tab- or four-or-more-space-indented ```/~~~ line
+// is an inert indented-code line, never a delimiter (§2.4).
+func parseFence(body string) (marker byte, run int, ok bool) {
+	if strings.HasPrefix(body, "\t") {
+		return 0, 0, false
+	}
+	stripped := strings.TrimLeft(body, " ")
+	if len(body)-len(stripped) >= 4 {
+		return 0, 0, false
+	}
+	if stripped == "" || (stripped[0] != '`' && stripped[0] != '~') {
+		return 0, 0, false
+	}
+	marker = stripped[0]
+	for run < len(stripped) && stripped[run] == marker {
+		run++
+	}
+	if run < 3 {
+		return 0, 0, false
+	}
+	return marker, run, true
 }
 
+// isIndented reports whether body is an indented code line — a leading tab or
+// four or more leading spaces (§2.4).
 func isIndented(body string) bool {
-	return strings.HasPrefix(body, "\t") || strings.HasPrefix(body, "    ")
+	if strings.HasPrefix(body, "\t") {
+		return true
+	}
+	return len(body)-len(strings.TrimLeft(body, " ")) >= 4
 }
 
 // appended returns importLine terminated with the host file's EOL, prefixed
@@ -354,12 +405,10 @@ func removeTemp(path string) error {
 // mode. The rename in write depends on the bytes being durable first.
 func writeTemp(tmp *os.File, text string, mode os.FileMode) error {
 	if _, err := tmp.WriteString(text); err != nil {
-		tmp.Close()
-		return fmt.Errorf("writing temp file %q: %w", tmp.Name(), err)
+		return errors.Join(fmt.Errorf("writing temp file %q: %w", tmp.Name(), err), tmp.Close())
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("syncing temp file %q: %w", tmp.Name(), err)
+		return errors.Join(fmt.Errorf("syncing temp file %q: %w", tmp.Name(), err), tmp.Close())
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("closing temp file %q: %w", tmp.Name(), err)
@@ -370,54 +419,87 @@ func writeTemp(tmp *os.File, text string, mode os.FileMode) error {
 	return nil
 }
 
-// withLock resolves path (following a symlink to its real file), takes an
-// exclusive lock keyed on the resolved path, and runs fn with the resolved
-// target. The lock serializes the whole read-modify-write against a parallel
-// invocation, which atomic rename alone cannot: two unsynchronized writers each
-// read the old bytes and the second clobbers the first.
+// withLock resolves path (following a symlink to its real file), takes Lock B —
+// the tool-agnostic sibling lock for the host CLAUDE.md — and runs fn with the
+// resolved target. The lock serializes the whole read-modify-write against a
+// parallel invocation, which atomic rename alone cannot: two unsynchronized
+// writers each read the old bytes and the second clobbers the first.
 func withLock(path string, fn func(target string) error) error {
 	target, err := resolve(path)
 	if err != nil {
 		return err
 	}
-	return WithLock(target, func() error { return fn(target) })
+	lockPath, err := siblingLockPath(path)
+	if err != nil {
+		return err
+	}
+	return flockFile(lockPath, func() error { return fn(target) })
 }
 
 // The enable/disable guidance layer uses two nested locks:
 //
 //   - Lock A — the per-repo OPERATION lock. It serializes beadle's own enable
-//     against disable so the two never interleave. Key: the canonical repo root.
+//     against disable so the two never interleave. Key: the canonical repo root,
+//     hashed into a lock file in the OS temp dir. It is beadle-internal —
 //     enable/disable acquire it through WithLock for the whole operation.
 //   - Lock B — the per-CLAUDE.md-path flock. It serializes the CLAUDE.md
-//     read-modify-write across ALL tools, not just beadle. Key: the canonical
-//     CLAUDE.md path. Register and Prune acquire it through withLock.
+//     read-modify-write across ALL tools, not just beadle, so §2.4 mandates it
+//     be the sibling ".<basename>.punt-import.lock" in the host file's own
+//     directory — tool-agnostic by requirement, since vox, quarry, biff, and
+//     beadle all mutate the same ~/.claude/CLAUDE.md and must take the identical
+//     lock. Register and Prune acquire it through withLock.
 //
 // INVARIANT: every observation OR mutation of CLAUDE.md — reading it, appending
 // the import, pruning it, and the "remove the file if pruning emptied it"
 // decision (PruneAndDiscardEmpty) — happens while holding Lock B. Nothing
 // touches CLAUDE.md state outside B.
 //
-// Deadlock freedom: Lock A nests Lock B (never the reverse), and the two keys
-// are always distinct canonical paths (repo root vs repo root + "/CLAUDE.md"),
-// so a fixed acquire order over distinct locks cannot cycle.
+// Deadlock freedom: Lock A nests Lock B (never the reverse). Lock A is a temp-dir
+// hash lock and Lock B is a sibling file next to the CLAUDE.md, so their paths
+// never coincide and a fixed acquire order over distinct locks cannot cycle.
 
-// WithLock runs fn while holding an exclusive flock keyed on key. The lock file
-// lives in the OS temp dir, named by the SHA-256 of key's canonical path, so
-// two callers naming the same file by different spellings (a symlinked parent,
-// "./x", "a/../x") take the SAME lock, while distinct files never contend.
-func WithLock(key string, fn func() error) (err error) {
+// WithLock runs fn while holding Lock A — the per-repo OPERATION lock (see the
+// note above). The lock file lives in the OS temp dir, named by the SHA-256 of
+// key's canonical path, so two callers naming the same repo by different
+// spellings (a symlinked parent, "./x", "a/../x") take the SAME lock, while
+// distinct repos never contend. This is beadle-internal; the cross-tool
+// CLAUDE.md lock is Lock B, the sibling file taken by withLock.
+func WithLock(key string, fn func() error) error {
 	canon, err := canonicalKey(key)
 	if err != nil {
 		return err
 	}
 	sum := sha256.Sum256([]byte(canon))
 	lockPath := filepath.Join(os.TempDir(), "beadle-claudemd-"+hex.EncodeToString(sum[:])+".lock")
+	return flockFile(lockPath, fn)
+}
+
+// siblingLockPath returns Lock B for the host CLAUDE.md: the sibling
+// ".<basename>.punt-import.lock" in the host file's own directory (§2.4). The
+// host path is symlink-canonicalized first, so two spellings of one file — a
+// symlinked parent, or a CLAUDE.md symlinked into a dotfile store — take the
+// identical lock, and vox, quarry, biff, and beadle all serialize on it. The
+// lock is a separate file, never the host inode: the atomic rename that replaces
+// the host would carry a lock held on the target away with the dead inode, so
+// the next writer would serialize against nothing.
+func siblingLockPath(host string) (string, error) {
+	canon, err := canonicalKey(host)
+	if err != nil {
+		return "", err
+	}
+	dir, base := filepath.Split(canon)
+	return filepath.Join(dir, "."+base+".punt-import.lock"), nil
+}
+
+// flockFile runs fn while holding an exclusive flock on lockPath, creating the
+// lock file if it does not exist. Closing the file releases the flock; its
+// close failure surfaces only when fn itself succeeded.
+func flockFile(lockPath string, fn func() error) (err error) {
 	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening lock %q: %w", lockPath, err)
 	}
 	defer func() {
-		// Close releases the flock; report its failure only if fn succeeded.
 		if cerr := lock.Close(); cerr != nil && err == nil {
 			err = fmt.Errorf("closing lock %q: %w", lockPath, cerr)
 		}
