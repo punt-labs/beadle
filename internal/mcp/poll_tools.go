@@ -15,13 +15,16 @@ import (
 )
 
 // ServerInstructions primes the connecting agent on the inbox/poll protocol.
-// This mailbox is the agent's own: new mail fires tools/list_changed and the
-// unread count rides on get_poll_status's description. The MCP spec bounds the
-// instructions length, so keep this short.
+// This mailbox is the agent's own: a change in the unread count fires
+// tools/list_changed and an approximate, bucketed count rides on
+// get_poll_status's description. The MCP spec bounds the instructions length,
+// so keep this short.
 const ServerInstructions = "This mailbox is your own agent inbox. " +
-	"When new mail arrives the server fires a tools/list_changed notification, " +
-	"and the current unread count appears in the get_poll_status tool description. " +
-	"Process new mail with the /inbox command, or with list_messages then reply_message. " +
+	"When the unread count changes the server fires a tools/list_changed notification, " +
+	"and get_poll_status's description shows an approximate count, bucketed " +
+	"(exact 1-9, then 10+/50+/100+); it clears once the inbox is read down. " +
+	"Process new mail with the /inbox command, or with list_messages then read_message, " +
+	"replying with reply_message where a response is warranted. " +
 	"Set a recurring check with set_poll_interval (e.g. 5m)."
 
 func setPollIntervalTool() mcplib.Tool {
