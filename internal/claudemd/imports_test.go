@@ -169,6 +169,31 @@ func TestDanglingFenceAboveImportStillPruned(t *testing.T) {
 		"only the import line is removed; the user's dangling fence is left intact")
 }
 
+// TestDanglingFenceEnableAppendsTopLevel is the enable-direction counterpart:
+// a host CLAUDE.md ending in a dangling ``` opener. We follow §2.4 — the opener
+// delimits nothing — so Register appends the import at column 0 (top-level), a
+// re-run is idempotent, and a subsequent Prune re-matches and removes it. The
+// old endsInOpenFence refusal is gone; the import must land, not be rejected.
+func TestDanglingFenceEnableAppendsTopLevel(t *testing.T) {
+	content := "# Notes\n\n```\nunclosed snippet\n"
+	path := writeHost(t, content)
+
+	wrote, err := Register(path, line)
+	require.NoError(t, err)
+	require.True(t, wrote, "enable appends the import even under a dangling opener")
+	assert.Equal(t, content+line+"\n", readHost(t, path),
+		"the import lands at column 0, below the dangling fence")
+
+	wrote, err = Register(path, line)
+	require.NoError(t, err)
+	assert.False(t, wrote, "re-run is idempotent: the appended line is top-level, so it is seen")
+
+	pruned, err := Prune(path, line)
+	require.NoError(t, err)
+	assert.True(t, pruned, "disable re-matches the top-level import and removes it")
+	assert.Equal(t, content, readHost(t, path), "the user's dangling fence is left intact")
+}
+
 func TestPrune(t *testing.T) {
 	tests := []struct {
 		name      string

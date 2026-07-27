@@ -48,10 +48,10 @@ const newFileMode = 0o644
 // added newline, so this is the single case an enable+disable round-trip is
 // not byte-for-byte (see the package comment).
 //
-// Register refuses to append when the file ends inside an unclosed code fence:
-// an import written at EOF there would sit inside the fence, where it neither
-// resolves nor matches on re-run — so a retry would append endless duplicates.
-// The caller must close the fence first.
+// The import is always written at column 0, so it is top-level by construction
+// (§2.4). A dangling code fence in the user's prose delimits nothing, so it
+// never hides the appended line — Register appends it top-level and Prune
+// re-matches it regardless of an unterminated opener above.
 func Register(path, importLine string) (bool, error) {
 	if err := validate(importLine); err != nil {
 		return false, err
@@ -405,12 +405,10 @@ func removeTemp(path string) error {
 // mode. The rename in write depends on the bytes being durable first.
 func writeTemp(tmp *os.File, text string, mode os.FileMode) error {
 	if _, err := tmp.WriteString(text); err != nil {
-		tmp.Close()
-		return fmt.Errorf("writing temp file %q: %w", tmp.Name(), err)
+		return errors.Join(fmt.Errorf("writing temp file %q: %w", tmp.Name(), err), tmp.Close())
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("syncing temp file %q: %w", tmp.Name(), err)
+		return errors.Join(fmt.Errorf("syncing temp file %q: %w", tmp.Name(), err), tmp.Close())
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("closing temp file %q: %w", tmp.Name(), err)
