@@ -102,6 +102,47 @@ func TestPoller_FirstPollNoNotification(t *testing.T) {
 	assert.True(t, p.lastCheck.IsZero(), "lastCheck must start as zero for first-poll detection")
 }
 
+func TestPoller_Notify(t *testing.T) {
+	tests := []struct {
+		name       string
+		first      bool
+		prev       uint32
+		unseen     uint32
+		wantCount  bool   // count observer fired
+		wantCountN uint32 // value it fired with
+		wantMail   bool   // new-mail callback fired
+		wantMailN  uint32 // delta it fired with
+	}{
+		{name: "increase after first: both fire", prev: 3, unseen: 5, wantCount: true, wantCountN: 5, wantMail: true, wantMailN: 2},
+		{name: "decrease: only count observer", prev: 40, unseen: 3, wantCount: true, wantCountN: 3},
+		{name: "read down to zero: count observer clears", prev: 5, unseen: 0, wantCount: true, wantCountN: 0},
+		{name: "no change: neither fires", prev: 5, unseen: 5},
+		{name: "first poll with mail: count observer only", first: true, prev: 0, unseen: 5, wantCount: true, wantCountN: 5},
+		{name: "first poll empty: neither fires", first: true, prev: 0, unseen: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotCount, gotMail bool
+			var countN, mailN uint32
+			p := &Poller{
+				logger:    discardLogger(),
+				onCount:   func(n uint32) { gotCount = true; countN = n },
+				onNewMail: func(n uint32) { gotMail = true; mailN = n },
+			}
+			p.notify(tt.first, tt.prev, tt.unseen)
+
+			assert.Equal(t, tt.wantCount, gotCount, "count observer fired")
+			if tt.wantCount {
+				assert.Equal(t, tt.wantCountN, countN)
+			}
+			assert.Equal(t, tt.wantMail, gotMail, "new-mail callback fired")
+			if tt.wantMail {
+				assert.Equal(t, tt.wantMailN, mailN)
+			}
+		})
+	}
+}
+
 func TestPoller_RecordFailure(t *testing.T) {
 	p := testPoller()
 	before := time.Now()

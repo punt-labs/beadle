@@ -60,10 +60,14 @@ var serveCmd = &cobra.Command{
 			"beadle-email",
 			version,
 			server.WithToolCapabilities(true),
+			server.WithInstructions(mcptools.ServerInstructions),
 			server.WithExperimental(map[string]any{
 				"claude/channel": map[string]any{},
 			}),
 		)
+		// marker is assigned by RegisterTools below; observeCount closes over it
+		// and fires only after Start, by which time it is set.
+		var marker *mcptools.UnreadMarker
 		onNewMail := func(newCount uint32) {
 			s.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
 			logger.Info("poller: sent tools/list_changed notification")
@@ -78,8 +82,16 @@ var serveCmd = &cobra.Command{
 			s.SendNotificationToAllClients("notifications/claude/channel", channelParams)
 			logger.Info("poller: channel notification sent")
 		}
-		poller := email.NewPoller(onNewMail, resolver, logger, email.DefaultDialer{})
-		mcptools.RegisterTools(s, resolver, logger, mcptools.WithEthosDir(ethosDir), mcptools.WithPoller(poller))
+		// observeCount tracks every count change, including drops, so the unread
+		// marker clears when the inbox is read down. onNewMail prompts only on an
+		// increase, so a drop never wakes the agent.
+		observeCount := func(unseen uint32) {
+			if marker != nil {
+				marker.Update(unseen)
+			}
+		}
+		poller := email.NewPoller(onNewMail, resolver, logger, email.DefaultDialer{}, email.WithCountObserver(observeCount))
+		marker = mcptools.RegisterTools(s, resolver, logger, mcptools.WithEthosDir(ethosDir), mcptools.WithPoller(poller))
 		if err := poller.Start(); err != nil {
 			logger.Error("background polling failed to start", "error", err)
 		}
