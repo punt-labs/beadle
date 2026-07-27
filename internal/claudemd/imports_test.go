@@ -277,6 +277,34 @@ func TestCanonicalKeySameForSpellings(t *testing.T) {
 	assert.Equal(t, deep, viaDeep, "an unresolvable path keys on its cleaned absolute form")
 }
 
+func TestSiblingLockPath(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(host, []byte("x\n"), 0o644))
+
+	got, err := siblingLockPath(host)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, ".CLAUDE.md.punt-import.lock"), got,
+		"Lock B is the tool-agnostic sibling in the host's own directory (§2.4)")
+}
+
+func TestSiblingLockPathCanonicalizes(t *testing.T) {
+	// A CLAUDE.md symlinked into a dotfile store keys its lock next to the real
+	// file, so a tool naming the file through the link and one naming it directly
+	// take the identical lock — the cross-tool serialization §2.4 requires.
+	store := t.TempDir()
+	real := filepath.Join(store, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(real, []byte("x\n"), 0o644))
+	link := filepath.Join(t.TempDir(), "CLAUDE.md")
+	require.NoError(t, os.Symlink(real, link))
+
+	viaReal, err := siblingLockPath(real)
+	require.NoError(t, err)
+	viaLink, err := siblingLockPath(link)
+	require.NoError(t, err)
+	assert.Equal(t, viaReal, viaLink, "a symlinked host keys the same lock as its real target")
+}
+
 func TestPruneMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "CLAUDE.md")
 	wrote, err := Prune(path, line)

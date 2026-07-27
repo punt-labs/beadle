@@ -370,54 +370,87 @@ func writeTemp(tmp *os.File, text string, mode os.FileMode) error {
 	return nil
 }
 
-// withLock resolves path (following a symlink to its real file), takes an
-// exclusive lock keyed on the resolved path, and runs fn with the resolved
-// target. The lock serializes the whole read-modify-write against a parallel
-// invocation, which atomic rename alone cannot: two unsynchronized writers each
-// read the old bytes and the second clobbers the first.
+// withLock resolves path (following a symlink to its real file), takes Lock B —
+// the tool-agnostic sibling lock for the host CLAUDE.md — and runs fn with the
+// resolved target. The lock serializes the whole read-modify-write against a
+// parallel invocation, which atomic rename alone cannot: two unsynchronized
+// writers each read the old bytes and the second clobbers the first.
 func withLock(path string, fn func(target string) error) error {
 	target, err := resolve(path)
 	if err != nil {
 		return err
 	}
-	return WithLock(target, func() error { return fn(target) })
+	lockPath, err := siblingLockPath(path)
+	if err != nil {
+		return err
+	}
+	return flockFile(lockPath, func() error { return fn(target) })
 }
 
 // The enable/disable guidance layer uses two nested locks:
 //
 //   - Lock A — the per-repo OPERATION lock. It serializes beadle's own enable
-//     against disable so the two never interleave. Key: the canonical repo root.
+//     against disable so the two never interleave. Key: the canonical repo root,
+//     hashed into a lock file in the OS temp dir. It is beadle-internal —
 //     enable/disable acquire it through WithLock for the whole operation.
 //   - Lock B — the per-CLAUDE.md-path flock. It serializes the CLAUDE.md
-//     read-modify-write across ALL tools, not just beadle. Key: the canonical
-//     CLAUDE.md path. Register and Prune acquire it through withLock.
+//     read-modify-write across ALL tools, not just beadle, so §2.4 mandates it
+//     be the sibling ".<basename>.punt-import.lock" in the host file's own
+//     directory — tool-agnostic by requirement, since vox, quarry, biff, and
+//     beadle all mutate the same ~/.claude/CLAUDE.md and must take the identical
+//     lock. Register and Prune acquire it through withLock.
 //
 // INVARIANT: every observation OR mutation of CLAUDE.md — reading it, appending
 // the import, pruning it, and the "remove the file if pruning emptied it"
 // decision (PruneAndDiscardEmpty) — happens while holding Lock B. Nothing
 // touches CLAUDE.md state outside B.
 //
-// Deadlock freedom: Lock A nests Lock B (never the reverse), and the two keys
-// are always distinct canonical paths (repo root vs repo root + "/CLAUDE.md"),
-// so a fixed acquire order over distinct locks cannot cycle.
+// Deadlock freedom: Lock A nests Lock B (never the reverse). Lock A is a temp-dir
+// hash lock and Lock B is a sibling file next to the CLAUDE.md, so their paths
+// never coincide and a fixed acquire order over distinct locks cannot cycle.
 
-// WithLock runs fn while holding an exclusive flock keyed on key. The lock file
-// lives in the OS temp dir, named by the SHA-256 of key's canonical path, so
-// two callers naming the same file by different spellings (a symlinked parent,
-// "./x", "a/../x") take the SAME lock, while distinct files never contend.
-func WithLock(key string, fn func() error) (err error) {
+// WithLock runs fn while holding Lock A — the per-repo OPERATION lock (see the
+// note above). The lock file lives in the OS temp dir, named by the SHA-256 of
+// key's canonical path, so two callers naming the same repo by different
+// spellings (a symlinked parent, "./x", "a/../x") take the SAME lock, while
+// distinct repos never contend. This is beadle-internal; the cross-tool
+// CLAUDE.md lock is Lock B, the sibling file taken by withLock.
+func WithLock(key string, fn func() error) error {
 	canon, err := canonicalKey(key)
 	if err != nil {
 		return err
 	}
 	sum := sha256.Sum256([]byte(canon))
 	lockPath := filepath.Join(os.TempDir(), "beadle-claudemd-"+hex.EncodeToString(sum[:])+".lock")
+	return flockFile(lockPath, fn)
+}
+
+// siblingLockPath returns Lock B for the host CLAUDE.md: the sibling
+// ".<basename>.punt-import.lock" in the host file's own directory (§2.4). The
+// host path is symlink-canonicalized first, so two spellings of one file — a
+// symlinked parent, or a CLAUDE.md symlinked into a dotfile store — take the
+// identical lock, and vox, quarry, biff, and beadle all serialize on it. The
+// lock is a separate file, never the host inode: the atomic rename that replaces
+// the host would carry a lock held on the target away with the dead inode, so
+// the next writer would serialize against nothing.
+func siblingLockPath(host string) (string, error) {
+	canon, err := canonicalKey(host)
+	if err != nil {
+		return "", err
+	}
+	dir, base := filepath.Split(canon)
+	return filepath.Join(dir, "."+base+".punt-import.lock"), nil
+}
+
+// flockFile runs fn while holding an exclusive flock on lockPath, creating the
+// lock file if it does not exist. Closing the file releases the flock; its
+// close failure surfaces only when fn itself succeeded.
+func flockFile(lockPath string, fn func() error) (err error) {
 	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening lock %q: %w", lockPath, err)
 	}
 	defer func() {
-		// Close releases the flock; report its failure only if fn succeeded.
 		if cerr := lock.Close(); cerr != nil && err == nil {
 			err = fmt.Errorf("closing lock %q: %w", lockPath, cerr)
 		}
