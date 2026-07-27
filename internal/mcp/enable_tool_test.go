@@ -76,3 +76,12 @@ func TestEnableToolReportsRepoRootError(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.IsError, "an unresolved repo root surfaces as a tool error, not a panic")
 }
+
+func TestEnableToolNilRepoRootDoesNotPanic(t *testing.T) {
+	// A handler built outside RegisterTools has a nil repoRoot. The guard turns
+	// that into a tool error, not a nil-func panic.
+	h := &handler{}
+	res, err := h.enable(context.Background(), enableReq("enable"))
+	require.NoError(t, err)
+	assert.True(t, res.IsError, "a nil repo-root resolver is reported, not dereferenced")
+}

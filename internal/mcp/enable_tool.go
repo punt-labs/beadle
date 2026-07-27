@@ -9,12 +9,21 @@ import (
 	"github.com/punt-labs/beadle/internal/enable"
 )
 
+// action is the enable tool's verb — the one vocabulary shared with the CLI
+// (§2.14), not an enabled:bool. The two consts are the single source for the
+// tool's Enum values, its validation, and its dispatch, so a typo cannot slip
+// in at one use site and disagree with another.
+type action string
+
+const (
+	actionEnable  action = "enable"
+	actionDisable action = "disable"
+)
+
 // enableTool is the Claude Code surface for beadle's enable/disable verbs
-// (§2.14). Its action argument is an enum "enable" | "disable" — not an
-// enabled:bool — so the one vocabulary carries across the CLI and the MCP tool.
-// It writes the same <repo>/.punt-labs/beadle/enabled marker the CLI writes and
-// never runs git: the working-tree change is committed through a PR like any
-// other.
+// (§2.14). It writes the same <repo>/.punt-labs/beadle/enabled marker the CLI
+// writes and never runs git: the working-tree change is committed through a PR
+// like any other.
 func enableTool() mcplib.Tool {
 	return mcplib.NewTool("enable",
 		mcplib.WithDescription(
@@ -28,27 +37,33 @@ func enableTool() mcplib.Tool {
 		mcplib.WithString("action",
 			mcplib.Required(),
 			mcplib.Description("enable or disable"),
-			mcplib.Enum("enable", "disable"),
+			mcplib.Enum(string(actionEnable), string(actionDisable)),
 		),
 	)
 }
 
 func (h *handler) enable(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
-	action, err := req.RequireString("action")
+	raw, err := req.RequireString("action")
 	if err != nil {
 		return mcplib.NewToolResultError("action is required"), nil
 	}
-	if action != "enable" && action != "disable" {
-		return mcplib.NewToolResultError(fmt.Sprintf("action must be \"enable\" or \"disable\", got %q", action)), nil
+	act := action(raw)
+	if act != actionEnable && act != actionDisable {
+		return mcplib.NewToolResultError(fmt.Sprintf("action must be %q or %q, got %q", actionEnable, actionDisable, raw)), nil
 	}
 
+	// A handler built outside RegisterTools has no resolver; guard rather than
+	// panic on a nil func.
+	if h.repoRoot == nil {
+		return mcplib.NewToolResultError("repo-root resolver not configured"), nil
+	}
 	root, err := h.repoRoot()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
 
 	// nil progress: the MCP surface reports through the tool result, not stderr.
-	if action == "enable" {
+	if act == actionEnable {
 		if err := enable.Enable(root, nil); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("enable: %v", err)), nil
 		}
