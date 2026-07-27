@@ -65,18 +65,10 @@ var serveCmd = &cobra.Command{
 				"claude/channel": map[string]any{},
 			}),
 		)
-		// marker and poller are assigned below; onNewMail closes over both and
-		// runs only after Start, by which time each is set.
-		var (
-			marker *mcptools.UnreadMarker
-			poller *email.Poller
-		)
+		// marker is assigned by RegisterTools below; observeCount closes over it
+		// and fires only after Start, by which time it is set.
+		var marker *mcptools.UnreadMarker
 		onNewMail := func(newCount uint32) {
-			// Carry the repo's current unread count on get_poll_status's
-			// description so the tools/list_changed signal is meaningful.
-			if marker != nil {
-				marker.Update(poller.Status().Unseen)
-			}
 			s.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
 			logger.Info("poller: sent tools/list_changed notification")
 			channelParams := map[string]any{
@@ -90,7 +82,15 @@ var serveCmd = &cobra.Command{
 			s.SendNotificationToAllClients("notifications/claude/channel", channelParams)
 			logger.Info("poller: channel notification sent")
 		}
-		poller = email.NewPoller(onNewMail, resolver, logger, email.DefaultDialer{})
+		// observeCount tracks every count change, including drops, so the unread
+		// marker clears when the inbox is read down. onNewMail prompts only on an
+		// increase, so a drop never wakes the agent.
+		observeCount := func(unseen uint32) {
+			if marker != nil {
+				marker.Update(unseen)
+			}
+		}
+		poller := email.NewPoller(onNewMail, resolver, logger, email.DefaultDialer{}, email.WithCountObserver(observeCount))
 		marker = mcptools.RegisterTools(s, resolver, logger, mcptools.WithEthosDir(ethosDir), mcptools.WithPoller(poller))
 		if err := poller.Start(); err != nil {
 			logger.Error("background polling failed to start", "error", err)

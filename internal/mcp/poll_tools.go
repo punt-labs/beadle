@@ -164,11 +164,5 @@ func (h *handler) setPollInterval(_ context.Context, req mcplib.CallToolRequest)
 
 func (h *handler) getPollStatus(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	st := h.poller.Status()
-	// Sync the description marker to what the agent now sees. This is the one
-	// path that observes a decrease — the poller's onNewMail fires only on an
-	// increase — so it is where the marker clears once the inbox is read down.
-	if h.marker != nil {
-		h.marker.Update(st.Unseen)
-	}
 	return textResult(formatPollStatus(st))
 }

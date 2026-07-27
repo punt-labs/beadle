@@ -79,11 +79,12 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 	s.AddTool(whoamiTool(), h.whoami)
 	s.AddTool(switchIdentityTool(), h.switchIdentity)
 
+	var marker *UnreadMarker
 	if h.poller != nil {
 		s.AddTool(setPollIntervalTool(), h.setPollInterval)
-		h.marker = newUnreadMarker(s, h.getPollStatus, h.poller.Status().Unseen)
+		marker = newUnreadMarker(s, h.getPollStatus, h.poller.Status().Unseen)
 	}
-	return h.marker
+	return marker
 }
 
 type handler struct {
@@ -92,7 +93,6 @@ type handler struct {
 	dialer           email.Dialer
 	ethosDir         string
 	poller           *email.Poller
-	marker           *UnreadMarker      // nil when no poller; carries unread count on get_poll_status
 	overrideMu       sync.RWMutex       // guards identityOverride
 	identityOverride *identity.Identity // session-scoped: depends on process lifecycle matching session
 }

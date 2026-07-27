@@ -31,6 +31,7 @@ type PollStatus struct {
 // when the unread count increases.
 type Poller struct {
 	onNewMail NewMailFunc
+	onCount   func(uint32)
 	resolver  *identity.Resolver
 	logger    *slog.Logger
 	dialer    Dialer
@@ -59,6 +60,18 @@ func WithRepoScope(resolve func() string) PollerOption {
 	return func(p *Poller) {
 		if resolve != nil {
 			p.repoSlug = resolve
+		}
+	}
+}
+
+// WithCountObserver registers a hook called with the current unread count each
+// time the count changes, including a decrease and a return to zero. The mcp
+// layer wires it to the unread marker so the marker tracks any change; the
+// poller stays ignorant of the marker type. A nil hook is ignored.
+func WithCountObserver(observe func(uint32)) PollerOption {
+	return func(p *Poller) {
+		if observe != nil {
+			p.onCount = observe
 		}
 	}
 }
@@ -223,24 +236,35 @@ func (p *Poller) poll() {
 	p.mu.Unlock()
 
 	p.logger.Info("poller: tick", "unseen", unseen, "previous", prev, "first", first)
+	p.notify(first, prev, unseen)
 
-	if !first && unseen > prev {
-		newCount := unseen - prev
-		p.logger.Info("poller: new mail", "unseen", unseen, "previous", prev)
-		if p.onNewMail != nil {
-			p.onNewMail(newCount)
-		}
-	}
-
-	// Publish lastCheck only after the callback has run (or been skipped), so
+	// Publish lastCheck only after the callbacks have run (or been skipped), so
 	// LastCheck marks completion of the whole poll cycle. A waiter that sees
 	// LastCheck advance is therefore guaranteed the cycle has finished and any
 	// notification for it has already been attempted — so when a callback was
-	// due, it has run. (No callback runs on the first poll, when the unseen
-	// count did not increase, or when onNewMail is nil.)
+	// due, it has run. (No new-mail callback runs on the first poll, when the
+	// unseen count did not increase, or when onNewMail is nil.)
 	p.mu.Lock()
 	p.lastCheck = time.Now()
 	p.mu.Unlock()
+}
+
+// notify dispatches poll results to the callbacks. The count observer fires on
+// any change — including a decrease and a return to zero — so the unread marker
+// tracks the count down as the inbox is read, not just up. The new-mail
+// callback fires only on an increase after the first poll, so a drop never
+// prompts the agent and startup does not prompt for mail already waiting. It is
+// split out so these dispatch rules are unit-testable without a live mailbox.
+func (p *Poller) notify(first bool, prev, unseen uint32) {
+	if unseen != prev && p.onCount != nil {
+		p.onCount(unseen)
+	}
+	if !first && unseen > prev {
+		p.logger.Info("poller: new mail", "unseen", unseen, "previous", prev)
+		if p.onNewMail != nil {
+			p.onNewMail(unseen - prev)
+		}
+	}
 }
 
 func (p *Poller) recordFailure(msg string) {
