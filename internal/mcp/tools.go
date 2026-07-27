@@ -21,6 +21,7 @@ import (
 	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/enable"
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/pgp"
@@ -51,7 +52,7 @@ func WithPoller(p *email.Poller) HandlerOption {
 // is configured it returns the UnreadMarker that carries the repo's unread
 // count on get_poll_status's description; otherwise it returns nil.
 func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slog.Logger, opts ...HandlerOption) *UnreadMarker {
-	h := &handler{resolver: resolver, logger: logger, dialer: email.DefaultDialer{}}
+	h := &handler{resolver: resolver, logger: logger, dialer: email.DefaultDialer{}, repoRoot: enable.RepoRoot}
 	for _, o := range opts {
 		o(h)
 	}
@@ -79,6 +80,8 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 	s.AddTool(whoamiTool(), h.whoami)
 	s.AddTool(switchIdentityTool(), h.switchIdentity)
 
+	s.AddTool(enableTool(), h.enable)
+
 	var marker *UnreadMarker
 	if h.poller != nil {
 		s.AddTool(setPollIntervalTool(), h.setPollInterval)
@@ -93,8 +96,9 @@ type handler struct {
 	dialer           email.Dialer
 	ethosDir         string
 	poller           *email.Poller
-	overrideMu       sync.RWMutex       // guards identityOverride
-	identityOverride *identity.Identity // session-scoped: depends on process lifecycle matching session
+	repoRoot         func() (string, error) // resolves the enable/disable target repo; defaults to enable.RepoRoot
+	overrideMu       sync.RWMutex           // guards identityOverride
+	identityOverride *identity.Identity     // session-scoped: depends on process lifecycle matching session
 }
 
 // resolveIdentityAndConfig resolves the active identity and loads the

@@ -101,7 +101,7 @@ var uninstallCmd = &cobra.Command{
 			return fmt.Errorf("cannot determine home directory: %w", err)
 		}
 		commandsDir := filepath.Join(home, ".claude", "commands")
-		for _, name := range []string{"inbox.md", "mail.md", "send.md", "contacts.md"} {
+		for _, name := range []string{"inbox.md", "mail.md", "send.md", "contacts.md", "beadle.md"} {
 			path := filepath.Join(commandsDir, name)
 			if err := os.Remove(path); err == nil {
 				fmt.Fprintf(os.Stderr, "removed %s\n", path)

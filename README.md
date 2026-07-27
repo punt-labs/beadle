@@ -72,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/407fc12/install.sh
 
 Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts to install the Claude Code plugin (MCP tools + slash commands + hooks). If plugin installation fails, the script falls back to registering the standalone MCP server (no slash commands or hooks). Runs `doctor` to check your setup. Restart Claude Code after install. If you previously registered `beadle-email` as a standalone MCP server via `claude mcp add`, remove it first with `claude mcp remove beadle-email` to avoid duplicate registrations.
 
-**Plugin install** provides MCP tools, slash commands (`/inbox`, `/mail`, `/send`, `/contacts`), and hooks (two-channel display, automatic session setup). **Standalone MCP** provides only MCP tools --- no slash commands or hooks.
+**Plugin install** provides MCP tools, slash commands (`/inbox`, `/mail`, `/send`, `/contacts`, `/beadle`), and hooks (two-channel display, automatic session setup). **Standalone MCP** provides only MCP tools --- no slash commands or hooks.
 
 <details>
 <summary>Inspect before running</summary>
@@ -111,12 +111,12 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 
 ## Features
 
-- **22 MCP tools** (20 always-on + 2 poll tools gated on config) --- list, search, read, reply, send, mark read/unread (single + batch), move/archive (single + batch), download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts), whoami, `switch_identity`, inbox polling (set interval, get status)
+- **23 MCP tools** (21 always-on + 2 poll tools gated on config) --- list, search, read, reply, send, mark read/unread (single + batch), move/archive (single + batch), download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts), whoami, `switch_identity`, enable/disable repo guidance, inbox polling (set interval, get status)
 - **Multi-identity via ethos** --- identity resolved per-request from ethos sidecar. Repo-local config pins identity. Mid-session switching via `switch_identity` tool. Fallback to `default-identity` file
 - **Two-dimensional trust** --- transport trust (trusted/verified/untrusted/unverified) + identity permissions (rwx per contact per identity). Both must pass before autonomous action
 - **Four-level transport trust** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
 - **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically
-- **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound)
+- **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound), `/beadle` (enable/disable repo guidance)
 - **Two-channel display** (plugin only) --- compact panel summaries with full data in context, no raw JSON in conversation
 - **Proton Bridge native** --- IMAP STARTTLS for reading, SMTP for sending, Resend API fallback
 - **Credential isolation** --- secrets resolved at runtime from OS keychain, never stored in config files
@@ -145,6 +145,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 | `remove_contact` | Remove a contact by name. |
 | `whoami` | Return the active identity (email, display name, ethos handle). |
 | `switch_identity` | Switch the active identity for this session. Pass an ethos handle or empty to reset. |
+| `enable` | Turn beadle's repo guidance on or off in this repo (`action`: `enable` or `disable`). Deposits the guide + `enabled` marker and adds the `@.punt-labs/beadle/CLAUDE.md` import, or removes them. Same marker as the CLI `enable`/`disable`. |
 | `set_poll_interval` | Set automatic inbox polling interval (1m, 5m, 10m, 15m, 30m, 1h, 2h) or disable (`n`). |
 | `get_poll_status` | Return current polling configuration: interval, active state, last check time, unseen count. |
 
@@ -161,6 +162,7 @@ Available when installed as a Claude Code plugin.
 | `/mail` | Mail something to the owner or a specific recipient. |
 | `/send` | Send via any channel (email today, Signal later). |
 | `/contacts` | Manage address book (list, add with permissions, remove, find). |
+| `/beadle enable` / `/beadle disable` | Turn beadle's repo guidance on or off in this repo (writes the `enabled` marker + `CLAUDE.md` import). Commit the change via a PR. |
 
 ## Setup
 

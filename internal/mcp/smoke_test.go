@@ -104,7 +104,7 @@ func TestMCPSmoke_ToolRegistration(t *testing.T) {
 		"batch_move_messages", "mark_message", "batch_mark_messages",
 		"download_attachment", "list_contacts",
 		"find_contact", "add_contact", "remove_contact", "whoami",
-		"switch_identity",
+		"switch_identity", "enable",
 	}
 
 	for _, expected := range expectedTools {
