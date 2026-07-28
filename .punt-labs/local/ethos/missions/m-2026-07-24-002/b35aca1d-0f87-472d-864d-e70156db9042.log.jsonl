@@ -1,0 +1,3 @@
+{"ts":"2026-07-24T04:48:21.493946Z","event":"create","actor":"claude","details":{"evaluator":"rsc","ticket":"beadle-gpv","worker":"bwk"}}
+{"ts":"2026-07-24T05:26:00.986945Z","event":"result","actor":"bwk","details":{"confidence":0.95,"evidence_entries":6,"files_changed":3,"round":1,"verdict":"pass"}}
+{"ts":"2026-07-25T13:38:36.023634Z","event":"close","actor":"claude","details":{"round":1,"status":"closed","verdict":"pass"}}

@@ -1,0 +1,3 @@
+{"ts":"2026-07-27T15:06:07.594121Z","event":"create","actor":"claude","details":{"evaluator":"rsc","ticket":"beadle-obd","worker":"bwk"}}
+{"ts":"2026-07-27T15:28:29.005415Z","event":"result","actor":"bwk","details":{"confidence":0.95,"evidence_entries":5,"files_changed":10,"round":1,"verdict":"pass"}}
+{"ts":"2026-07-27T15:45:36.128237Z","event":"close","actor":"claude","details":{"round":1,"status":"closed","verdict":"pass"}}
