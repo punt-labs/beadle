@@ -125,7 +125,12 @@ each message according to its permission level below.
 
 - **Read** the message and surface it to the user.
 - **Reply if the message asks a question.** Same reply rules as `rw-` apply.
-- Do not archive — leave in inbox for the user to decide.
+  A question that arrived by email is answered by email (via `reply_message`),
+  not only in the session.
+- **Archive** after processing. This mailbox is beadle's own inbox, not the
+  owner's review queue — the owner reads their own mail. Once the message has
+  been surfaced and any reply sent, archive it so the inbox reflects only
+  unprocessed mail.
 
 #### `rw-` — Trusted contacts with reply permission
 

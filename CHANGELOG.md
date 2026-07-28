@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `/inbox` now archives owner (`rwx`) mail after processing instead of leaving
+  it in the inbox. The mailbox is beadle's own inbox, not the owner's review
+  queue — the owner reads their own mail — so a message that has been surfaced
+  (and answered by email when it asks a question) is archived, leaving only
+  unprocessed mail in the inbox (beadle-g1r).
+
 ## [0.16.0] - 2026-07-27
 
 ### Added
