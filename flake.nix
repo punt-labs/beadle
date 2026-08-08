@@ -35,7 +35,7 @@
               git
               gnumake
               go_1_26
-              go-tools
+              go-tools # staticcheck
               gopls
               jq
               markdownlint-cli2
