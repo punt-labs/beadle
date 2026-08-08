@@ -1,6 +1,7 @@
 VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
-STATICCHECK ?= $(or $(shell command -v staticcheck 2>/dev/null),$(firstword $(subst :, ,$(shell go env GOPATH)))/bin/staticcheck)
+GOPATH_FIRST := $(firstword $(subst :, ,$(shell go env GOPATH)))
+STATICCHECK ?= $(or $(wildcard $(GOPATH_FIRST)/bin/staticcheck),$(shell command -v staticcheck 2>/dev/null),$(GOPATH_FIRST)/bin/staticcheck)
 MARKDOWNLINT ?= npx --yes markdownlint-cli2
 
 .PHONY: help lint docs test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover tools doctor

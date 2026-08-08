@@ -46,6 +46,7 @@
 
             shellHook = ''
               export BEADLE_NIX_SHELL=1
+              export STATICCHECK=staticcheck
               export MARKDOWNLINT=markdownlint-cli2
               echo "beadle dev shell: Go $(${pkgs.go_1_26}/bin/go version), Node $(${pkgs.nodejs_24}/bin/node --version)"
             '';
