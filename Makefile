@@ -1,5 +1,7 @@
 VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
+STATICCHECK ?= $(shell if command -v staticcheck >/dev/null 2>&1; then command -v staticcheck; else printf '%s/bin/staticcheck' "$$(go env GOPATH)"; fi)
+MARKDOWNLINT ?= npx --yes markdownlint-cli2
 
 .PHONY: help lint docs test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover tools doctor
 
@@ -9,10 +11,10 @@ help: ## Show available targets
 lint: ## Lint (gofmt + go vet + staticcheck)
 	@test -z "$$(gofmt -s -l ./cmd/ ./internal/ 2>/dev/null)" || { echo "gofmt -s: these files need formatting:"; gofmt -s -l ./cmd/ ./internal/; exit 1; }
 	go vet ./...
-	$(shell go env GOPATH)/bin/staticcheck ./...
+	$(STATICCHECK) ./...
 
 docs: ## Lint markdown
-	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"
+	$(MARKDOWNLINT) "**/*.md" "#node_modules"
 
 test: ## Run tests with race detection
 	go test -race -count=1 ./...
