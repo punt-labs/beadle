@@ -49,3 +49,6 @@ docs/*.log
 docs/*.fuzz
 docs/*.toc
 .envrc.local
+
+# Quarry session-transcript captures (pkit-kcps)
+.punt-labs/quarry/captures/
