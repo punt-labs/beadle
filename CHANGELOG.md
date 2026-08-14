@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `OPENROUTER_API_KEY` wired up in `.envrc` (canonical envrc rollout).
+
 ## [0.16.2] - 2026-08-13
 
 ### Removed
