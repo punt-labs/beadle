@@ -53,6 +53,13 @@ docs/*.toc
 # Quarry session-transcript captures (pkit-kcps)
 .punt-labs/quarry/captures/
 
+# Ethos per-session and per-mission local state. Machine-local by
+# construction — one file per session id, written live by the running
+# session's own writer. Tracking it races every git operation that needs a
+# clean tree: the v0.16.2 release preflight and its post-merge checkout both
+# failed on an audit file being appended to while the release ran.
+.punt-labs/local/
+
 # The mandated sibling lock every punt CLI takes before mutating a shared
 # host file (tool-enable-disable.md 2.4). Per-machine runtime state, and it
 # persists by design — unlinking a lock file races the next writer. The
