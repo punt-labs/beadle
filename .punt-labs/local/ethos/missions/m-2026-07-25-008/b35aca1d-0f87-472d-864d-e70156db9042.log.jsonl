@@ -1,3 +1,0 @@
-{"ts":"2026-07-25T06:28:39.813564Z","event":"create","actor":"claude","details":{"evaluator":"mdm","ticket":"beadle-6i0.4","worker":"bwk"}}
-{"ts":"2026-07-25T16:05:19.764764Z","event":"result","actor":"bwk","details":{"confidence":0.95,"evidence_entries":2,"files_changed":1,"round":1,"verdict":"pass"}}
-{"ts":"2026-07-25T16:05:19.793816Z","event":"close","actor":"claude","details":{"round":1,"status":"closed","verdict":"pass"}}
