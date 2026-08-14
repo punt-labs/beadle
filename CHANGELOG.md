@@ -10,6 +10,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `OPENROUTER_API_KEY` wired up in `.envrc` (canonical envrc rollout).
 
+### Removed
+
+- Untracked several dev- and internal-facing paths that were shipping to every
+  marketplace-plugin user via the tag-clone distribution channel: `research/`
+  (three files, ~90 KB including a Word doc), `meetings/` (one internal
+  meeting summary), `prfaq.tex` / `prfaq.pdf` / `prfaq.bib` (product-vision
+  materials, ~215 KB combined), and `.envrc` (developer environment config
+  naming the credential lookup keys). These have no runtime dependency and
+  the plugin distribution channel had no reason to carry them. Added
+  matching entries to `.gitignore` so they cannot be re-tracked by accident.
+  Extends the beadle-efv cleanup from v0.16.2 (bead beadle-efv).
+
 ## [0.16.2] - 2026-08-13
 
 ### Removed
