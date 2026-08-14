@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-08-13
+
 ### Removed
 
 - A 495 KB quarry session capture transcript
