@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- A 495 KB quarry session capture transcript
+  (`.punt-labs/quarry/captures/session-b35aca1d.md`, 6151 lines) is no longer
+  tracked, and so is no longer carried in the published plugin payload. Plugin
+  distribution clones the whole tracked tree from the tag the marketplace pins,
+  so this file reached every user who installed v0.16.0 or v0.16.1. It held
+  internal session deliberation — no credentials and no email addresses — but a
+  session transcript is not part of the plugin and should never have been
+  published (beadle-efv).
+
+### Fixed
+
+- Two dead `Write(path)` deny rules are gone from `.claude/settings.json`.
+  Claude Code matches path-scoped permission rules only under `Edit(path)` —
+  that one form covers Write, Edit, and NotebookEdit — so `Write(.env)` and
+  `Write(.envrc)` matched nothing and printed a startup warning every session.
+  The paired `Edit(.env)` and `Edit(.envrc)` rules remain and do all the
+  enforcing, so no guard is weakened (beadle-9ku).
+- `.envrc` now exports a secret only when its lookup returns a non-empty value,
+  so a failed keychain or `pass` lookup no longer exports an empty variable that
+  masks the failure.
+- `.gitignore` excludes quarry session captures and punt CLI lock artifacts
+  (`.*.lock`), so neither can be committed by accident again.
+
+### Changed
+
+- The `.punt-labs/ethos` submodule advances to team `58019b3`.
+
 ## [0.16.1] - 2026-07-28
 
 ### Changed
