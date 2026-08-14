@@ -213,3 +213,15 @@ docs/*.toc
 # differ on the suffix — .CLAUDE.md.lock and .CLAUDE.md.punt-import.lock
 # both appear.
 .*.lock
+
+# Beadle-efv v0.16.3 payload trim: internal materials that used to be tracked
+# and therefore shipped to every marketplace-plugin user's cache. The plugin
+# distribution channel clones the entire tracked git tree, so anything tracked
+# reaches users regardless of whether the code depends on it. These are dev-
+# and internal-facing artifacts a plugin consumer has no reason to receive.
+research/
+meetings/
+prfaq.tex
+prfaq.pdf
+prfaq.bib
+.envrc
