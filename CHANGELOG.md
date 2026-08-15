@@ -15,6 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is the security control, but the comment is the only part a human
   reads, so a wrong one hides a stale pin from every review. No SHA was
   changed.
+- `markdownlint-cli2-action` is repinned from an unreleased commit on the
+  action's default branch — ahead of every release tag including v24.2.0 —
+  to the v24.2.0 release commit, and its `# v22` comment corrected. The
+  workflow was already running code past v24.2.0 while the comment claimed
+  v22; the pin now names an immutable released artifact rather than a
+  moving branch head.
 
 ### Added
 
