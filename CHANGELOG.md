@@ -8,12 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Action pin comments now state the version actually pinned:
+- Action pin comments now state the version actually pinned.
   `actions/checkout` was labelled `# v4` on v7.0.1's SHA,
-  `actions/setup-go` `# v5` on v7.0.0's, and
-  `softprops/action-gh-release` `# v2` on v3.0.2's. The SHA is the
-  security control, but the comment is the only part a human reads, so a
-  wrong one hides a stale pin from every review. No SHA changed
+  `actions/setup-go` was labelled `# v5` on v7.0.0's, and
+  `softprops/action-gh-release` was labelled `# v2` on v3.0.2's. The SHA
+  is the security control, but the comment is the only part a human
+  reads, so a wrong one hides a stale pin from every review. No SHA was
+  changed.
 
 ### Added
 
