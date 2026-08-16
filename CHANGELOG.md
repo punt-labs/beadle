@@ -37,6 +37,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the plugin distribution channel had no reason to carry them. Added
   matching entries to `.gitignore` so they cannot be re-tracked by accident.
   Extends the beadle-efv cleanup from v0.16.2 (bead beadle-efv).
+- The `.punt-labs/ethos` git submodule. Claude Code clones the whole tracked
+  tree — submodules included — so every plugin user received ~1 MB / 245 files
+  of the org-wide identity registry (identities, roles, personalities, writing
+  styles), none of it beadle-specific. Beadle already resolves identity from
+  the global `~/.punt-labs/ethos/` at runtime, with `.punt-labs/ethos.yaml` as
+  the repo-local pin; both that file and `.punt-labs/biff/` stay tracked. The
+  submodule used an HTTPS URL, so keyless installs were never broken — this is
+  payload, not a fix.
+- `.ethos/missions.jsonl` — 37 append-only mission records naming internal
+  handles, ticket ids, and team email addresses, tracked and therefore shipped
+  to every plugin user. Nothing reads it, and a live session appends to it, so
+  tracking it also dirtied the tree mid-release.
 
 ## [0.16.2] - 2026-08-13
 

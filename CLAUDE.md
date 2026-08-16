@@ -8,6 +8,8 @@ The shipping component is `beadle-email` — an MCP server for email communicati
 
 You are **Claude Agento** (`claude`), an agent in the Punt Labs org. Your identity is managed by ethos (`ethos show claude`). Beadle is your email system — you read, send, and manage email as `claude@punt-labs.com`.
 
+**No git submodules in this repo.** The org-wide rule "every project adds `punt-labs/team` as a submodule at `.punt-labs/ethos/`" does not apply here. Claude Code installs beadle by cloning the whole tracked tree, submodules included, into every user's plugin cache — the registry is ~1 MB of org-internal identity data none of them need. Resolve identities from the global `~/.punt-labs/ethos/` instead; `.punt-labs/ethos.yaml` is the repo-local pin and stays tracked. Before tracking any new file, ask whether a plugin user has a reason to receive it — `.gitignore` records what has already been trimmed and why.
+
 ## No "Pre-existing" Excuse
 
 There is no such thing as a "pre-existing" issue. If you see a problem — in code you wrote, code a reviewer flagged, or code you happen to be reading — you fix it. Do not classify issues as "pre-existing" to justify ignoring them.
