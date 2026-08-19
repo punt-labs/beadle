@@ -173,12 +173,6 @@ timeline.xctimeline
 # TTS ephemeral audio
 .tts/
 
-# Claude local settings
-
-# direnv
-
-# Scratch/temp directory (TMPDIR set via .envrc)
-
 # Session transcripts
 *-transcript.txt
 
@@ -198,13 +192,17 @@ docs/*.log
 docs/*.fuzz
 docs/*.toc
 
-# Quarry session-transcript captures (pkit-kcps)
-
 # Ethos per-session and per-mission local state. Machine-local by
 # construction — one file per session id, written live by the running
 # session's own writer. Tracking it races every git operation that needs a
 # clean tree: the v0.16.2 release preflight and its post-merge checkout both
-# failed on an audit file being appended to while the release ran.
+# failed on an audit file being appended to while the release ran. The
+# `.punt-labs/` half of this (`.punt-labs/local/`, `.punt-labs/quarry/
+# captures/`) now lives in the canonical block above; `.ethos/` is the
+# repo-root mission log, which is the same live-writer hazard and, being
+# tracked, also shipped 37 internal mission records — handles, tickets, and
+# team email addresses — to every plugin user.
+.ethos/
 
 # The mandated sibling lock every punt CLI takes before mutating a shared
 # host file (tool-enable-disable.md 2.4). Per-machine runtime state, and it
@@ -225,3 +223,13 @@ prfaq.tex
 prfaq.pdf
 prfaq.bib
 .envrc
+
+# Mount path of the former `.punt-labs/ethos` submodule (punt-labs/team). Same
+# payload argument as the trim above: the registry is ~1 MB / 245 files of
+# org-wide identities, roles, personalities, and writing styles, none of it
+# beadle-specific, cloned into every plugin user's cache. Beadle resolves
+# identity from the global ~/.punt-labs/ethos/ at runtime (README "Identity"),
+# so nothing here needs the checked-in copy. The rule names only the directory
+# — `.punt-labs/ethos.yaml` and `.punt-labs/biff/` are tracked on purpose —
+# and it keeps a stray `git submodule add` from restoring the mount path.
+.punt-labs/ethos/
