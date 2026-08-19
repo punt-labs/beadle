@@ -5,6 +5,12 @@
 .punt-labs
 dist
 coverage.out
+# Locally built binaries. The Dockerfile's builder stage does `COPY . .` and
+# then compiles from source, so shipping ~20 MB of host-built ELF into the
+# build context is pure upload cost — and a darwin build would not even run in
+# the linux image.
+/beadle-email
+/beadle-daemon
 *.pdf
 .envrc
 .envrc.local
