@@ -37,7 +37,7 @@ install: build ## Build and install to ~/.local/bin
 
 deploy-commands: ## Deploy commands to ~/.claude/commands/
 	mkdir -p $(HOME)/.claude/commands
-	@for f in commands/*.md; do \
+	@for f in plugin/commands/*.md; do \
 		name=$$(basename "$$f"); \
 		case "$$name" in *-dev.md) continue;; esac; \
 		if [ ! -f "$(HOME)/.claude/commands/$$name" ] || ! diff -q "$$f" "$(HOME)/.claude/commands/$$name" >/dev/null 2>&1; then \

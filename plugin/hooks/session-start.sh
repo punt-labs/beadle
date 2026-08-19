@@ -2,10 +2,18 @@
 set -euo pipefail
 # SessionStart — deploy commands, auto-allow MCP permissions, first-run setup.
 
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || true)}"
+# Claude Code sets CLAUDE_PLUGIN_ROOT for an installed plugin. When it is
+# absent — the script run by hand, or from a dev checkout — resolve the plugin
+# root from the script's own location: this file lives at
+# <plugin-root>/hooks/session-start.sh. The git toplevel is no longer a usable
+# fallback, because the shippable surface moved under plugin/ and the repo root
+# has no .claude-plugin/ or commands/ of its own.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 if [[ -z "$PLUGIN_ROOT" ]]; then
-  echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Beadle SessionStart: skipped (not in a git repo)"}}'
-  exit 0
+  if ! PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+    echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Beadle SessionStart: skipped (cannot resolve plugin root)"}}'
+    exit 0
+  fi
 fi
 
 SETTINGS="$HOME/.claude/settings.json"
