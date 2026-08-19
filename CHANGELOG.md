@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   set --cone`, so an install stops fetching whole directories: `cmd/`,
   `internal/`, `docs/`, `scripts/`, `.github/`, `.beads/`, and this repo's own
   `.punt-labs/` working data and `.claude/` dev config are all absent. Measured
-  against this branch on GitHub: 29 files / 249 KB of working tree (668 KB
+  against this branch on GitHub: 29 files / 253 KB of working tree (672 KB
   including `.git`) versus 227 files / 12 MB (18 MB including `.git`) for the
   equivalent shallow full clone today's `url` source performs — 7.8x fewer
   files and 35x less working tree. Nothing in the surface reaches outside
@@ -29,7 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   behavior change; existing installs are unaffected until the marketplace entry
   is repointed.
 - Note for anyone trimming the payload further: cone mode always materializes
-  the files sitting in the *repo root*, so 220 KB of root-level documents
+  the files sitting in the *repo root*, so 224 KB of root-level documents
   (`DESIGN.md` at 115 KB, `CHANGELOG.md` at 45 KB, `README.md` at 18 KB) still
   travel with an install — 88% of what remains. `plugin/` itself is 29 KB.
   Shrinking that remainder means moving root documents into a subdirectory,
