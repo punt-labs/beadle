@@ -8,7 +8,9 @@ The shipping component is `beadle-email` — an MCP server for email communicati
 
 You are **Claude Agento** (`claude`), an agent in the Punt Labs org. Your identity is managed by ethos (`ethos show claude`). Beadle is your email system — you read, send, and manage email as `claude@punt-labs.com`.
 
-**No git submodules in this repo.** The org-wide rule "every project adds `punt-labs/team` as a submodule at `.punt-labs/ethos/`" does not apply here. Claude Code installs beadle by cloning the whole tracked tree, submodules included, into every user's plugin cache — the registry is ~1 MB of org-internal identity data none of them need. Resolve identities from the global `~/.punt-labs/ethos/` instead; `.punt-labs/ethos.yaml` is the repo-local pin and stays tracked. Before tracking any new file, ask whether a plugin user has a reason to receive it — `.gitignore` records what has already been trimmed and why.
+**No git submodules in this repo.** The org-wide rule "every project adds `punt-labs/team` as a submodule at `.punt-labs/ethos/`" does not apply here. A `git-subdir` install still clones with `--recurse-submodules`, so a gitlink anywhere in the tree is fetched into every user's plugin cache — and the registry is ~1 MB of org-internal identity data none of them need. Resolve identities from the global `~/.punt-labs/ethos/` instead; `.punt-labs/ethos.yaml` is the repo-local pin and stays tracked.
+
+**The plugin payload is `plugin/` plus every file in the repo root.** The shippable surface lives under `plugin/` and the marketplace fetches it with Claude Code's `git-subdir` source — a blobless partial clone plus a cone-mode sparse checkout — so no other *directory* reaches a user. Cone mode makes no such promise about the repo *root*: every root-level file travels with every install. Before tracking a new file, ask whether a plugin user has a reason to receive it, and put it in a directory rather than at the root when the answer is no. `.gitignore` records what has already been trimmed and why. See `docs/ARCHITECTURE.md` for the layout.
 
 ## No "Pre-existing" Excuse
 

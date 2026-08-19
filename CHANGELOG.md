@@ -6,6 +6,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The shippable plugin surface moved to `plugin/`, so a marketplace install
+  fetches only the plugin.** `.claude-plugin/`, `commands/`, and `hooks/` now
+  live under a single `plugin/` directory, which lets the marketplace entry use
+  Claude Code's `git-subdir` source (`"source": "git-subdir"`, `"path":
+  "plugin"`). That source is a blobless partial clone plus a `sparse-checkout
+  set --cone`, so an install stops fetching whole directories: `cmd/`,
+  `internal/`, `docs/`, `scripts/`, `.github/`, `.beads/`, and this repo's own
+  `.punt-labs/` working data and `.claude/` dev config are all absent. Measured
+  against this branch on GitHub: 29 files / 253 KB of working tree (672 KB
+  including `.git`) versus 227 files / 12 MB (18 MB including `.git`) for the
+  equivalent shallow full clone today's `url` source performs — 7.8x fewer
+  files and 35x less working tree. Nothing in the surface reaches outside
+  itself at runtime — the MCP server is the `beadle-email` binary on `PATH`,
+  and the two hook scripts depend only on `$HOME`, `jq`, and that binary — and
+  `${CLAUDE_PLUGIN_ROOT}/hooks/*.sh` in `hooks.json` stays correct because the
+  whole `hooks/` directory moved together. The repo's own references did break
+  and are fixed: `make deploy-commands` reads `plugin/commands/*.md`, and both
+  release scripts point at `plugin/.claude-plugin/plugin.json`. No user-visible
+  behavior change; existing installs are unaffected until the marketplace entry
+  is repointed.
+- Note for anyone trimming the payload further: cone mode always materializes
+  the files sitting in the *repo root*, so 224 KB of root-level documents
+  (`DESIGN.md` at 115 KB, `CHANGELOG.md` at 45 KB, `README.md` at 18 KB) still
+  travel with an install — 88% of what remains. `plugin/` itself is 29 KB.
+  Shrinking that remainder means moving root documents into a subdirectory,
+  which this change does not attempt.
+
+### Fixed
+
+- **`session-start.sh` would have silently deployed nothing and written the
+  wrong permission glob after the move.** Its `CLAUDE_PLUGIN_ROOT` fallback was
+  the git toplevel, which is no longer the plugin root: `$PLUGIN_ROOT/`
+  `.claude-plugin/plugin.json` and `$PLUGIN_ROOT/commands/` are both absent
+  there, so the `grep '"beadle-dev"'` dev-mode probe reads false and the deploy
+  loop (`shopt -s nullglob`) iterates an empty glob — neither failure prints
+  anything. Demonstrated against the sparse checkout with an isolated `HOME`:
+  the pre-move script reported only "Created ~/.claude/settings.json" and
+  allowed `mcp__plugin_beadle_email__*`, while the fixed script reported
+  "Deployed commands: /beadle /contacts /inbox /mail /send" and allowed
+  `mcp__plugin_beadle-dev_email__*`. The fallback is now the script's own parent
+  directory, which is the plugin root both in an installed plugin and in a dev
+  checkout, and needs no git at all. It also now asserts that
+  `.claude-plugin/plugin.json` actually exists under the resolved root before
+  trusting anything derived from it, and skips with the resolved path in the
+  message when it does not — so the next relayout or misconfigured
+  `CLAUDE_PLUGIN_ROOT` produces a loud, actionable skip instead of re-creating
+  this same silent zero-deploy.
+- **A 9.7 MB `beadle-daemon` binary was tracked at the repo root** — a `make
+  build-daemon` artifact committed by accident, while `.gitignore` already
+  ignored its sibling `/beadle-email`. It was 98% of the root-level payload
+  (10.13 MB of 10.35 MB), and because cone mode always materializes root files,
+  leaving it tracked would have dominated every git-subdir install and
+  cancelled most of the restructure's win. Untracked with `git rm --cached`, so
+  the local build artifact survives; root files drop from 10.35 MB to 220 KB.
+- **Not one of the repo's eleven shell scripts was linted.** `make lint` ran
+  gofmt, go vet, and staticcheck; CI ran the same three. The Go standard
+  requires shellcheck for a project with `.sh` files, and the two plugin hook
+  scripts are the plugin's entire executable surface, so an unlinted regression
+  there ships straight to every install. New `make lint-shell` target, which
+  `make lint` depends on and the Test workflow calls directly so there is one
+  definition of the file set. That set is *discovered*, not enumerated:
+  `git ls-files --cached --others --exclude-standard '*.sh'`, so a newly added
+  script — even one not yet `git add`ed — is linted the first time the gate
+  runs, and an empty result fails loudly rather than passing vacuously. The
+  tree was already clean, so this adopts at zero findings across all eleven.
+
 ## [0.16.3] - 2026-08-19
 
 ### Fixed

@@ -2,15 +2,43 @@
 set -euo pipefail
 # SessionStart — deploy commands, auto-allow MCP permissions, first-run setup.
 
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || true)}"
+# Claude Code sets CLAUDE_PLUGIN_ROOT for an installed plugin. When it is
+# absent — the script run by hand, or from a dev checkout — resolve the plugin
+# root from the script's own location: this file lives at
+# <plugin-root>/hooks/session-start.sh. The git toplevel is no longer a usable
+# fallback, because the shippable surface moved under plugin/ and the repo root
+# has no .claude-plugin/ or commands/ of its own.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 if [[ -z "$PLUGIN_ROOT" ]]; then
-  echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Beadle SessionStart: skipped (not in a git repo)"}}'
-  exit 0
+  if ! PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
+    echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Beadle SessionStart: skipped (cannot resolve plugin root)"}}'
+    exit 0
+  fi
 fi
 
 SETTINGS="$HOME/.claude/settings.json"
 COMMANDS_DIR="$HOME/.claude/commands"
 PLUGIN_JSON="${PLUGIN_ROOT}/.claude-plugin/plugin.json"
+
+# Assert the resolved root really is a plugin root before trusting anything
+# derived from it. Without this, a wrong PLUGIN_ROOT degrades silently rather
+# than loudly: the dev-mode probe below reads false because grep cannot open
+# the file, and the deploy loop iterates an empty glob under nullglob — so a
+# future relayout or a misconfigured CLAUDE_PLUGIN_ROOT deploys nothing, writes
+# the wrong permission glob, and says so nowhere. Fail visibly instead.
+if [[ ! -f "$PLUGIN_JSON" ]]; then
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg root "$PLUGIN_ROOT" '{
+      hookSpecificOutput: {
+        hookEventName: "SessionStart",
+        additionalContext: ("Beadle SessionStart: skipped (no .claude-plugin/plugin.json under resolved plugin root " + $root + ")")
+      }
+    }'
+  else
+    echo "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Beadle SessionStart: skipped (no .claude-plugin/plugin.json under resolved plugin root ${PLUGIN_ROOT//\"/\\\"})\"}}"
+  fi
+  exit 0
+fi
 
 # Detect dev mode: plugin.json name contains "beadle-dev"
 DEV_MODE=false
