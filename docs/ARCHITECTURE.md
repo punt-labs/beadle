@@ -1,5 +1,38 @@
 # Architecture
 
+## Repository Layout
+
+Everything the Claude Code plugin ships lives under `plugin/`, and nothing
+else does:
+
+| Path | Contents |
+|------|----------|
+| `plugin/.claude-plugin/plugin.json` | Plugin manifest. `mcpServers` names the `beadle-email` binary on `PATH`, so no compiled code ships. |
+| `plugin/.claude-plugin/hooks/hooks.json` | Hook registrations. This path, not `hooks/hooks.json`, is where Claude Code discovers them for this plugin (v0.6.1). |
+| `plugin/commands/` | Slash commands (`/beadle`, `/contacts`, `/inbox`, `/mail`, `/send`). |
+| `plugin/hooks/` | The two hook scripts: `session-start.sh` and `suppress-output.sh`. |
+
+The marketplace installs this directory with Claude Code's `git-subdir`
+source (`"source": "git-subdir"`, `"path": "plugin"`), which is a blobless
+partial clone plus `git sparse-checkout set --cone plugin` — so an install
+never fetches `cmd/`, `internal/`, `docs/`, `scripts/`, `.github/`, or this
+repo's own `.claude/` and `.punt-labs/` working state.
+
+Two rules follow from that, and both are load-bearing:
+
+- **The plugin surface must not reach outside itself at runtime.** A hook
+  script may use `$HOME`, the `beadle-email` binary, and paths under the
+  *consumer's* home or repo; it may not reference a file elsewhere in this
+  repo, because that file will not exist on an installed plugin.
+  `${CLAUDE_PLUGIN_ROOT}` is `plugin/`, and `session-start.sh` falls back to
+  its own parent directory — never the git toplevel, which is no longer the
+  plugin root.
+- **Cone mode always materializes the files in the repo root.** Only whole
+  directories are excluded, so a root-level file travels with every install
+  regardless of whether a user needs it. That is why a stray build artifact
+  at the root is a distribution bug (see `.gitignore`), and it is the reason
+  the root document set is worth keeping small.
+
 ## Package Map
 
 | Package | Responsibility |
