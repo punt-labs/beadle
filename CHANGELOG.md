@@ -49,7 +49,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   "Deployed commands: /beadle /contacts /inbox /mail /send" and allowed
   `mcp__plugin_beadle-dev_email__*`. The fallback is now the script's own parent
   directory, which is the plugin root both in an installed plugin and in a dev
-  checkout, and needs no git at all.
+  checkout, and needs no git at all. It also now asserts that
+  `.claude-plugin/plugin.json` actually exists under the resolved root before
+  trusting anything derived from it, and skips with the resolved path in the
+  message when it does not — so the next relayout or misconfigured
+  `CLAUDE_PLUGIN_ROOT` produces a loud, actionable skip instead of re-creating
+  this same silent zero-deploy.
 - **A 9.7 MB `beadle-daemon` binary was tracked at the repo root** — a `make
   build-daemon` artifact committed by accident, while `.gitignore` already
   ignored its sibling `/beadle-email`. It was 98% of the root-level payload
@@ -57,13 +62,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   leaving it tracked would have dominated every git-subdir install and
   cancelled most of the restructure's win. Untracked with `git rm --cached`, so
   the local build artifact survives; root files drop from 10.35 MB to 220 KB.
-- **The six shell scripts were linted by nothing.** `make lint` ran gofmt, go
-  vet, and staticcheck; CI ran the same three. The Go standard requires
-  shellcheck for a project with `.sh` files, and the two hook scripts are the
-  plugin's entire executable surface, so an unlinted regression there ships
-  straight to every install. Both `make lint` and the Test workflow now run
-  `shellcheck plugin/hooks/*.sh install.sh entrypoint.sh scripts/*.sh`; the
-  tree was already clean, so this adopts at zero findings.
+- **Not one of the repo's eleven shell scripts was linted.** `make lint` ran
+  gofmt, go vet, and staticcheck; CI ran the same three. The Go standard
+  requires shellcheck for a project with `.sh` files, and the two plugin hook
+  scripts are the plugin's entire executable surface, so an unlinted regression
+  there ships straight to every install. New `make lint-shell` target, which
+  `make lint` depends on and the Test workflow calls directly so there is one
+  definition of the file set. That set is *discovered*, not enumerated:
+  `git ls-files --cached --others --exclude-standard '*.sh'`, so a newly added
+  script — even one not yet `git add`ed — is linted the first time the gate
+  runs, and an empty result fails loudly rather than passing vacuously. The
+  tree was already clean, so this adopts at zero findings across all eleven.
 
 ## [0.16.3] - 2026-08-19
 
