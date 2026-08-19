@@ -176,8 +176,14 @@ timeline.xctimeline
 # Session transcripts
 *-transcript.txt
 
-# Go build artifacts
+# Go build artifacts. `/beadle-daemon` was tracked by accident and, at 9.7 MB,
+# was 98% of the repo's root-level payload — which matters more after the
+# plugin/ move than before it: a git-subdir install is a cone-mode sparse
+# checkout, and cone mode always materializes the files sitting in the repo
+# root even when it excludes every directory but plugin/. Rebuild it with
+# `make build-daemon`.
 /beadle-email
+/beadle-daemon
 dist/
 coverage.out
 
