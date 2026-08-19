@@ -6,10 +6,12 @@ LDFLAGS := -X main.version=$(VERSION)
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-lint: ## Lint (gofmt + go vet + staticcheck)
+lint: ## Lint (gofmt + go vet + staticcheck + shellcheck)
 	@test -z "$$(gofmt -s -l ./cmd/ ./internal/ 2>/dev/null)" || { echo "gofmt -s: these files need formatting:"; gofmt -s -l ./cmd/ ./internal/; exit 1; }
 	go vet ./...
 	$(shell go env GOPATH)/bin/staticcheck ./...
+	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found — install it (apt install shellcheck / brew install shellcheck)"; exit 1; }
+	shellcheck plugin/hooks/*.sh install.sh entrypoint.sh scripts/*.sh
 
 docs: ## Lint markdown
 	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"

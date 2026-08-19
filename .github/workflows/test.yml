@@ -28,5 +28,8 @@ jobs:
       - name: Staticcheck
         run: staticcheck ./...
 
+      - name: ShellCheck
+        run: shellcheck plugin/hooks/*.sh install.sh entrypoint.sh scripts/*.sh
+
       - name: Test
         run: go test -race -count=1 ./...
