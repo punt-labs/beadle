@@ -1,17 +1,28 @@
 VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: help lint docs test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover tools doctor
+# Every shell script in the repo, discovered rather than enumerated: a
+# hardcoded list means a new .sh ships unlinted while `make lint` and CI stay
+# green. `--cached` catches tracked scripts, `--others --exclude-standard`
+# catches a new one that is not `git add`ed yet, and gitignored paths (.tmp/,
+# node_modules/) stay out. Assumes no spaces in script paths, which the shell
+# standard forbids anyway.
+SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard '*.sh' 2>/dev/null)
+
+.PHONY: help lint lint-shell docs test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover tools doctor
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-lint: ## Lint (gofmt + go vet + staticcheck + shellcheck)
+lint: lint-shell ## Lint (gofmt + go vet + staticcheck + shellcheck)
 	@test -z "$$(gofmt -s -l ./cmd/ ./internal/ 2>/dev/null)" || { echo "gofmt -s: these files need formatting:"; gofmt -s -l ./cmd/ ./internal/; exit 1; }
 	go vet ./...
 	$(shell go env GOPATH)/bin/staticcheck ./...
+
+lint-shell: ## Lint every shell script in the repo (shellcheck)
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found — install it (apt install shellcheck / brew install shellcheck)"; exit 1; }
-	shellcheck plugin/hooks/*.sh install.sh entrypoint.sh scripts/*.sh
+	@test -n "$(SHELL_SCRIPTS)" || { echo "lint-shell: discovered no *.sh — 'git ls-files' returned nothing (not a git checkout?)"; exit 1; }
+	shellcheck $(SHELL_SCRIPTS)
 
 docs: ## Lint markdown
 	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"

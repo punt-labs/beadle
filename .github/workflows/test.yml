@@ -29,7 +29,7 @@ jobs:
         run: staticcheck ./...
 
       - name: ShellCheck
-        run: shellcheck plugin/hooks/*.sh install.sh entrypoint.sh scripts/*.sh
+        run: make lint-shell
 
       - name: Test
         run: go test -race -count=1 ./...
