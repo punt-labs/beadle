@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.16.4] - 2026-08-19
+
 ### Changed
 
 - **The shippable plugin surface moved to `plugin/`, so a marketplace install
