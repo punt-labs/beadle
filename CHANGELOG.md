@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Canonical `.envrc`, previously missing from this repo entirely.** Adds
+  the standard punt-labs `.envrc`, byte-identical to
+  `.bin/envrc-canonical.template` in the workspace meta-repo: git identity
+  via `~/.punt-labs/git-identity.env`, Beads Hosted DoltDB connection vars,
+  platform-native secret lookups (macOS Keychain / Linux `pass`) that only
+  export when non-empty, and `TMPDIR` pinned to `.tmp/`. Without it, `direnv`
+  had nothing to load in this repo and every contributor relied on ambient
+  shell state instead of the org-standard, reproducible environment.
+
 ## [0.16.4] - 2026-08-19
 
 ### Changed
