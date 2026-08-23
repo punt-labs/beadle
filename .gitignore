@@ -219,26 +219,29 @@ docs/*.toc
 .*.lock
 
 # Beadle-efv v0.16.3 payload trim: internal materials that used to be tracked
-# and therefore shipped to every marketplace-plugin user's cache. The plugin
-# distribution channel clones the entire tracked git tree, so anything tracked
-# reaches users regardless of whether the code depends on it. These are dev-
-# and internal-facing artifacts a plugin consumer has no reason to receive.
+# and therefore were believed to ship to every marketplace-plugin user's
+# cache. Re-evaluated and reverted for .envrc 2026-08-23 (see below);
+# research/meetings/prfaq.* are flagged for the same re-evaluation in a
+# follow-up (beadle tracker), not bundled into this fix.
 #
-# .envrc stays in this trim deliberately, unlike most other punt-labs repos
-# (which track a canonical .envrc per .bin/envrc-canonical.template). Cone-mode
-# sparse-checkout only excludes whole *directories* -- it still materializes
-# every root-level file regardless of the git-subdir "path": "plugin" scoping
-# (ARCHITECTURE.md "Repository Layout"). A tracked root .envrc would ship
-# internal Hosted DoltDB host/user and org secret-store lookup names to every
-# marketplace plugin install. Re-evaluated 2026-08-23 (PR #238) when the org
-# rolled out the canonical .envrc org-wide; confirmed still applicable and
-# intentionally excluded, not a gap.
+# .envrc was excluded here from PR #238 through 2026-08-23 on the theory that
+# cone-mode sparse-checkout only excludes whole *directories* and therefore
+# materializes every root-level file regardless of the git-subdir
+# "path": "plugin" scoping. That theory is disproven: a direct inspection of
+# `~/.claude/plugins/cache/punt-labs/<plugin>/<version>/` for every
+# punt-labs git-subdir plugin, including a fresh beadle v0.16.4 install via
+# beadle/install.sh, shows the installed cache contains ONLY the `path`
+# directory's contents (plugin/hooks, plugin/commands, plugin/.claude-plugin)
+# -- no .git, no .envrc, no root-level files of any kind reach a consumer's
+# disk. ARCHITECTURE.md's "Repository Layout" claim about cone mode is
+# corrected accordingly. .envrc is tracked again, matching dungeon, ethos,
+# mcp-proxy, prfaq, punt-kit, quarry, vox, biff, lux, z-spec, and
+# public-website.
 research/
 meetings/
 prfaq.tex
 prfaq.pdf
 prfaq.bib
-.envrc
 
 # Mount path of the former `.punt-labs/ethos` submodule (punt-labs/team). Same
 # payload argument as the trim above: the registry is ~1 MB / 245 files of

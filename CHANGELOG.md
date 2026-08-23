@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`.envrc` is tracked again, and `docs/ARCHITECTURE.md`'s cone-mode claim is
+  corrected.** PR #238 untracked `.envrc` on the theory that git-subdir's
+  cone-mode sparse checkout materializes every root-level file to plugin
+  consumers regardless of the `"path": "plugin"` scoping. That theory is
+  disproven: direct inspection of
+  `~/.claude/plugins/cache/punt-labs/<plugin>/<version>/` for every
+  punt-labs git-subdir plugin, including a fresh beadle v0.16.4 install via
+  `beadle/install.sh`, shows the installed cache contains only the `path`
+  directory's contents — no root-level files reach a consumer's disk.
+  `.envrc` is retracked, matching every other punt-labs repo that tracks a
+  canonical `.envrc`.
+
 ## [0.16.4] - 2026-08-19
 
 ### Changed
