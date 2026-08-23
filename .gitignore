@@ -223,6 +223,16 @@ docs/*.toc
 # distribution channel clones the entire tracked git tree, so anything tracked
 # reaches users regardless of whether the code depends on it. These are dev-
 # and internal-facing artifacts a plugin consumer has no reason to receive.
+#
+# .envrc stays in this trim deliberately, unlike most other punt-labs repos
+# (which track a canonical .envrc per .bin/envrc-canonical.template). Cone-mode
+# sparse-checkout only excludes whole *directories* -- it still materializes
+# every root-level file regardless of the git-subdir "path": "plugin" scoping
+# (ARCHITECTURE.md "Repository Layout"). A tracked root .envrc would ship
+# internal Hosted DoltDB host/user and org secret-store lookup names to every
+# marketplace plugin install. Re-evaluated 2026-08-23 (PR #238) when the org
+# rolled out the canonical .envrc org-wide; confirmed still applicable and
+# intentionally excluded, not a gap.
 research/
 meetings/
 prfaq.tex
