@@ -8,20 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Canonical `.envrc`, previously missing from this repo entirely.** Adds
-  the standard punt-labs `.envrc`, byte-identical to
-  `.bin/envrc-canonical.template` in the workspace meta-repo: git identity
-  via `~/.punt-labs/git-identity.env`, Beads Hosted DoltDB connection vars,
-  platform-native secret lookups (macOS Keychain / Linux `pass`) that only
-  export when non-empty, and `TMPDIR` pinned to `.tmp/`. Without it, `direnv`
-  had nothing to load in this repo and every contributor relied on ambient
-  shell state instead of the org-standard, reproducible environment.
-- **`.gitignore` no longer trims `.envrc` from the tracked tree.** The v0.16.3
-  payload trim untracked `.envrc` because the plugin distribution channel at
-  the time cloned the whole tracked tree, shipping it to every marketplace
-  install. v0.16.4 moved the shippable surface to `plugin/` via `git-subdir`,
-  which never fetches root-level files outside that path — so the rule was
-  stale and blocked tracking the canonical `.envrc` added above.
+- **Canonical `.envrc` restored to the tracked tree.** `.envrc` was tracked
+  here before the v0.16.3 payload trim untracked it, when the plugin
+  distribution channel still cloned the whole tracked tree and shipped
+  everything in it to every marketplace install. v0.16.4 moved the shippable
+  surface to `plugin/` via `git-subdir`, which never fetches root-level files
+  outside that path, so the original reason for untracking `.envrc` no longer
+  applies. Re-adds it byte-identical to `.bin/envrc-canonical.template` in the
+  workspace meta-repo — git identity via `~/.punt-labs/git-identity.env`,
+  Beads Hosted DoltDB connection vars, platform-native secret lookups (macOS
+  Keychain / Linux `pass`) that only export when non-empty, and `TMPDIR`
+  pinned to `.tmp/` — and drops the now-stale `.gitignore` entry that blocked
+  tracking it.
 
 ## [0.16.4] - 2026-08-19
 
