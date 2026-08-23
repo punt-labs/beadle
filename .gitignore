@@ -223,12 +223,17 @@ docs/*.toc
 # distribution channel clones the entire tracked git tree, so anything tracked
 # reaches users regardless of whether the code depends on it. These are dev-
 # and internal-facing artifacts a plugin consumer has no reason to receive.
+#
+# .envrc was trimmed here too, but v0.16.4 moved the shippable plugin surface
+# to plugin/ via git-subdir (ARCHITECTURE.md "Repository Layout") — a
+# git-subdir clone never fetches root-level files outside that path, so a
+# tracked root .envrc no longer reaches plugin consumers. Tracking it is the
+# org-standard pattern every other repo follows (.bin/envrc-canonical.template).
 research/
 meetings/
 prfaq.tex
 prfaq.pdf
 prfaq.bib
-.envrc
 
 # Mount path of the former `.punt-labs/ethos` submodule (punt-labs/team). Same
 # payload argument as the trim above: the registry is ~1 MB / 245 files of
