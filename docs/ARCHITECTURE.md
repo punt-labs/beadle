@@ -27,11 +27,18 @@ Two rules follow from that, and both are load-bearing:
   `${CLAUDE_PLUGIN_ROOT}` is `plugin/`, and `session-start.sh` falls back to
   its own parent directory — never the git toplevel, which is no longer the
   plugin root.
-- **Cone mode always materializes the files in the repo root.** Only whole
-  directories are excluded, so a root-level file travels with every install
-  regardless of whether a user needs it. That is why a stray build artifact
-  at the root is a distribution bug (see `.gitignore`), and it is the reason
-  the root document set is worth keeping small.
+- **Cone mode does not materialize the repo root.** Verified directly against
+  `~/.claude/plugins/cache/punt-labs/<plugin>/<version>/` for every
+  punt-labs git-subdir plugin, including a fresh beadle install (`beadle/install.sh`):
+  the installed cache contains only the `path` directory's contents
+  (`plugin/hooks/`, `plugin/commands/`, `plugin/.claude-plugin/`) — no `.git`,
+  no root-level files, no other top-level directories. A tracked root file
+  such as `.envrc` does not reach a plugin consumer's install. This corrects
+  an earlier (2026-08-23 and prior) claim in this document that cone mode
+  "always materializes the files in the repo root" — that claim was never
+  checked against the actual installer output and does not hold. The root
+  document set is still worth keeping small for repo hygiene, but not because
+  of a distribution leak.
 
 ## Package Map
 
