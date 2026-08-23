@@ -224,16 +224,21 @@ docs/*.toc
 # reaches users regardless of whether the code depends on it. These are dev-
 # and internal-facing artifacts a plugin consumer has no reason to receive.
 #
-# .envrc was trimmed here too, but v0.16.4 moved the shippable plugin surface
-# to plugin/ via git-subdir (ARCHITECTURE.md "Repository Layout") — a
-# git-subdir clone never fetches root-level files outside that path, so a
-# tracked root .envrc no longer reaches plugin consumers. Tracking it is the
-# org-standard pattern every other repo follows (.bin/envrc-canonical.template).
+# .envrc stays in this trim deliberately, unlike most other punt-labs repos
+# (which track a canonical .envrc per .bin/envrc-canonical.template). Cone-mode
+# sparse-checkout only excludes whole *directories* -- it still materializes
+# every root-level file regardless of the git-subdir "path": "plugin" scoping
+# (ARCHITECTURE.md "Repository Layout"). A tracked root .envrc would ship
+# internal Hosted DoltDB host/user and org secret-store lookup names to every
+# marketplace plugin install. Re-evaluated 2026-08-23 (PR #238) when the org
+# rolled out the canonical .envrc org-wide; confirmed still applicable and
+# intentionally excluded, not a gap.
 research/
 meetings/
 prfaq.tex
 prfaq.pdf
 prfaq.bib
+.envrc
 
 # Mount path of the former `.punt-labs/ethos` submodule (punt-labs/team). Same
 # payload argument as the trim above: the registry is ~1 MB / 245 files of
