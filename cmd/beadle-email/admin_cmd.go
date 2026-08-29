@@ -226,8 +226,10 @@ var doctorCmd = &cobra.Command{
 					needsPassphrase, _ := pgp.KeyRequiresPassphrase(cfg.GPGBinary, cfg.GPGSigner)
 					switch {
 					case !needsPassphrase:
-						checks = append(checks, doctorCheck{"gpg_passphrase", "OK",
-							fmt.Sprintf("not required (%s has no passphrase — filesystem access grants signing authority)", cfg.GPGSigner)})
+						checks = append(checks, doctorCheck{
+							"gpg_passphrase", "OK",
+							fmt.Sprintf("not required (%s has no passphrase — filesystem access grants signing authority)", cfg.GPGSigner),
+						})
 					default:
 						if _, err := cfg.GPGPassphrase(); err != nil {
 							checks = append(checks, doctorCheck{"gpg_passphrase", "FAIL", err.Error()})

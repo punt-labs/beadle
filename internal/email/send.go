@@ -257,8 +257,8 @@ func buildMixedBodyPart(textBody string, attachments []OutboundAttachment) ([]by
 // is affected.
 func ComposeEncryptedSignedRaw(from string, to, cc []string, subject, textBody string,
 	attachments []OutboundAttachment, gpgBinary, signer, passphrase string,
-	recipientKeyIDs []string, tag RepoTag, threading Threading) ([]byte, error) {
-
+	recipientKeyIDs []string, tag RepoTag, threading Threading,
+) ([]byte, error) {
 	allAddrs := make([]string, 0, len(to)+len(cc))
 	allAddrs = append(allAddrs, to...)
 	allAddrs = append(allAddrs, cc...)

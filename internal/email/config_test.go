@@ -23,7 +23,7 @@ func TestLoadConfig(t *testing.T) {
 		"imap_port": 1143,
 		"imap_user": "test@example.com",
 		"from_address": "test@example.com"
-	}`), 0644)
+	}`), 0o644)
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig(cfgPath)
@@ -42,7 +42,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	err := os.WriteFile(cfgPath, []byte(`{
 		"imap_user": "test@example.com",
 		"from_address": "test@example.com"
-	}`), 0644)
+	}`), 0o644)
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig(cfgPath)
@@ -227,7 +227,7 @@ func TestLoadConfig_SMTPDefaults(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			cfgPath := filepath.Join(dir, "email.json")
-			require.NoError(t, os.WriteFile(cfgPath, []byte(tt.json), 0644))
+			require.NoError(t, os.WriteFile(cfgPath, []byte(tt.json), 0o644))
 
 			cfg, err := LoadConfig(cfgPath)
 			require.NoError(t, err)
@@ -422,7 +422,7 @@ func TestLoadConfig_TLSSkipVerify(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			cfgPath := filepath.Join(dir, "email.json")
-			require.NoError(t, os.WriteFile(cfgPath, []byte(tt.json), 0644))
+			require.NoError(t, os.WriteFile(cfgPath, []byte(tt.json), 0o644))
 
 			cfg, err := LoadConfig(cfgPath)
 			require.NoError(t, err)

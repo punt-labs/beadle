@@ -22,7 +22,7 @@ func shortGPGHome(t *testing.T) (home string) {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
 	home = filepath.Join(dir, "g")
-	require.NoError(t, os.Mkdir(home, 0700))
+	require.NoError(t, os.Mkdir(home, 0o700))
 	return home
 }
 
