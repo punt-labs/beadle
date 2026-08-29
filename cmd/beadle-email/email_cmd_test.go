@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -244,6 +246,18 @@ func TestResolveConfig_ExplicitFlagSkipsIdentityLookupEntirely(t *testing.T) {
 	assert.Equal(t, "agent@test.com", id.Email)
 }
 
+// writeConfigFixtureWithPort writes a minimal valid email.json config at path
+// with an explicit imap_port, so a test can pin the dial target to a port it
+// controls instead of accepting LoadConfig's default (1143, Proton Bridge's
+// real port) — a value shared with, and dependent on, whatever happens to be
+// listening on the machine running the test.
+func writeConfigFixtureWithPort(t *testing.T, path, imapUser string, port int) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	body := fmt.Sprintf(`{"imap_host":"127.0.0.1","imap_port":%d,"imap_user":"%s"}`, port, imapUser)
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+}
+
 // TestFoldersCmd_ExplicitConfigFlagSkipsIdentityLookup is a wiring-level
 // regression guard: driving an actual mail command (folders) with an
 // explicit -c against a corrupt identity config must reach the dial step,
@@ -257,14 +271,23 @@ func TestFoldersCmd_ExplicitConfigFlagSkipsIdentityLookup(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(idConfigPath), 0o700))
 	require.NoError(t, os.WriteFile(idConfigPath, []byte(`{not json`), 0o600))
 
+	// Allocate an ephemeral port, then close the listener to guarantee nothing
+	// is listening on it — a hermetic dial-refused target, unlike the default
+	// IMAP port (1143) whose reachability depends on whatever happens to be
+	// listening on the machine running the test.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	require.NoError(t, ln.Close())
+
 	explicitPath := filepath.Join(home, "explicit-email.json")
-	writeConfigFixture(t, explicitPath, "explicit@test.com")
+	writeConfigFixtureWithPort(t, explicitPath, "explicit@test.com", port)
 
 	t.Cleanup(snapshotConfigFlag(t, foldersCmd))
 	require.NoError(t, foldersCmd.Flags().Set("config", explicitPath))
 
 	err = foldersCmd.RunE(foldersCmd, nil)
-	require.Error(t, err, "no real IMAP server is reachable in this test")
-	assert.Contains(t, err.Error(), "connect:",
-		"an explicit -c must reach the dial step, not fail on the corrupt identity config")
+	require.Error(t, err, "nothing is listening on the just-closed port")
+	assert.Contains(t, err.Error(), "connection refused",
+		"an explicit -c must reach the dial step (a refused connection to the closed port), not fail on the corrupt identity config or a generic substring also satisfied by unrelated dial-stage failures like a missing password")
 }
