@@ -102,9 +102,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fresh machine. `beadle-email`'s own identity resolution was never
   affected by this gap and is unchanged: it has always read the operating
   identity's YAML from the global `~/.punt-labs/ethos/identities/<handle>.yaml`,
-  by design, regardless of any repo-local copy. `.punt-labs/ethos/{identities,
-  personalities,writing-styles,talents,roles,teams}/` are now tracked,
-  `docs/setup-guide.md`'s identity step (which still described the
+  by design, regardless of any repo-local copy.
+  `.punt-labs/ethos/{identities,personalities,writing-styles,talents,roles,teams}/`
+  are now tracked, `docs/setup-guide.md`'s identity step (which still described the
   `git submodule init` flow #227 dropped) is corrected, and `CLAUDE.md`'s
   Identity section now documents
   both layers accurately: the vendored copy supplies the `ethos` CLI's
