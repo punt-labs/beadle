@@ -8,21 +8,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **`doctor` now falls back to the identity-scoped config like `status`
-  already did, both respect an explicit `-c`/`--config` override, and both
-  fail closed on a corrupt identity config instead of silently falling
-  back.** `doctor` previously always loaded `email.DefaultConfigPath()`,
-  ignoring the per-identity config `status` already preferred, and an
-  explicit `-c`/`--config` was silently ignored by both commands in favor
-  of the identity-scoped config. The identity-config-with-fallback
-  precedence rule — previously duplicated with inconsistent semantics
-  across `internal/email/poller.go`, `internal/mcp/poll_tools.go`, and
-  `cmd/beadle-email/admin_cmd.go` — is now implemented once, in
-  `email.LoadIdentityConfig`, with `poller.go`'s existing fail-closed
-  behavior (a corrupt identity config is a hard error, never silently
-  masked by an older fallback file) adopted as the one standard. `doctor`
-  and `status` call it only when `-c`/`--config` was not explicitly passed;
-  an explicit flag always wins and skips identity-config lookup entirely.
+- **`doctor` and `status` now share one config-resolution precedence,
+  implemented once in `email.LoadIdentityConfig`, and both respect an
+  explicit `-c`/`--config` override.** `doctor` previously always loaded
+  `email.DefaultConfigPath()` and never fell back to the identity-scoped
+  config the way `status` did — so `doctor` always honored an explicit `-c`
+  on `main`, but reported against the default file even when an identity
+  resolved and had its own config. `status`, conversely, unconditionally
+  preferred the identity-scoped config whenever identity resolution
+  succeeded, silently ignoring an explicit `-c`/`--config`. The
+  identity-config-with-fallback precedence rule — previously duplicated,
+  with these inconsistent semantics, across `internal/email/poller.go`,
+  `internal/mcp/poll_tools.go`, `cmd/beadle-email/admin_cmd.go`,
+  `cmd/beadle-email/email_cmd.go`'s `resolveConfig`, and
+  `internal/mcp/tools.go`'s `resolveIdentityAndConfig` — is now implemented
+  once, in `email.LoadIdentityConfig`, with `poller.go`'s existing
+  fail-closed behavior (a corrupt identity config is a hard error, never
+  silently masked by an older fallback file) adopted as the one standard.
+  `doctor` and `status` call it only when `-c`/`--config` was not explicitly
+  passed; an explicit flag always wins and skips identity-config lookup
+  entirely.
+
+- **`list`, `search`, `read`, `send`, `reply`, `move`, `mark`, and `folders`
+  now fail closed on a corrupt identity-scoped config, instead of silently
+  falling back to the explicit `--config` path.** These commands share
+  `resolveConfig`, which previously logged a warning and fell back to the
+  explicit config on *any* identity-config load error, including a corrupt
+  or malformed file — the same failure mode the `doctor`/`status` fix above
+  eliminates, but on the live mail-sending path instead of just health
+  checks. `resolveConfig` now calls `email.LoadIdentityConfig` for that
+  decision: identity-resolution failures upstream of a known identity (no
+  resolver, a resolve error, an unavailable data or identity directory)
+  still fall back silently, unchanged; once an identity is known and its
+  directory exists, a corrupt identity config is now a hard error.
 
 - **`.envrc` is tracked again, and `docs/ARCHITECTURE.md`'s cone-mode claim is
   corrected.** PR #238 untracked `.envrc` on the theory that git-subdir's
