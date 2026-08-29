@@ -270,6 +270,12 @@ func (h *MailHandler) verifyTrust(client *email.Client, cfg *email.Config, msg c
 	return channel.Verified
 }
 
+// loadConfig loads identityEmail's config with no fallback, deliberately —
+// unlike email.LoadIdentityConfig, which prefers an identity-scoped config
+// but falls back when one is simply absent. The daemon already knows which
+// identity triggered this handler (from a verified inbound message), so a
+// missing or corrupt config for that identity is always a hard error here,
+// never a reason to substitute another identity's config.
 func (h *MailHandler) loadConfig(identityEmail string) (*email.Config, error) {
 	cfgPath, err := paths.IdentityConfigPath(identityEmail)
 	if err != nil {
