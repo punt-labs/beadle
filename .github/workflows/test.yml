@@ -20,16 +20,16 @@ jobs:
           go-version-file: go.mod
 
       - name: Vet
-        run: go vet ./...
+        run: make vet
 
       - name: Staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+        run: make staticcheck
 
       - name: golangci-lint
-        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.1 run ./...
+        run: make lint-strict
 
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+        run: make vulncheck
 
       - name: ShellCheck
         run: make lint-shell
