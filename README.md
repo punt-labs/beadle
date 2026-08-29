@@ -69,7 +69,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 <summary>Prerequisites</summary>
 
 - An IMAP server for reading (Proton Bridge on localhost, Fastmail, Gmail IMAP, etc.)
-- An SMTP server for sending (Proton Bridge, or any SMTP with STARTTLS support; implicit TLS/SMTPS on port 465 is not yet supported)
+- An SMTP server for sending (Proton Bridge, or any SMTP with STARTTLS support, or implicit TLS/SMTPS on port 465)
 - [GPG](https://gnupg.org/) for signature verification
 - (Optional) [Resend](https://resend.com) API key for fallback sending
 
@@ -82,7 +82,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 - **Two-dimensional trust** --- transport trust (trusted/verified/untrusted/unverified) + identity permissions (rwx per contact per identity). Both must pass before autonomous action
 - **Four-level transport trust** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
 - **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically
-- **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound), `/beadle` (enable/disable repo guidance)
+- **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound), `/contacts` (manage the address book), `/beadle` (enable/disable repo guidance)
 - **Two-channel display** (plugin only) --- compact panel summaries with full data in context, no raw JSON in conversation
 - **Proton Bridge native** --- IMAP STARTTLS for reading, SMTP for sending, Resend API fallback
 - **Credential isolation** --- secrets resolved at runtime from OS keychain, never stored in config files
@@ -102,6 +102,7 @@ $ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/4cc7f6b/install.
 [+] resend_api_key
 [+] gpg              /usr/bin/gpg
 [+] gpg_signing_key  you@example.com
+[+] gpg_passphrase   not required (you@example.com has no passphrase — filesystem access grants signing authority)
 [+] smtp             127.0.0.1:1025
 [+] contacts         2 contacts at ~/.punt-labs/beadle/identities/you@example.com/contacts.json
 [+] mcp_registration plugin provides the MCP server (no standalone duplicate)
@@ -323,8 +324,8 @@ beadle-email version                                    # Print version
 
 # Global flags (supported by most subcommands; not: install, uninstall, version)
 beadle-email --json list                                # JSON output
-beadle-email --verbose doctor                            # Debug logging
-beadle-email --quiet send --to ...                       # Errors only
+beadle-email --verbose doctor                           # Debug logging
+beadle-email --quiet send --to ...                      # Errors only
 ```
 
 `install` is a once-per-machine step (the binary and the MCP server, which is
