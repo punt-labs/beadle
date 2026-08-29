@@ -332,7 +332,9 @@ func (c *Client) searchFallback(numMessages uint32, q SearchQuery, count, offset
 	return recencySet(numMessages, clampCount(count, numMessages)), int(numMessages), degradedListing, nil
 }
 
-// clampCount bounds count to [0, numMessages] so it is a safe recencySet span.
+// clampCount bounds count to at most numMessages so it is a safe recencySet
+// span. count is assumed already positive — every caller (CLI, MCP, and the
+// daemon poller) validates count > 0 before reaching here.
 func clampCount(count int, numMessages uint32) int {
 	if count > int(numMessages) {
 		return int(numMessages)

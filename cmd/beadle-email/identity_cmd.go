@@ -134,7 +134,7 @@ var identitySetCmd = &cobra.Command{
 		}
 		configPath := filepath.Join(dir, "ethos.yaml")
 		content := fmt.Sprintf("agent: %s\n", handle)
-		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil { // #nosec G306 -- repo-local pin, tracked and committed, not a secret
+		if err := os.WriteFile(configPath, []byte(content), 0o640); err != nil { // #nosec G306 -- repo-local pin, tracked and committed, not a secret; 0o640 matches this file's mode before this branch touched it
 			return fmt.Errorf("write %s: %w", configPath, err)
 		}
 
