@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.16.5] - 2026-08-29
+
 ### Fixed
 
 - **`doctor` and `status` now share one config-resolution precedence,
