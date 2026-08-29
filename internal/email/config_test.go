@@ -304,6 +304,19 @@ func TestLoadIdentityConfig(t *testing.T) {
 		assert.Equal(t, fallbackPath, usedPath)
 	})
 
+	t.Run("empty-email identity uses fallback directly, same as nil", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		fallbackPath := filepath.Join(home, "fallback-email.json")
+		require.NoError(t, os.WriteFile(fallbackPath, []byte(`{"imap_user":"fallback@test.com"}`), 0o600))
+
+		cfg, usedPath, err := LoadIdentityConfig(&identity.Identity{}, fallbackPath)
+		require.NoError(t, err)
+		assert.Equal(t, "fallback@test.com", cfg.IMAPUser)
+		assert.Equal(t, fallbackPath, usedPath)
+	})
+
 	t.Run("identity config present and valid wins over fallback", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
@@ -354,6 +367,16 @@ func TestLoadIdentityConfig(t *testing.T) {
 		require.Error(t, err, "a corrupt identity config must fail closed, not silently prefer fallbackPath")
 		assert.Nil(t, cfg)
 		assert.Equal(t, "", usedPath)
+	})
+
+	t.Run("identity config path failure is wrapped for diagnosis", func(t *testing.T) {
+		t.Setenv("HOME", "")
+
+		id := &identity.Identity{Email: "agent@test.com"}
+		_, _, err := LoadIdentityConfig(id, "/does-not-matter.json")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "identity config path",
+			"a paths.IdentityConfigPath failure must be distinguishable from a load failure")
 	})
 
 	t.Run("fallback load error propagates when identity config is also absent", func(t *testing.T) {

@@ -52,17 +52,18 @@ func DefaultConfigPath() string {
 // LoadIdentityConfig loads the config for id, preferring the identity-scoped
 // config path (paths.IdentityConfigPath(id.Email)) over fallbackPath. id is
 // nilable: pass nil when identity resolution failed upstream, and
-// fallbackPath is used directly. The identity config wins only when it is
-// present and loads cleanly. When it is simply absent (os.ErrNotExist), this
-// falls back to fallbackPath. Any other load error — a corrupt or malformed
-// identity config — is returned as a hard failure rather than silently
-// masked by an older fallback file: a caller like doctor must report the
-// corruption, not report OK against the wrong file.
+// fallbackPath is used directly. An id with an empty Email is treated the
+// same as nil — there is no identity to scope a path to. The identity config
+// wins only when it is present and loads cleanly. When it is simply absent
+// (os.ErrNotExist), this falls back to fallbackPath. Any other load error —
+// a corrupt or malformed identity config — is returned as a hard failure
+// rather than silently masked by an older fallback file: a caller like
+// doctor must report the corruption, not report OK against the wrong file.
 func LoadIdentityConfig(id *identity.Identity, fallbackPath string) (cfg *Config, usedPath string, err error) {
-	if id != nil {
+	if id != nil && id.Email != "" {
 		idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
 		if pathErr != nil {
-			return nil, "", pathErr
+			return nil, "", fmt.Errorf("identity config path: %w", pathErr)
 		}
 		idCfg, cfgErr := LoadConfig(idConfigPath)
 		if cfgErr == nil {
