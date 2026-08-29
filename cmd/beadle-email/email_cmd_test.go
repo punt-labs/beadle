@@ -185,7 +185,7 @@ func TestResolveConfig_UsesIdentityScopedConfigOverExplicit(t *testing.T) {
 	require.NoError(t, err)
 	writeConfigFixture(t, idConfigPath, "identity@test.com")
 
-	cfg, id, err := resolveConfig(email.DefaultConfigPath())
+	cfg, id, err := resolveConfig(configFlagCmd(t), email.DefaultConfigPath())
 	require.NoError(t, err)
 	require.NotNil(t, id)
 	assert.Equal(t, "agent@test.com", id.Email)
@@ -210,9 +210,61 @@ func TestResolveConfig_FailsClosedOnCorruptIdentityConfig(t *testing.T) {
 	fallbackPath := filepath.Join(home, "fallback-email.json")
 	writeConfigFixture(t, fallbackPath, "fallback@test.com")
 
-	cfg, id, err := resolveConfig(fallbackPath)
+	cfg, id, err := resolveConfig(configFlagCmd(t), fallbackPath)
 	assert.Error(t, err, "a corrupt identity config must fail closed, never report the fallback")
 	assert.Nil(t, cfg)
 	require.NotNil(t, id, "the resolved identity is still returned alongside the error")
 	assert.Equal(t, "agent@test.com", id.Email)
+}
+
+// TestResolveConfig_ExplicitFlagSkipsIdentityLookupEntirely proves an
+// explicit -c/--config wins the same way doctor/status's loadConfigForCmd
+// does: identity-config lookup is skipped entirely, so even a corrupt
+// identity config never surfaces — matching list/search/read/send/reply/
+// move/mark/folders to doctor's own -c precedence.
+func TestResolveConfig_ExplicitFlagSkipsIdentityLookupEntirely(t *testing.T) {
+	home := setupDefaultIdentityHome(t, "agent@test.com")
+
+	idConfigPath, err := paths.IdentityConfigPath("agent@test.com")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(idConfigPath), 0o700))
+	require.NoError(t, os.WriteFile(idConfigPath, []byte(`{not json`), 0o600))
+
+	explicitPath := filepath.Join(home, "explicit-email.json")
+	writeConfigFixture(t, explicitPath, "explicit@test.com")
+
+	cmd := configFlagCmd(t)
+	require.NoError(t, cmd.Flags().Set("config", explicitPath))
+
+	cfg, id, err := resolveConfig(cmd, explicitPath)
+	require.NoError(t, err, "an explicit -c must bypass identity-config lookup, so the corrupt identity config never surfaces")
+	require.NotNil(t, cfg)
+	assert.Equal(t, "explicit@test.com", cfg.IMAPUser)
+	require.NotNil(t, id, "the resolved identity is still returned for repo tagging")
+	assert.Equal(t, "agent@test.com", id.Email)
+}
+
+// TestFoldersCmd_ExplicitConfigFlagSkipsIdentityLookup is a wiring-level
+// regression guard: driving an actual mail command (folders) with an
+// explicit -c against a corrupt identity config must reach the dial step,
+// not fail on the identity config's corruption — proving resolveConfig's
+// flag-awareness is wired through cmd, not just exercised in isolation.
+func TestFoldersCmd_ExplicitConfigFlagSkipsIdentityLookup(t *testing.T) {
+	home := setupDefaultIdentityHome(t, "agent@test.com")
+
+	idConfigPath, err := paths.IdentityConfigPath("agent@test.com")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(idConfigPath), 0o700))
+	require.NoError(t, os.WriteFile(idConfigPath, []byte(`{not json`), 0o600))
+
+	explicitPath := filepath.Join(home, "explicit-email.json")
+	writeConfigFixture(t, explicitPath, "explicit@test.com")
+
+	t.Cleanup(snapshotConfigFlag(t, foldersCmd))
+	require.NoError(t, foldersCmd.Flags().Set("config", explicitPath))
+
+	err = foldersCmd.RunE(foldersCmd, nil)
+	require.Error(t, err, "no real IMAP server is reachable in this test")
+	assert.Contains(t, err.Error(), "connect:",
+		"an explicit -c must reach the dial step, not fail on the corrupt identity config")
 }

@@ -41,6 +41,13 @@ func newResolver() (*identity.Resolver, error) {
 // (e.g. send, for repo tagging) need not resolve it a second time; the identity
 // is nil when resolution itself fails.
 //
+// An explicit -c/--config always wins: when cmd.Flags().Changed("config") is
+// true, that exact path is loaded directly and identity-config lookup is
+// skipped entirely — matching doctor/status (loadConfigForCmd). Without this,
+// `doctor -c X` could report OK while list/search/read/send/reply/move/mark/
+// folders still consulted a different, possibly-corrupt identity config
+// doctor's -c never looked at.
+//
 // Identity resolution failure (no resolver, resolve error, unavailable data
 // dir, or unavailable identity dir) still falls back silently to
 // explicitPath — these are upstream failures this command cannot act on, and
@@ -50,7 +57,7 @@ func newResolver() (*identity.Resolver, error) {
 // corrupt or malformed identity config is now a hard error on every command
 // that calls resolveConfig (list, search, read, send, reply, move, mark,
 // folders), never silently masked by a fallback to explicitPath.
-func resolveConfig(explicitPath string) (*email.Config, *identity.Identity, error) {
+func resolveConfig(cmd *cobra.Command, explicitPath string) (*email.Config, *identity.Identity, error) {
 	resolver, err := newResolver()
 	if err != nil {
 		slog.Warn("identity resolution unavailable, using explicit config", "error", err, "config", explicitPath)
@@ -62,6 +69,10 @@ func resolveConfig(explicitPath string) (*email.Config, *identity.Identity, erro
 		slog.Warn("identity resolution failed, using explicit config", "error", err, "config", explicitPath)
 		cfg, _, loadErr := email.LoadIdentityConfig(nil, explicitPath)
 		return cfg, nil, loadErr
+	}
+	if cmd.Flags().Changed("config") {
+		cfg, loadErr := email.LoadConfig(explicitPath)
+		return cfg, id, loadErr
 	}
 	beadleDir, err := paths.DataDir()
 	if err != nil {
@@ -75,9 +86,12 @@ func resolveConfig(explicitPath string) (*email.Config, *identity.Identity, erro
 		return cfg, id, loadErr
 	}
 
-	cfg, _, err := email.LoadIdentityConfig(id, explicitPath)
+	cfg, usedPath, err := email.LoadIdentityConfig(id, explicitPath)
 	if err != nil {
 		return nil, id, err
+	}
+	if usedPath == explicitPath {
+		slog.Warn("identity config absent, using explicit config", "identity", id.Email, "config", explicitPath)
 	}
 	return cfg, id, nil
 }
@@ -215,7 +229,7 @@ var listCmd = &cobra.Command{
 			return fmt.Errorf("--offset must be non-negative")
 		}
 
-		cfg, id, err := resolveConfig(listConfig)
+		cfg, id, err := resolveConfig(cmd, listConfig)
 		if err != nil {
 			return err
 		}
@@ -298,7 +312,7 @@ var searchCmd = &cobra.Command{
 			return fmt.Errorf("--offset must be non-negative")
 		}
 
-		cfg, id, err := resolveConfig(searchConfig)
+		cfg, id, err := resolveConfig(cmd, searchConfig)
 		if err != nil {
 			return err
 		}
@@ -357,7 +371,7 @@ var readCmd = &cobra.Command{
 			return fmt.Errorf("invalid UID %q", args[0])
 		}
 
-		cfg, _, err := resolveConfig(readConfig)
+		cfg, _, err := resolveConfig(cmd, readConfig)
 		if err != nil {
 			return err
 		}
@@ -429,7 +443,7 @@ var sendCmd = &cobra.Command{
 			return fmt.Errorf("at least one recipient is required")
 		}
 
-		cfg, id, err := resolveConfig(sendConfig)
+		cfg, id, err := resolveConfig(cmd, sendConfig)
 		if err != nil {
 			return err
 		}
@@ -498,7 +512,7 @@ var replyCmd = &cobra.Command{
 		cc := splitAddresses(ccResolved)
 		bcc := splitAddresses(bccResolved)
 
-		cfg, id, err := resolveConfig(replyConfig)
+		cfg, id, err := resolveConfig(cmd, replyConfig)
 		if err != nil {
 			return err
 		}
@@ -579,7 +593,7 @@ var moveCmd = &cobra.Command{
 			return fmt.Errorf("invalid UID %q", args[0])
 		}
 
-		cfg, _, err := resolveConfig(moveConfig)
+		cfg, _, err := resolveConfig(cmd, moveConfig)
 		if err != nil {
 			return err
 		}
@@ -648,7 +662,7 @@ var markCmd = &cobra.Command{
 		}
 		uids = email.DedupUIDs(uids)
 
-		cfg, _, err := resolveConfig(markConfig)
+		cfg, _, err := resolveConfig(cmd, markConfig)
 		if err != nil {
 			return err
 		}
@@ -698,7 +712,7 @@ var foldersCmd = &cobra.Command{
 	Use:   "folders",
 	Short: "List IMAP folders",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, _, err := resolveConfig(foldersConfig)
+		cfg, _, err := resolveConfig(cmd, foldersConfig)
 		if err != nil {
 			return err
 		}
