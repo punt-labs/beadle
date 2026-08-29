@@ -59,12 +59,12 @@ func (t *MissionTemplate) BuildMCPConfig(servers []string, registry map[string]M
 	path := f.Name()
 
 	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(path)
+		_ = f.Close()
+		_ = os.Remove(path)
 		return "", fmt.Errorf("write mcp config to %s: %w", path, err)
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("close mcp config %s: %w", path, err)
 	}
 	return path, nil
@@ -103,12 +103,12 @@ contract and note the conflict in your result.
 	path := f.Name()
 
 	if _, err := f.WriteString(prompt); err != nil {
-		f.Close()
-		os.Remove(path)
+		_ = f.Close()
+		_ = os.Remove(path)
 		return "", fmt.Errorf("write system prompt to %s: %w", path, err)
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("close system prompt %s: %w", path, err)
 	}
 	return path, nil

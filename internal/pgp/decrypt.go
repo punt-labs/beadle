@@ -39,13 +39,15 @@ func Decrypt(gpgBinary, passphrase string, raw []byte) (*DecryptResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create passphrase file: %w", err)
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 
 	if _, err := f.WriteString(passphrase); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("write passphrase file: %w", err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("close passphrase file: %w", err)
+	}
 
 	cmd := exec.Command(gpgBinary,
 		"--batch", "--no-tty",

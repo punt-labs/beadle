@@ -55,19 +55,19 @@ func New(t testing.TB, emailAddr string) *Env {
 	idDir := filepath.Join(ethosDir, "identities")
 	require.NoError(t, os.MkdirAll(idDir, 0o750))
 	idYAML := "handle: " + handle + "\nname: Test User\nemail: " + emailAddr + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(idDir, handle+".yaml"), []byte(idYAML), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(idDir, handle+".yaml"), []byte(idYAML), 0o600))
 
 	// Write repo-local ethos config.
 	repoPuntDir := filepath.Join(repoDir, ".punt-labs")
 	require.NoError(t, os.MkdirAll(repoPuntDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(repoPuntDir, "ethos.yaml"), []byte("agent: "+handle+"\n"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(repoPuntDir, "ethos.yaml"), []byte("agent: "+handle+"\n"), 0o600))
 
 	// Create beadle identity directory.
 	beadleIDDir := filepath.Join(beadleDir, "identities", emailAddr)
 	require.NoError(t, os.MkdirAll(beadleIDDir, 0o750))
 
 	// Write empty contacts.
-	require.NoError(t, os.WriteFile(filepath.Join(beadleIDDir, "contacts.json"), []byte("[]"), 0o640))
+	require.NoError(t, os.WriteFile(filepath.Join(beadleIDDir, "contacts.json"), []byte("[]"), 0o600))
 
 	resolver := identity.NewResolver(ethosDir, beadleDir, repoDir)
 
@@ -117,7 +117,7 @@ func (e *Env) WriteConfig(cfg *email.Config) {
 	}, "", "  ")
 	require.NoError(e.t, err)
 
-	require.NoError(e.t, os.WriteFile(filepath.Join(e.idDir, "email.json"), data, 0o640))
+	require.NoError(e.t, os.WriteFile(filepath.Join(e.idDir, "email.json"), data, 0o600))
 }
 
 // IdentityDir returns the beadle identity directory path.
@@ -132,7 +132,7 @@ func (e *Env) AddIdentity(handle, name, emailAddr string) {
 	idDir := filepath.Join(e.EthosDir, "identities")
 	require.NoError(e.t, os.MkdirAll(idDir, 0o750))
 	idYAML := "handle: " + handle + "\nname: " + name + "\nemail: " + emailAddr + "\n"
-	require.NoError(e.t, os.WriteFile(filepath.Join(idDir, handle+".yaml"), []byte(idYAML), 0o640))
+	require.NoError(e.t, os.WriteFile(filepath.Join(idDir, handle+".yaml"), []byte(idYAML), 0o600))
 
 	// Ensure beadle identity directory exists for the new identity.
 	beadleIDDir := filepath.Join(e.BeadleDir, "identities", emailAddr)
@@ -140,7 +140,7 @@ func (e *Env) AddIdentity(handle, name, emailAddr string) {
 	// Write empty contacts.
 	contactsPath := filepath.Join(beadleIDDir, "contacts.json")
 	if _, err := os.Stat(contactsPath); os.IsNotExist(err) {
-		require.NoError(e.t, os.WriteFile(contactsPath, []byte("[]"), 0o640))
+		require.NoError(e.t, os.WriteFile(contactsPath, []byte("[]"), 0o600))
 	}
 }
 
@@ -158,5 +158,5 @@ func (e *Env) WriteConfigForIdentity(emailAddr string, cfg *email.Config) {
 		"from_address": cfg.FromAddress,
 	}, "", "  ")
 	require.NoError(e.t, err)
-	require.NoError(e.t, os.WriteFile(filepath.Join(beadleIDDir, "email.json"), data, 0o640))
+	require.NoError(e.t, os.WriteFile(filepath.Join(beadleIDDir, "email.json"), data, 0o600))
 }

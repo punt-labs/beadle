@@ -253,20 +253,34 @@ func TestFormatMessages_FullInboxOfGithubRelays(t *testing.T) {
 	older := time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC)
 	oldest := time.Date(2026, 4, 6, 12, 0, 0, 0, time.UTC)
 	msgs := []channel.MessageSummary{
-		{ID: "319", From: "Copilot <notifications@github.com>", Date: when,
-			Subject: "Re: [punt-labs/beadle] 1", TrustLevel: channel.Unverified, Unread: true},
-		{ID: "320", From: "Pat Singh <notifications@github.com>", Date: when,
-			Subject: "Re: [punt-labs/beadle] 2", TrustLevel: channel.Unverified, Unread: true},
-		{ID: "322", From: "cursor[bot] <notifications@github.com>", Date: when,
-			Subject: "Re: [punt-labs/beadle] 3", TrustLevel: channel.Unverified, Unread: true},
-		{ID: "335", From: "vercel[bot] <notifications@github.com>", Date: when,
-			Subject: "Re: [punt-labs/public] 4", TrustLevel: channel.Unverified, Unread: true},
-		{ID: "340", From: "Sam Jackson <sam@example.co.uk>", Date: when,
-			Subject: "Re: [punt-labs/punt-kit] 5", TrustLevel: channel.Trusted, Unread: true},
-		{ID: "8", From: "Claude Agento <claude@punt-labs.com>", Date: older,
-			Subject: "doctor fix landed", TrustLevel: channel.Trusted},
-		{ID: "7", From: "Alice Chen <alice@example.com>", Date: oldest,
-			Subject: "lunch thursday?", TrustLevel: channel.Unverified},
+		{
+			ID: "319", From: "Copilot <notifications@github.com>", Date: when,
+			Subject: "Re: [punt-labs/beadle] 1", TrustLevel: channel.Unverified, Unread: true,
+		},
+		{
+			ID: "320", From: "Pat Singh <notifications@github.com>", Date: when,
+			Subject: "Re: [punt-labs/beadle] 2", TrustLevel: channel.Unverified, Unread: true,
+		},
+		{
+			ID: "322", From: "cursor[bot] <notifications@github.com>", Date: when,
+			Subject: "Re: [punt-labs/beadle] 3", TrustLevel: channel.Unverified, Unread: true,
+		},
+		{
+			ID: "335", From: "vercel[bot] <notifications@github.com>", Date: when,
+			Subject: "Re: [punt-labs/public] 4", TrustLevel: channel.Unverified, Unread: true,
+		},
+		{
+			ID: "340", From: "Sam Jackson <sam@example.co.uk>", Date: when,
+			Subject: "Re: [punt-labs/punt-kit] 5", TrustLevel: channel.Trusted, Unread: true,
+		},
+		{
+			ID: "8", From: "Claude Agento <claude@punt-labs.com>", Date: older,
+			Subject: "doctor fix landed", TrustLevel: channel.Trusted,
+		},
+		{
+			ID: "7", From: "Alice Chen <alice@example.com>", Date: oldest,
+			Subject: "lunch thursday?", TrustLevel: channel.Unverified,
+		},
 	}
 	got := formatMessages(msgs, 7)
 	assertAllRowsExactWidth(t, got, 80)

@@ -49,13 +49,13 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	if err != nil {
 		return "", fmt.Errorf("build mcp config: %w", err)
 	}
-	defer os.Remove(mcpPath)
+	defer func() { _ = os.Remove(mcpPath) }()
 
 	promptPath, err := r.Templates.BuildSystemPrompt(missionID)
 	if err != nil {
 		return "", fmt.Errorf("build system prompt: %w", err)
 	}
-	defer os.Remove(promptPath)
+	defer func() { _ = os.Remove(promptPath) }()
 
 	envOverrides := resolveEnvVars(cmd.EnvVars)
 
@@ -126,7 +126,7 @@ type CLIRunner struct {
 }
 
 // Run executes a single-binary CLI command and returns its stdout.
-func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string) (string, error) {
+func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cmd *Command, call CommandCall, pipe string) (string, error) {
 	if len(cmd.Steps) > 0 {
 		return r.runCompound(ctx, e, cmd, pipe)
 	}
@@ -205,7 +205,7 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 	}
 
 	output, _ := io.ReadAll(io.LimitReader(stdoutPipe, 1<<20))
-	io.Copy(io.Discard, stdoutPipe) // drain remainder so Wait() won't hang
+	_, _ = io.Copy(io.Discard, stdoutPipe) // drain remainder so Wait() won't hang
 
 	if err := c.Wait(); err != nil {
 		if stderrBuf.buf.Len() > 0 {
@@ -293,12 +293,12 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 			cancel()
 			// Close all pipe endpoints so started processes unblock.
 			for j := 0; j < n-1; j++ {
-				pipeWriters[j].Close()
-				pipeReaders[j].Close()
+				_ = pipeWriters[j].Close()
+				_ = pipeReaders[j].Close()
 			}
 			// Wait on already-started processes (best-effort cleanup).
 			for j := 0; j < i; j++ {
-				cmds[j].Wait()
+				_ = cmds[j].Wait()
 			}
 			return "", fmt.Errorf("step[%d] start %s: %w", i, cmd.Steps[i].Binary, err)
 		}
@@ -324,7 +324,7 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 			}
 			// Close our write end so the next step's read unblocks.
 			if i < n-1 {
-				pipeWriters[i].Close()
+				_ = pipeWriters[i].Close()
 			}
 		}(i)
 	}

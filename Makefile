@@ -1,6 +1,14 @@
 VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
 
+# Pinned once here. CI invokes these via `make vet`, `make staticcheck`,
+# `make lint-strict`, and `make vulncheck` rather than duplicating the
+# versioned commands in .github/workflows/test.yml, so local and CI can
+# never drift apart.
+STATICCHECK_VERSION := v0.8.1
+GOLANGCI_LINT_VERSION := v2.12.2
+GOVULNCHECK_VERSION := v1.7.0
+
 # Every shell script in the repo, discovered rather than enumerated: a
 # hardcoded list means a new .sh ships unlinted while `make lint` and CI stay
 # green. `--cached` catches tracked scripts, `--others --exclude-standard`
@@ -9,15 +17,25 @@ LDFLAGS := -X main.version=$(VERSION)
 # standard forbids anyway.
 SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard '*.sh' 2>/dev/null)
 
-.PHONY: help lint lint-shell docs test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover tools doctor
+.PHONY: help lint lint-strict lint-shell vet staticcheck vulncheck docs test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-lint: lint-shell ## Lint (gofmt + go vet + staticcheck + shellcheck)
+lint: lint-shell vet staticcheck ## Lint (gofmt + go vet + staticcheck + shellcheck)
 	@test -z "$$(gofmt -s -l ./cmd/ ./internal/ 2>/dev/null)" || { echo "gofmt -s: these files need formatting:"; gofmt -s -l ./cmd/ ./internal/; exit 1; }
+
+vet: ## Run go vet
 	go vet ./...
-	$(shell go env GOPATH)/bin/staticcheck ./...
+
+staticcheck: ## Run staticcheck alone (also part of `lint`)
+	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) ./...
+
+lint-strict: ## Lint (golangci-lint: errcheck, gosec, revive, gofumpt, ...)
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
+
+vulncheck: ## Scan imports + call graph for known Go vulnerabilities
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 lint-shell: ## Lint every shell script in the repo (shellcheck)
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found — install it (apt install shellcheck / brew install shellcheck)"; exit 1; }
@@ -33,10 +51,10 @@ test: ## Run tests with race detection
 test-integration: ## Run integration tests (in-process IMAP/SMTP)
 	go test -race -count=1 -tags=integration ./...
 
-check: lint docs test ## Run all quality gates
+check: lint lint-strict vulncheck docs test ## Run all quality gates
 
-format: ## Format code (with simplify)
-	gofmt -s -w ./cmd/ ./internal/
+format: ## Format code (golangci-lint fmt: gofumpt + goimports, matching lint-strict)
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) fmt ./...
 
 build: ## Build beadle-email binary
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o beadle-email ./cmd/beadle-email/
@@ -80,9 +98,6 @@ docker-push: docker ## Push Docker image to ghcr.io
 cover: ## Test with coverage report
 	go test -cover -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
-
-tools: ## Install development tools
-	go install honnef.co/go/tools/cmd/staticcheck@latest
 
 doctor: build ## Run beadle-email doctor
 	./beadle-email doctor

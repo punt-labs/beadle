@@ -32,12 +32,12 @@ var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Start the daemon",
 	Long:  "Start the background daemon. Polls for new mail and blocks until SIGTERM or SIGINT.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		logWriter, logPath, logErr := openDaemonLogFile()
 		var w io.Writer = os.Stderr
 		if logWriter != nil {
 			w = io.MultiWriter(os.Stderr, logWriter)
-			defer logWriter.Close()
+			defer func() { _ = logWriter.Close() }() // best-effort; stderr still has the log
 		}
 		logger := slog.New(slog.NewTextHandler(w, nil))
 		if logErr != nil {
@@ -205,7 +205,7 @@ func openDaemonLogFile() (*os.File, string, error) {
 		return nil, "", fmt.Errorf("create log dir %s: %w", logDir, err)
 	}
 	path := filepath.Join(logDir, "beadle-daemon.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, "", fmt.Errorf("open %s: %w", path, err)
 	}

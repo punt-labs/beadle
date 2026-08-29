@@ -17,7 +17,7 @@ import (
 const (
 	CredIMAPPassword  = "imap-password"
 	CredSMTPPassword  = "smtp-password"
-	CredResendAPIKey  = "resend-api-key"
+	CredResendAPIKey  = "resend-api-key" // #nosec G101 -- a secret-resolver lookup key name, not an embedded credential value
 	CredGPGPassphrase = "gpg-passphrase"
 )
 
@@ -87,7 +87,7 @@ func LoadIdentityConfig(id *identity.Identity, fallbackPath string) (cfg *Config
 
 // LoadConfig reads configuration from the given path.
 func LoadConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
@@ -213,7 +213,7 @@ func ValidPollInterval(s string) bool {
 // leaving all other fields untouched. The write is atomic (temp file + rename).
 func SaveConfig(path string, cfg *Config) error {
 	existing := make(map[string]any)
-	data, readErr := os.ReadFile(path)
+	data, readErr := os.ReadFile(filepath.Clean(path))
 	if readErr == nil {
 		if err := json.Unmarshal(data, &existing); err != nil {
 			return fmt.Errorf("existing config %s is corrupt: %w", path, err)
@@ -245,14 +245,14 @@ func SaveConfig(path string, cfg *Config) error {
 		return fmt.Errorf("create temp config: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 
 	if _, err := tmp.Write(out); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("write temp config: %w", err)
 	}
-	if err := tmp.Chmod(0o640); err != nil {
-		tmp.Close()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("set temp config permissions: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

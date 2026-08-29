@@ -2,6 +2,7 @@ package email
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -102,7 +103,7 @@ func extractionFailed(body string) bool {
 func walkParts(mr message.MultipartReader, plainBody, htmlBody *string, attachments *[]channel.Attachment) {
 	for {
 		part, err := mr.NextPart()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -182,7 +183,7 @@ func ParseMIMEStructure(raw []byte) ([]MIMEPart, error) {
 
 	for {
 		part, err := mr.NextPart()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -251,7 +252,7 @@ func ExtractPart(raw []byte, partIndex int) (*MIMEPart, []byte, error) {
 	idx := 0
 	for {
 		part, err := mr.NextPart()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil, nil, fmt.Errorf("part index %d out of range (message has %d parts)", partIndex, idx)
 		}
 		if err != nil {
@@ -280,10 +281,10 @@ func ExtractPart(raw []byte, partIndex int) (*MIMEPart, []byte, error) {
 	}
 }
 
-func truncate(s string, max int) string {
+func truncate(s string, limit int) string {
 	runes := []rune(s)
-	if len(runes) <= max {
+	if len(runes) <= limit {
 		return s
 	}
-	return string(runes[:max]) + "..."
+	return string(runes[:limit]) + "..."
 }

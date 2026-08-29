@@ -42,7 +42,7 @@ func enableTool() mcplib.Tool {
 	)
 }
 
-func (h *handler) enable(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) enable(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	raw, err := req.RequireString("action")
 	if err != nil {
 		return mcplib.NewToolResultError("action is required"), nil

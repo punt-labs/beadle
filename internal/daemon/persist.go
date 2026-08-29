@@ -37,7 +37,7 @@ func (s *PipelineStore) Save(p *Pipeline) error {
 		return fmt.Errorf("write temp file %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, final); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("rename %s to %s: %w", tmp, final, err)
 	}
 	return nil
@@ -70,7 +70,7 @@ func (s *PipelineStore) LoadRunning() ([]*Pipeline, error) {
 		}
 
 		path := filepath.Join(s.Dir, e.Name())
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
 			s.Logger.Warn("skip unreadable pipeline file", "path", path, "error", err)
 			continue

@@ -75,7 +75,7 @@ func secretsDir() (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(root, "secrets")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create secrets dir: %w", err)
 	}
 	return dir, nil
@@ -94,11 +94,11 @@ func fileGet(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if info.Mode().Perm()&0077 != 0 {
+	if info.Mode().Perm()&0o077 != 0 {
 		return "", fmt.Errorf("credential file %s has unsafe permissions %o (must not be group/world readable)", path, info.Mode().Perm())
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return "", err
 	}

@@ -1,3 +1,5 @@
+// Package email implements the email channel: IMAP/SMTP clients, MIME
+// parsing, trust classification, and PGP-signed message composition.
 package email
 
 import (

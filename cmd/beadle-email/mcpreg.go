@@ -146,7 +146,7 @@ type mcpConfig struct {
 // malformed file IS an error so the caller can surface it rather than silently
 // treating drift as absent.
 func mcpFileDeclaresServer(path, server string) (bool, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
@@ -209,8 +209,10 @@ func currentProjectScopeFile() (string, error) {
 func mcpRegistrationCheck(state pluginState, standalone bool) doctorCheck {
 	switch {
 	case state == pluginEnabled && standalone:
-		return doctorCheck{"mcp_registration", "WARN",
-			"standalone beadle-email server coexists with the enabled beadle plugin (duplicate) — remove it: claude mcp remove -s user beadle-email"}
+		return doctorCheck{
+			"mcp_registration", "WARN",
+			"standalone beadle-email server coexists with the enabled beadle plugin (duplicate) — remove it: claude mcp remove -s user beadle-email",
+		}
 	case state == pluginEnabled:
 		return doctorCheck{"mcp_registration", "OK", "plugin provides the MCP server (no standalone duplicate)"}
 	case state == pluginDisabled && standalone:
@@ -234,8 +236,10 @@ func projectScopeCheck(projectScopeFile string, scanErr error) *doctorCheck {
 	case scanErr != nil:
 		return &doctorCheck{"mcp_scope", "WARN", fmt.Sprintf("cannot determine MCP project scope: %v", scanErr)}
 	case projectScopeFile != "":
-		return &doctorCheck{"mcp_scope", "WARN",
-			fmt.Sprintf("beadle-email is registered at project scope in %s — remove it: claude mcp remove -s project beadle-email (use user scope only)", projectScopeFile)}
+		return &doctorCheck{
+			"mcp_scope", "WARN",
+			fmt.Sprintf("beadle-email is registered at project scope in %s — remove it: claude mcp remove -s project beadle-email (use user scope only)", projectScopeFile),
+		}
 	default:
 		return nil
 	}

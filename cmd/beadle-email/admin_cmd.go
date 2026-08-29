@@ -36,12 +36,12 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start MCP server",
 	Long:  "Start the beadle-email MCP server. Transport: stdio (default) or ws (WebSocket).",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		logWriter, logPath, logErr := openServeLogFile()
 		var w io.Writer = os.Stderr
 		if logWriter != nil {
 			w = io.MultiWriter(os.Stderr, logWriter)
-			defer logWriter.Close()
+			defer func() { _ = logWriter.Close() }() // best-effort; stderr still has the log
 		}
 		logger := slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
 			Level: g.slogLevel(),
@@ -129,7 +129,7 @@ func init() {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		fmt.Printf("beadle-email %s\n", version)
 	},
 }
@@ -150,7 +150,7 @@ var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check installation health",
 	Long:  "Run health checks on identity, credentials, GPG, SMTP, and contacts.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		var checks []doctorCheck
 
 		checks = append(checks, doctorCheck{"version", "OK", version})
@@ -226,8 +226,10 @@ var doctorCmd = &cobra.Command{
 					needsPassphrase, _ := pgp.KeyRequiresPassphrase(cfg.GPGBinary, cfg.GPGSigner)
 					switch {
 					case !needsPassphrase:
-						checks = append(checks, doctorCheck{"gpg_passphrase", "OK",
-							fmt.Sprintf("not required (%s has no passphrase — filesystem access grants signing authority)", cfg.GPGSigner)})
+						checks = append(checks, doctorCheck{
+							"gpg_passphrase", "OK",
+							fmt.Sprintf("not required (%s has no passphrase — filesystem access grants signing authority)", cfg.GPGSigner),
+						})
 					default:
 						if _, err := cfg.GPGPassphrase(); err != nil {
 							checks = append(checks, doctorCheck{"gpg_passphrase", "FAIL", err.Error()})
@@ -325,7 +327,7 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current state",
 	Long:  "Show operational state: version, IMAP/SMTP settings, identity, contacts count.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		resolver, err := newResolver()
 		if err != nil {
 			return err
@@ -404,7 +406,7 @@ func openServeLogFile() (*os.File, string, error) {
 		return nil, "", fmt.Errorf("create log dir %s: %w", logDir, err)
 	}
 	path := filepath.Join(logDir, "beadle-email.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, "", fmt.Errorf("open %s: %w", path, err)
 	}

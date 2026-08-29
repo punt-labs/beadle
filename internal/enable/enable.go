@@ -74,7 +74,7 @@ func enableLocked(root string, progress Progressf) error {
 	// Only the user-owned repo CLAUDE.md below goes through the atomic+flock
 	// import-writer, which exists to never corrupt bytes the user authored.
 	guidePath := filepath.Join(dir, "CLAUDE.md")
-	if err := os.WriteFile(guidePath, claudemd.Guide, 0o644); err != nil {
+	if err := os.WriteFile(guidePath, claudemd.Guide, 0o644); err != nil { // #nosec G306 -- deposited public doc, not a secret
 		return fmt.Errorf("writing %s: %w", guidePath, err)
 	}
 	progress.printf("deposited %s\n", guidePath)
@@ -95,7 +95,7 @@ func enableLocked(root string, progress Progressf) error {
 	}
 
 	markerPath := filepath.Join(dir, "enabled")
-	if err := os.WriteFile(markerPath, nil, 0o644); err != nil {
+	if err := os.WriteFile(markerPath, nil, 0o644); err != nil { // #nosec G306 -- committed-via-PR marker, not a secret
 		return fmt.Errorf("writing %s: %w", markerPath, err)
 	}
 

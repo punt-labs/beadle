@@ -43,10 +43,10 @@ func Verify(gpgBinary string, raw []byte) (*VerifyResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	gpgHome := filepath.Join(tmpDir, "gnupg")
-	if err := os.Mkdir(gpgHome, 0700); err != nil {
+	if err := os.Mkdir(gpgHome, 0o700); err != nil {
 		return nil, fmt.Errorf("create gpg home: %w", err)
 	}
 
@@ -57,7 +57,7 @@ func Verify(gpgBinary string, raw []byte) (*VerifyResult, error) {
 	// Import public key if attached to the message
 	if pubkeyBytes != nil {
 		keyFile := filepath.Join(tmpDir, "sender.asc")
-		if err := os.WriteFile(keyFile, pubkeyBytes, 0600); err != nil {
+		if err := os.WriteFile(keyFile, pubkeyBytes, 0o600); err != nil {
 			return nil, fmt.Errorf("write key file: %w", err)
 		}
 
@@ -77,12 +77,12 @@ func Verify(gpgBinary string, raw []byte) (*VerifyResult, error) {
 
 	// Write signed data and signature to temp files
 	bodyFile := filepath.Join(tmpDir, "signed_body")
-	if err := os.WriteFile(bodyFile, signedData, 0600); err != nil {
+	if err := os.WriteFile(bodyFile, signedData, 0o600); err != nil {
 		return nil, fmt.Errorf("write body file: %w", err)
 	}
 
 	sigFile := filepath.Join(tmpDir, "signature.asc")
-	if err := os.WriteFile(sigFile, sigBytes, 0600); err != nil {
+	if err := os.WriteFile(sigFile, sigBytes, 0o600); err != nil {
 		return nil, fmt.Errorf("write sig file: %w", err)
 	}
 
@@ -205,7 +205,7 @@ func exportAll(gpgBinary, gpgHome string) {
 	importCmd := exec.Command(gpgBinary, "--homedir", gpgHome, "--batch", "--no-tty", "--import")
 	importCmd.Stdin = &keyData
 	importCmd.Stderr = io.Discard
-	importCmd.Run() //nolint:errcheck // best-effort
+	_ = importCmd.Run() // best-effort
 }
 
 func extractQuoted(s string) string {

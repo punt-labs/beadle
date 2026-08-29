@@ -28,7 +28,7 @@ var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Set up beadle-email",
 	Long:  "Interactive setup: create directories, prompt for config, register MCP server.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		// 1. Create directory tree
 		dataDir, err := paths.DataDir()
 		if err != nil {
@@ -51,11 +51,11 @@ var installCmd = &cobra.Command{
 			data, _ := json.MarshalIndent(cfg, "", "  ")
 			data = append(data, '\n')
 			tmp := configPath + ".tmp"
-			if err := os.WriteFile(tmp, data, 0o640); err != nil {
+			if err := os.WriteFile(tmp, data, 0o600); err != nil {
 				return fmt.Errorf("write config: %w", err)
 			}
 			if err := os.Rename(tmp, configPath); err != nil {
-				os.Remove(tmp)
+				_ = os.Remove(tmp)
 				return fmt.Errorf("rename config: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "wrote %s\n", configPath)
@@ -88,7 +88,7 @@ var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "Remove beadle-email",
 	Long:  "Remove MCP registration, deployed commands, and permissions.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		removed := 0
 
 		// 1. Remove the standalone MCP registration at user scope — the exact
@@ -163,7 +163,9 @@ func prompt(scanner *bufio.Scanner, label, defaultVal string) string {
 func promptInt(scanner *bufio.Scanner, label string, defaultVal int) int {
 	s := prompt(scanner, label, fmt.Sprintf("%d", defaultVal))
 	n := defaultVal
-	fmt.Sscanf(s, "%d", &n)
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
+		return defaultVal
+	}
 	return n
 }
 
@@ -177,7 +179,7 @@ func selfPath() string {
 
 // cleanSettings removes beadle-related entries from settings.json.
 func cleanSettings(path string) int {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return 0
 	}
@@ -214,11 +216,11 @@ func cleanSettings(path string) int {
 	}
 	out = append(out, '\n')
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o640); err != nil {
+	if err := os.WriteFile(tmp, out, 0o600); err != nil {
 		return 0
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return 0
 	}
 	return removed

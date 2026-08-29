@@ -267,10 +267,10 @@ func TestPruneAndDiscardEmpty(t *testing.T) {
 
 func TestPruneAndDiscardEmptyKeepsSymlink(t *testing.T) {
 	dir := t.TempDir()
-	real := filepath.Join(dir, "real-CLAUDE.md")
-	require.NoError(t, os.WriteFile(real, []byte(line+"\n"), 0o644))
+	realPath := filepath.Join(dir, "real-CLAUDE.md")
+	require.NoError(t, os.WriteFile(realPath, []byte(line+"\n"), 0o644))
 	link := filepath.Join(dir, "CLAUDE.md")
-	require.NoError(t, os.Symlink(real, link))
+	require.NoError(t, os.Symlink(realPath, link))
 
 	pruned, removed, err := PruneAndDiscardEmpty(link, line)
 	require.NoError(t, err)
@@ -280,7 +280,7 @@ func TestPruneAndDiscardEmptyKeepsSymlink(t *testing.T) {
 	fi, err := os.Lstat(link)
 	require.NoError(t, err)
 	assert.NotZero(t, fi.Mode()&os.ModeSymlink, "the link survives")
-	assert.Equal(t, "", readHost(t, real), "its target is emptied, not deleted")
+	assert.Equal(t, "", readHost(t, realPath), "its target is emptied, not deleted")
 }
 
 // TestPruneAndDiscardEmptyNoTOCTOUWipe proves the removal cannot wipe a
@@ -312,23 +312,23 @@ func TestPruneAndDiscardEmptyNoTOCTOUWipe(t *testing.T) {
 }
 
 func TestCanonicalKeySameForSpellings(t *testing.T) {
-	real := t.TempDir()
+	realPath := t.TempDir()
 	link := filepath.Join(t.TempDir(), "link")
-	require.NoError(t, os.Symlink(real, link))
+	require.NoError(t, os.Symlink(realPath, link))
 
-	viaReal, err := canonicalKey(filepath.Join(real, "CLAUDE.md"))
+	viaReal, err := canonicalKey(filepath.Join(realPath, "CLAUDE.md"))
 	require.NoError(t, err)
 	viaLink, err := canonicalKey(filepath.Join(link, "CLAUDE.md"))
 	require.NoError(t, err)
 	assert.Equal(t, viaReal, viaLink, "a symlinked parent keys the same lock as the real path")
 
-	viaDots, err := canonicalKey(filepath.Join(real, "sub", "..", "CLAUDE.md"))
+	viaDots, err := canonicalKey(filepath.Join(realPath, "sub", "..", "CLAUDE.md"))
 	require.NoError(t, err)
 	assert.Equal(t, viaReal, viaDots, `"a/../x" keys the same lock as "x"`)
 
 	// Neither the file nor its parent exists: fall back to the cleaned absolute
 	// path so the key is still deterministic rather than an error.
-	deep := filepath.Join(real, "missing-dir", "CLAUDE.md")
+	deep := filepath.Join(realPath, "missing-dir", "CLAUDE.md")
 	viaDeep, err := canonicalKey(deep)
 	require.NoError(t, err)
 	assert.Equal(t, deep, viaDeep, "an unresolvable path keys on its cleaned absolute form")
@@ -350,12 +350,12 @@ func TestSiblingLockPathCanonicalizes(t *testing.T) {
 	// file, so a tool naming the file through the link and one naming it directly
 	// take the identical lock — the cross-tool serialization §2.4 requires.
 	store := t.TempDir()
-	real := filepath.Join(store, "CLAUDE.md")
-	require.NoError(t, os.WriteFile(real, []byte("x\n"), 0o644))
+	realPath := filepath.Join(store, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(realPath, []byte("x\n"), 0o644))
 	link := filepath.Join(t.TempDir(), "CLAUDE.md")
-	require.NoError(t, os.Symlink(real, link))
+	require.NoError(t, os.Symlink(realPath, link))
 
-	viaReal, err := siblingLockPath(real)
+	viaReal, err := siblingLockPath(realPath)
 	require.NoError(t, err)
 	viaLink, err := siblingLockPath(link)
 	require.NoError(t, err)
@@ -397,10 +397,10 @@ func TestRegisterNewFileMode(t *testing.T) {
 
 func TestRegisterFollowsSymlink(t *testing.T) {
 	dir := t.TempDir()
-	real := filepath.Join(dir, "real-CLAUDE.md")
-	require.NoError(t, os.WriteFile(real, []byte("# Title\n"), 0o644))
+	realPath := filepath.Join(dir, "real-CLAUDE.md")
+	require.NoError(t, os.WriteFile(realPath, []byte("# Title\n"), 0o644))
 	link := filepath.Join(dir, "CLAUDE.md")
-	require.NoError(t, os.Symlink(real, link))
+	require.NoError(t, os.Symlink(realPath, link))
 
 	wrote, err := Register(link, line)
 	require.NoError(t, err)
@@ -409,7 +409,7 @@ func TestRegisterFollowsSymlink(t *testing.T) {
 	fi, err := os.Lstat(link)
 	require.NoError(t, err)
 	assert.NotZero(t, fi.Mode()&os.ModeSymlink, "the link must survive, not be clobbered")
-	assert.Equal(t, "# Title\n"+line+"\n", readHost(t, real), "the real file gets the import")
+	assert.Equal(t, "# Title\n"+line+"\n", readHost(t, realPath), "the real file gets the import")
 }
 
 func TestConcurrentRegisterAppendsOnce(t *testing.T) {

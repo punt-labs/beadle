@@ -521,7 +521,7 @@ func (h *handler) withClient(cfg *email.Config, fn func(*email.Client) (*mcplib.
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("IMAP connection failed: %v", err)), nil
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	return fn(client)
 }
 
@@ -658,7 +658,7 @@ func (h *handler) searchMessages(ctx context.Context, req mcplib.CallToolRequest
 	})
 }
 
-func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) readMessage(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -670,10 +670,11 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		return mcplib.NewToolResultError("message_id is required"), nil
 	}
 
-	uid, err := strconv.ParseUint(msgID, 10, 32)
+	uid64, err := strconv.ParseUint(msgID, 10, 32)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
 	}
+	uid := uint32(uid64)
 
 	maxBody, err := intParam(req, "max_body_length", 0)
 	if err != nil {
@@ -684,7 +685,7 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		msg, err := c.FetchMessage(folder, uint32(uid))
+		msg, err := c.FetchMessage(folder, uid)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("read message: %v", err)), nil
 		}
@@ -703,7 +704,7 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 		}
 
 		if msg.TrustLevel == channel.Unverified && email.HasPGPSignature(msg.RawHeaders["Content-Type"], nil) {
-			raw, fetchErr := c.FetchRaw(folder, uint32(uid))
+			raw, fetchErr := c.FetchRaw(folder, uid)
 			if fetchErr != nil {
 				h.logger.Warn("pgp: fetch raw failed", "uid", msgID, "err", fetchErr)
 			} else {
@@ -730,7 +731,7 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	})
 }
 
-func (h *handler) listFolders(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) listFolders(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -831,10 +832,11 @@ func (h *handler) replyMessage(ctx context.Context, req mcplib.CallToolRequest) 
 	if err != nil {
 		return mcplib.NewToolResultError("message_id is required"), nil
 	}
-	uid, err := strconv.ParseUint(msgID, 10, 32)
+	uid64, err := strconv.ParseUint(msgID, 10, 32)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
 	}
+	uid := uint32(uid64)
 	replyText, err := req.RequireString("body")
 	if err != nil {
 		return mcplib.NewToolResultError("body is required"), nil
@@ -859,7 +861,7 @@ func (h *handler) replyMessage(ctx context.Context, req mcplib.CallToolRequest) 
 	}
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		rc, err := c.FetchThread(folder, uint32(uid))
+		rc, err := c.FetchThread(folder, uid)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch original: %v", err)), nil
 		}
@@ -923,7 +925,7 @@ func (h *handler) replyMessage(ctx context.Context, req mcplib.CallToolRequest) 
 	})
 }
 
-func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) verifySignature(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -935,13 +937,14 @@ func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolReques
 		return mcplib.NewToolResultError("message_id is required"), nil
 	}
 
-	uid, err := strconv.ParseUint(msgID, 10, 32)
+	uid64, err := strconv.ParseUint(msgID, 10, 32)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id: %v", err)), nil
 	}
+	uid := uint32(uid64)
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		raw, err := c.FetchRaw(folder, uint32(uid))
+		raw, err := c.FetchRaw(folder, uid)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
 		}
@@ -969,7 +972,7 @@ func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolReques
 	})
 }
 
-func (h *handler) showMIME(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) showMIME(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -981,13 +984,14 @@ func (h *handler) showMIME(ctx context.Context, req mcplib.CallToolRequest) (*mc
 		return mcplib.NewToolResultError("message_id is required"), nil
 	}
 
-	uid, err := strconv.ParseUint(msgID, 10, 32)
+	uid64, err := strconv.ParseUint(msgID, 10, 32)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id: %v", err)), nil
 	}
+	uid := uint32(uid64)
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		raw, err := c.FetchRaw(folder, uint32(uid))
+		raw, err := c.FetchRaw(folder, uid)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
 		}
@@ -1000,7 +1004,7 @@ func (h *handler) showMIME(ctx context.Context, req mcplib.CallToolRequest) (*mc
 	})
 }
 
-func (h *handler) checkTrust(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) checkTrust(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1012,13 +1016,14 @@ func (h *handler) checkTrust(ctx context.Context, req mcplib.CallToolRequest) (*
 		return mcplib.NewToolResultError("message_id is required"), nil
 	}
 
-	uid, err := strconv.ParseUint(msgID, 10, 32)
+	uid64, err := strconv.ParseUint(msgID, 10, 32)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id: %v", err)), nil
 	}
+	uid := uint32(uid64)
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		raw, err := c.FetchRaw(folder, uint32(uid))
+		raw, err := c.FetchRaw(folder, uid)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
 		}
@@ -1044,7 +1049,7 @@ type moveResult struct {
 	Moved       int    `json:"moved"`
 }
 
-func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) moveMessage(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1057,13 +1062,14 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	}
 	destination := stringParam(req, "destination", "Archive")
 
-	uid, err := strconv.ParseUint(msgID, 10, 32)
+	uid64, err := strconv.ParseUint(msgID, 10, 32)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
 	}
+	uid := uint32(uid64)
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		moved, err := c.MoveMessage(folder, uint32(uid), destination)
+		moved, err := c.MoveMessage(folder, uid, destination)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("move message: %v", err)), nil
 		}
@@ -1078,7 +1084,7 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	})
 }
 
-func (h *handler) batchMoveMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) batchMoveMessages(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1124,7 +1130,7 @@ type markResult struct {
 	Modified  int    `json:"modified"`
 }
 
-func (h *handler) markMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) markMessage(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1137,13 +1143,14 @@ func (h *handler) markMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	}
 	seen := boolParamDefault(req, "seen", true)
 
-	uid, err := strconv.ParseUint(msgID, 10, 32)
+	uid64, err := strconv.ParseUint(msgID, 10, 32)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
 	}
+	uid := uint32(uid64)
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		modified, err := c.SetSeen(folder, uint32(uid), seen)
+		modified, err := c.SetSeen(folder, uid, seen)
 		if err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("mark message: %v", err)), nil
 		}
@@ -1158,7 +1165,7 @@ func (h *handler) markMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	})
 }
 
-func (h *handler) batchMarkMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) batchMarkMessages(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1194,7 +1201,7 @@ func (h *handler) batchMarkMessages(ctx context.Context, req mcplib.CallToolRequ
 	})
 }
 
-func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) downloadAttachment(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1213,13 +1220,14 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 		return mcplib.NewToolResultError("part_index is required"), nil
 	}
 
-	uid, err := strconv.ParseUint(msgID, 10, 32)
+	uid64, err := strconv.ParseUint(msgID, 10, 32)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("invalid message_id %q: %v", msgID, err)), nil
 	}
+	uid := uint32(uid64)
 
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
-		raw, err := c.FetchRaw(folder, uint32(uid))
+		raw, err := c.FetchRaw(folder, uid)
 		if err != nil {
 			h.logger.Warn("download_attachment: fetch failed", "uid", msgID, "folder", folder, "err", err)
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
@@ -1262,7 +1270,7 @@ func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolReq
 
 		outName := fmt.Sprintf("%s_%s", msgID, filename)
 		outPath := filepath.Join(attachDir, outName)
-		if err := os.WriteFile(outPath, data, 0o640); err != nil {
+		if err := os.WriteFile(outPath, data, 0o600); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("write attachment: %v", err)), nil
 		}
 
@@ -1323,23 +1331,23 @@ func readAttachments(req mcplib.CallToolRequest) ([]email.OutboundAttachment, er
 			return nil, fmt.Errorf("attachment path must be absolute: %q", path)
 		}
 
-		f, err := os.Open(path)
+		f, err := os.Open(filepath.Clean(path))
 		if err != nil {
 			return nil, fmt.Errorf("attachment %q: %w", filepath.Base(path), err)
 		}
 
 		info, err := f.Stat()
 		if err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("attachment %q: %w", filepath.Base(path), err)
 		}
 		if info.Size() > maxAttachmentSize {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("attachment %q exceeds 25 MB limit (%d bytes)", filepath.Base(path), info.Size())
 		}
 
 		data, err := io.ReadAll(io.LimitReader(f, maxAttachmentSize+1))
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read attachment %q: %w", filepath.Base(path), err)
 		}

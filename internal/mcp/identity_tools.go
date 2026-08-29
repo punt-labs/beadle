@@ -30,7 +30,7 @@ func switchIdentityTool() mcplib.Tool {
 	)
 }
 
-func (h *handler) switchIdentity(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) switchIdentity(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	handle := stringParam(req, "handle", "")
 
 	// Reset to default.
@@ -86,7 +86,7 @@ func whoamiTool() mcplib.Tool {
 	)
 }
 
-func (h *handler) whoami(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) whoami(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	// Snapshot default identity before checking override to avoid TOCTOU.
 	defaultID, _ := h.resolver.Resolve()
 

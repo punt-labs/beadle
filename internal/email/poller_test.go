@@ -84,7 +84,7 @@ func TestPoller_Status_Initial(t *testing.T) {
 	assert.Equal(t, "", st.LastError)
 }
 
-func TestPoller_StopIdempotent(t *testing.T) {
+func TestPoller_StopIdempotent(_ *testing.T) {
 	p := testPoller()
 	p.Stop() // should not panic
 	p.Stop()

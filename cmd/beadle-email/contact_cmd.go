@@ -31,7 +31,7 @@ var contactListContacts string
 var contactListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all contacts",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		path := contactListContacts
 		if path == "" {
 			path = resolveContactsPath()
@@ -72,7 +72,7 @@ var contactAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a new contact",
 	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		path := contactAddContacts
 		if path == "" {
 			path = resolveContactsPath()
@@ -118,7 +118,7 @@ var contactRemoveCmd = &cobra.Command{
 	Use:   "remove <name>",
 	Short: "Remove a contact by name",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		name := args[0]
 		path := contactRemoveContacts
 		if path == "" {
@@ -152,7 +152,7 @@ var contactFindCmd = &cobra.Command{
 	Short: "Search contacts by query",
 	Long:  "Search contacts by name, email, or aliases.",
 	Args:  cobra.MinimumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		query := strings.Join(args, " ")
 		path := contactFindContacts
 		if path == "" {

@@ -61,7 +61,8 @@ func formatTable(cols []column, rows [][]string) string {
 			break
 		}
 	}
-	if varIdx >= 0 {
+	if varIdx >= 0 && varIdx < len(cols) {
+		varCol := cols[varIdx]
 		sepTotal := len(colSep) * (n - 1)
 		fixedTotal := 0
 		for i, w := range widths {
@@ -70,8 +71,8 @@ func formatTable(cols []column, rows [][]string) string {
 			}
 		}
 		budget := tableWidth - prefixLen - fixedTotal - sepTotal
-		if budget < cols[varIdx].minWidth {
-			budget = cols[varIdx].minWidth
+		if budget < varCol.minWidth {
+			budget = varCol.minWidth
 		}
 		if widths[varIdx] > budget {
 			widths[varIdx] = budget
@@ -166,7 +167,8 @@ func formatTableWithPrefixes(
 			break
 		}
 	}
-	if varIdx >= 0 {
+	if varIdx >= 0 && varIdx < len(cols) {
+		varCol := cols[varIdx]
 		sepTotal := len(colSep) * n // prefix + n-1 inter-column separators
 		fixedTotal := 0
 		for i, w := range widths {
@@ -175,8 +177,8 @@ func formatTableWithPrefixes(
 			}
 		}
 		budget := tableWidth - prefixWidth - fixedTotal - sepTotal
-		if budget < cols[varIdx].minWidth {
-			budget = cols[varIdx].minWidth
+		if budget < varCol.minWidth {
+			budget = varCol.minWidth
 		}
 		// Pin the variable column to the full budget so every rendered
 		// row is exactly tableWidth runes wide. DES-018 requires this

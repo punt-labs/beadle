@@ -9,6 +9,7 @@ import "time"
 // TrustLevel classifies how much a message should be trusted.
 type TrustLevel string
 
+// The four trust levels a message can carry, from strongest to weakest.
 const (
 	Trusted    TrustLevel = "trusted"    // Proton-to-Proton, E2E verified by Proton
 	Verified   TrustLevel = "verified"   // External, PGP signature valid

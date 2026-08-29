@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -51,7 +52,7 @@ func Dial(cfg *Config, logger *slog.Logger) (*Client, error) {
 		}
 		c, err = imapclient.NewStartTLS(conn, opts)
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 		}
 	}
 	if err != nil {
@@ -60,12 +61,12 @@ func Dial(cfg *Config, logger *slog.Logger) (*Client, error) {
 
 	password, err := cfg.IMAPPassword()
 	if err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("read password: %w", err)
 	}
 
 	if err := c.Login(cfg.IMAPUser, password).Wait(); err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("login %s: %w", cfg.IMAPUser, err)
 	}
 
@@ -109,7 +110,11 @@ func (c *Client) UnreadCount(folder, repoSlug string) (uint32, error) {
 		c.logger.Warn("repo unread search failed; counting all repos", "err", err)
 		return c.Status(folder)
 	}
-	return uint32(len(searchData.AllUIDs())), nil
+	n := len(searchData.AllUIDs())
+	if n > math.MaxInt32 {
+		n = math.MaxInt32
+	}
+	return uint32(n), nil
 }
 
 // ListFolders returns all available mailbox folders.
@@ -127,7 +132,6 @@ func (c *Client) ListFolders() ([]channel.Folder, error) {
 	return folders, nil
 }
 
-// ListMessages returns recent messages from a folder.
 // ListResult holds the messages returned by ListMessages along with the
 // total number of messages matching the query criteria.
 type ListResult struct {
@@ -164,6 +168,7 @@ type SearchQuery struct {
 	UnreadOnly bool
 }
 
+// ListMessages returns recent messages from a folder.
 func (c *Client) ListMessages(folder string, count int, unreadOnly bool, repoSlug string) (*ListResult, error) {
 	return c.SearchMessages(folder, SearchQuery{RepoSlug: repoSlug, UnreadOnly: unreadOnly}, count, 0)
 }
@@ -327,7 +332,9 @@ func (c *Client) searchFallback(numMessages uint32, q SearchQuery, count, offset
 	return recencySet(numMessages, clampCount(count, numMessages)), int(numMessages), degradedListing, nil
 }
 
-// clampCount bounds count to [0, numMessages] so it is a safe recencySet span.
+// clampCount bounds count to at most numMessages so it is a safe recencySet
+// span. count is assumed already positive — every caller (CLI, MCP, and the
+// daemon poller) validates count > 0 before reaching here.
 func clampCount(count int, numMessages uint32) int {
 	if count > int(numMessages) {
 		return int(numMessages)
@@ -351,9 +358,13 @@ func selectUIDs(searchData *imap.SearchData, count, offset int) (imap.NumSet, in
 // recencySet selects the last count messages by sequence number.
 // count must lie in [1, numMessages].
 func recencySet(numMessages uint32, count int) imap.SeqSet {
+	if count > math.MaxInt32 {
+		count = math.MaxInt32
+	}
+	width := uint32(count)
 	start := uint32(1)
-	if numMessages > uint32(count) {
-		start = numMessages - uint32(count) + 1
+	if numMessages > width {
+		start = numMessages - width + 1
 	}
 	return imap.SeqSet{{Start: start, Stop: numMessages}}
 }

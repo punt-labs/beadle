@@ -16,8 +16,8 @@ func TestFileGet(t *testing.T) {
 	t.Setenv("HOME", dir)
 
 	cfgDir := filepath.Join(dir, ".punt-labs", "beadle", "secrets")
-	require.NoError(t, os.MkdirAll(cfgDir, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "test-cred"), []byte("s3cret\n"), 0600))
+	require.NoError(t, os.MkdirAll(cfgDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "test-cred"), []byte("s3cret\n"), 0o600))
 
 	val, err := fileGet("test-cred")
 	require.NoError(t, err)
@@ -29,8 +29,8 @@ func TestFileGet_UnsafePerms(t *testing.T) {
 	t.Setenv("HOME", dir)
 
 	cfgDir := filepath.Join(dir, ".punt-labs", "beadle", "secrets")
-	require.NoError(t, os.MkdirAll(cfgDir, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "world-readable"), []byte("s3cret\n"), 0644))
+	require.NoError(t, os.MkdirAll(cfgDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "world-readable"), []byte("s3cret\n"), 0o644))
 
 	_, err := fileGet("world-readable")
 	assert.Error(t, err)
@@ -42,11 +42,11 @@ func TestGet_BadPermissionsFile_NotErrNotFound(t *testing.T) {
 	t.Setenv("HOME", dir)
 
 	cfgDir := filepath.Join(dir, ".punt-labs", "beadle", "secrets")
-	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+	require.NoError(t, os.MkdirAll(cfgDir, 0o700))
 	// Use a name that cannot exist in any real OS keychain.
 	const credName = "__test_bad_perms_beadle__"
 	credPath := filepath.Join(cfgDir, credName)
-	require.NoError(t, os.WriteFile(credPath, []byte("s3cret\n"), 0644))
+	require.NoError(t, os.WriteFile(credPath, []byte("s3cret\n"), 0o644))
 
 	_, err := Get(credName)
 	require.Error(t, err)

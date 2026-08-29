@@ -143,7 +143,9 @@ func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) error {
 		if err != nil {
 			return fmt.Errorf("marshaling messages as JSON: %w", err)
 		}
-		fmt.Fprintln(w, string(data))
+		if _, err := fmt.Fprintln(w, string(data)); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
 		return nil
 	}
 	if lr.Degraded {
@@ -151,18 +153,24 @@ func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) error {
 		if reason == "" {
 			reason = "results degraded"
 		}
-		fmt.Fprintln(w, reason)
+		if _, err := fmt.Fprintln(w, reason); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
 	}
 	if g.Quiet {
 		return nil
 	}
-	fmt.Fprintln(w, lr.StatusLine())
+	if _, err := fmt.Fprintln(w, lr.StatusLine()); err != nil {
+		return fmt.Errorf("write output: %w", err)
+	}
 	for _, m := range lr.Messages {
 		unread := " "
 		if m.Unread {
 			unread = "*"
 		}
-		fmt.Fprintf(w, "%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date)
+		if _, err := fmt.Fprintf(w, "%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
 	}
 	return nil
 }
@@ -220,7 +228,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List messages",
 	Long:  "List messages from the inbox or a specified IMAP folder.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		// Validate paging before opening a connection.
 		if listCount <= 0 {
 			return fmt.Errorf("--count must be positive")
@@ -238,7 +246,7 @@ var listCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		// Scope to the current repo unless --all-repos is set. An empty slug
 		// (no git remote) leaves the listing unfiltered.
@@ -288,7 +296,7 @@ var searchCmd = &cobra.Command{
 	Short: "Search messages",
 	Long: "Search a mailbox folder by sender, subject, date, or free text. " +
 		"At least one of --from/--subject/--since/--text is required.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		q := email.SearchQuery{
 			From:       searchFrom,
 			Subject:    searchSubject,
@@ -321,7 +329,7 @@ var searchCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		// Scope to the current repo unless --all-repos is set.
 		if !searchAllRepos {
@@ -380,7 +388,7 @@ var readCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		msg, err := client.FetchMessage(readFolder, uint32(uidNum))
 		if err != nil {
@@ -419,7 +427,7 @@ var sendCmd = &cobra.Command{
 	Use:   "send",
 	Short: "Send an email",
 	Long:  "Send an email via Proton Bridge SMTP or Resend API fallback.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		contactsPath := resolveContactsPath()
 		store, storeErr := email.LoadContactsIfNeeded(contactsPath, sendTo, sendCc, sendBcc)
 		toResolved, err := email.ResolveField(store, storeErr, sendTo)
@@ -521,7 +529,7 @@ var replyCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		rc, err := client.FetchThread(replyFolder, uint32(uidNum))
 		if err != nil {
@@ -602,7 +610,7 @@ var moveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		moved, err := client.MoveMessage(moveFolder, uint32(uidNum), moveDest)
 		if err != nil {
@@ -671,7 +679,7 @@ var markCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		seen := !markUnread
 		modified, err := client.SetSeenBatch(markFolder, uids, seen)
@@ -711,7 +719,7 @@ var foldersConfig string
 var foldersCmd = &cobra.Command{
 	Use:   "folders",
 	Short: "List IMAP folders",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		cfg, _, err := resolveConfig(cmd, foldersConfig)
 		if err != nil {
 			return err
@@ -721,7 +729,7 @@ var foldersCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		folders, err := client.ListFolders()
 		if err != nil {

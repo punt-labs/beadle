@@ -102,10 +102,10 @@ func createMissionFromContract(tmpDir, contract string) (string, error) {
 		return "", fmt.Errorf("create temp contract file: %w", err)
 	}
 	tmpPath := f.Name()
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	if _, err := f.WriteString(contract); err != nil {
-		f.Close()
+		_ = f.Close()
 		return "", fmt.Errorf("write contract to %s: %w", tmpPath, err)
 	}
 	if err := f.Close(); err != nil {

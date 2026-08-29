@@ -23,7 +23,7 @@ func TestLoadConfig(t *testing.T) {
 		"imap_port": 1143,
 		"imap_user": "test@example.com",
 		"from_address": "test@example.com"
-	}`), 0644)
+	}`), 0o644)
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig(cfgPath)
@@ -42,7 +42,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	err := os.WriteFile(cfgPath, []byte(`{
 		"imap_user": "test@example.com",
 		"from_address": "test@example.com"
-	}`), 0644)
+	}`), 0o644)
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig(cfgPath)
@@ -227,7 +227,7 @@ func TestLoadConfig_SMTPDefaults(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			cfgPath := filepath.Join(dir, "email.json")
-			require.NoError(t, os.WriteFile(cfgPath, []byte(tt.json), 0644))
+			require.NoError(t, os.WriteFile(cfgPath, []byte(tt.json), 0o644))
 
 			cfg, err := LoadConfig(cfgPath)
 			require.NoError(t, err)
@@ -238,24 +238,11 @@ func TestLoadConfig_SMTPDefaults(t *testing.T) {
 	}
 }
 
-func TestCredentialMethods_Exist(t *testing.T) {
-	// Verify the credential methods exist and return either a value or a
-	// meaningful error. We don't assert specific values because the
-	// resolution chain (keychain → file → env) is environment-dependent.
-	cfg := &Config{}
-
-	_, imapErr := cfg.IMAPPassword()
-	_, smtpErr := cfg.SMTPPassword()
-	_, resendErr := cfg.ResendAPIKey()
-	_, gpgErr := cfg.GPGPassphrase()
-
-	// On a configured dev machine these succeed; on CI they return
-	// "credential not found" errors. Either outcome is correct —
-	// the methods are wired up and don't panic.
-	_ = imapErr
-	_ = smtpErr
-	_ = resendErr
-	_ = gpgErr
+func TestIMAPPassword_TestPasswordOverride(t *testing.T) {
+	cfg := &Config{TestPassword: "test-secret"}
+	pw, err := cfg.IMAPPassword()
+	require.NoError(t, err)
+	assert.Equal(t, "test-secret", pw)
 }
 
 func TestSMTPPassword_TestPasswordOverride(t *testing.T) {
@@ -422,7 +409,7 @@ func TestLoadConfig_TLSSkipVerify(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			cfgPath := filepath.Join(dir, "email.json")
-			require.NoError(t, os.WriteFile(cfgPath, []byte(tt.json), 0644))
+			require.NoError(t, os.WriteFile(cfgPath, []byte(tt.json), 0o644))
 
 			cfg, err := LoadConfig(cfgPath)
 			require.NoError(t, err)

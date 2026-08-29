@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net"
 	"sort"
@@ -47,7 +48,7 @@ func NewIMAPServer(t testing.TB, user, pass string) (*IMAPServer, string) {
 	tlsCert := selfSignedCert(t)
 
 	srv := imapserver.New(&imapserver.Options{
-		NewSession: func(conn *imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
+		NewSession: func(_ *imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
 			return &memSession{backend: backend}, nil, nil
 		},
 		Caps: imap.CapSet{
@@ -217,7 +218,7 @@ func (s *memSession) Login(username, password string) error {
 	return nil
 }
 
-func (s *memSession) Select(mailbox string, options *imap.SelectOptions) (*imap.SelectData, error) {
+func (s *memSession) Select(mailbox string, _ *imap.SelectOptions) (*imap.SelectData, error) {
 	s.backend.mu.Lock()
 	defer s.backend.mu.Unlock()
 
@@ -227,10 +228,13 @@ func (s *memSession) Select(mailbox string, options *imap.SelectOptions) (*imap.
 	}
 	s.selected = mb
 
-	numMessages := uint32(len(mb.messages))
+	n := len(mb.messages)
+	if n > math.MaxInt32 {
+		n = math.MaxInt32
+	}
 
 	return &imap.SelectData{
-		NumMessages: numMessages,
+		NumMessages: uint32(n),
 		UIDNext:     imap.UID(mb.uidNext),
 		UIDValidity: 1,
 		Flags:       []imap.Flag{imap.FlagSeen, imap.FlagAnswered, imap.FlagFlagged, imap.FlagDeleted, imap.FlagDraft},
@@ -261,7 +265,7 @@ func (s *memSession) Rename(_, _ string, _ *imap.RenameOptions) error {
 func (s *memSession) Subscribe(_ string) error   { return nil }
 func (s *memSession) Unsubscribe(_ string) error { return nil }
 
-func (s *memSession) List(w *imapserver.ListWriter, ref string, patterns []string, options *imap.ListOptions) error {
+func (s *memSession) List(w *imapserver.ListWriter, ref string, patterns []string, _ *imap.ListOptions) error {
 	s.backend.mu.Lock()
 	names := make([]string, 0, len(s.backend.mailboxes))
 	for name := range s.backend.mailboxes {
@@ -304,7 +308,7 @@ func matchMailbox(ref, pattern, name string) bool {
 	return name == full
 }
 
-func (s *memSession) Status(mailbox string, options *imap.StatusOptions) (*imap.StatusData, error) {
+func (s *memSession) Status(mailbox string, _ *imap.StatusOptions) (*imap.StatusData, error) {
 	s.backend.mu.Lock()
 	defer s.backend.mu.Unlock()
 
@@ -403,7 +407,7 @@ func (s *memSession) Expunge(w *imapserver.ExpungeWriter, uids *imap.UIDSet) err
 	return nil
 }
 
-func (s *memSession) Search(kind imapserver.NumKind, criteria *imap.SearchCriteria, options *imap.SearchOptions) (*imap.SearchData, error) {
+func (s *memSession) Search(_ imapserver.NumKind, criteria *imap.SearchCriteria, _ *imap.SearchOptions) (*imap.SearchData, error) {
 	if s.selected == nil {
 		return nil, fmt.Errorf("no mailbox selected")
 	}
@@ -428,9 +432,13 @@ func (s *memSession) Search(kind imapserver.NumKind, criteria *imap.SearchCriter
 		uidSet.AddNum(uid)
 	}
 
+	n := len(uids)
+	if n > math.MaxInt32 {
+		n = math.MaxInt32
+	}
 	return &imap.SearchData{
 		All:   uidSet,
-		Count: uint32(len(uids)),
+		Count: uint32(n),
 	}, nil
 }
 
@@ -658,7 +666,7 @@ func parseAddress(s string) imap.Address {
 	return addr
 }
 
-func (s *memSession) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags *imap.StoreFlags, options *imap.StoreOptions) error {
+func (s *memSession) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags *imap.StoreFlags, _ *imap.StoreOptions) error {
 	if s.selected == nil {
 		return fmt.Errorf("no mailbox selected")
 	}
@@ -770,6 +778,7 @@ func (s *memSession) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest str
 	// the last COPYUID) undercount the moved messages.
 	var remaining []*memMessage
 	var srcUIDs, destUIDs imap.UIDSet
+	var expungeErr error
 	for seqIdx, msg := range s.selected.messages {
 		seqNum := uint32(seqIdx + 1)
 		if !numSetContains(numSet, seqNum, msg.uid) {
@@ -787,15 +796,25 @@ func (s *memSession) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest str
 		})
 		srcUIDs.AddNum(msg.uid)
 		destUIDs.AddNum(newUID)
-		w.WriteExpunge(seqNum)
+		if err := w.WriteExpunge(seqNum); err != nil && expungeErr == nil {
+			expungeErr = fmt.Errorf("write expunge: %w", err)
+		}
 	}
+	// Commit the source mailbox mutation before returning, even on a write
+	// error above, so a message already appended to destMb is also removed
+	// from the source — never left duplicated in both mailboxes.
 	s.selected.messages = remaining
+	if expungeErr != nil {
+		return expungeErr
+	}
 	if len(srcUIDs) > 0 {
-		w.WriteCopyData(&imap.CopyData{
+		if err := w.WriteCopyData(&imap.CopyData{
 			UIDValidity: 1,
 			SourceUIDs:  srcUIDs,
 			DestUIDs:    destUIDs,
-		})
+		}); err != nil {
+			return fmt.Errorf("write copy data: %w", err)
+		}
 	}
 	return nil
 }
