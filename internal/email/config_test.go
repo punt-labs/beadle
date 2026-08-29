@@ -238,24 +238,11 @@ func TestLoadConfig_SMTPDefaults(t *testing.T) {
 	}
 }
 
-func TestCredentialMethods_Exist(_ *testing.T) {
-	// Verify the credential methods exist and return either a value or a
-	// meaningful error. We don't assert specific values because the
-	// resolution chain (keychain → file → env) is environment-dependent.
-	cfg := &Config{}
-
-	_, imapErr := cfg.IMAPPassword()
-	_, smtpErr := cfg.SMTPPassword()
-	_, resendErr := cfg.ResendAPIKey()
-	_, gpgErr := cfg.GPGPassphrase()
-
-	// On a configured dev machine these succeed; on CI they return
-	// "credential not found" errors. Either outcome is correct —
-	// the methods are wired up and don't panic.
-	_ = imapErr
-	_ = smtpErr
-	_ = resendErr
-	_ = gpgErr
+func TestIMAPPassword_TestPasswordOverride(t *testing.T) {
+	cfg := &Config{TestPassword: "test-secret"}
+	pw, err := cfg.IMAPPassword()
+	require.NoError(t, err)
+	assert.Equal(t, "test-secret", pw)
 }
 
 func TestSMTPPassword_TestPasswordOverride(t *testing.T) {
