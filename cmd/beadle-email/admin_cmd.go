@@ -19,6 +19,7 @@ import (
 
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/identity"
 	mcptools "github.com/punt-labs/beadle/internal/mcp"
 	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/pgp"
@@ -156,11 +157,14 @@ var doctorCmd = &cobra.Command{
 		checks = append(checks, doctorCheck{"version", "OK", version})
 
 		// Check identity resolution
+		var id *identity.Identity
+		var idErr error
 		resolver, resolverErr := newResolver()
 		if resolverErr != nil {
 			checks = append(checks, doctorCheck{"identity", "FAIL", resolverErr.Error()})
+			idErr = resolverErr
 		} else {
-			id, idErr := resolver.Resolve()
+			id, idErr = resolver.Resolve()
 			if idErr != nil {
 				checks = append(checks, doctorCheck{"identity", "WARN", fmt.Sprintf("no identity: %v", idErr)})
 			} else {
@@ -172,12 +176,32 @@ var doctorCmd = &cobra.Command{
 		backends := secret.Available()
 		checks = append(checks, doctorCheck{"secret_backends", "OK", strings.Join(backends, ", ")})
 
-		// Check config file
-		cfg, err := email.LoadConfig(doctorConfig)
-		if err != nil {
-			checks = append(checks, doctorCheck{"config", "FAIL", err.Error()})
-		} else {
-			checks = append(checks, doctorCheck{"config", "OK", doctorConfig})
+		// Check config file — falls back to the identity-scoped config the
+		// same way statusCmd does, so doctor reports on whatever config is
+		// actually in effect.
+		var cfg *email.Config
+		usedConfigPath := doctorConfig
+		if idErr == nil {
+			idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
+			if pathErr == nil {
+				idCfg, cfgErr := email.LoadConfig(idConfigPath)
+				if cfgErr == nil {
+					cfg = idCfg
+					usedConfigPath = idConfigPath
+				} else if !errors.Is(cfgErr, os.ErrNotExist) {
+					fmt.Fprintf(os.Stderr, "warning: identity config %s: %v (using fallback)\n", idConfigPath, cfgErr)
+				}
+			}
+		}
+		if cfg == nil {
+			var cfgErr error
+			cfg, cfgErr = email.LoadConfig(doctorConfig)
+			if cfgErr != nil {
+				checks = append(checks, doctorCheck{"config", "FAIL", cfgErr.Error()})
+			}
+		}
+		if cfg != nil {
+			checks = append(checks, doctorCheck{"config", "OK", usedConfigPath})
 
 			if _, err := cfg.IMAPPassword(); err != nil {
 				checks = append(checks, doctorCheck{"imap_password", "FAIL", err.Error()})
