@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -178,8 +177,8 @@ var doctorCmd = &cobra.Command{
 
 		// Check config file — falls back to the identity-scoped config the
 		// same way statusCmd does, so doctor reports on whatever config is
-		// actually in effect.
-		cfg, usedConfigPath, cfgErr := resolveIdentityConfig(id, idErr, doctorConfig)
+		// actually in effect. An explicit -c/--config always wins.
+		cfg, usedConfigPath, cfgErr := loadConfigForCmd(cmd, id, idErr, doctorConfig)
 		if cfgErr != nil {
 			checks = append(checks, doctorCheck{"config", "FAIL", cfgErr.Error()})
 		} else {
@@ -298,28 +297,24 @@ func init() {
 	doctorCmd.Flags().StringVarP(&doctorConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
 }
 
-// resolveIdentityConfig picks the config to load, preferring the
-// identity-scoped config (paths.IdentityConfigPath(id.Email)) over
-// fallbackPath. The identity config wins only when it successfully loads;
-// otherwise fallbackPath is used — whether because there is no resolved
-// identity (idErr != nil), the identity path can't be computed, or the
-// identity config file is absent or fails to load. A load error other than
-// "not found" is warned to stderr before falling back, since a stale
-// selection warrants a human's attention that a "not found" doesn't.
-func resolveIdentityConfig(id *identity.Identity, idErr error, fallbackPath string) (cfg *email.Config, usedPath string, err error) {
-	if idErr == nil {
-		idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
-		if pathErr == nil {
-			idCfg, cfgErr := email.LoadConfig(idConfigPath)
-			if cfgErr == nil {
-				return idCfg, idConfigPath, nil
-			} else if !errors.Is(cfgErr, os.ErrNotExist) {
-				fmt.Fprintf(os.Stderr, "warning: identity config %s: %v (using fallback)\n", idConfigPath, cfgErr)
-			}
-		}
+// loadConfigForCmd loads the config for a doctor/status invocation. An
+// explicit -c/--config always wins over the implicit identity-config
+// preference: when the user passed it, cmd.Flags().Changed("config") is
+// true and fallbackPath (the flag's value) is used directly, skipping
+// identity-config lookup entirely. Otherwise this defers to
+// email.LoadIdentityConfig's identity-scoped-over-fallback precedence,
+// passing id only when idErr is nil — an unresolved identity must not be
+// consulted for its (possibly stale or zero-value) Email field.
+func loadConfigForCmd(cmd *cobra.Command, id *identity.Identity, idErr error, fallbackPath string) (cfg *email.Config, usedPath string, err error) {
+	if cmd.Flags().Changed("config") {
+		cfg, err = email.LoadConfig(fallbackPath)
+		return cfg, fallbackPath, err
 	}
-	cfg, err = email.LoadConfig(fallbackPath)
-	return cfg, fallbackPath, err
+	var idArg *identity.Identity
+	if idErr == nil {
+		idArg = id
+	}
+	return email.LoadIdentityConfig(idArg, fallbackPath)
 }
 
 // --- status ---
@@ -337,7 +332,7 @@ var statusCmd = &cobra.Command{
 		}
 		id, idErr := resolver.Resolve()
 
-		cfg, usedConfigPath, err := resolveIdentityConfig(id, idErr, statusConfig)
+		cfg, usedConfigPath, err := loadConfigForCmd(cmd, id, idErr, statusConfig)
 		if err != nil {
 			return err
 		}

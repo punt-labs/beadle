@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/secret"
 )
@@ -46,6 +47,33 @@ type Config struct {
 // DefaultConfigPath returns ~/.punt-labs/beadle/email.json.
 func DefaultConfigPath() string {
 	return filepath.Join(paths.MustDataDir(), "email.json")
+}
+
+// LoadIdentityConfig loads the config for id, preferring the identity-scoped
+// config path (paths.IdentityConfigPath(id.Email)) over fallbackPath. id is
+// nilable: pass nil when identity resolution failed upstream, and
+// fallbackPath is used directly. The identity config wins only when it is
+// present and loads cleanly. When it is simply absent (os.ErrNotExist), this
+// falls back to fallbackPath. Any other load error — a corrupt or malformed
+// identity config — is returned as a hard failure rather than silently
+// masked by an older fallback file: a caller like doctor must report the
+// corruption, not report OK against the wrong file.
+func LoadIdentityConfig(id *identity.Identity, fallbackPath string) (cfg *Config, usedPath string, err error) {
+	if id != nil {
+		idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
+		if pathErr != nil {
+			return nil, "", pathErr
+		}
+		idCfg, cfgErr := LoadConfig(idConfigPath)
+		if cfgErr == nil {
+			return idCfg, idConfigPath, nil
+		}
+		if !errors.Is(cfgErr, os.ErrNotExist) {
+			return nil, "", fmt.Errorf("identity config %s: %w", idConfigPath, cfgErr)
+		}
+	}
+	cfg, err = LoadConfig(fallbackPath)
+	return cfg, fallbackPath, err
 }
 
 // LoadConfig reads configuration from the given path.

@@ -2,16 +2,13 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"sync"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/punt-labs/beadle/internal/email"
-	"github.com/punt-labs/beadle/internal/paths"
 )
 
 // ServerInstructions primes the connecting agent on the inbox/poll protocol.
@@ -135,20 +132,9 @@ func (h *handler) setPollInterval(_ context.Context, req mcplib.CallToolRequest)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("resolve identity: %v", err)), nil
 	}
-	configPath, err := paths.IdentityConfigPath(id.Email)
-	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("identity path: %v", err)), nil
-	}
-	cfg, loadErr := email.LoadConfig(configPath)
+	cfg, configPath, loadErr := email.LoadIdentityConfig(id, email.DefaultConfigPath())
 	if loadErr != nil {
-		if !errors.Is(loadErr, os.ErrNotExist) {
-			return mcplib.NewToolResultError(fmt.Sprintf("identity config %s: %v", configPath, loadErr)), nil
-		}
-		cfg, loadErr = email.LoadConfig(email.DefaultConfigPath())
-		if loadErr != nil {
-			return mcplib.NewToolResultError(fmt.Sprintf("load config: %v", loadErr)), nil
-		}
-		configPath = email.DefaultConfigPath()
+		return mcplib.NewToolResultError(fmt.Sprintf("load config: %v", loadErr)), nil
 	}
 	cfg.PollInterval = interval
 	if saveErr := email.SaveConfig(configPath, cfg); saveErr != nil {

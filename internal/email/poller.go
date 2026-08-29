@@ -2,15 +2,12 @@ package email
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/punt-labs/beadle/internal/identity"
-	"github.com/punt-labs/beadle/internal/paths"
 )
 
 // NewMailFunc is called when the poller detects new messages.
@@ -283,19 +280,9 @@ func (p *Poller) loadConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	idCfgPath, err := paths.IdentityConfigPath(id.Email)
+	cfg, _, err := LoadIdentityConfig(id, DefaultConfigPath())
 	if err != nil {
 		return nil, err
-	}
-	cfg, err := LoadConfig(idCfgPath)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("identity config %s: %w", idCfgPath, err)
-		}
-		cfg, err = LoadConfig(DefaultConfigPath())
-		if err != nil {
-			return nil, fmt.Errorf("default config: %w", err)
-		}
 	}
 	return cfg, nil
 }

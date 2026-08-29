@@ -8,6 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/punt-labs/beadle/internal/identity"
+	"github.com/punt-labs/beadle/internal/paths"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -279,6 +282,92 @@ func TestSMTPEffectiveUser_FallsBackToIMAPUser(t *testing.T) {
 func TestSMTPEffectiveUser_UsesExplicitSMTPUser(t *testing.T) {
 	cfg := &Config{IMAPUser: "imap@example.com", SMTPUser: "smtp@example.com"}
 	assert.Equal(t, "smtp@example.com", cfg.SMTPEffectiveUser())
+}
+
+// TestLoadIdentityConfig proves the one shared precedence rule poller.go and
+// poll_tools.go both rely on: the identity-scoped config wins only when id
+// is non-nil and that config is present and loads cleanly; a nil id (no
+// resolved identity) or a missing identity config falls back to
+// fallbackPath; a present-but-corrupt identity config is a hard failure,
+// never a silent fallback.
+func TestLoadIdentityConfig(t *testing.T) {
+	t.Run("nil identity uses fallback directly", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		fallbackPath := filepath.Join(home, "fallback-email.json")
+		require.NoError(t, os.WriteFile(fallbackPath, []byte(`{"imap_user":"fallback@test.com"}`), 0o600))
+
+		cfg, usedPath, err := LoadIdentityConfig(nil, fallbackPath)
+		require.NoError(t, err)
+		assert.Equal(t, "fallback@test.com", cfg.IMAPUser)
+		assert.Equal(t, fallbackPath, usedPath)
+	})
+
+	t.Run("identity config present and valid wins over fallback", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		id := &identity.Identity{Email: "agent@test.com"}
+		idConfigPath, err := paths.IdentityConfigPath(id.Email)
+		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(filepath.Dir(idConfigPath), 0o700))
+		require.NoError(t, os.WriteFile(idConfigPath, []byte(`{"imap_user":"identity@test.com"}`), 0o600))
+
+		fallbackPath := filepath.Join(home, "fallback-email.json")
+		require.NoError(t, os.WriteFile(fallbackPath, []byte(`{"imap_user":"fallback@test.com"}`), 0o600))
+
+		cfg, usedPath, err := LoadIdentityConfig(id, fallbackPath)
+		require.NoError(t, err)
+		assert.Equal(t, "identity@test.com", cfg.IMAPUser)
+		assert.Equal(t, idConfigPath, usedPath)
+	})
+
+	t.Run("identity config absent falls back", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		id := &identity.Identity{Email: "agent@test.com"}
+		fallbackPath := filepath.Join(home, "fallback-email.json")
+		require.NoError(t, os.WriteFile(fallbackPath, []byte(`{"imap_user":"fallback@test.com"}`), 0o600))
+
+		cfg, usedPath, err := LoadIdentityConfig(id, fallbackPath)
+		require.NoError(t, err)
+		assert.Equal(t, "fallback@test.com", cfg.IMAPUser)
+		assert.Equal(t, fallbackPath, usedPath)
+	})
+
+	t.Run("corrupt identity config fails closed, never falls back", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		id := &identity.Identity{Email: "agent@test.com"}
+		idConfigPath, err := paths.IdentityConfigPath(id.Email)
+		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(filepath.Dir(idConfigPath), 0o700))
+		require.NoError(t, os.WriteFile(idConfigPath, []byte(`{not json`), 0o600))
+
+		fallbackPath := filepath.Join(home, "fallback-email.json")
+		require.NoError(t, os.WriteFile(fallbackPath, []byte(`{"imap_user":"fallback@test.com"}`), 0o600))
+
+		cfg, usedPath, err := LoadIdentityConfig(id, fallbackPath)
+		require.Error(t, err, "a corrupt identity config must fail closed, not silently prefer fallbackPath")
+		assert.Nil(t, cfg)
+		assert.Equal(t, "", usedPath)
+	})
+
+	t.Run("fallback load error propagates when identity config is also absent", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		id := &identity.Identity{Email: "agent@test.com"}
+		missingFallback := filepath.Join(home, "does-not-exist.json")
+
+		cfg, usedPath, err := LoadIdentityConfig(id, missingFallback)
+		require.Error(t, err)
+		assert.Nil(t, cfg)
+		assert.Equal(t, missingFallback, usedPath)
+	})
 }
 
 func TestLoadConfig_TLSSkipVerify(t *testing.T) {

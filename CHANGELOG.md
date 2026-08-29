@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`doctor` now falls back to the identity-scoped config like `status`
+  already did, both respect an explicit `-c`/`--config` override, and both
+  fail closed on a corrupt identity config instead of silently falling
+  back.** `doctor` previously always loaded `email.DefaultConfigPath()`,
+  ignoring the per-identity config `status` already preferred, and an
+  explicit `-c`/`--config` was silently ignored by both commands in favor
+  of the identity-scoped config. The identity-config-with-fallback
+  precedence rule — previously duplicated with inconsistent semantics
+  across `internal/email/poller.go`, `internal/mcp/poll_tools.go`, and
+  `cmd/beadle-email/admin_cmd.go` — is now implemented once, in
+  `email.LoadIdentityConfig`, with `poller.go`'s existing fail-closed
+  behavior (a corrupt identity config is a hard error, never silently
+  masked by an older fallback file) adopted as the one standard. `doctor`
+  and `status` call it only when `-c`/`--config` was not explicitly passed;
+  an explicit flag always wins and skips identity-config lookup entirely.
+
 - **`.envrc` is tracked again, and `docs/ARCHITECTURE.md`'s cone-mode claim is
   corrected.** PR #238 untracked `.envrc` on the theory that git-subdir's
   cone-mode sparse checkout materializes every root-level file to plugin
