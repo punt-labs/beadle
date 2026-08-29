@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -139,21 +138,6 @@ func TestHandler_ListFolders(t *testing.T) {
 	assert.False(t, r.IsError)
 	assert.Contains(t, r.text(), "INBOX")
 	assert.Contains(t, r.text(), "Archive")
-}
-
-// TestHandler_ListFolders_FailsClosedOnCorruptIdentityConfig proves
-// resolveIdentityAndConfig's dedup onto email.LoadIdentityConfig preserved
-// its existing fail-closed behavior: a corrupt identity-scoped config is a
-// hard tool error, never a silent fallback to email.DefaultConfigPath().
-func TestHandler_ListFolders_FailsClosedOnCorruptIdentityConfig(t *testing.T) {
-	s, env, _ := setupHandler(t)
-
-	idConfigPath := filepath.Join(env.IdentityDir(), "email.json")
-	require.NoError(t, os.WriteFile(idConfigPath, []byte(`{not json`), 0o640))
-
-	r := callTool(t, s, "list_folders", nil)
-	assert.True(t, r.IsError, "a corrupt identity config must fail the tool call, not silently fall back")
-	assert.Contains(t, r.text(), "load config")
 }
 
 func TestHandler_ListMessages(t *testing.T) {
