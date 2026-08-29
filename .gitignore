@@ -251,9 +251,10 @@ prfaq.bib
 # contents, and `.punt-labs/` is not under `plugin/`. Per org policy
 # (punt-labs/CLAUDE.md "Team Registry"), every repo tracks an inline vendored
 # copy at `.punt-labs/ethos/` — plain committed files, never a git submodule
-# (a submodule's gitlink IS fetched by a `--recurse-submodules` clone,
-# unlike plain tracked files, which is the one real leak vector this rule
-# still correctly guards against).
+# (a submodule's gitlink IS fetched by a `--recurse-submodules` clone, unlike
+# plain tracked files, which is the one real leak vector the no-submodule
+# policy guards against — no ignore rule is needed for it, since nothing
+# here ever adds a submodule in the first place).
 
 # Vendored ethos runtime state (regenerated per-machine — vendored registry
 # only). Matches lux's .gitignore pattern for the same inline-vendored setup.

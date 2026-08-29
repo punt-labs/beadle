@@ -90,16 +90,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   correctly never used a git submodule for it (a submodule's gitlink is
   fetched by any `git-subdir --recurse-submodules` install; plain committed
   files are not — confirmed by the same cache inspection as the `.envrc` fix
-  above), but conflated "no submodule" with "no vendored copy at all," and
-  told agents to resolve identities from the global `~/.punt-labs/ethos/`
-  instead. That left the delegation worker/evaluator roster (`bwk`, `mdm`,
-  `rop`, etc.) entirely dependent on whatever happened to already be
-  populated in a machine's global ethos directory — silently broken on any
-  fresh machine. `.punt-labs/ethos/{identities,personalities,writing-styles,
+  above), but conflated "no submodule" with "no vendored copy at all," leaving
+  the `ethos` CLI's agent personas and delegation worker/evaluator roster
+  (`bwk`, `mdm`, `rop`, etc.) — `.claude/agents/<handle>.md` generation,
+  `ethos identity list`, the session roster — entirely dependent on whatever
+  happened to already be populated in a machine's global ethos directory —
+  silently broken on any fresh machine. `beadle-email`'s own identity
+  resolution was never affected by this gap and is unchanged: it has always
+  read the operating identity's YAML from the global
+  `~/.punt-labs/ethos/identities/<handle>.yaml`, by design, regardless of any
+  repo-local copy. `.punt-labs/ethos/{identities,personalities,writing-styles,
   talents,roles,teams}/` are now tracked, `docs/setup-guide.md`'s identity
   step (which still described `git submodule init`, a pattern this repo
-  never used) is corrected, and `CLAUDE.md`'s Identity section now points at
-  the repo-local copy.
+  never used) is corrected, and `CLAUDE.md`'s Identity section now documents
+  both layers accurately: the vendored copy supplies the `ethos` CLI's
+  personas, while `beadle-email`'s own identity resolution continues to read
+  the global directory.
 
 ## [0.16.4] - 2026-08-19
 
