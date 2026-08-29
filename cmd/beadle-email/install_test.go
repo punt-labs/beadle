@@ -10,13 +10,13 @@ import (
 	"github.com/punt-labs/beadle/internal/paths"
 )
 
-// TestInstallCmd_DoctorStepReportsRootConfigWhenNoIdentity proves install's
-// doctor step (step 4) reports on the root config it just ensured exists when
-// no identity resolves. Before the fix, install forced doctor's -c/--config
-// to the root path directly, which happened to agree here (no identity
-// config exists to disagree with) — but the same forcing silently overrode a
-// present identity-scoped config in the sibling test below, which is the
-// actual defect this pair of tests guards against.
+// TestInstallCmd_DoctorStepReportsRootConfigWhenNoIdentity is a
+// characterization test: it proves install's doctor step (step 4), which
+// invokes doctorCmd with no flag set, reports on the root config it just
+// ensured exists when no identity resolves. Its sibling below proves the
+// half of this composed behavior that actually discriminates: that install's
+// doctor step, like a bare `doctor` invocation, prefers an identity-scoped
+// config over the root one when both exist.
 func TestInstallCmd_DoctorStepReportsRootConfigWhenNoIdentity(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -54,10 +54,10 @@ func TestInstallCmd_DoctorStepReportsRootConfigWhenNoIdentity(t *testing.T) {
 // install's doctor step defers to the identity-scoped config when one exists
 // and loads cleanly, exactly like a bare `doctor` invocation run immediately
 // afterward — install and doctor must never disagree about which config is
-// in effect. Before the fix, install forced doctor's -c/--config flag to the
-// root path it had just written/selected, so install always reported OK
-// against that root file even when an identity-scoped config was the config
-// every other command (including a bare `doctor`) would actually use.
+// in effect. install's doctor step inherits this precedence entirely from
+// doctorCmd's own loadConfigForCmd; install sets no flag and adds no logic
+// of its own, so this test is a composition proof, not a guard against
+// install-specific behavior.
 func TestInstallCmd_DoctorStepMatchesBareDoctorWhenIdentityConfigExists(t *testing.T) {
 	setupDefaultIdentityHome(t, "agent@test.com")
 

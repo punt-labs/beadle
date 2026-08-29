@@ -72,14 +72,13 @@ var installCmd = &cobra.Command{
 
 		// 4. Run doctor to report on whatever config is actually in effect —
 		// the same identity-scoped-over-fallback precedence every other
-		// command applies via loadConfigForCmd. No flag is forced here:
-		// doctorConfig's own default (email.DefaultConfigPath(), the root
-		// path this step ensures exists) is already the correct fallback
-		// argument when no identity resolves or its config is absent.
-		// Forcing -c to configPath would make install report OK on a
-		// possibly-irrelevant root file while every other command defers
-		// to a different (possibly corrupt) identity-scoped config that
-		// nothing here just checked.
+		// command applies via loadConfigForCmd. No flag is set here:
+		// doctorConfig's own default (email.DefaultConfigPath(), which is
+		// always the same path as the configPath this step just ensured
+		// exists) is already the correct fallback argument, so install's
+		// doctor step reports the identity-scoped config when one exists
+		// and loads cleanly, or the root config otherwise — exactly what a
+		// bare `doctor` invocation would report immediately afterward.
 		fmt.Fprintln(os.Stderr)
 		return doctorCmd.RunE(doctorCmd, nil)
 	},
