@@ -85,6 +85,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `.envrc` is retracked, matching every other punt-labs repo that tracks a
   canonical `.envrc`.
 
+- **`.punt-labs/ethos/` is now an inline vendored copy of the `punt-labs/team`
+  registry, tracked in git, matching every other punt-labs repo.** This repo
+  correctly never used a git submodule for it (a submodule's gitlink is
+  fetched by any `git-subdir --recurse-submodules` install; plain committed
+  files are not — confirmed by the same cache inspection as the `.envrc` fix
+  above), but conflated "no submodule" with "no vendored copy at all," and
+  told agents to resolve identities from the global `~/.punt-labs/ethos/`
+  instead. That left the delegation worker/evaluator roster (`bwk`, `mdm`,
+  `rop`, etc.) entirely dependent on whatever happened to already be
+  populated in a machine's global ethos directory — silently broken on any
+  fresh machine. `.punt-labs/ethos/{identities,personalities,writing-styles,
+  talents,roles,teams}/` are now tracked, `docs/setup-guide.md`'s identity
+  step (which still described `git submodule init`, a pattern this repo
+  never used) is corrected, and `CLAUDE.md`'s Identity section now points at
+  the repo-local copy.
+
 ## [0.16.4] - 2026-08-19
 
 ### Changed

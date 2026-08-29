@@ -1,0 +1,25 @@
+name: website
+repositories:
+  - punt-labs/public-website
+members:
+  - identity: jfreeman
+    role: ceo
+  - identity: claude
+    role: coo
+  - identity: edt
+    role: ux-designer
+  - identity: ghr
+    role: pm-building-blocks
+collaborations:
+  - from: coo
+    to: ceo
+    type: reports_to
+  - from: ux-designer
+    to: coo
+    type: reports_to
+  - from: pm-building-blocks
+    to: ceo
+    type: reports_to
+  - from: ux-designer
+    to: pm-building-blocks
+    type: collaborates_with

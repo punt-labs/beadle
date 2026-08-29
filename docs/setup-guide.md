@@ -311,18 +311,18 @@ Then test from Claude Code:
 This step is only for Punt Labs agents whose identity is managed by
 ethos.
 
-Beadle resolves identity from the ethos sidecar. On a new machine, the
-team submodule may not be initialized:
+Beadle resolves identity from the ethos sidecar. `.punt-labs/ethos/` is an
+inline vendored copy of the `punt-labs/team` registry — plain committed
+files, not a git submodule (this repo can't use a submodule at all: `ethos
+enable` refuses to write its audit-seal hooks into one). Cloning this repo
+brings the full team registry (identities, personalities, writing styles,
+roles, talents, teams) with it like any other tracked directory — no
+separate init step. Git hooks are not cloned, though; run this once after
+clone:
 
 ```bash
-# In any punt-labs repo with the team submodule:
-cd /path/to/your-repo
-git submodule init
-git submodule update
+ethos enable
 ```
-
-This populates `.punt-labs/ethos/` with the team registry (identities,
-personalities, writing styles, etc.).
 
 For the global ethos directory (`~/.punt-labs/ethos/`), which is used
 outside of git repos, the ethos session hooks create it automatically

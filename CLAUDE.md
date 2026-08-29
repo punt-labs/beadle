@@ -8,9 +8,9 @@ The shipping component is `beadle-email` — an MCP server for email communicati
 
 You are **Claude Agento** (`claude`), an agent in the Punt Labs org. Your identity is managed by ethos (`ethos show claude`). Beadle is your email system — you read, send, and manage email as `claude@punt-labs.com`.
 
-**No git submodules in this repo.** The org-wide rule "every project adds `punt-labs/team` as a submodule at `.punt-labs/ethos/`" does not apply here. A `git-subdir` install still clones with `--recurse-submodules`, so a gitlink anywhere in the tree is fetched into every user's plugin cache — and the registry is ~1 MB of org-internal identity data none of them need. Resolve identities from the global `~/.punt-labs/ethos/` instead; `.punt-labs/ethos.yaml` is the repo-local pin and stays tracked.
+**No git submodules in this repo — but a plain vendored copy, per org policy.** The org-wide rule "every project adds `punt-labs/team` as a submodule at `.punt-labs/ethos/`" does not apply here: a `git-subdir` install clones with `--recurse-submodules`, so a submodule's gitlink is fetched into every user's plugin cache regardless of path. Plain committed files carry no such risk — `git-subdir` with `path: "plugin"` only ever materializes `plugin/`'s contents (see below), so `.punt-labs/ethos/` never reaches a plugin consumer either way. Per org policy (`punt-labs/CLAUDE.md` "Team Registry"), `.punt-labs/ethos/` is an inline vendored copy — plain committed files, matching lux, cryptd, public-website, and punt-labs itself. Identities resolve from this repo-local copy; nothing here depends on the global `~/.punt-labs/ethos/`.
 
-**The plugin payload is `plugin/` plus every file in the repo root.** The shippable surface lives under `plugin/` and the marketplace fetches it with Claude Code's `git-subdir` source — a blobless partial clone plus a cone-mode sparse checkout — so no other *directory* reaches a user. Cone mode makes no such promise about the repo *root*: every root-level file travels with every install. Before tracking a new file, ask whether a plugin user has a reason to receive it, and put it in a directory rather than at the root when the answer is no. `.gitignore` records what has already been trimmed and why. See `docs/ARCHITECTURE.md` for the layout.
+**The plugin payload is `plugin/`, and nothing else.** The shippable surface lives under `plugin/` and the marketplace fetches it with Claude Code's `git-subdir` source — a blobless partial clone plus a cone-mode sparse checkout scoped to `path: "plugin"`. Verified by direct inspection of the installed plugin cache (`~/.claude/plugins/cache/punt-labs/<plugin>/<version>/`): it contains only `plugin/`'s contents, no `.git`, no root-level files, no other top-level directories. Before tracking a new file, ask whether a plugin user has a reason to receive it, and put it in a directory rather than at the root when the answer is no — not because the root leaks (it doesn't), but because a small root stays easy to reason about. `.gitignore` records what has already been trimmed and why. See `docs/ARCHITECTURE.md` for the layout.
 
 ## No "Pre-existing" Excuse
 
@@ -74,3 +74,6 @@ and `workflow.md` are the PR and org-workflow standards. These are cross-repo
 - [`docs/TESTING.md`](docs/TESTING.md) — test pyramid and GPG/Fastmail test config.
 - [`.claude/rules/delegation.md`](.claude/rules/delegation.md) — mission pipelines, worker/evaluator table.
 - [CLI standard](https://github.com/punt-labs/punt-kit/blob/main/standards/cli.md) — command-design reference for `beadle-email`.
+@.punt-labs/vox/CLAUDE.md
+@.punt-labs/ethos/CLAUDE.md
+@.punt-labs/beadle/CLAUDE.md
