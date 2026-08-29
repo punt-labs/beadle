@@ -27,10 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   silently masked by an older fallback file) adopted as the one standard.
   `doctor` and `status` call it only when `-c`/`--config` was not explicitly
   passed; an explicit flag always wins and skips identity-config lookup
-  entirely. `install`'s doctor step now sets the `-c`/`--config` flag
-  (`doctorCmd.Flags().Set`) instead of assigning `doctorConfig` directly, so
-  the just-written config is Changed and honored rather than falling back to
-  an identity-scoped config when one exists.
+  entirely. `install`'s doctor step invokes `doctorCmd` with no flag forced,
+  so it reports on whatever config is actually in effect — the just-written
+  root config when no identity resolves or its config is absent, or the
+  identity-scoped config when one exists and loads cleanly — matching what a
+  bare `doctor` invocation reports immediately after install.
 
 - **`list`, `search`, `read`, `send`, `reply`, `move`, `mark`, and `folders`
   now fail closed on a corrupt identity-scoped config, instead of silently
@@ -54,12 +55,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`internal/email/poller.go`'s background poll loop and
   `internal/mcp/poll_tools.go`'s `set_poll_interval` no longer risk a panic
-  on a `HOME`-resolution failure.** Both called `email.DefaultConfigPath()`
-  as an eager argument to `email.LoadIdentityConfig`, so its panic (via
-  `paths.MustDataDir()`) fired unconditionally on every poll tick and every
-  tool invocation, regardless of whether the identity config succeeded — a
-  robustness regression for a long-running background goroutine and an MCP
-  handler, neither of which may crash the process on an environment
+  on a `HOME`-resolution failure.** Both fell back to
+  `email.DefaultConfigPath()` when the identity-scoped config was absent
+  (`os.ErrNotExist`), and `DefaultConfigPath()` panics via
+  `paths.MustDataDir()` on a `HOME`-resolution failure — so a poll tick or
+  tool invocation that fell back could crash the process instead of
+  returning an error, a robustness regression for a long-running background
+  goroutine and an MCP handler, neither of which may crash on an environment
   failure. Both now build the fallback path via the non-panicking
   `paths.DataDir()` and return a clean error instead.
 
