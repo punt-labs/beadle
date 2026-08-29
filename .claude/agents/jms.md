@@ -44,7 +44,7 @@ tools:
   - mcp__plugin_z-spec-dev_zspec__get_report
 model: "sonnet"
 skills:
-  - baseline-ops
+  - "baseline-ops"
 hooks:
   PostToolUse:
     - matcher: "Write|Edit"
