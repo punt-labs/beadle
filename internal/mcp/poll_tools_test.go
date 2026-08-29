@@ -206,8 +206,6 @@ func TestUnreadMarker_DescriptionCarriesCount(t *testing.T) {
 	assert.NotContains(t, pollStatusDesc(t, s), "unread)", "marker cleared at zero")
 }
 
-// TestServerInstructions_Exposed proves the server surfaces the inbox/poll
-// protocol in its initialize response.
 // TestSetPollInterval_DataDirFailureErrorsNotPanics proves the tool returns a
 // clean error result, rather than panicking, when the fallback config path's
 // underlying paths.DataDir() call fails. Regression guard for eagerly
@@ -227,6 +225,8 @@ func TestSetPollInterval_DataDirFailureErrorsNotPanics(t *testing.T) {
 	assert.True(t, result.IsError, "expected an error result, not a crash")
 }
 
+// TestServerInstructions_Exposed proves the server surfaces the inbox/poll
+// protocol in its initialize response.
 func TestServerInstructions_Exposed(t *testing.T) {
 	require.NotEmpty(t, mcptools.ServerInstructions)
 	assert.Contains(t, mcptools.ServerInstructions, "get_poll_status")
