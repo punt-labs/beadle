@@ -271,3 +271,24 @@ func TestResolveIdentityAndConfig_FailsClosedOnCorruptIdentityConfig(t *testing.
 	require.Error(t, err, "a corrupt identity config must fail closed, never silently fall back")
 	assert.Contains(t, err.Error(), "load config")
 }
+
+// TestResolveIdentityAndConfig_DataDirFailureErrorsNotPanics proves the
+// function returns a clean error, rather than panicking, when the
+// environment can't resolve a home directory. Regression guard for building
+// the fallback config path from the already-resolved beadleDir instead of
+// the panicking email.DefaultConfigPath() (paths.MustDataDir() panics on a
+// HOME-resolution failure) — an MCP tool handler must not crash the server
+// on an environment failure.
+func TestResolveIdentityAndConfig_DataDirFailureErrorsNotPanics(t *testing.T) {
+	env := testenv.New(t, "test@test.com")
+	env.WriteConfig(&email.Config{IMAPHost: "127.0.0.1", IMAPUser: "test@test.com"})
+
+	t.Setenv("HOME", "")
+
+	h := &handler{resolver: env.Resolver}
+	var err error
+	require.NotPanics(t, func() {
+		_, _, _, err = h.resolveIdentityAndConfig()
+	})
+	assert.Error(t, err)
+}
