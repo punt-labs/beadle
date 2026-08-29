@@ -65,7 +65,11 @@ func (h *handler) switchIdentity(ctx context.Context, req mcplib.CallToolRequest
 	if pathErr != nil {
 		h.logger.Warn("switch_identity preflight: resolve identity config path", "error", pathErr)
 	} else if _, statErr := os.Stat(configPath); statErr != nil {
-		msg += fmt.Sprintf("\n\nWARNING: no email config at %s — email operations will use fallback config.", configPath)
+		if os.IsNotExist(statErr) {
+			msg += fmt.Sprintf("\n\nWARNING: no email config at %s — email operations will use fallback config.", configPath)
+		} else {
+			h.logger.Warn("switch_identity preflight: stat identity config", "path", configPath, "error", statErr)
+		}
 	}
 	return textResult(msg)
 }

@@ -1,6 +1,8 @@
 package mcp_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,4 +61,27 @@ func TestSwitchIdentity_DataDirFailureDoesNotPanic(t *testing.T) {
 	})
 	assert.False(t, r.IsError, "switch itself must still succeed: %s", r.text())
 	assert.NotContains(t, r.text(), "WARNING", "no path could be resolved to check, so no warning is issued")
+}
+
+// TestSwitchIdentity_StatErrorOtherThanNotExistIsNotMisreportedAsAbsent
+// proves the preflight distinguishes "no config" from any other os.Stat
+// failure: a non-ENOENT error (here, a path component that is a file instead
+// of a directory) must not produce the "no email config" warning, since the
+// config's actual absence was never established.
+func TestSwitchIdentity_StatErrorOtherThanNotExistIsNotMisreportedAsAbsent(t *testing.T) {
+	s, env, _ := setupHandler(t)
+	env.AddIdentity("sam", "Sam Jackson", "sam@test.com")
+
+	configPath, err := paths.IdentityConfigPath("sam@test.com")
+	require.NoError(t, err)
+	// Replace the identity directory with a file, so stat-ing configPath
+	// (a path through it) fails with ENOTDIR, not ENOENT.
+	identityDir := filepath.Dir(configPath)
+	require.NoError(t, os.RemoveAll(identityDir))
+	require.NoError(t, os.WriteFile(identityDir, []byte("not a directory"), 0o600))
+
+	r := callTool(t, s, "switch_identity", map[string]any{"handle": "sam"})
+	assert.False(t, r.IsError, "switch itself must still succeed: %s", r.text())
+	assert.NotContains(t, r.text(), "WARNING",
+		"a non-ENOENT stat error must not be misreported as 'no email config'")
 }
