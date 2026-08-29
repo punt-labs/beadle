@@ -47,7 +47,7 @@ func NewIMAPServer(t testing.TB, user, pass string) (*IMAPServer, string) {
 	tlsCert := selfSignedCert(t)
 
 	srv := imapserver.New(&imapserver.Options{
-		NewSession: func(conn *imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
+		NewSession: func(_ *imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
 			return &memSession{backend: backend}, nil, nil
 		},
 		Caps: imap.CapSet{
@@ -217,7 +217,7 @@ func (s *memSession) Login(username, password string) error {
 	return nil
 }
 
-func (s *memSession) Select(mailbox string, options *imap.SelectOptions) (*imap.SelectData, error) {
+func (s *memSession) Select(mailbox string, _ *imap.SelectOptions) (*imap.SelectData, error) {
 	s.backend.mu.Lock()
 	defer s.backend.mu.Unlock()
 
@@ -261,7 +261,7 @@ func (s *memSession) Rename(_, _ string, _ *imap.RenameOptions) error {
 func (s *memSession) Subscribe(_ string) error   { return nil }
 func (s *memSession) Unsubscribe(_ string) error { return nil }
 
-func (s *memSession) List(w *imapserver.ListWriter, ref string, patterns []string, options *imap.ListOptions) error {
+func (s *memSession) List(w *imapserver.ListWriter, ref string, patterns []string, _ *imap.ListOptions) error {
 	s.backend.mu.Lock()
 	names := make([]string, 0, len(s.backend.mailboxes))
 	for name := range s.backend.mailboxes {
@@ -304,7 +304,7 @@ func matchMailbox(ref, pattern, name string) bool {
 	return name == full
 }
 
-func (s *memSession) Status(mailbox string, options *imap.StatusOptions) (*imap.StatusData, error) {
+func (s *memSession) Status(mailbox string, _ *imap.StatusOptions) (*imap.StatusData, error) {
 	s.backend.mu.Lock()
 	defer s.backend.mu.Unlock()
 
@@ -403,7 +403,7 @@ func (s *memSession) Expunge(w *imapserver.ExpungeWriter, uids *imap.UIDSet) err
 	return nil
 }
 
-func (s *memSession) Search(kind imapserver.NumKind, criteria *imap.SearchCriteria, options *imap.SearchOptions) (*imap.SearchData, error) {
+func (s *memSession) Search(_ imapserver.NumKind, criteria *imap.SearchCriteria, _ *imap.SearchOptions) (*imap.SearchData, error) {
 	if s.selected == nil {
 		return nil, fmt.Errorf("no mailbox selected")
 	}
@@ -658,7 +658,7 @@ func parseAddress(s string) imap.Address {
 	return addr
 }
 
-func (s *memSession) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags *imap.StoreFlags, options *imap.StoreOptions) error {
+func (s *memSession) Store(w *imapserver.FetchWriter, numSet imap.NumSet, flags *imap.StoreFlags, _ *imap.StoreOptions) error {
 	if s.selected == nil {
 		return fmt.Errorf("no mailbox selected")
 	}

@@ -19,7 +19,7 @@ var g globalOpts
 var rootCmd = &cobra.Command{
 	Use:   "beadle-email",
 	Short: "beadle-email: Beadle email channel MCP server",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 		cmd.SilenceUsage = true
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 			Level: g.slogLevel(),

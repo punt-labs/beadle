@@ -281,10 +281,10 @@ func ExtractPart(raw []byte, partIndex int) (*MIMEPart, []byte, error) {
 	}
 }
 
-func truncate(s string, max int) string {
+func truncate(s string, limit int) string {
 	runes := []rune(s)
-	if len(runes) <= max {
+	if len(runes) <= limit {
 		return s
 	}
-	return string(runes[:max]) + "..."
+	return string(runes[:limit]) + "..."
 }

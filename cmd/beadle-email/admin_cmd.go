@@ -36,7 +36,7 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start MCP server",
 	Long:  "Start the beadle-email MCP server. Transport: stdio (default) or ws (WebSocket).",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		logWriter, logPath, logErr := openServeLogFile()
 		var w io.Writer = os.Stderr
 		if logWriter != nil {
@@ -129,7 +129,7 @@ func init() {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		fmt.Printf("beadle-email %s\n", version)
 	},
 }
@@ -150,7 +150,7 @@ var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check installation health",
 	Long:  "Run health checks on identity, credentials, GPG, SMTP, and contacts.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		var checks []doctorCheck
 
 		checks = append(checks, doctorCheck{"version", "OK", version})
@@ -327,7 +327,7 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current state",
 	Long:  "Show operational state: version, IMAP/SMTP settings, identity, contacts count.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		resolver, err := newResolver()
 		if err != nil {
 			return err

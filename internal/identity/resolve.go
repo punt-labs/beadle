@@ -39,13 +39,6 @@ func NewResolver(ethosDir, beadleDir, repoDir string) *Resolver {
 	}
 }
 
-// Resolve returns the active identity by walking the resolution chain:
-//  1. Repo-local ethos config → handle
-//  2. Global ethos active file → handle
-//  3. Handle → ethos identity YAML → email, name
-//  4. Handle → beadle extension → gpg_key_id (optional)
-//  5. Beadle default-identity file → email (no handle)
-//
 // ValidateHandle rejects handles containing path separators or parent
 // directory references to prevent path traversal attacks.
 func ValidateHandle(handle string) error {
@@ -73,6 +66,12 @@ func ValidateEmailAsPath(email string) error {
 	return nil
 }
 
+// Resolve returns the active identity by walking the resolution chain:
+//  1. Repo-local ethos config → handle
+//  2. Global ethos active file → handle
+//  3. Handle → ethos identity YAML → email, name
+//  4. Handle → beadle extension → gpg_key_id (optional)
+//  5. Beadle default-identity file → email (no handle)
 func (r *Resolver) Resolve() (*Identity, error) {
 	// Try ethos-based resolution (steps 1-4)
 	handle, err := r.resolveHandle()

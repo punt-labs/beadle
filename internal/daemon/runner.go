@@ -126,7 +126,7 @@ type CLIRunner struct {
 }
 
 // Run executes a single-binary CLI command and returns its stdout.
-func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string) (string, error) {
+func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cmd *Command, call CommandCall, pipe string) (string, error) {
 	if len(cmd.Steps) > 0 {
 		return r.runCompound(ctx, e, cmd, pipe)
 	}

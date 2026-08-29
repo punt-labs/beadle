@@ -238,7 +238,7 @@ func TestLoadConfig_SMTPDefaults(t *testing.T) {
 	}
 }
 
-func TestCredentialMethods_Exist(t *testing.T) {
+func TestCredentialMethods_Exist(_ *testing.T) {
 	// Verify the credential methods exist and return either a value or a
 	// meaningful error. We don't assert specific values because the
 	// resolution chain (keychain → file → env) is environment-dependent.

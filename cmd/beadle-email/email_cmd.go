@@ -226,7 +226,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List messages",
 	Long:  "List messages from the inbox or a specified IMAP folder.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		// Validate paging before opening a connection.
 		if listCount <= 0 {
 			return fmt.Errorf("--count must be positive")
@@ -294,7 +294,7 @@ var searchCmd = &cobra.Command{
 	Short: "Search messages",
 	Long: "Search a mailbox folder by sender, subject, date, or free text. " +
 		"At least one of --from/--subject/--since/--text is required.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		q := email.SearchQuery{
 			From:       searchFrom,
 			Subject:    searchSubject,
@@ -425,7 +425,7 @@ var sendCmd = &cobra.Command{
 	Use:   "send",
 	Short: "Send an email",
 	Long:  "Send an email via Proton Bridge SMTP or Resend API fallback.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		contactsPath := resolveContactsPath()
 		store, storeErr := email.LoadContactsIfNeeded(contactsPath, sendTo, sendCc, sendBcc)
 		toResolved, err := email.ResolveField(store, storeErr, sendTo)
@@ -717,7 +717,7 @@ var foldersConfig string
 var foldersCmd = &cobra.Command{
 	Use:   "folders",
 	Short: "List IMAP folders",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		cfg, _, err := resolveConfig(cmd, foldersConfig)
 		if err != nil {
 			return err

@@ -127,7 +127,6 @@ func (c *Client) ListFolders() ([]channel.Folder, error) {
 	return folders, nil
 }
 
-// ListMessages returns recent messages from a folder.
 // ListResult holds the messages returned by ListMessages along with the
 // total number of messages matching the query criteria.
 type ListResult struct {
@@ -164,6 +163,7 @@ type SearchQuery struct {
 	UnreadOnly bool
 }
 
+// ListMessages returns recent messages from a folder.
 func (c *Client) ListMessages(folder string, count int, unreadOnly bool, repoSlug string) (*ListResult, error) {
 	return c.SearchMessages(folder, SearchQuery{RepoSlug: repoSlug, UnreadOnly: unreadOnly}, count, 0)
 }

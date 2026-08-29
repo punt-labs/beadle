@@ -280,6 +280,6 @@ func ValidateArgs(cmd *Command, args map[string]any) error {
 // VerifySignature is a stub for GPG signature verification of command files.
 // The signing workflow is not yet defined; the Signature field exists so
 // YAML can carry the signature for future verification.
-func VerifySignature(cmd *Command, gpgBinary string) error {
+func VerifySignature(_ *Command, _ string) error {
 	return nil
 }

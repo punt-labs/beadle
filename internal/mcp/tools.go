@@ -658,7 +658,7 @@ func (h *handler) searchMessages(ctx context.Context, req mcplib.CallToolRequest
 	})
 }
 
-func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) readMessage(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -730,7 +730,7 @@ func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	})
 }
 
-func (h *handler) listFolders(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) listFolders(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -923,7 +923,7 @@ func (h *handler) replyMessage(ctx context.Context, req mcplib.CallToolRequest) 
 	})
 }
 
-func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) verifySignature(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -969,7 +969,7 @@ func (h *handler) verifySignature(ctx context.Context, req mcplib.CallToolReques
 	})
 }
 
-func (h *handler) showMIME(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) showMIME(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1000,7 +1000,7 @@ func (h *handler) showMIME(ctx context.Context, req mcplib.CallToolRequest) (*mc
 	})
 }
 
-func (h *handler) checkTrust(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) checkTrust(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1044,7 +1044,7 @@ type moveResult struct {
 	Moved       int    `json:"moved"`
 }
 
-func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) moveMessage(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1078,7 +1078,7 @@ func (h *handler) moveMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	})
 }
 
-func (h *handler) batchMoveMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) batchMoveMessages(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1124,7 +1124,7 @@ type markResult struct {
 	Modified  int    `json:"modified"`
 }
 
-func (h *handler) markMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) markMessage(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1158,7 +1158,7 @@ func (h *handler) markMessage(ctx context.Context, req mcplib.CallToolRequest) (
 	})
 }
 
-func (h *handler) batchMarkMessages(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) batchMarkMessages(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	_, cfg, _, err := h.resolveIdentityAndConfig()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1194,7 +1194,7 @@ func (h *handler) batchMarkMessages(ctx context.Context, req mcplib.CallToolRequ
 	})
 }
 
-func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) downloadAttachment(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil

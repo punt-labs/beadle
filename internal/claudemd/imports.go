@@ -548,9 +548,9 @@ func resolve(path string) (string, error) {
 	if fi.Mode()&os.ModeSymlink == 0 {
 		return path, nil
 	}
-	real, err := filepath.EvalSymlinks(path)
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", fmt.Errorf("resolving symlink %q: %w", path, err)
 	}
-	return real, nil
+	return resolved, nil
 }

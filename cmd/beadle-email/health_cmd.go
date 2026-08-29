@@ -14,7 +14,7 @@ var healthCmd = &cobra.Command{
 	Use:   "health",
 	Short: "Check WebSocket server health",
 	Long:  "HTTP GET to http://localhost:<port>/health. Exit 0 if 200, exit 1 otherwise.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		url := fmt.Sprintf("http://localhost:%d/health", healthPort)
 		client := &http.Client{Timeout: 5 * time.Second}
 		resp, err := client.Get(url)

@@ -80,8 +80,8 @@ func (s *memSMTPSession) AuthMechanisms() []string {
 	return []string{sasl.Plain}
 }
 
-func (s *memSMTPSession) Auth(mech string) (sasl.Server, error) {
-	return sasl.NewPlainServer(func(identity, username, password string) error {
+func (s *memSMTPSession) Auth(_ string) (sasl.Server, error) {
+	return sasl.NewPlainServer(func(_, _, _ string) error {
 		// Accept any credentials for testing.
 		return nil
 	}), nil

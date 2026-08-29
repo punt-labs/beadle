@@ -41,7 +41,7 @@ func NewWSServer(s *server.MCPServer, version string, logger *slog.Logger) *WSSe
 		upgrader: websocket.Upgrader{
 			// Sandbox isolation prevents browser access. For traditional
 			// Docker, mcp-proxy authenticates via MCP_PROXY_TOKEN on upgrade.
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(_ *http.Request) bool { return true },
 		},
 	}
 }
@@ -77,7 +77,7 @@ func (ws *WSServer) ListenAndServe(ctx context.Context, port int) error {
 }
 
 // HandleHealth responds with a JSON status object.
-func (ws *WSServer) HandleHealth(w http.ResponseWriter, r *http.Request) {
+func (ws *WSServer) HandleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",

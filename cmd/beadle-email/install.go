@@ -28,7 +28,7 @@ var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Set up beadle-email",
 	Long:  "Interactive setup: create directories, prompt for config, register MCP server.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		// 1. Create directory tree
 		dataDir, err := paths.DataDir()
 		if err != nil {
@@ -88,7 +88,7 @@ var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "Remove beadle-email",
 	Long:  "Remove MCP registration, deployed commands, and permissions.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		removed := 0
 
 		// 1. Remove the standalone MCP registration at user scope — the exact

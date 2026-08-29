@@ -32,7 +32,7 @@ var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Start the daemon",
 	Long:  "Start the background daemon. Polls for new mail and blocks until SIGTERM or SIGINT.",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		logWriter, logPath, logErr := openDaemonLogFile()
 		var w io.Writer = os.Stderr
 		if logWriter != nil {

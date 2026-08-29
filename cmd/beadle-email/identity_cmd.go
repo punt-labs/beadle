@@ -37,7 +37,7 @@ var identityShowCmd = &cobra.Command{
 	RunE:  identityShowRun,
 }
 
-func identityShowRun(cmd *cobra.Command, args []string) error {
+func identityShowRun(_ *cobra.Command, _ []string) error {
 	resolver, err := newResolver()
 	if err != nil {
 		return fmt.Errorf("create resolver: %w", err)
@@ -111,7 +111,7 @@ var identitySetCmd = &cobra.Command{
 	Short: "Set per-repo identity handle",
 	Long:  "Write .punt-labs/ethos.yaml with the given handle for this repo.",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		handle := strings.TrimSpace(args[0])
 		if handle == "" {
 			return fmt.Errorf("handle cannot be empty")

@@ -298,12 +298,12 @@ func (e *Executor) save(p *Pipeline) {
 	}
 }
 
-// truncateLog returns s truncated to max bytes, appending "..." if truncated.
-func truncateLog(s string, max int) string {
-	if len(s) <= max {
+// truncateLog returns s truncated to limit bytes, appending "..." if truncated.
+func truncateLog(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	return s[:max] + "..."
+	return s[:limit] + "..."
 }
 
 // fireElse logs the pipeline error and sends a reply to the originator
