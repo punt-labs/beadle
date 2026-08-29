@@ -1323,7 +1323,7 @@ func readAttachments(req mcplib.CallToolRequest) ([]email.OutboundAttachment, er
 			return nil, fmt.Errorf("attachment path must be absolute: %q", path)
 		}
 
-		f, err := os.Open(path)
+		f, err := os.Open(filepath.Clean(path))
 		if err != nil {
 			return nil, fmt.Errorf("attachment %q: %w", filepath.Base(path), err)
 		}

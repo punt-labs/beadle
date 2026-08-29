@@ -129,7 +129,7 @@ func (r *Resolver) resolveHandle() (string, error) {
 
 	// Step 2: global ethos active file
 	activePath := filepath.Join(r.ethosDir, "active")
-	data, err := os.ReadFile(activePath)
+	data, err := os.ReadFile(filepath.Clean(activePath))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil // no ethos installed
@@ -150,7 +150,7 @@ type repoEthosConfig struct {
 
 // readRepoEthosConfig reads the agent handle from a repo-local config.
 func readRepoEthosConfig(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return "", err
 	}
@@ -168,7 +168,7 @@ func readRepoEthosConfig(path string) (string, error) {
 func (r *Resolver) fromEthos(handle string) (*Identity, error) {
 	// Step 3: read identity YAML
 	idPath := filepath.Join(r.ethosDir, "identities", handle+".yaml")
-	data, err := os.ReadFile(idPath)
+	data, err := os.ReadFile(filepath.Clean(idPath))
 	if err != nil {
 		return nil, fmt.Errorf("read ethos identity %s: %w", idPath, err)
 	}
@@ -193,7 +193,7 @@ func (r *Resolver) fromEthos(handle string) (*Identity, error) {
 
 	// Step 4: read beadle extension (optional — missing file is OK, corrupt is not)
 	extPath := filepath.Join(r.ethosDir, "identities", handle+".ext", "beadle.yaml")
-	extData, err := os.ReadFile(extPath)
+	extData, err := os.ReadFile(filepath.Clean(extPath))
 	if err == nil {
 		var ext beadleExtension
 		if parseErr := yaml.Unmarshal(extData, &ext); parseErr != nil {
@@ -210,7 +210,7 @@ func (r *Resolver) fromEthos(handle string) (*Identity, error) {
 // fromDefault reads the default-identity file (plain email string).
 func (r *Resolver) fromDefault() (*Identity, error) {
 	path := filepath.Join(r.beadleDir, "default-identity")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}

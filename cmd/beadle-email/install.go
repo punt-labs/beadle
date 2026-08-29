@@ -179,7 +179,7 @@ func selfPath() string {
 
 // cleanSettings removes beadle-related entries from settings.json.
 func cleanSettings(path string) int {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return 0
 	}

@@ -44,7 +44,7 @@ func copyFileIfNeeded(src, dst string) error {
 	}
 
 	// Skip if source doesn't exist
-	srcFile, err := os.Open(src)
+	srcFile, err := os.Open(filepath.Clean(src))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -58,7 +58,7 @@ func copyFileIfNeeded(src, dst string) error {
 		return err
 	}
 
-	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, info.Mode())
+	dstFile, err := os.OpenFile(filepath.Clean(dst), os.O_CREATE|os.O_WRONLY|os.O_EXCL, info.Mode())
 	if err != nil {
 		return err
 	}

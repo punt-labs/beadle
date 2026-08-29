@@ -146,7 +146,7 @@ type mcpConfig struct {
 // malformed file IS an error so the caller can surface it rather than silently
 // treating drift as absent.
 func mcpFileDeclaresServer(path, server string) (bool, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil

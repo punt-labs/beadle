@@ -205,7 +205,7 @@ func openDaemonLogFile() (*os.File, string, error) {
 		return nil, "", fmt.Errorf("create log dir %s: %w", logDir, err)
 	}
 	path := filepath.Join(logDir, "beadle-daemon.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, "", fmt.Errorf("open %s: %w", path, err)
 	}

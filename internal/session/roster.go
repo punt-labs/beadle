@@ -74,7 +74,7 @@ func ReadRoster(ethosDir string) (*Roster, error) {
 
 	// Read session ID from current/<pid> sidecar.
 	currentPath := filepath.Join(ethosDir, "sessions", "current", strconv.Itoa(pid))
-	data, err := os.ReadFile(currentPath)
+	data, err := os.ReadFile(filepath.Clean(currentPath))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil // no session file = not in a session
@@ -89,7 +89,7 @@ func ReadRoster(ethosDir string) (*Roster, error) {
 
 	// Read roster YAML.
 	rosterPath := filepath.Join(ethosDir, "sessions", sessionID+".yaml")
-	rosterData, err := os.ReadFile(rosterPath)
+	rosterData, err := os.ReadFile(filepath.Clean(rosterPath))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil // stale sidecar pointing at removed session

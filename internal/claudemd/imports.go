@@ -354,7 +354,7 @@ func splitKeepEnds(s string) []string {
 // no newline translation, so a read/write round-trip preserves LF, CRLF, and
 // lone-CR endings.
 func read(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
@@ -495,7 +495,7 @@ func siblingLockPath(host string) (string, error) {
 // lock file if it does not exist. Closing the file releases the flock; its
 // close failure surfaces only when fn itself succeeded.
 func flockFile(lockPath string, fn func() error) (err error) {
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile(filepath.Clean(lockPath), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening lock %q: %w", lockPath, err)
 	}

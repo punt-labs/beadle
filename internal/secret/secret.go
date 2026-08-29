@@ -98,7 +98,7 @@ func fileGet(name string) (string, error) {
 		return "", fmt.Errorf("credential file %s has unsafe permissions %o (must not be group/world readable)", path, info.Mode().Perm())
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return "", err
 	}

@@ -90,7 +90,7 @@ func LoadCommands(dir string) (map[string]*Command, error) {
 }
 
 func loadCommand(path string) (*Command, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}

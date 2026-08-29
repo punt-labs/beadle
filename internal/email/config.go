@@ -87,7 +87,7 @@ func LoadIdentityConfig(id *identity.Identity, fallbackPath string) (cfg *Config
 
 // LoadConfig reads configuration from the given path.
 func LoadConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
@@ -213,7 +213,7 @@ func ValidPollInterval(s string) bool {
 // leaving all other fields untouched. The write is atomic (temp file + rename).
 func SaveConfig(path string, cfg *Config) error {
 	existing := make(map[string]any)
-	data, readErr := os.ReadFile(path)
+	data, readErr := os.ReadFile(filepath.Clean(path))
 	if readErr == nil {
 		if err := json.Unmarshal(data, &existing); err != nil {
 			return fmt.Errorf("existing config %s is corrupt: %w", path, err)
