@@ -54,7 +54,10 @@ func TestWSServer_MCPInitialize(t *testing.T) {
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/mcp"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, wsResp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if wsResp != nil {
+		defer func() { _ = wsResp.Body.Close() }()
+	}
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -121,7 +124,10 @@ func TestWSServer_ListenAndServe(t *testing.T) {
 
 	// WebSocket initialize.
 	wsURL := fmt.Sprintf("ws://%s/mcp", addr)
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, wsResp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if wsResp != nil {
+		defer func() { _ = wsResp.Body.Close() }()
+	}
 	require.NoError(t, err)
 	defer conn.Close()
 
