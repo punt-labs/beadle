@@ -51,7 +51,7 @@ var installCmd = &cobra.Command{
 			data, _ := json.MarshalIndent(cfg, "", "  ")
 			data = append(data, '\n')
 			tmp := configPath + ".tmp"
-			if err := os.WriteFile(tmp, data, 0o640); err != nil {
+			if err := os.WriteFile(tmp, data, 0o600); err != nil {
 				return fmt.Errorf("write config: %w", err)
 			}
 			if err := os.Rename(tmp, configPath); err != nil {
@@ -216,7 +216,7 @@ func cleanSettings(path string) int {
 	}
 	out = append(out, '\n')
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o640); err != nil {
+	if err := os.WriteFile(tmp, out, 0o600); err != nil {
 		return 0
 	}
 	if err := os.Rename(tmp, path); err != nil {

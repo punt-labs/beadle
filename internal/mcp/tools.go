@@ -1262,7 +1262,7 @@ func (h *handler) downloadAttachment(_ context.Context, req mcplib.CallToolReque
 
 		outName := fmt.Sprintf("%s_%s", msgID, filename)
 		outPath := filepath.Join(attachDir, outName)
-		if err := os.WriteFile(outPath, data, 0o640); err != nil {
+		if err := os.WriteFile(outPath, data, 0o600); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("write attachment: %v", err)), nil
 		}
 
