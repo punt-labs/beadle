@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -109,7 +110,11 @@ func (c *Client) UnreadCount(folder, repoSlug string) (uint32, error) {
 		c.logger.Warn("repo unread search failed; counting all repos", "err", err)
 		return c.Status(folder)
 	}
-	return uint32(len(searchData.AllUIDs())), nil
+	n := len(searchData.AllUIDs())
+	if n > math.MaxUint32 {
+		n = math.MaxUint32
+	}
+	return uint32(n), nil
 }
 
 // ListFolders returns all available mailbox folders.
@@ -351,9 +356,16 @@ func selectUIDs(searchData *imap.SearchData, count, offset int) (imap.NumSet, in
 // recencySet selects the last count messages by sequence number.
 // count must lie in [1, numMessages].
 func recencySet(numMessages uint32, count int) imap.SeqSet {
+	if count < 0 {
+		count = 0
+	}
+	countU := count
+	if countU > math.MaxUint32 {
+		countU = math.MaxUint32
+	}
 	start := uint32(1)
-	if numMessages > uint32(count) {
-		start = numMessages - uint32(count) + 1
+	if numMessages > uint32(countU) {
+		start = numMessages - uint32(countU) + 1
 	}
 	return imap.SeqSet{{Start: start, Stop: numMessages}}
 }
