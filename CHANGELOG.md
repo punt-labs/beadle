@@ -8,6 +8,71 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`doctor` and `status` now share one config-resolution precedence,
+  implemented once in `email.LoadIdentityConfig`, and both respect an
+  explicit `-c`/`--config` override.** `doctor` previously always loaded
+  `email.DefaultConfigPath()` and never fell back to the identity-scoped
+  config the way `status` did — so `doctor` always honored an explicit `-c`
+  on `main`, but reported against the default file even when an identity
+  resolved and had its own config. `status`, conversely, unconditionally
+  preferred the identity-scoped config whenever identity resolution
+  succeeded, silently ignoring an explicit `-c`/`--config`. The
+  identity-config-with-fallback precedence rule — previously duplicated,
+  with these inconsistent semantics, across `internal/email/poller.go`,
+  `internal/mcp/poll_tools.go`, `cmd/beadle-email/admin_cmd.go`,
+  `cmd/beadle-email/email_cmd.go`'s `resolveConfig`, and
+  `internal/mcp/tools.go`'s `resolveIdentityAndConfig` — is now implemented
+  once, in `email.LoadIdentityConfig`, with `poller.go`'s existing
+  fail-closed behavior (a corrupt identity config is a hard error, never
+  silently masked by an older fallback file) adopted as the one standard.
+  `doctor` and `status` call it only when `-c`/`--config` was not explicitly
+  passed; an explicit flag always wins and skips identity-config lookup
+  entirely. `install`'s doctor step invokes `doctorCmd` with no flag forced,
+  so it reports on whatever config is actually in effect — the just-written
+  root config when no identity resolves or its config is absent, or the
+  identity-scoped config when one exists and loads cleanly — matching what a
+  bare `doctor` invocation reports immediately after install.
+
+- **`list`, `search`, `read`, `send`, `reply`, `move`, `mark`, and `folders`
+  now fail closed on a corrupt identity-scoped config, instead of silently
+  falling back to the explicit `--config` path, and now also honor an
+  explicit `-c`/`--config` the same way `doctor`/`status` do.** These
+  commands share `resolveConfig`, which previously logged a warning and fell
+  back to the explicit config on *any* identity-config load error, including
+  a corrupt or malformed file — the same failure mode the `doctor`/`status`
+  fix above eliminates, but on the live mail-sending path instead of just
+  health checks. `resolveConfig` now calls `email.LoadIdentityConfig` for
+  that decision: identity-resolution failures upstream of a known identity
+  (no resolver, a resolve error, an unavailable data or identity directory)
+  still fall back silently, unchanged; once an identity is known and its
+  directory exists, a corrupt identity config is now a hard error. Fixing
+  `doctor`/`status` first without these eight commands left a real
+  diagnostic hole — `doctor -c X` could report OK while every mail command
+  still consulted a different, possibly-corrupt identity config `doctor`'s
+  `-c` had bypassed checking — so `resolveConfig` is now flag-aware too:
+  when `-c` is passed explicitly, that exact path is used directly and
+  identity-config lookup is skipped entirely.
+
+- **`internal/email/poller.go`'s background poll loop and
+  `internal/mcp/poll_tools.go`'s `set_poll_interval` no longer risk a panic
+  on a `HOME`-resolution failure.** Both fell back to
+  `email.DefaultConfigPath()` when the identity-scoped config was absent
+  (`os.ErrNotExist`), and `DefaultConfigPath()` panics via
+  `paths.MustDataDir()` on a `HOME`-resolution failure — so a poll tick or
+  tool invocation that fell back could crash the process instead of
+  returning an error, a robustness regression for a long-running background
+  goroutine and an MCP handler, neither of which may crash on an environment
+  failure. Both now build the fallback path via the non-panicking
+  `paths.DataDir()` and return a clean error instead.
+
+- **`switch_identity`'s preflight config check no longer hand-rolls the
+  identity config path or discards `paths.DataDir()`'s error.** It now uses
+  `paths.IdentityConfigPath(id.Email)` — the same helper
+  `email.LoadIdentityConfig` consults — instead of duplicating that layout
+  with `filepath.Join(beadleDir, "identities", id.Email, "email.json")`, and
+  logs a `paths.DataDir()` resolution failure instead of silently discarding
+  it with `beadleDir, _ := paths.DataDir()`.
+
 - **`.envrc` is tracked again, and `docs/ARCHITECTURE.md`'s cone-mode claim is
   corrected.** PR #238 untracked `.envrc` on the theory that git-subdir's
   cone-mode sparse checkout materializes every root-level file to plugin

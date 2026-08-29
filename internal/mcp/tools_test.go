@@ -9,7 +9,9 @@ import (
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/punt-labs/beadle/internal/contacts"
+	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/identity"
+	"github.com/punt-labs/beadle/internal/testenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -251,4 +253,44 @@ func TestSplitAddresses(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// TestResolveIdentityAndConfig_FailsClosedOnCorruptIdentityConfig proves the
+// dedup onto email.LoadIdentityConfig preserved resolveIdentityAndConfig's
+// existing fail-closed behavior: a corrupt identity-scoped config is a hard
+// error, never a silent fallback to email.DefaultConfigPath().
+func TestResolveIdentityAndConfig_FailsClosedOnCorruptIdentityConfig(t *testing.T) {
+	env := testenv.New(t, "test@test.com")
+	env.WriteConfig(&email.Config{IMAPHost: "127.0.0.1", IMAPUser: "test@test.com"})
+
+	idConfigPath := filepath.Join(env.IdentityDir(), "email.json")
+	require.NoError(t, os.WriteFile(idConfigPath, []byte(`{not json`), 0o640))
+
+	h := &handler{resolver: env.Resolver}
+	_, _, _, err := h.resolveIdentityAndConfig()
+	require.Error(t, err, "a corrupt identity config must fail closed, never silently fall back")
+	assert.Contains(t, err.Error(), "load config")
+}
+
+// TestResolveIdentityAndConfig_DataDirFailureErrorsNotPanics is a
+// characterization test pinning current fail-clean behavior: the function
+// returns a clean error, rather than panicking, when the environment can't
+// resolve a home directory. Verified (by restoring the pre-fix function in a
+// scratch worktree) to already pass unchanged against the pre-fix code —
+// resolveIdentityAndConfig already returned on a HOME/DataDir failure via an
+// earlier check, before ever reaching the line this fix changed. Kept as a
+// guard on real, current behavior: an MCP tool handler must not crash the
+// server on an environment failure.
+func TestResolveIdentityAndConfig_DataDirFailureErrorsNotPanics(t *testing.T) {
+	env := testenv.New(t, "test@test.com")
+	env.WriteConfig(&email.Config{IMAPHost: "127.0.0.1", IMAPUser: "test@test.com"})
+
+	t.Setenv("HOME", "")
+
+	h := &handler{resolver: env.Resolver}
+	var err error
+	require.NotPanics(t, func() {
+		_, _, _, err = h.resolveIdentityAndConfig()
+	})
+	assert.Error(t, err)
 }

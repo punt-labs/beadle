@@ -2,10 +2,9 @@ package email
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -275,6 +274,15 @@ func (p *Poller) recordFailure(msg string) {
 	p.mu.Unlock()
 }
 
+// loadConfig resolves the poll identity's config, preferring the
+// identity-scoped file over ~/.punt-labs/beadle/email.json. It builds the
+// fallback path via the non-panicking paths.DataDir() rather than calling
+// DefaultConfigPath() — DefaultConfigPath panics via paths.MustDataDir() on a
+// HOME-resolution failure, and this runs on every poll tick from a
+// long-running background goroutine, which must error, never crash the
+// process, on an environment failure. A fallback-file load failure is
+// distinguished from any other failure ("default config: %w") so poller
+// failure logs stay debuggable.
 func (p *Poller) loadConfig() (*Config, error) {
 	if p.resolver == nil {
 		return nil, fmt.Errorf("no identity resolver configured")
@@ -283,19 +291,17 @@ func (p *Poller) loadConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	idCfgPath, err := paths.IdentityConfigPath(id.Email)
+	dataDir, err := paths.DataDir()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve data dir: %w", err)
 	}
-	cfg, err := LoadConfig(idCfgPath)
+	fallbackPath := filepath.Join(dataDir, "email.json")
+	cfg, usedPath, err := LoadIdentityConfig(id, fallbackPath)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("identity config %s: %w", idCfgPath, err)
-		}
-		cfg, err = LoadConfig(DefaultConfigPath())
-		if err != nil {
+		if usedPath == fallbackPath {
 			return nil, fmt.Errorf("default config: %w", err)
 		}
+		return nil, err
 	}
 	return cfg, nil
 }

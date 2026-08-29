@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,6 +14,7 @@ import (
 
 	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/paths"
 )
 
 // TestChangeStatus proves a mutating command reports "not_found" when nothing
@@ -169,4 +174,120 @@ func TestPrintMessages_JSONUnchanged(t *testing.T) {
 	assert.Contains(t, out, `"id": "7"`, "JSON carries the message slice")
 	assert.NotContains(t, out, "showing 1 of 1 messages", "no human status line in JSON mode")
 	assert.NotContains(t, out, "recent mail instead", "no human notice in JSON mode")
+}
+
+// TestResolveConfig_UsesIdentityScopedConfigOverExplicit proves resolveConfig
+// (used by list/search/read/send/reply/move/mark/folders) prefers the
+// identity-scoped config over the explicit --config default, mirroring
+// doctor/status's own precedence.
+func TestResolveConfig_UsesIdentityScopedConfigOverExplicit(t *testing.T) {
+	setupDefaultIdentityHome(t, "agent@test.com")
+
+	idConfigPath, err := paths.IdentityConfigPath("agent@test.com")
+	require.NoError(t, err)
+	writeConfigFixture(t, idConfigPath, "identity@test.com")
+
+	cfg, id, err := resolveConfig(configFlagCmd(t), email.DefaultConfigPath())
+	require.NoError(t, err)
+	require.NotNil(t, id)
+	assert.Equal(t, "agent@test.com", id.Email)
+	assert.Equal(t, "identity@test.com", cfg.IMAPUser)
+}
+
+// TestResolveConfig_FailsClosedOnCorruptIdentityConfig proves the fail-closed
+// behavior change this round introduces: a corrupt identity-scoped config is
+// a hard error for every command that resolves config through resolveConfig
+// (list, search, read, send, reply, move, mark, folders), never a silent
+// fallback to explicitPath — the same corruption-is-fatal contract doctor and
+// status already enforce via email.LoadIdentityConfig.
+func TestResolveConfig_FailsClosedOnCorruptIdentityConfig(t *testing.T) {
+	home := setupDefaultIdentityHome(t, "agent@test.com")
+
+	idConfigPath, err := paths.IdentityConfigPath("agent@test.com")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(idConfigPath), 0o700))
+	require.NoError(t, os.WriteFile(idConfigPath, []byte(`{not json`), 0o600))
+
+	// A fallback the corrupt identity config must NOT silently fall back to.
+	fallbackPath := filepath.Join(home, "fallback-email.json")
+	writeConfigFixture(t, fallbackPath, "fallback@test.com")
+
+	cfg, id, err := resolveConfig(configFlagCmd(t), fallbackPath)
+	assert.Error(t, err, "a corrupt identity config must fail closed, never report the fallback")
+	assert.Nil(t, cfg)
+	require.NotNil(t, id, "the resolved identity is still returned alongside the error")
+	assert.Equal(t, "agent@test.com", id.Email)
+}
+
+// TestResolveConfig_ExplicitFlagSkipsIdentityLookupEntirely proves an
+// explicit -c/--config wins the same way doctor/status's loadConfigForCmd
+// does: identity-config lookup is skipped entirely, so even a corrupt
+// identity config never surfaces — matching list/search/read/send/reply/
+// move/mark/folders to doctor's own -c precedence.
+func TestResolveConfig_ExplicitFlagSkipsIdentityLookupEntirely(t *testing.T) {
+	home := setupDefaultIdentityHome(t, "agent@test.com")
+
+	idConfigPath, err := paths.IdentityConfigPath("agent@test.com")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(idConfigPath), 0o700))
+	require.NoError(t, os.WriteFile(idConfigPath, []byte(`{not json`), 0o600))
+
+	explicitPath := filepath.Join(home, "explicit-email.json")
+	writeConfigFixture(t, explicitPath, "explicit@test.com")
+
+	cmd := configFlagCmd(t)
+	require.NoError(t, cmd.Flags().Set("config", explicitPath))
+
+	cfg, id, err := resolveConfig(cmd, explicitPath)
+	require.NoError(t, err, "an explicit -c must bypass identity-config lookup, so the corrupt identity config never surfaces")
+	require.NotNil(t, cfg)
+	assert.Equal(t, "explicit@test.com", cfg.IMAPUser)
+	require.NotNil(t, id, "the resolved identity is still returned for repo tagging")
+	assert.Equal(t, "agent@test.com", id.Email)
+}
+
+// writeConfigFixtureWithPort writes a minimal valid email.json config at path
+// with an explicit imap_port, so a test can pin the dial target to a port it
+// controls instead of accepting LoadConfig's default (1143, Proton Bridge's
+// real port) — a value shared with, and dependent on, whatever happens to be
+// listening on the machine running the test.
+func writeConfigFixtureWithPort(t *testing.T, path, imapUser string, port int) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	body := fmt.Sprintf(`{"imap_host":"127.0.0.1","imap_port":%d,"imap_user":"%s"}`, port, imapUser)
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+}
+
+// TestFoldersCmd_ExplicitConfigFlagSkipsIdentityLookup is a wiring-level
+// regression guard: driving an actual mail command (folders) with an
+// explicit -c against a corrupt identity config must reach the dial step,
+// not fail on the identity config's corruption — proving resolveConfig's
+// flag-awareness is wired through cmd, not just exercised in isolation.
+func TestFoldersCmd_ExplicitConfigFlagSkipsIdentityLookup(t *testing.T) {
+	home := setupDefaultIdentityHome(t, "agent@test.com")
+
+	idConfigPath, err := paths.IdentityConfigPath("agent@test.com")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(idConfigPath), 0o700))
+	require.NoError(t, os.WriteFile(idConfigPath, []byte(`{not json`), 0o600))
+
+	// Allocate an ephemeral port, then close the listener to guarantee nothing
+	// is listening on it — a hermetic dial-refused target, unlike the default
+	// IMAP port (1143) whose reachability depends on whatever happens to be
+	// listening on the machine running the test.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	require.NoError(t, ln.Close())
+
+	explicitPath := filepath.Join(home, "explicit-email.json")
+	writeConfigFixtureWithPort(t, explicitPath, "explicit@test.com", port)
+
+	t.Cleanup(snapshotConfigFlag(t, foldersCmd))
+	require.NoError(t, foldersCmd.Flags().Set("config", explicitPath))
+
+	err = foldersCmd.RunE(foldersCmd, nil)
+	require.Error(t, err, "nothing is listening on the just-closed port")
+	assert.Contains(t, err.Error(), "connection refused",
+		"an explicit -c must reach the dial step (a refused connection to the closed port), not fail on the corrupt identity config or a generic substring also satisfied by unrelated dial-stage failures like a missing password")
 }

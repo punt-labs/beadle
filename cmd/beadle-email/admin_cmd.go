@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/identity"
 	mcptools "github.com/punt-labs/beadle/internal/mcp"
 	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/pgp"
@@ -156,11 +156,14 @@ var doctorCmd = &cobra.Command{
 		checks = append(checks, doctorCheck{"version", "OK", version})
 
 		// Check identity resolution
+		var id *identity.Identity
+		var idErr error
 		resolver, resolverErr := newResolver()
 		if resolverErr != nil {
 			checks = append(checks, doctorCheck{"identity", "FAIL", resolverErr.Error()})
+			idErr = resolverErr
 		} else {
-			id, idErr := resolver.Resolve()
+			id, idErr = resolver.Resolve()
 			if idErr != nil {
 				checks = append(checks, doctorCheck{"identity", "WARN", fmt.Sprintf("no identity: %v", idErr)})
 			} else {
@@ -172,12 +175,14 @@ var doctorCmd = &cobra.Command{
 		backends := secret.Available()
 		checks = append(checks, doctorCheck{"secret_backends", "OK", strings.Join(backends, ", ")})
 
-		// Check config file
-		cfg, err := email.LoadConfig(doctorConfig)
-		if err != nil {
-			checks = append(checks, doctorCheck{"config", "FAIL", err.Error()})
+		// Check config file — falls back to the identity-scoped config the
+		// same way statusCmd does, so doctor reports on whatever config is
+		// actually in effect. An explicit -c/--config always wins.
+		cfg, usedConfigPath, cfgErr := loadConfigForCmd(cmd, id, idErr, doctorConfig)
+		if cfgErr != nil {
+			checks = append(checks, doctorCheck{"config", "FAIL", cfgErr.Error()})
 		} else {
-			checks = append(checks, doctorCheck{"config", "OK", doctorConfig})
+			checks = append(checks, doctorCheck{"config", "OK", usedConfigPath})
 
 			if _, err := cfg.IMAPPassword(); err != nil {
 				checks = append(checks, doctorCheck{"imap_password", "FAIL", err.Error()})
@@ -292,6 +297,26 @@ func init() {
 	doctorCmd.Flags().StringVarP(&doctorConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
 }
 
+// loadConfigForCmd loads the config for a doctor/status invocation. An
+// explicit -c/--config always wins over the implicit identity-config
+// preference: when the user passed it, cmd.Flags().Changed("config") is
+// true and fallbackPath (the flag's value) is used directly, skipping
+// identity-config lookup entirely. Otherwise this defers to
+// email.LoadIdentityConfig's identity-scoped-over-fallback precedence,
+// passing id only when idErr is nil — an unresolved identity must not be
+// consulted for its (possibly stale or zero-value) Email field.
+func loadConfigForCmd(cmd *cobra.Command, id *identity.Identity, idErr error, fallbackPath string) (cfg *email.Config, usedPath string, err error) {
+	if cmd.Flags().Changed("config") {
+		cfg, err = email.LoadConfig(fallbackPath)
+		return cfg, fallbackPath, err
+	}
+	var idArg *identity.Identity
+	if idErr == nil {
+		idArg = id
+	}
+	return email.LoadIdentityConfig(idArg, fallbackPath)
+}
+
 // --- status ---
 
 var statusConfig string
@@ -307,26 +332,9 @@ var statusCmd = &cobra.Command{
 		}
 		id, idErr := resolver.Resolve()
 
-		var cfg *email.Config
-		usedConfigPath := statusConfig
-		if idErr == nil {
-			idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
-			if pathErr == nil {
-				idCfg, cfgErr := email.LoadConfig(idConfigPath)
-				if cfgErr == nil {
-					cfg = idCfg
-					usedConfigPath = idConfigPath
-				} else if !errors.Is(cfgErr, os.ErrNotExist) {
-					fmt.Fprintf(os.Stderr, "warning: identity config %s: %v (using fallback)\n", idConfigPath, cfgErr)
-				}
-			}
-		}
-		if cfg == nil {
-			var cfgErr error
-			cfg, cfgErr = email.LoadConfig(statusConfig)
-			if cfgErr != nil {
-				return cfgErr
-			}
+		cfg, usedConfigPath, err := loadConfigForCmd(cmd, id, idErr, statusConfig)
+		if err != nil {
+			return err
 		}
 
 		contactsPath := resolveContactsPath()

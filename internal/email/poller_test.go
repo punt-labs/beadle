@@ -3,11 +3,15 @@ package email
 import (
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/punt-labs/beadle/internal/identity"
 )
 
 // discardLogger returns a logger that writes nowhere.
@@ -141,6 +145,44 @@ func TestPoller_Notify(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPoller_LoadConfig_DataDirFailureErrorsNotPanics proves loadConfig
+// returns a clean error, rather than panicking, when the fallback path's
+// underlying paths.DataDir() call fails — a real robustness requirement for
+// a background goroutine that must not crash the process on every poll tick.
+// Regression guard for eagerly evaluating the panicking DefaultConfigPath()
+// as a call argument.
+func TestPoller_LoadConfig_DataDirFailureErrorsNotPanics(t *testing.T) {
+	beadleDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(beadleDir, "default-identity"), []byte("agent@test.com\n"), 0o600))
+	resolver := identity.NewResolver(t.TempDir(), beadleDir, t.TempDir())
+
+	t.Setenv("HOME", "")
+
+	p := &Poller{logger: discardLogger(), resolver: resolver}
+	var err error
+	assert.NotPanics(t, func() {
+		_, err = p.loadConfig()
+	})
+	require.Error(t, err)
+}
+
+// TestPoller_LoadConfig_FallbackLoadFailureWrapped proves a fallback-file
+// load failure is distinguished from any other loadConfig failure, so
+// poller failure logs stay debuggable.
+func TestPoller_LoadConfig_FallbackLoadFailureWrapped(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	beadleDir := filepath.Join(home, ".punt-labs", "beadle")
+	require.NoError(t, os.MkdirAll(beadleDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(beadleDir, "default-identity"), []byte("agent@test.com\n"), 0o600))
+	resolver := identity.NewResolver(t.TempDir(), beadleDir, t.TempDir())
+
+	p := &Poller{logger: discardLogger(), resolver: resolver}
+	_, err := p.loadConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "default config:")
 }
 
 func TestPoller_RecordFailure(t *testing.T) {

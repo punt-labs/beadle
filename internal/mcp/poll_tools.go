@@ -2,9 +2,8 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
+	"path/filepath"
 	"sync"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -135,20 +134,18 @@ func (h *handler) setPollInterval(_ context.Context, req mcplib.CallToolRequest)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("resolve identity: %v", err)), nil
 	}
-	configPath, err := paths.IdentityConfigPath(id.Email)
+	// Build the fallback path via the non-panicking paths.DataDir() rather
+	// than email.DefaultConfigPath() — DefaultConfigPath panics via
+	// paths.MustDataDir() on a HOME-resolution failure, and an MCP tool
+	// handler must return a clean error, never crash the server, on an
+	// environment failure.
+	dataDir, err := paths.DataDir()
 	if err != nil {
-		return mcplib.NewToolResultError(fmt.Sprintf("identity path: %v", err)), nil
+		return mcplib.NewToolResultError(fmt.Sprintf("resolve data dir: %v", err)), nil
 	}
-	cfg, loadErr := email.LoadConfig(configPath)
+	cfg, configPath, loadErr := email.LoadIdentityConfig(id, filepath.Join(dataDir, "email.json"))
 	if loadErr != nil {
-		if !errors.Is(loadErr, os.ErrNotExist) {
-			return mcplib.NewToolResultError(fmt.Sprintf("identity config %s: %v", configPath, loadErr)), nil
-		}
-		cfg, loadErr = email.LoadConfig(email.DefaultConfigPath())
-		if loadErr != nil {
-			return mcplib.NewToolResultError(fmt.Sprintf("load config: %v", loadErr)), nil
-		}
-		configPath = email.DefaultConfigPath()
+		return mcplib.NewToolResultError(fmt.Sprintf("load config: %v", loadErr)), nil
 	}
 	cfg.PollInterval = interval
 	if saveErr := email.SaveConfig(configPath, cfg); saveErr != nil {

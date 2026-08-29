@@ -3,7 +3,6 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -129,17 +128,15 @@ func (h *handler) resolveIdentityAndConfig() (*identity.Identity, *email.Config,
 		return nil, nil, "", fmt.Errorf("ensure identity dir: %w", err)
 	}
 
-	// Load config from identity dir, fall back to root only if missing
-	configPath := filepath.Join(idDir, "email.json")
-	cfg, err := email.LoadConfig(configPath)
+	// Load identity-scoped config, falling back to the default path when it
+	// is simply absent; a corrupt identity config is a hard error. Build the
+	// fallback path from the already-resolved beadleDir rather than
+	// email.DefaultConfigPath() — DefaultConfigPath panics via
+	// paths.MustDataDir() on a HOME-resolution failure, and an MCP tool
+	// handler must return a clean error, never crash the server.
+	cfg, _, err := email.LoadIdentityConfig(id, filepath.Join(beadleDir, "email.json"))
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, nil, "", fmt.Errorf("load identity config %s: %w", configPath, err)
-		}
-		cfg, err = email.LoadConfig(email.DefaultConfigPath())
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("load config: %w", err)
-		}
+		return nil, nil, "", fmt.Errorf("load config: %w", err)
 	}
 
 	return id, cfg, idDir, nil

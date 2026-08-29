@@ -206,6 +206,25 @@ func TestUnreadMarker_DescriptionCarriesCount(t *testing.T) {
 	assert.NotContains(t, pollStatusDesc(t, s), "unread)", "marker cleared at zero")
 }
 
+// TestSetPollInterval_DataDirFailureErrorsNotPanics proves the tool returns a
+// clean error result, rather than panicking, when the fallback config path's
+// underlying paths.DataDir() call fails. Regression guard for eagerly
+// evaluating the panicking email.DefaultConfigPath() as a call argument on
+// every set_poll_interval invocation — an MCP tool handler must not crash the
+// server on an environment failure.
+func TestSetPollInterval_DataDirFailureErrorsNotPanics(t *testing.T) {
+	s, _ := newMarkerServer(t)
+	callMCP(t, s, "initialize", 0, initParams())
+
+	t.Setenv("HOME", "")
+
+	var result toolResult
+	require.NotPanics(t, func() {
+		result = callTool(t, s, "set_poll_interval", map[string]any{"interval": "5m"})
+	})
+	assert.True(t, result.IsError, "expected an error result, not a crash")
+}
+
 // TestServerInstructions_Exposed proves the server surfaces the inbox/poll
 // protocol in its initialize response.
 func TestServerInstructions_Exposed(t *testing.T) {

@@ -70,9 +70,16 @@ var installCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "MCP registration: %v\n", err)
 		}
 
-		// 4. Run doctor with the config we just created/selected
+		// 4. Run doctor to report on whatever config is actually in effect —
+		// the same identity-scoped-over-fallback precedence every other
+		// command applies via loadConfigForCmd. No flag is set here:
+		// doctorConfig's own default (email.DefaultConfigPath(), which is
+		// always the same path as the configPath this step just ensured
+		// exists) is already the correct fallback argument, so install's
+		// doctor step reports the identity-scoped config when one exists
+		// and loads cleanly, or the root config otherwise — exactly what a
+		// bare `doctor` invocation would report immediately afterward.
 		fmt.Fprintln(os.Stderr)
-		doctorConfig = configPath
 		return doctorCmd.RunE(doctorCmd, nil)
 	},
 }
