@@ -70,14 +70,17 @@ var installCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "MCP registration: %v\n", err)
 		}
 
-		// 4. Run doctor with the config we just created/selected. Setting
-		// the flag (not just the backing variable) marks it Changed, so
-		// loadConfigForCmd's explicit-config gate sees it and reports on
-		// configPath instead of falling back to the identity-scoped config.
+		// 4. Run doctor to report on whatever config is actually in effect —
+		// the same identity-scoped-over-fallback precedence every other
+		// command applies via loadConfigForCmd. No flag is forced here:
+		// doctorConfig's own default (email.DefaultConfigPath(), the root
+		// path this step ensures exists) is already the correct fallback
+		// argument when no identity resolves or its config is absent.
+		// Forcing -c to configPath would make install report OK on a
+		// possibly-irrelevant root file while every other command defers
+		// to a different (possibly corrupt) identity-scoped config that
+		// nothing here just checked.
 		fmt.Fprintln(os.Stderr)
-		if err := doctorCmd.Flags().Set("config", configPath); err != nil {
-			return fmt.Errorf("set doctor config flag: %w", err)
-		}
 		return doctorCmd.RunE(doctorCmd, nil)
 	},
 }
