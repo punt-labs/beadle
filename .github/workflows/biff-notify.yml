@@ -53,13 +53,7 @@ jobs:
           BIFF_RELAY_URL: ${{ vars.BIFF_RELAY_URL }}
           BIFF_RELAY_TOKEN: ${{ secrets.BIFF_RELAY_TOKEN }}
           BIFF_RELAY_TLS_HANDSHAKE_FIRST: ${{ vars.BIFF_RELAY_TLS_HANDSHAKE_FIRST }}
-        # NOTE: 1.15.2 predates BIFF_RELAY_* env-var support
-        # (docs/relay-env-overrides.md, DES-060) -- until this pin is bumped
-        # to a release containing it, the BIFF_RELAY_* vars above are
-        # silently ignored and this step keeps falling through to the demo
-        # relay. Tracked in biff-ykw; bump this pin (and the copy in
-        # .github/workflows/biff-notify.yml) once that release ships.
         run: >-
-          uvx --from punt-biff==1.15.2 biff --user github-actions wall
+          uvx --from punt-biff==1.16.0 biff --user github-actions wall
           "CI failed: ${WORKFLOW_NAME} on ${BRANCH} — ${RUN_URL}"
           --duration 2h
