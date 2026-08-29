@@ -43,7 +43,7 @@ func Verify(gpgBinary string, raw []byte) (*VerifyResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	gpgHome := filepath.Join(tmpDir, "gnupg")
 	if err := os.Mkdir(gpgHome, 0o700); err != nil {
@@ -205,7 +205,7 @@ func exportAll(gpgBinary, gpgHome string) {
 	importCmd := exec.Command(gpgBinary, "--homedir", gpgHome, "--batch", "--no-tty", "--import")
 	importCmd.Stdin = &keyData
 	importCmd.Stderr = io.Discard
-	importCmd.Run() //nolint:errcheck // best-effort
+	_ = importCmd.Run() // best-effort
 }
 
 func extractQuoted(s string) string {

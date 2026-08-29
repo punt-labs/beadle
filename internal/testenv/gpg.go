@@ -34,7 +34,7 @@ func ShortGPGHome(t testing.TB) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "bg-*")
 	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	home := filepath.Join(dir, "g")
 	require.NoError(t, os.Mkdir(home, 0o700))

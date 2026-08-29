@@ -37,7 +37,7 @@ var runCmd = &cobra.Command{
 		var w io.Writer = os.Stderr
 		if logWriter != nil {
 			w = io.MultiWriter(os.Stderr, logWriter)
-			defer logWriter.Close()
+			defer func() { _ = logWriter.Close() }() // best-effort; stderr still has the log
 		}
 		logger := slog.New(slog.NewTextHandler(w, nil))
 		if logErr != nil {

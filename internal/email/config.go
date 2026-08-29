@@ -245,14 +245,14 @@ func SaveConfig(path string, cfg *Config) error {
 		return fmt.Errorf("create temp config: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 
 	if _, err := tmp.Write(out); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("write temp config: %w", err)
 	}
 	if err := tmp.Chmod(0o640); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("set temp config permissions: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

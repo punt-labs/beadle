@@ -191,11 +191,11 @@ func (s *Store) write() error {
 	}
 	data = append(data, '\n')
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o640); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write contacts temp file: %w", err)
 	}
 	if err := os.Rename(tmp, s.path); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("rename contacts file: %w", err)
 	}
 	return nil

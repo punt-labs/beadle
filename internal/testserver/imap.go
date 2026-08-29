@@ -787,15 +787,19 @@ func (s *memSession) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest str
 		})
 		srcUIDs.AddNum(msg.uid)
 		destUIDs.AddNum(newUID)
-		w.WriteExpunge(seqNum)
+		if err := w.WriteExpunge(seqNum); err != nil {
+			return fmt.Errorf("write expunge: %w", err)
+		}
 	}
 	s.selected.messages = remaining
 	if len(srcUIDs) > 0 {
-		w.WriteCopyData(&imap.CopyData{
+		if err := w.WriteCopyData(&imap.CopyData{
 			UIDValidity: 1,
 			SourceUIDs:  srcUIDs,
 			DestUIDs:    destUIDs,
-		})
+		}); err != nil {
+			return fmt.Errorf("write copy data: %w", err)
+		}
 	}
 	return nil
 }

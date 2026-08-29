@@ -51,7 +51,7 @@ func copyFileIfNeeded(src, dst string) error {
 		}
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	info, err := srcFile.Stat()
 	if err != nil {
@@ -62,8 +62,9 @@ func copyFileIfNeeded(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		_ = dstFile.Close()
+		return err
+	}
+	return dstFile.Close()
 }

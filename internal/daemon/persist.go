@@ -37,7 +37,7 @@ func (s *PipelineStore) Save(p *Pipeline) error {
 		return fmt.Errorf("write temp file %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, final); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("rename %s to %s: %w", tmp, final, err)
 	}
 	return nil

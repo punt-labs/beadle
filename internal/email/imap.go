@@ -51,7 +51,7 @@ func Dial(cfg *Config, logger *slog.Logger) (*Client, error) {
 		}
 		c, err = imapclient.NewStartTLS(conn, opts)
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 		}
 	}
 	if err != nil {
@@ -60,12 +60,12 @@ func Dial(cfg *Config, logger *slog.Logger) (*Client, error) {
 
 	password, err := cfg.IMAPPassword()
 	if err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("read password: %w", err)
 	}
 
 	if err := c.Login(cfg.IMAPUser, password).Wait(); err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("login %s: %w", cfg.IMAPUser, err)
 	}
 

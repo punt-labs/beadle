@@ -521,7 +521,7 @@ func (h *handler) withClient(cfg *email.Config, fn func(*email.Client) (*mcplib.
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("IMAP connection failed: %v", err)), nil
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	return fn(client)
 }
 
@@ -1330,16 +1330,16 @@ func readAttachments(req mcplib.CallToolRequest) ([]email.OutboundAttachment, er
 
 		info, err := f.Stat()
 		if err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("attachment %q: %w", filepath.Base(path), err)
 		}
 		if info.Size() > maxAttachmentSize {
-			f.Close()
+			_ = f.Close()
 			return nil, fmt.Errorf("attachment %q exceeds 25 MB limit (%d bytes)", filepath.Base(path), info.Size())
 		}
 
 		data, err := io.ReadAll(io.LimitReader(f, maxAttachmentSize+1))
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read attachment %q: %w", filepath.Base(path), err)
 		}

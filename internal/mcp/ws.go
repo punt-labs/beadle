@@ -79,10 +79,12 @@ func (ws *WSServer) ListenAndServe(ctx context.Context, port int) error {
 // HandleHealth responds with a JSON status object.
 func (ws *WSServer) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
 		"version": ws.version,
-	})
+	}); err != nil {
+		ws.logger.Warn("health response write failed", "error", err)
+	}
 }
 
 // HandleMCP upgrades the connection to WebSocket and bridges it to an
@@ -94,7 +96,7 @@ func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(wsReadLimit)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	ws.logger.Info("websocket session started", "remote", conn.RemoteAddr())
 
@@ -116,7 +118,7 @@ func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer clientWriter.Close()
+		defer func() { _ = clientWriter.Close() }()
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -145,7 +147,10 @@ func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 			if len(line) == 0 {
 				continue
 			}
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				cancel()
+				return
+			}
 			if err := conn.WriteMessage(websocket.TextMessage, line); err != nil {
 				cancel()
 				return
@@ -160,7 +165,7 @@ func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Close the server writer so goroutine 2 sees EOF.
-	serverWriter.Close()
+	_ = serverWriter.Close()
 	cancel()
 	wg.Wait()
 

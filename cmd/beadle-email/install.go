@@ -55,7 +55,7 @@ var installCmd = &cobra.Command{
 				return fmt.Errorf("write config: %w", err)
 			}
 			if err := os.Rename(tmp, configPath); err != nil {
-				os.Remove(tmp)
+				_ = os.Remove(tmp)
 				return fmt.Errorf("rename config: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "wrote %s\n", configPath)
@@ -163,7 +163,9 @@ func prompt(scanner *bufio.Scanner, label, defaultVal string) string {
 func promptInt(scanner *bufio.Scanner, label string, defaultVal int) int {
 	s := prompt(scanner, label, fmt.Sprintf("%d", defaultVal))
 	n := defaultVal
-	fmt.Sscanf(s, "%d", &n)
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
+		return defaultVal
+	}
 	return n
 }
 
@@ -218,7 +220,7 @@ func cleanSettings(path string) int {
 		return 0
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return 0
 	}
 	return removed

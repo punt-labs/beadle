@@ -143,26 +143,32 @@ func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) error {
 		if err != nil {
 			return fmt.Errorf("marshaling messages as JSON: %w", err)
 		}
-		fmt.Fprintln(w, string(data))
-		return nil
+		_, err = fmt.Fprintln(w, string(data))
+		return err
 	}
 	if lr.Degraded {
 		reason := lr.DegradedReason
 		if reason == "" {
 			reason = "results degraded"
 		}
-		fmt.Fprintln(w, reason)
+		if _, err := fmt.Fprintln(w, reason); err != nil {
+			return err
+		}
 	}
 	if g.Quiet {
 		return nil
 	}
-	fmt.Fprintln(w, lr.StatusLine())
+	if _, err := fmt.Fprintln(w, lr.StatusLine()); err != nil {
+		return err
+	}
 	for _, m := range lr.Messages {
 		unread := " "
 		if m.Unread {
 			unread = "*"
 		}
-		fmt.Fprintf(w, "%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date)
+		if _, err := fmt.Fprintf(w, "%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -238,7 +244,7 @@ var listCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		// Scope to the current repo unless --all-repos is set. An empty slug
 		// (no git remote) leaves the listing unfiltered.
@@ -321,7 +327,7 @@ var searchCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		// Scope to the current repo unless --all-repos is set.
 		if !searchAllRepos {
@@ -380,7 +386,7 @@ var readCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		msg, err := client.FetchMessage(readFolder, uint32(uidNum))
 		if err != nil {
@@ -521,7 +527,7 @@ var replyCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		rc, err := client.FetchThread(replyFolder, uint32(uidNum))
 		if err != nil {
@@ -602,7 +608,7 @@ var moveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		moved, err := client.MoveMessage(moveFolder, uint32(uidNum), moveDest)
 		if err != nil {
@@ -671,7 +677,7 @@ var markCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		seen := !markUnread
 		modified, err := client.SetSeenBatch(markFolder, uids, seen)
@@ -721,7 +727,7 @@ var foldersCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		folders, err := client.ListFolders()
 		if err != nil {

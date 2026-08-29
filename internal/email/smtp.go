@@ -42,7 +42,7 @@ func SMTPSend(cfg *Config, from string, recipients []string, raw []byte) error {
 		}
 		c, err = smtp.NewClient(conn, host)
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return fmt.Errorf("smtp client %s: %w", addr, err)
 		}
 	} else {
@@ -53,15 +53,15 @@ func SMTPSend(cfg *Config, from string, recipients []string, raw []byte) error {
 		}
 		c, err = smtp.NewClient(conn, host)
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return fmt.Errorf("smtp client %s: %w", addr, err)
 		}
 		if err := c.StartTLS(tlsCfg); err != nil {
-			c.Close()
+			_ = c.Close()
 			return fmt.Errorf("smtp starttls: %w", err)
 		}
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	auth := smtp.PlainAuth("", cfg.SMTPEffectiveUser(), password, host)
 	if err := c.Auth(auth); err != nil {
@@ -101,6 +101,6 @@ func SMTPAvailable(cfg *Config) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close()
 	return true
 }

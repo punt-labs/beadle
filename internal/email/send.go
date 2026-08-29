@@ -77,7 +77,9 @@ func ComposeRaw(from string, to, cc []string, subject, textBody string, attachme
 	if err != nil {
 		return nil, fmt.Errorf("create text part: %w", err)
 	}
-	fmt.Fprintf(tw, "%s\r\n", textBody)
+	if _, err := fmt.Fprintf(tw, "%s\r\n", textBody); err != nil {
+		return nil, fmt.Errorf("write text part: %w", err)
+	}
 
 	// Attachment parts
 	for _, att := range attachments {
@@ -101,7 +103,9 @@ func ComposeRaw(from string, to, cc []string, subject, textBody string, attachme
 			if end > len(encoded) {
 				end = len(encoded)
 			}
-			fmt.Fprintf(aw, "%s\r\n", encoded[i:end])
+			if _, err := fmt.Fprintf(aw, "%s\r\n", encoded[i:end]); err != nil {
+				return nil, fmt.Errorf("write attachment part %q: %w", att.Filename, err)
+			}
 		}
 	}
 
@@ -215,7 +219,9 @@ func buildMixedBodyPart(textBody string, attachments []OutboundAttachment) ([]by
 	if err != nil {
 		return nil, fmt.Errorf("create text part: %w", err)
 	}
-	fmt.Fprintf(tw, "%s\r\n", textBody)
+	if _, err := fmt.Fprintf(tw, "%s\r\n", textBody); err != nil {
+		return nil, fmt.Errorf("write text part: %w", err)
+	}
 
 	// Attachment parts
 	for _, att := range attachments {
@@ -234,7 +240,9 @@ func buildMixedBodyPart(textBody string, attachments []OutboundAttachment) ([]by
 			if end > len(encoded) {
 				end = len(encoded)
 			}
-			fmt.Fprintf(aw, "%s\r\n", encoded[i:end])
+			if _, err := fmt.Fprintf(aw, "%s\r\n", encoded[i:end]); err != nil {
+				return nil, fmt.Errorf("write attachment part %q: %w", att.Filename, err)
+			}
 		}
 	}
 
@@ -459,7 +467,7 @@ func Send(cfg *Config, req SendRequest) (*SendResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
