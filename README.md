@@ -251,7 +251,8 @@ Beadle reads identity from [ethos](https://github.com/punt-labs/ethos) (sidecar 
 
 1. **Repo-local config** — `.punt-labs/ethos.yaml` with `agent: <handle>`
 2. **Global ethos active** — `~/.punt-labs/ethos/active`
-3. **Default identity** — `~/.punt-labs/beadle/default-identity` (plain email string)
+3. **Handle → ethos identity YAML** — `~/.punt-labs/ethos/identities/<handle>.yaml` supplies name and email; `~/.punt-labs/ethos/identities/<handle>.ext/beadle.yaml` supplies the GPG key id. Always global, never a repo-local vendored copy.
+4. **Default identity** — `~/.punt-labs/beadle/default-identity` (plain email string)
 
 Each identity gets its own directory under `~/.punt-labs/beadle/identities/<email>/` with separate `email.json`, `contacts.json`, and `attachments/`. Root files are auto-migrated on first use.
 

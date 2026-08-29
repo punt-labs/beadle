@@ -32,7 +32,7 @@ tools:
   - mcp__plugin_ethos-dev_self__session
 model: "sonnet"
 skills:
-  - baseline-ops
+  - "baseline-ops"
 hooks:
   PostToolUse:
     - matcher: "Write|Edit"

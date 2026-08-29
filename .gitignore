@@ -243,12 +243,22 @@ prfaq.tex
 prfaq.pdf
 prfaq.bib
 
-# Mount path of the former `.punt-labs/ethos` submodule (punt-labs/team). Same
-# payload argument as the trim above: the registry is ~1 MB / 245 files of
-# org-wide identities, roles, personalities, and writing styles, none of it
-# beadle-specific, cloned into every plugin user's cache. Beadle resolves
-# identity from the global ~/.punt-labs/ethos/ at runtime (README "Identity"),
-# so nothing here needs the checked-in copy. The rule names only the directory
-# — `.punt-labs/ethos.yaml` and `.punt-labs/biff/` are tracked on purpose —
-# and it keeps a stray `git submodule add` from restoring the mount path.
-.punt-labs/ethos/
+# `.punt-labs/ethos/` was excluded here on the theory that its ~1 MB / 245
+# files of org-wide identities, roles, personalities, and writing styles get
+# cloned into every plugin user's cache. That is the same payload-leak theory
+# the .envrc correction above disproves, for the identical reason: cone-mode
+# git-subdir only ever materializes the `path: "plugin"` directory's
+# contents, and `.punt-labs/` is not under `plugin/`. Per org policy
+# (punt-labs/CLAUDE.md "Team Registry"), every repo tracks an inline vendored
+# copy at `.punt-labs/ethos/` — plain committed files, never a git submodule
+# (a submodule's gitlink IS fetched by a `--recurse-submodules` clone, unlike
+# plain tracked files, which is the one real leak vector the no-submodule
+# policy guards against — no ignore rule is needed for it, since nothing
+# here ever adds a submodule in the first place).
+
+# Vendored ethos runtime state (regenerated per-machine — vendored registry
+# only). Matches lux's .gitignore pattern for the same inline-vendored setup.
+.punt-labs/ethos/missions/
+.punt-labs/ethos/missions.jsonl
+.punt-labs/ethos/sessions/
+.punt-labs/ethos/.biff

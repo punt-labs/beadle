@@ -85,6 +85,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `.envrc` is retracked, matching every other punt-labs repo that tracks a
   canonical `.envrc`.
 
+- **`.punt-labs/ethos/` is now an inline vendored copy of the `punt-labs/team`
+  registry, tracked in git, matching every other punt-labs repo.** This repo
+  used a git submodule for it from #77 (2026-03-30) until #227
+  (2026-08-18), which dropped it under the theory that a `git-subdir`
+  install's cone-mode sparse checkout still fetches a submodule's gitlink
+  regardless of path — the same payload-leak theory the `.envrc` fix above
+  disproves for plain tracked files (a submodule's gitlink genuinely is
+  fetched by any `--recurse-submodules` clone; a plain file is not — that
+  half of #227's reasoning holds). #227 never replaced the submodule with
+  an inline vendored copy, leaving the `ethos` CLI's agent personas and
+  delegation worker/evaluator roster (`bwk`, `mdm`, `rop`, etc.) —
+  `.claude/agents/<handle>.md` generation, `ethos identity list`, the
+  session roster — entirely dependent on whatever happened to already be
+  populated in a machine's global ethos directory — silently broken on any
+  fresh machine. `beadle-email`'s own identity resolution was never
+  affected by this gap and is unchanged: it has always read the operating
+  identity's YAML from the global `~/.punt-labs/ethos/identities/<handle>.yaml`,
+  by design, regardless of any repo-local copy.
+  `.punt-labs/ethos/{identities,personalities,writing-styles,talents,roles,teams}/`
+  are now tracked, `docs/setup-guide.md`'s identity step (which still described the
+  `git submodule init` flow #227 dropped) is corrected, and `CLAUDE.md`'s
+  Identity section now documents
+  both layers accurately: the vendored copy supplies the `ethos` CLI's
+  personas, while `beadle-email`'s own identity resolution continues to read
+  the global directory.
+
 ## [0.16.4] - 2026-08-19
 
 ### Changed

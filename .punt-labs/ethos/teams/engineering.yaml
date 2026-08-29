@@ -1,0 +1,221 @@
+name: engineering
+repositories:
+  - punt-labs/ethos
+  - punt-labs/biff
+  - punt-labs/quarry
+  - punt-labs/beadle
+  - punt-labs/vox
+  - punt-labs/lux
+  - punt-labs/punt-kit
+  - punt-labs/z-spec
+  - punt-labs/prfaq
+  - punt-labs/cryptd
+  - punt-labs/refactory
+  - punt-labs/mcp-proxy
+  - punt-labs/postern
+  - punt-labs/claude-agent-sdk-smalltalk
+  - punt-labs/langlearn
+  - punt-labs/langlearn-anki
+  - punt-labs/langlearn-imagegen
+  - punt-labs/langlearn-tts
+  - punt-labs/langlearn-types
+  - punt-labs/use-cases
+  - punt-labs/reason-trace
+  - punt-labs/dungeon
+  - punt-labs/claude-plugins
+  - punt-labs/homebrew-tap
+  - punt-labs/team
+members:
+  - identity: jfreeman
+    role: ceo
+  - identity: claude
+    role: coo
+  # Go
+  - identity: bwk
+    role: go-specialist
+  - identity: rsc
+    role: go-toolchain
+  # Python
+  - identity: rmh
+    role: python-specialist
+  - identity: gvr
+    role: python-language-design
+  # Smalltalk / Pharo
+  - identity: kwb
+    role: smalltalk-specialist
+  - identity: rej
+    role: smalltalk-patterns
+  # Swift / Apple platforms
+  - identity: csl
+    role: swift-specialist
+  - identity: srn
+    role: swift-platforms
+  # Web (JS/TS)
+  - identity: bne
+    role: web-javascript
+  - identity: ahj
+    role: web-typescript
+  # CLI
+  - identity: mdm
+    role: cli-specialist
+  - identity: rop
+    role: cli-minimalist
+  # Security
+  - identity: djb
+    role: security-engineer
+  - identity: bcs
+    role: security-architect
+  # Infrastructure / DevOps
+  - identity: adb
+    role: infra-engineer
+  - identity: kth
+    role: cloud-native-engineer
+  # ML / inference
+  - identity: kpz
+    role: ml-specialist
+  - identity: ylc
+    role: ml-foundations
+  # Formal methods
+  - identity: jms
+    role: z-specialist
+  - identity: jra
+    role: b-specialist
+  # UX / info design
+  - identity: edt
+    role: ux-designer
+  - identity: dna
+    role: ux-cognitive
+  # Product management
+  - identity: mcg
+    role: product-strategy
+  - identity: tdt
+    role: product-discovery
+  # Cross-cutting
+  - identity: ach
+    role: finance-ops
+  - identity: adt
+    role: pm-grounding
+  - identity: ghr
+    role: pm-building-blocks
+collaborations:
+  - from: coo
+    to: ceo
+    type: reports_to
+  - from: go-specialist
+    to: coo
+    type: reports_to
+  - from: go-toolchain
+    to: coo
+    type: reports_to
+  - from: python-specialist
+    to: coo
+    type: reports_to
+  - from: python-language-design
+    to: coo
+    type: reports_to
+  - from: smalltalk-specialist
+    to: coo
+    type: reports_to
+  - from: smalltalk-patterns
+    to: coo
+    type: reports_to
+  - from: swift-specialist
+    to: coo
+    type: reports_to
+  - from: swift-platforms
+    to: coo
+    type: reports_to
+  - from: web-javascript
+    to: coo
+    type: reports_to
+  - from: web-typescript
+    to: coo
+    type: reports_to
+  - from: cli-specialist
+    to: coo
+    type: reports_to
+  - from: cli-minimalist
+    to: coo
+    type: reports_to
+  - from: security-engineer
+    to: coo
+    type: reports_to
+  - from: security-architect
+    to: coo
+    type: reports_to
+  - from: infra-engineer
+    to: coo
+    type: reports_to
+  - from: cloud-native-engineer
+    to: coo
+    type: reports_to
+  - from: ml-specialist
+    to: coo
+    type: reports_to
+  - from: ml-foundations
+    to: coo
+    type: reports_to
+  - from: z-specialist
+    to: coo
+    type: reports_to
+  - from: b-specialist
+    to: coo
+    type: reports_to
+  - from: ux-designer
+    to: coo
+    type: reports_to
+  - from: ux-cognitive
+    to: coo
+    type: reports_to
+  - from: product-strategy
+    to: coo
+    type: reports_to
+  - from: product-discovery
+    to: coo
+    type: reports_to
+  - from: finance-ops
+    to: coo
+    type: reports_to
+  - from: pm-grounding
+    to: coo
+    type: reports_to
+  - from: pm-building-blocks
+    to: coo
+    type: reports_to
+  # Domain pairings
+  - from: go-toolchain
+    to: go-specialist
+    type: collaborates_with
+  - from: python-language-design
+    to: python-specialist
+    type: collaborates_with
+  - from: smalltalk-patterns
+    to: smalltalk-specialist
+    type: collaborates_with
+  - from: swift-platforms
+    to: swift-specialist
+    type: collaborates_with
+  - from: web-typescript
+    to: web-javascript
+    type: collaborates_with
+  - from: cli-minimalist
+    to: cli-specialist
+    type: collaborates_with
+  - from: security-architect
+    to: security-engineer
+    type: collaborates_with
+  - from: cloud-native-engineer
+    to: infra-engineer
+    type: collaborates_with
+  - from: ml-foundations
+    to: ml-specialist
+    type: collaborates_with
+  - from: b-specialist
+    to: z-specialist
+    type: collaborates_with
+  - from: ux-cognitive
+    to: ux-designer
+    type: collaborates_with
+  - from: product-discovery
+    to: product-strategy
+    type: collaborates_with

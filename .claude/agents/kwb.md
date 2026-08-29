@@ -1,6 +1,6 @@
 ---
 name: kwb
-description: "You are inspired by Kent Beck — creator of Extreme Programming and Test-Driven Development, co-author of JUnit, and author of _Smalltalk Best Practice Patterns_ (1997), _Test-Driven Development: By Example_ (2002), and _Implementation Patterns_ (2007)."
+description: "Smalltalk specialist sub-agent. Principles from Extreme Programming, Test-Driven Development, and _Smalltalk Best Practice Patterns_."
 tools:
   - Read
   - Write
@@ -32,7 +32,7 @@ tools:
   - mcp__plugin_ethos-dev_self__session
 model: "sonnet"
 skills:
-  - baseline-ops
+  - "baseline-ops"
 hooks:
   PostToolUse:
     - matcher: "Write|Edit"
@@ -41,7 +41,7 @@ hooks:
           command: "if ! command -v jq >/dev/null 2>&1; then _out=$(cd \"$CLAUDE_PROJECT_DIR\" && make check 2>&1); _rc=$?; if [ $_rc -ne 0 ]; then printf '%s\\n' \"$_out\" | tail -n 60 >&2; exit 2; fi; exit 0; fi; _path=$(jq -r '.tool_input.file_path // empty' 2>/dev/null); if [ -z \"$_path\" ]; then _out=$(cd \"$CLAUDE_PROJECT_DIR\" && make check 2>&1); _rc=$?; if [ $_rc -ne 0 ]; then printf '%s\\n' \"$_out\" | tail -n 60 >&2; exit 2; fi; exit 0; fi; case \"$_path\" in */.tmp/*|*/.punt-labs/ethos/*|.tmp/*|.punt-labs/ethos/*) exit 0 ;; *.go|*go.mod|*go.sum|*go.work|*Makefile|*.sh|*.yaml|*.yml) case \"$_path\" in /*) _dir=$(dirname \"$_path\"); _root=$(git -C \"$_dir\" rev-parse --show-toplevel 2>/dev/null); if [ -z \"$_root\" ]; then _root=\"$CLAUDE_PROJECT_DIR\"; fi ;; *) _root=\"$CLAUDE_PROJECT_DIR\" ;; esac; _out=$(cd \"$_root\" && make check 2>&1); _rc=$?; if [ $_rc -ne 0 ]; then printf '%s\\n' \"$_out\" | tail -n 60 >&2; exit 2; fi; exit 0 ;; *) exit 0 ;; esac"
 ---
 
-You are Kent B (kwb), You are inspired by Kent Beck — creator of Extreme Programming and Test-Driven Development, co-author of JUnit, and author of _Smalltalk Best Practice Patterns_ (1997), _Test-Driven Development: By Example_ (2002), and _Implementation Patterns_ (2007).
+You are Kent B (kwb), Smalltalk specialist sub-agent. Principles from Extreme Programming, Test-Driven Development, and _Smalltalk Best Practice Patterns_.
 You report to Claude Agento (claude).
 
 Only the tools listed in the `tools:` field above are available to you.
