@@ -272,13 +272,15 @@ func TestResolveIdentityAndConfig_FailsClosedOnCorruptIdentityConfig(t *testing.
 	assert.Contains(t, err.Error(), "load config")
 }
 
-// TestResolveIdentityAndConfig_DataDirFailureErrorsNotPanics proves the
-// function returns a clean error, rather than panicking, when the
-// environment can't resolve a home directory. Regression guard for building
-// the fallback config path from the already-resolved beadleDir instead of
-// the panicking email.DefaultConfigPath() (paths.MustDataDir() panics on a
-// HOME-resolution failure) — an MCP tool handler must not crash the server
-// on an environment failure.
+// TestResolveIdentityAndConfig_DataDirFailureErrorsNotPanics is a
+// characterization test pinning current fail-clean behavior: the function
+// returns a clean error, rather than panicking, when the environment can't
+// resolve a home directory. Verified (by restoring the pre-fix function in a
+// scratch worktree) to already pass unchanged against the pre-fix code —
+// resolveIdentityAndConfig already returned on a HOME/DataDir failure via an
+// earlier check, before ever reaching the line this fix changed. Kept as a
+// guard on real, current behavior: an MCP tool handler must not crash the
+// server on an environment failure.
 func TestResolveIdentityAndConfig_DataDirFailureErrorsNotPanics(t *testing.T) {
 	env := testenv.New(t, "test@test.com")
 	env.WriteConfig(&email.Config{IMAPHost: "127.0.0.1", IMAPUser: "test@test.com"})

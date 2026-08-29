@@ -38,11 +38,15 @@ func TestSwitchIdentity_NoWarningWhenIdentityConfigPresent(t *testing.T) {
 	assert.NotContains(t, r.text(), "WARNING")
 }
 
-// TestSwitchIdentity_DataDirFailureDoesNotPanic proves a paths.DataDir()
-// failure inside the preflight (surfaced through paths.IdentityConfigPath)
-// is handled, not silently discarded and then dereferenced — the switch
-// itself must still succeed and report, never panic, on the environment
-// failure. Regression guard for beadleDir, _ := paths.DataDir().
+// TestSwitchIdentity_DataDirFailureDoesNotPanic is a characterization test
+// pinning current fail-clean behavior: a paths.DataDir() failure inside the
+// preflight (surfaced through paths.IdentityConfigPath) is handled, not
+// silently discarded and then dereferenced — the switch itself still
+// succeeds and reports, never panics, on the environment failure. Verified
+// (by restoring the pre-fix preflight in a scratch worktree) to already pass
+// unchanged against the pre-fix code — the preflight already guarded on a
+// HOME/DataDir failure before ever reaching the line this fix changed. Kept
+// as a guard on real, current behavior.
 func TestSwitchIdentity_DataDirFailureDoesNotPanic(t *testing.T) {
 	s, env, _ := setupHandler(t)
 	env.AddIdentity("sam", "Sam Jackson", "sam@test.com")
