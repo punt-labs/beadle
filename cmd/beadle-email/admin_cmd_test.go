@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
 )
@@ -148,16 +147,28 @@ func setupDefaultIdentityHome(t *testing.T, emailAddr string) string {
 	return home
 }
 
-// resetConfigFlag restores a command's -c/--config flag to its unset,
-// default state, so an earlier test that set it explicitly does not leak
-// Changed==true into a later test sharing the package-level command
-// singleton. Tests in this package run sequentially.
-func resetConfigFlag(t *testing.T, cmd *cobra.Command) {
+// snapshotConfigFlag captures a command's -c/--config flag value and Changed
+// state right now, and returns a func restoring exactly that captured state.
+// Callers register the returned func with t.Cleanup before running the
+// command, so an earlier test's flag mutation never leaks into a later test
+// sharing the package-level doctorCmd/statusCmd singletons.
+//
+// This must snapshot rather than recompute email.DefaultConfigPath() at
+// cleanup time: t.Cleanup runs LIFO, so a cleanup registered after a test's
+// own t.Setenv("HOME", ...) cleanup fires BEFORE it — recomputing the
+// default there resolves it under the test's about-to-be-removed temp HOME
+// and leaks that soon-to-be-deleted path into the package-level flag for
+// whichever test runs next.
+func snapshotConfigFlag(t *testing.T, cmd *cobra.Command) func() {
 	t.Helper()
 	f := cmd.Flags().Lookup("config")
 	require.NotNil(t, f)
-	require.NoError(t, f.Value.Set(email.DefaultConfigPath()))
-	f.Changed = false
+	value := f.Value.String()
+	changed := f.Changed
+	return func() {
+		require.NoError(t, f.Value.Set(value))
+		f.Changed = changed
+	}
 }
 
 // captureStdout redirects os.Stdout for the duration of fn and returns what
@@ -177,20 +188,23 @@ func captureStdout(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// runRootCmd executes rootCmd with args, capturing JSON stdout. Restores
-// the JSON global flag afterward.
-func runRootCmd(t *testing.T, args ...string) string {
+// runRootCmd executes rootCmd with args, capturing JSON stdout and the
+// command's error. Restores the JSON global flag and the doctor/status
+// -c/--config flags afterward, so a caller that needs Execute's error (e.g. a
+// fail-closed assertion) never has to reach past this helper into rootCmd's
+// package-level state directly.
+func runRootCmd(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	defer func(prev bool) { g.JSON = prev }(g.JSON)
-	t.Cleanup(func() {
-		resetConfigFlag(t, doctorCmd)
-		resetConfigFlag(t, statusCmd)
-	})
+	t.Cleanup(snapshotConfigFlag(t, doctorCmd))
+	t.Cleanup(snapshotConfigFlag(t, statusCmd))
 
 	rootCmd.SetArgs(append(args, "--json"))
-	return captureStdout(t, func() {
-		_ = rootCmd.Execute() // doctor/status may legitimately return a non-nil error (FAIL checks)
+	var err error
+	out := captureStdout(t, func() {
+		err = rootCmd.Execute() // doctor/status may legitimately return a non-nil error (FAIL checks)
 	})
+	return out, err
 }
 
 func doctorChecks(t *testing.T, jsonOut string) []doctorCheck {
@@ -216,7 +230,7 @@ func TestDoctorCmd_UsesIdentityScopedConfigOverDefault(t *testing.T) {
 	require.NoError(t, err)
 	writeConfigFixture(t, idConfigPath, "identity@test.com")
 
-	out := runRootCmd(t, "doctor")
+	out, _ := runRootCmd(t, "doctor")
 	checks := doctorChecks(t, out)
 
 	cfgCheck, ok := findCheck(checks, "config")
@@ -233,7 +247,7 @@ func TestStatusCmd_UsesIdentityScopedConfigOverDefault(t *testing.T) {
 	require.NoError(t, err)
 	writeConfigFixture(t, idConfigPath, "identity@test.com")
 
-	out := runRootCmd(t, "status")
+	out, _ := runRootCmd(t, "status")
 	var status map[string]string
 	require.NoError(t, json.Unmarshal([]byte(out), &status))
 
@@ -252,7 +266,7 @@ func TestDoctorCmd_ExplicitConfigFlagOverridesIdentity(t *testing.T) {
 	explicitPath := filepath.Join(home, "explicit-email.json")
 	writeConfigFixture(t, explicitPath, "explicit@test.com")
 
-	out := runRootCmd(t, "doctor", "-c", explicitPath)
+	out, _ := runRootCmd(t, "doctor", "-c", explicitPath)
 	checks := doctorChecks(t, out)
 
 	cfgCheck, ok := findCheck(checks, "config")
@@ -272,7 +286,7 @@ func TestStatusCmd_ExplicitConfigFlagOverridesIdentity(t *testing.T) {
 	explicitPath := filepath.Join(home, "explicit-email.json")
 	writeConfigFixture(t, explicitPath, "explicit@test.com")
 
-	out := runRootCmd(t, "status", "-c", explicitPath)
+	out, _ := runRootCmd(t, "status", "-c", explicitPath)
 	var status map[string]string
 	require.NoError(t, json.Unmarshal([]byte(out), &status))
 
@@ -292,7 +306,7 @@ func TestDoctorCmd_FailsClosedOnCorruptIdentityConfig(t *testing.T) {
 	fallbackPath := filepath.Join(home, ".punt-labs", "beadle", "email.json")
 	writeConfigFixture(t, fallbackPath, "fallback@test.com")
 
-	out := runRootCmd(t, "doctor")
+	out, _ := runRootCmd(t, "doctor")
 	checks := doctorChecks(t, out)
 
 	cfgCheck, ok := findCheck(checks, "config")
@@ -312,11 +326,6 @@ func TestStatusCmd_FailsClosedOnCorruptIdentityConfig(t *testing.T) {
 	fallbackPath := filepath.Join(home, ".punt-labs", "beadle", "email.json")
 	writeConfigFixture(t, fallbackPath, "fallback@test.com")
 
-	rootCmd.SetArgs([]string{"status", "--json"})
-	t.Cleanup(func() {
-		resetConfigFlag(t, doctorCmd)
-		resetConfigFlag(t, statusCmd)
-	})
-	err = rootCmd.Execute()
-	assert.Error(t, err, "status must fail closed on a corrupt identity config, not report the fallback")
+	_, execErr := runRootCmd(t, "status")
+	assert.Error(t, execErr, "status must fail closed on a corrupt identity config, not report the fallback")
 }
