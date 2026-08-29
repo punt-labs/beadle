@@ -22,6 +22,15 @@ linters:
         linters:
           - gosec
           - errcheck
+      # G204 (subprocess with variable/tainted args): every exec.Command call
+      # in these five paths invokes a config-controlled binary (gpg, pass,
+      # secret-tool, ethos, claude) with an explicit argument list -- never
+      # shell=true, never attacker- or network-controlled input. Scoped to
+      # these paths only; G204 stays fully active for the rest of the tree.
+      - path: ^(internal/pgp|internal/secret|internal/testenv|internal/daemon|cmd/beadle-email)/
+        linters:
+          - gosec
+        text: "G204"
 
 formatters:
   enable:

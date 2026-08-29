@@ -17,7 +17,7 @@ import (
 const (
 	CredIMAPPassword  = "imap-password"
 	CredSMTPPassword  = "smtp-password"
-	CredResendAPIKey  = "resend-api-key"
+	CredResendAPIKey  = "resend-api-key" // #nosec G101 -- a secret-resolver lookup key name, not an embedded credential value
 	CredGPGPassphrase = "gpg-passphrase"
 )
 
