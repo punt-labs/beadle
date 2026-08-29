@@ -59,6 +59,10 @@ func DefaultConfigPath() string {
 // a corrupt or malformed identity config — is returned as a hard failure
 // rather than silently masked by an older fallback file: a caller like
 // doctor must report the corruption, not report OK against the wrong file.
+//
+// usedPath is always the path that was actually attempted, on every branch —
+// including error branches — except when paths.IdentityConfigPath itself
+// fails, where no path was ever resolved to attempt.
 func LoadIdentityConfig(id *identity.Identity, fallbackPath string) (cfg *Config, usedPath string, err error) {
 	if id != nil && id.Email != "" {
 		idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
@@ -70,7 +74,7 @@ func LoadIdentityConfig(id *identity.Identity, fallbackPath string) (cfg *Config
 			return idCfg, idConfigPath, nil
 		}
 		if !errors.Is(cfgErr, os.ErrNotExist) {
-			return nil, "", fmt.Errorf("identity config %s: %w", idConfigPath, cfgErr)
+			return nil, idConfigPath, fmt.Errorf("identity config: %w", cfgErr)
 		}
 	}
 	cfg, err = LoadConfig(fallbackPath)

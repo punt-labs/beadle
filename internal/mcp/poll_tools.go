@@ -3,12 +3,14 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/paths"
 )
 
 // ServerInstructions primes the connecting agent on the inbox/poll protocol.
@@ -132,7 +134,16 @@ func (h *handler) setPollInterval(_ context.Context, req mcplib.CallToolRequest)
 	if err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("resolve identity: %v", err)), nil
 	}
-	cfg, configPath, loadErr := email.LoadIdentityConfig(id, email.DefaultConfigPath())
+	// Build the fallback path via the non-panicking paths.DataDir() rather
+	// than email.DefaultConfigPath() — DefaultConfigPath panics via
+	// paths.MustDataDir() on a HOME-resolution failure, and an MCP tool
+	// handler must return a clean error, never crash the server, on an
+	// environment failure.
+	dataDir, err := paths.DataDir()
+	if err != nil {
+		return mcplib.NewToolResultError(fmt.Sprintf("resolve data dir: %v", err)), nil
+	}
+	cfg, configPath, loadErr := email.LoadIdentityConfig(id, filepath.Join(dataDir, "email.json"))
 	if loadErr != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("load config: %v", loadErr)), nil
 	}

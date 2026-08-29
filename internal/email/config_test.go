@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -366,7 +367,9 @@ func TestLoadIdentityConfig(t *testing.T) {
 		cfg, usedPath, err := LoadIdentityConfig(id, fallbackPath)
 		require.Error(t, err, "a corrupt identity config must fail closed, not silently prefer fallbackPath")
 		assert.Nil(t, cfg)
-		assert.Equal(t, "", usedPath)
+		assert.Equal(t, idConfigPath, usedPath, "usedPath names the path actually attempted, even on error")
+		assert.Equal(t, 1, strings.Count(err.Error(), idConfigPath),
+			"the path must be named once, not repeated by both LoadIdentityConfig and LoadConfig's own wrap")
 	})
 
 	t.Run("identity config path failure is wrapped for diagnosis", func(t *testing.T) {
