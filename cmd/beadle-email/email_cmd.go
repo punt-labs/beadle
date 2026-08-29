@@ -143,8 +143,10 @@ func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) error {
 		if err != nil {
 			return fmt.Errorf("marshaling messages as JSON: %w", err)
 		}
-		_, err = fmt.Fprintln(w, string(data))
-		return err
+		if _, err := fmt.Fprintln(w, string(data)); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
+		return nil
 	}
 	if lr.Degraded {
 		reason := lr.DegradedReason
@@ -152,14 +154,14 @@ func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) error {
 			reason = "results degraded"
 		}
 		if _, err := fmt.Fprintln(w, reason); err != nil {
-			return err
+			return fmt.Errorf("write output: %w", err)
 		}
 	}
 	if g.Quiet {
 		return nil
 	}
 	if _, err := fmt.Fprintln(w, lr.StatusLine()); err != nil {
-		return err
+		return fmt.Errorf("write output: %w", err)
 	}
 	for _, m := range lr.Messages {
 		unread := " "
@@ -167,7 +169,7 @@ func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) error {
 			unread = "*"
 		}
 		if _, err := fmt.Fprintf(w, "%s [%s] %s — %s (%s)\n", unread, m.ID, m.From, m.Subject, m.Date); err != nil {
-			return err
+			return fmt.Errorf("write output: %w", err)
 		}
 	}
 	return nil
