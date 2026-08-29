@@ -311,22 +311,28 @@ Then test from Claude Code:
 This step is only for Punt Labs agents whose identity is managed by
 ethos.
 
-Beadle resolves identity from the ethos sidecar. `.punt-labs/ethos/` is an
-inline vendored copy of the `punt-labs/team` registry — plain committed
-files, not a git submodule (this repo can't use a submodule at all: `ethos
-enable` refuses to write its audit-seal hooks into one). Cloning this repo
-brings the full team registry (identities, personalities, writing styles,
-roles, talents, teams) with it like any other tracked directory — no
-separate init step. Git hooks are not cloned, though; run this once after
-clone:
+`.punt-labs/ethos/` is an inline vendored copy of the `punt-labs/team`
+registry — plain committed files, not a git submodule (this repo can't use
+a submodule at all: `ethos enable` refuses to write its audit-seal hooks
+into one). Cloning this repo brings the full team registry (identities,
+personalities, writing styles, roles, talents, teams) with it like any
+other tracked directory — no separate init step. It supplies the `ethos`
+CLI's agent personas inside this repo (`.claude/agents/<handle>.md`
+generation, `ethos identity list`, session roster). Git hooks are not
+cloned, though; run this once after clone:
 
 ```bash
 ethos enable
 ```
 
-For the global ethos directory (`~/.punt-labs/ethos/`), which is used
-outside of git repos, the ethos session hooks create it automatically
-on first Claude Code launch. If identity resolution fails, check:
+**Beadle itself does not read the vendored copy.** `beadle-email`'s own
+identity resolution always reads the operating identity's YAML from the
+global `~/.punt-labs/ethos/identities/<handle>.yaml` — the repo-local
+config only ever supplies a *handle* (see `README.md` "Identity" for the
+full chain). This directory does not come from cloning anything; the ethos
+session hooks create it automatically on first Claude Code launch, and it
+must be populated for beadle to resolve an identity, in or out of a git
+repo. If identity resolution fails, check:
 
 ```bash
 cat ~/.punt-labs/ethos/active
