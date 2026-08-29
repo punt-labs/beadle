@@ -70,9 +70,14 @@ var installCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "MCP registration: %v\n", err)
 		}
 
-		// 4. Run doctor with the config we just created/selected
+		// 4. Run doctor with the config we just created/selected. Setting
+		// the flag (not just the backing variable) marks it Changed, so
+		// loadConfigForCmd's explicit-config gate sees it and reports on
+		// configPath instead of falling back to the identity-scoped config.
 		fmt.Fprintln(os.Stderr)
-		doctorConfig = configPath
+		if err := doctorCmd.Flags().Set("config", configPath); err != nil {
+			return fmt.Errorf("set doctor config flag: %w", err)
+		}
 		return doctorCmd.RunE(doctorCmd, nil)
 	},
 }

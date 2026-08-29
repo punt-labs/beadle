@@ -27,7 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   silently masked by an older fallback file) adopted as the one standard.
   `doctor` and `status` call it only when `-c`/`--config` was not explicitly
   passed; an explicit flag always wins and skips identity-config lookup
-  entirely.
+  entirely. `install`'s doctor step now sets the `-c`/`--config` flag
+  (`doctorCmd.Flags().Set`) instead of assigning `doctorConfig` directly, so
+  the just-written config is Changed and honored rather than falling back to
+  an identity-scoped config when one exists.
 
 - **`list`, `search`, `read`, `send`, `reply`, `move`, `mark`, and `folders`
   now fail closed on a corrupt identity-scoped config, instead of silently
