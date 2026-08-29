@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -62,13 +61,11 @@ func (h *handler) switchIdentity(ctx context.Context, req mcplib.CallToolRequest
 
 	// Preflight: warn if no email config exists for the target identity.
 	msg := fmt.Sprintf("switched to %s (%s)", id.Handle, id.Email)
-	beadleDir, _ := paths.DataDir()
-	if beadleDir != "" {
-		idDir := filepath.Join(beadleDir, "identities", id.Email)
-		configPath := filepath.Join(idDir, "email.json")
-		if _, statErr := os.Stat(configPath); statErr != nil {
-			msg += fmt.Sprintf("\n\nWARNING: no email config at %s — email operations will use fallback config.", configPath)
-		}
+	configPath, pathErr := paths.IdentityConfigPath(id.Email)
+	if pathErr != nil {
+		h.logger.Warn("switch_identity preflight: resolve identity config path", "error", pathErr)
+	} else if _, statErr := os.Stat(configPath); statErr != nil {
+		msg += fmt.Sprintf("\n\nWARNING: no email config at %s — email operations will use fallback config.", configPath)
 	}
 	return textResult(msg)
 }
