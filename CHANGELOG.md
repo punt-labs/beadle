@@ -31,16 +31,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`list`, `search`, `read`, `send`, `reply`, `move`, `mark`, and `folders`
   now fail closed on a corrupt identity-scoped config, instead of silently
-  falling back to the explicit `--config` path.** These commands share
-  `resolveConfig`, which previously logged a warning and fell back to the
-  explicit config on *any* identity-config load error, including a corrupt
-  or malformed file — the same failure mode the `doctor`/`status` fix above
-  eliminates, but on the live mail-sending path instead of just health
-  checks. `resolveConfig` now calls `email.LoadIdentityConfig` for that
-  decision: identity-resolution failures upstream of a known identity (no
-  resolver, a resolve error, an unavailable data or identity directory)
+  falling back to the explicit `--config` path, and now also honor an
+  explicit `-c`/`--config` the same way `doctor`/`status` do.** These
+  commands share `resolveConfig`, which previously logged a warning and fell
+  back to the explicit config on *any* identity-config load error, including
+  a corrupt or malformed file — the same failure mode the `doctor`/`status`
+  fix above eliminates, but on the live mail-sending path instead of just
+  health checks. `resolveConfig` now calls `email.LoadIdentityConfig` for
+  that decision: identity-resolution failures upstream of a known identity
+  (no resolver, a resolve error, an unavailable data or identity directory)
   still fall back silently, unchanged; once an identity is known and its
-  directory exists, a corrupt identity config is now a hard error.
+  directory exists, a corrupt identity config is now a hard error. Fixing
+  `doctor`/`status` first without these eight commands left a real
+  diagnostic hole — `doctor -c X` could report OK while every mail command
+  still consulted a different, possibly-corrupt identity config `doctor`'s
+  `-c` had bypassed checking — so `resolveConfig` is now flag-aware too:
+  when `-c` is passed explicitly, that exact path is used directly and
+  identity-config lookup is skipped entirely.
+
+- **`internal/email/poller.go`'s background poll loop and
+  `internal/mcp/poll_tools.go`'s `set_poll_interval` no longer risk a panic
+  on a `HOME`-resolution failure.** Both called `email.DefaultConfigPath()`
+  as an eager argument to `email.LoadIdentityConfig`, so its panic (via
+  `paths.MustDataDir()`) fired unconditionally on every poll tick and every
+  tool invocation, regardless of whether the identity config succeeded — a
+  robustness regression for a long-running background goroutine and an MCP
+  handler, neither of which may crash the process on an environment
+  failure. Both now build the fallback path via the non-panicking
+  `paths.DataDir()` and return a clean error instead.
+
+- **`switch_identity`'s preflight config check no longer hand-rolls the
+  identity config path or discards `paths.DataDir()`'s error.** It now uses
+  `paths.IdentityConfigPath(id.Email)` — the same helper
+  `email.LoadIdentityConfig` consults — instead of duplicating that layout
+  with `filepath.Join(beadleDir, "identities", id.Email, "email.json")`, and
+  logs a `paths.DataDir()` resolution failure instead of silently discarding
+  it with `beadleDir, _ := paths.DataDir()`.
 
 - **`.envrc` is tracked again, and `docs/ARCHITECTURE.md`'s cone-mode claim is
   corrected.** PR #238 untracked `.envrc` on the theory that git-subdir's
