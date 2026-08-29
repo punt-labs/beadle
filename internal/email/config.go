@@ -251,7 +251,7 @@ func SaveConfig(path string, cfg *Config) error {
 		_ = tmp.Close()
 		return fmt.Errorf("write temp config: %w", err)
 	}
-	if err := tmp.Chmod(0o640); err != nil {
+	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("set temp config permissions: %w", err)
 	}
