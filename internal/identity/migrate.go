@@ -64,7 +64,12 @@ func copyFileIfNeeded(src, dst string) error {
 	}
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		_ = dstFile.Close()
+		_ = os.Remove(dst)
 		return err
 	}
-	return dstFile.Close()
+	if err := dstFile.Close(); err != nil {
+		_ = os.Remove(dst)
+		return err
+	}
+	return nil
 }

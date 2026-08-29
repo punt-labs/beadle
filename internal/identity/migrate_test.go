@@ -88,3 +88,18 @@ func TestEnsureIdentityDir_EmptyEmail(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "email is required")
 }
+
+func TestCopyFileIfNeeded_RemovesPartialDstOnCopyFailure(t *testing.T) {
+	dir := t.TempDir()
+	// A directory as src makes io.Copy fail with EISDIR on read, exercising
+	// the same cleanup path a failed Close would take.
+	src := filepath.Join(dir, "srcdir")
+	require.NoError(t, os.Mkdir(src, 0o700))
+	dst := filepath.Join(dir, "dst")
+
+	err := copyFileIfNeeded(src, dst)
+	require.Error(t, err)
+
+	_, statErr := os.Stat(dst)
+	assert.True(t, os.IsNotExist(statErr), "dst must not be left on disk after a failed copy, or every retry fails with EEXIST")
+}
