@@ -180,6 +180,7 @@ func captureStdout(t *testing.T, fn func()) string {
 	require.NoError(t, err)
 	os.Stdout = w
 	defer func() { os.Stdout = old }()
+	defer func() { require.NoError(t, r.Close()) }()
 	fn()
 	require.NoError(t, w.Close())
 	var buf bytes.Buffer

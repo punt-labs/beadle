@@ -60,9 +60,13 @@ func DefaultConfigPath() string {
 // rather than silently masked by an older fallback file: a caller like
 // doctor must report the corruption, not report OK against the wrong file.
 //
-// usedPath is always the path that was actually attempted, on every branch —
-// including error branches — except when paths.IdentityConfigPath itself
-// fails, where no path was ever resolved to attempt.
+// usedPath is the path associated with the returned cfg/err: the
+// identity-scoped path when it loaded (or was corrupt), or fallbackPath when
+// falling back to it (whether that load succeeded or failed) — not
+// necessarily every path this call attempted, since the absent-identity-
+// config case tries the identity path first before falling back. It is
+// empty only when paths.IdentityConfigPath itself fails, where no path was
+// ever resolved to attempt.
 func LoadIdentityConfig(id *identity.Identity, fallbackPath string) (cfg *Config, usedPath string, err error) {
 	if id != nil && id.Email != "" {
 		idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
