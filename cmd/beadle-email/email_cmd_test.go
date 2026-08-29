@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 
 	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/email"
+	"github.com/punt-labs/beadle/internal/paths"
 )
 
 // TestChangeStatus proves a mutating command reports "not_found" when nothing
@@ -169,4 +172,47 @@ func TestPrintMessages_JSONUnchanged(t *testing.T) {
 	assert.Contains(t, out, `"id": "7"`, "JSON carries the message slice")
 	assert.NotContains(t, out, "showing 1 of 1 messages", "no human status line in JSON mode")
 	assert.NotContains(t, out, "recent mail instead", "no human notice in JSON mode")
+}
+
+// TestResolveConfig_UsesIdentityScopedConfigOverExplicit proves resolveConfig
+// (used by list/search/read/send/reply/move/mark/folders) prefers the
+// identity-scoped config over the explicit --config default, mirroring
+// doctor/status's own precedence.
+func TestResolveConfig_UsesIdentityScopedConfigOverExplicit(t *testing.T) {
+	setupDefaultIdentityHome(t, "agent@test.com")
+
+	idConfigPath, err := paths.IdentityConfigPath("agent@test.com")
+	require.NoError(t, err)
+	writeConfigFixture(t, idConfigPath, "identity@test.com")
+
+	cfg, id, err := resolveConfig(email.DefaultConfigPath())
+	require.NoError(t, err)
+	require.NotNil(t, id)
+	assert.Equal(t, "agent@test.com", id.Email)
+	assert.Equal(t, "identity@test.com", cfg.IMAPUser)
+}
+
+// TestResolveConfig_FailsClosedOnCorruptIdentityConfig proves the fail-closed
+// behavior change this round introduces: a corrupt identity-scoped config is
+// a hard error for every command that resolves config through resolveConfig
+// (list, search, read, send, reply, move, mark, folders), never a silent
+// fallback to explicitPath — the same corruption-is-fatal contract doctor and
+// status already enforce via email.LoadIdentityConfig.
+func TestResolveConfig_FailsClosedOnCorruptIdentityConfig(t *testing.T) {
+	home := setupDefaultIdentityHome(t, "agent@test.com")
+
+	idConfigPath, err := paths.IdentityConfigPath("agent@test.com")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(idConfigPath), 0o700))
+	require.NoError(t, os.WriteFile(idConfigPath, []byte(`{not json`), 0o600))
+
+	// A fallback the corrupt identity config must NOT silently fall back to.
+	fallbackPath := filepath.Join(home, "fallback-email.json")
+	writeConfigFixture(t, fallbackPath, "fallback@test.com")
+
+	cfg, id, err := resolveConfig(fallbackPath)
+	assert.Error(t, err, "a corrupt identity config must fail closed, never report the fallback")
+	assert.Nil(t, cfg)
+	require.NotNil(t, id, "the resolved identity is still returned alongside the error")
+	assert.Equal(t, "agent@test.com", id.Email)
 }

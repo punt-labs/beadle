@@ -40,36 +40,44 @@ func newResolver() (*identity.Resolver, error) {
 // the explicit --config path. It also returns the resolved identity so callers
 // (e.g. send, for repo tagging) need not resolve it a second time; the identity
 // is nil when resolution itself fails.
+//
+// Identity resolution failure (no resolver, resolve error, unavailable data
+// dir, or unavailable identity dir) still falls back silently to
+// explicitPath — these are upstream failures this command cannot act on, and
+// each passes id=nil into email.LoadIdentityConfig, matching its own
+// nil-id-means-use-fallback-directly semantics. Once an identity is known and
+// its directory exists, the identity-scoped config is authoritative: a
+// corrupt or malformed identity config is now a hard error on every command
+// that calls resolveConfig (list, search, read, send, reply, move, mark,
+// folders), never silently masked by a fallback to explicitPath.
 func resolveConfig(explicitPath string) (*email.Config, *identity.Identity, error) {
 	resolver, err := newResolver()
 	if err != nil {
 		slog.Warn("identity resolution unavailable, using explicit config", "error", err, "config", explicitPath)
-		cfg, err := email.LoadConfig(explicitPath)
-		return cfg, nil, err
+		cfg, _, loadErr := email.LoadIdentityConfig(nil, explicitPath)
+		return cfg, nil, loadErr
 	}
 	id, err := resolver.Resolve()
 	if err != nil {
 		slog.Warn("identity resolution failed, using explicit config", "error", err, "config", explicitPath)
-		cfg, err := email.LoadConfig(explicitPath)
-		return cfg, nil, err
+		cfg, _, loadErr := email.LoadIdentityConfig(nil, explicitPath)
+		return cfg, nil, loadErr
 	}
 	beadleDir, err := paths.DataDir()
 	if err != nil {
 		slog.Warn("data dir unavailable, using explicit config", "error", err, "config", explicitPath)
-		cfg, err := email.LoadConfig(explicitPath)
-		return cfg, id, err
+		cfg, _, loadErr := email.LoadIdentityConfig(nil, explicitPath)
+		return cfg, id, loadErr
 	}
-	idDir, err := identity.EnsureIdentityDir(beadleDir, id.Email)
-	if err != nil {
+	if _, err := identity.EnsureIdentityDir(beadleDir, id.Email); err != nil {
 		slog.Warn("identity dir unavailable, using explicit config", "error", err, "config", explicitPath)
-		cfg, err := email.LoadConfig(explicitPath)
-		return cfg, id, err
+		cfg, _, loadErr := email.LoadIdentityConfig(nil, explicitPath)
+		return cfg, id, loadErr
 	}
-	cfg, err := email.LoadConfig(filepath.Join(idDir, "email.json"))
+
+	cfg, _, err := email.LoadIdentityConfig(id, explicitPath)
 	if err != nil {
-		slog.Warn("identity config unavailable, using explicit config", "error", err, "config", explicitPath)
-		cfg, err := email.LoadConfig(explicitPath)
-		return cfg, id, err
+		return nil, id, err
 	}
 	return cfg, id, nil
 }
