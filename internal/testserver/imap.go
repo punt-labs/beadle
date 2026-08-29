@@ -228,13 +228,13 @@ func (s *memSession) Select(mailbox string, _ *imap.SelectOptions) (*imap.Select
 	}
 	s.selected = mb
 
-	numMessages := len(mb.messages)
-	if numMessages > math.MaxUint32 {
-		numMessages = math.MaxUint32
+	n := len(mb.messages)
+	if n > math.MaxInt32 {
+		n = math.MaxInt32
 	}
 
 	return &imap.SelectData{
-		NumMessages: uint32(numMessages),
+		NumMessages: uint32(n),
 		UIDNext:     imap.UID(mb.uidNext),
 		UIDValidity: 1,
 		Flags:       []imap.Flag{imap.FlagSeen, imap.FlagAnswered, imap.FlagFlagged, imap.FlagDeleted, imap.FlagDraft},
@@ -432,13 +432,13 @@ func (s *memSession) Search(_ imapserver.NumKind, criteria *imap.SearchCriteria,
 		uidSet.AddNum(uid)
 	}
 
-	count := len(uids)
-	if count > math.MaxUint32 {
-		count = math.MaxUint32
+	n := len(uids)
+	if n > math.MaxInt32 {
+		n = math.MaxInt32
 	}
 	return &imap.SearchData{
 		All:   uidSet,
-		Count: uint32(count),
+		Count: uint32(n),
 	}, nil
 }
 

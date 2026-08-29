@@ -111,8 +111,8 @@ func (c *Client) UnreadCount(folder, repoSlug string) (uint32, error) {
 		return c.Status(folder)
 	}
 	n := len(searchData.AllUIDs())
-	if n > math.MaxUint32 {
-		n = math.MaxUint32
+	if n > math.MaxInt32 {
+		n = math.MaxInt32
 	}
 	return uint32(n), nil
 }
@@ -356,16 +356,13 @@ func selectUIDs(searchData *imap.SearchData, count, offset int) (imap.NumSet, in
 // recencySet selects the last count messages by sequence number.
 // count must lie in [1, numMessages].
 func recencySet(numMessages uint32, count int) imap.SeqSet {
-	if count < 0 {
-		count = 0
+	if count > math.MaxInt32 {
+		count = math.MaxInt32
 	}
-	countU := count
-	if countU > math.MaxUint32 {
-		countU = math.MaxUint32
-	}
+	width := uint32(count)
 	start := uint32(1)
-	if numMessages > uint32(countU) {
-		start = numMessages - uint32(countU) + 1
+	if numMessages > width {
+		start = numMessages - width + 1
 	}
 	return imap.SeqSet{{Start: start, Stop: numMessages}}
 }
