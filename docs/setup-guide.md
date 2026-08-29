@@ -314,12 +314,15 @@ ethos.
 `.punt-labs/ethos/` is an inline vendored copy of the `punt-labs/team`
 registry — plain committed files, not a git submodule (this repo can't use
 a submodule at all: `ethos enable` refuses to write its audit-seal hooks
-into one). Cloning this repo brings the full team registry (identities,
-personalities, writing styles, roles, talents, teams) with it like any
-other tracked directory — no separate init step. It supplies the `ethos`
-CLI's agent personas inside this repo (`.claude/agents/<handle>.md`
+into one — error `ethos-e29s`, a foreign-git-repo gitlink at
+`.punt-labs/ethos`). Cloning this repo brings the full team registry
+(identities, personalities, writing styles, roles, talents, teams) with it
+like any other tracked directory — no separate init step. It supplies the
+`ethos` CLI's agent personas inside this repo (`.claude/agents/<handle>.md`
 generation, `ethos identity list`, session roster). Git hooks are not
-cloned, though; run this once after clone:
+cloned, though; run this once after clone, from this repo's root (the
+command operates on the current working directory — from `/path/to/beadle`
+per Step 2 above, not its parent):
 
 ```bash
 ethos enable
