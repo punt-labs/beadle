@@ -179,28 +179,10 @@ var doctorCmd = &cobra.Command{
 		// Check config file — falls back to the identity-scoped config the
 		// same way statusCmd does, so doctor reports on whatever config is
 		// actually in effect.
-		var cfg *email.Config
-		usedConfigPath := doctorConfig
-		if idErr == nil {
-			idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
-			if pathErr == nil {
-				idCfg, cfgErr := email.LoadConfig(idConfigPath)
-				if cfgErr == nil {
-					cfg = idCfg
-					usedConfigPath = idConfigPath
-				} else if !errors.Is(cfgErr, os.ErrNotExist) {
-					fmt.Fprintf(os.Stderr, "warning: identity config %s: %v (using fallback)\n", idConfigPath, cfgErr)
-				}
-			}
-		}
-		if cfg == nil {
-			var cfgErr error
-			cfg, cfgErr = email.LoadConfig(doctorConfig)
-			if cfgErr != nil {
-				checks = append(checks, doctorCheck{"config", "FAIL", cfgErr.Error()})
-			}
-		}
-		if cfg != nil {
+		cfg, usedConfigPath, cfgErr := resolveIdentityConfig(id, idErr, doctorConfig)
+		if cfgErr != nil {
+			checks = append(checks, doctorCheck{"config", "FAIL", cfgErr.Error()})
+		} else {
 			checks = append(checks, doctorCheck{"config", "OK", usedConfigPath})
 
 			if _, err := cfg.IMAPPassword(); err != nil {
@@ -316,6 +298,30 @@ func init() {
 	doctorCmd.Flags().StringVarP(&doctorConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
 }
 
+// resolveIdentityConfig picks the config to load, preferring the
+// identity-scoped config (paths.IdentityConfigPath(id.Email)) over
+// fallbackPath. The identity config wins only when it successfully loads;
+// otherwise fallbackPath is used — whether because there is no resolved
+// identity (idErr != nil), the identity path can't be computed, or the
+// identity config file is absent or fails to load. A load error other than
+// "not found" is warned to stderr before falling back, since a stale
+// selection warrants a human's attention that a "not found" doesn't.
+func resolveIdentityConfig(id *identity.Identity, idErr error, fallbackPath string) (cfg *email.Config, usedPath string, err error) {
+	if idErr == nil {
+		idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
+		if pathErr == nil {
+			idCfg, cfgErr := email.LoadConfig(idConfigPath)
+			if cfgErr == nil {
+				return idCfg, idConfigPath, nil
+			} else if !errors.Is(cfgErr, os.ErrNotExist) {
+				fmt.Fprintf(os.Stderr, "warning: identity config %s: %v (using fallback)\n", idConfigPath, cfgErr)
+			}
+		}
+	}
+	cfg, err = email.LoadConfig(fallbackPath)
+	return cfg, fallbackPath, err
+}
+
 // --- status ---
 
 var statusConfig string
@@ -331,26 +337,9 @@ var statusCmd = &cobra.Command{
 		}
 		id, idErr := resolver.Resolve()
 
-		var cfg *email.Config
-		usedConfigPath := statusConfig
-		if idErr == nil {
-			idConfigPath, pathErr := paths.IdentityConfigPath(id.Email)
-			if pathErr == nil {
-				idCfg, cfgErr := email.LoadConfig(idConfigPath)
-				if cfgErr == nil {
-					cfg = idCfg
-					usedConfigPath = idConfigPath
-				} else if !errors.Is(cfgErr, os.ErrNotExist) {
-					fmt.Fprintf(os.Stderr, "warning: identity config %s: %v (using fallback)\n", idConfigPath, cfgErr)
-				}
-			}
-		}
-		if cfg == nil {
-			var cfgErr error
-			cfg, cfgErr = email.LoadConfig(statusConfig)
-			if cfgErr != nil {
-				return cfgErr
-			}
+		cfg, usedConfigPath, err := resolveIdentityConfig(id, idErr, statusConfig)
+		if err != nil {
+			return err
 		}
 
 		contactsPath := resolveContactsPath()
