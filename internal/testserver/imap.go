@@ -778,6 +778,7 @@ func (s *memSession) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest str
 	// the last COPYUID) undercount the moved messages.
 	var remaining []*memMessage
 	var srcUIDs, destUIDs imap.UIDSet
+	var expungeErr error
 	for seqIdx, msg := range s.selected.messages {
 		seqNum := uint32(seqIdx + 1)
 		if !numSetContains(numSet, seqNum, msg.uid) {
@@ -795,11 +796,17 @@ func (s *memSession) Move(w *imapserver.MoveWriter, numSet imap.NumSet, dest str
 		})
 		srcUIDs.AddNum(msg.uid)
 		destUIDs.AddNum(newUID)
-		if err := w.WriteExpunge(seqNum); err != nil {
-			return fmt.Errorf("write expunge: %w", err)
+		if err := w.WriteExpunge(seqNum); err != nil && expungeErr == nil {
+			expungeErr = fmt.Errorf("write expunge: %w", err)
 		}
 	}
+	// Commit the source mailbox mutation before returning, even on a write
+	// error above, so a message already appended to destMb is also removed
+	// from the source — never left duplicated in both mailboxes.
 	s.selected.messages = remaining
+	if expungeErr != nil {
+		return expungeErr
+	}
 	if len(srcUIDs) > 0 {
 		if err := w.WriteCopyData(&imap.CopyData{
 			UIDValidity: 1,
