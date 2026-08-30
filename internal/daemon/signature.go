@@ -72,14 +72,15 @@ var fingerprintPattern = regexp.MustCompile(`^[0-9A-Fa-f]{40}$`)
 // without inspecting message text or reaching into a broader family of
 // domain-error types.
 //
-// This function's classification is used at three of this file's five
-// exec.Command call sites: assertSingleOwnerKey's list-keys lookup,
-// verifyDetachedSignature's verify, and (via pgp.RanToCompletion,
-// indirectly) pgp.CheckKeyExpiry's own list-keys call, whose result reaches
-// this function through VerifySignature. Those three all parse a domain
-// outcome from gpg's output when it exits non-zero, so they need to tell
-// "gpg ran and gave an answer" apart from "gpg never ran." The remaining
-// two sites — importOwnerKey's export and import steps — do not call it:
+// This function's classification is used directly at two of this file's
+// four exec.Command call sites — assertSingleOwnerKey's list-keys lookup
+// and verifyDetachedSignature's verify — plus indirectly wherever
+// pgp.CheckKeyExpiry's own list-keys call (a separate exec.Command site in
+// internal/pgp/expiry.go) reaches this function through VerifySignature.
+// Those all parse a domain outcome from gpg's output when it exits
+// non-zero, so they need to tell "gpg ran and gave an answer" apart from
+// "gpg never ran." The remaining two sites in this file — importOwnerKey's
+// export and import steps — do not call it:
 // gpg --export and --import of an absent key both exit 0 with empty output
 // (verified against real gpg; see the "owner key absent from ambient
 // keyring entirely" case in signature_test.go), so neither step has a
