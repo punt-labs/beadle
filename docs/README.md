@@ -55,6 +55,16 @@ architecture from these; cross-check against `ARCHITECTURE.md`.
 | [`gpg-signature-verification.md`](gpg-signature-verification.md) | Command-file signature verification (DES-034) — design ratified, `VerifySignature` implemented. |
 | [`wire-verifysignature.md`](wire-verifysignature.md) | Wiring `VerifySignature` into the daemon (DES-035) — `daemon.json`, the `owner_handle`/`owner_gpg_key_id` owner-key sources, and the `loadCommand` call site. |
 
+## Artifacts
+
+Plain-language companions to the canonical docs above — for explaining the
+system to someone who won't read `ARCHITECTURE.md`, not for resolving a
+design question. `ARCHITECTURE.md` wins on any conflict.
+
+| Doc | What it is |
+|-----|-----------|
+| [`artifacts/trust-model-explainer.html`](artifacts/trust-model-explainer.html) | Self-contained HTML page explaining Beadle's trust model in plain language: the agent-mailbox framing, the two independent checks (message verification, per-contact `rwx` grants), and why only recipe execution needs an extra authorizer-signature lock. Uses "authorizer" for the concept `daemon.json`'s `owner_handle`/`owner_gpg_key_id` names in code today — see `beadle-4ul` for the pending rename. |
+
 ## Archive
 
 [`archive/`](archive/) holds ephemeral session and build artifacts kept only

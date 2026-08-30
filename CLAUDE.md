@@ -15,6 +15,13 @@ Two independent mechanisms decide that. **There is no privileged "owner" role si
 
 The one place "owner" shows up in code today (`daemon.json`'s `owner_handle`/`owner_gpg_key_id`, `internal/daemon.VerifySignature`'s `ownerKeyID`) is much narrower than the word implies: it names the single GPG key that must have signed a `beadle-daemon` recipe (command) file before the daemon will load it at all — an **authorizer** for recipe files, not a general position of authority, and unrelated to anyone's `rwx` grants. That naming is wrong and is being corrected (tracked as `beadle-4ul`); until it lands, read every "owner" in `internal/daemon` as "recipe authorizer," nothing more.
 
+**"Is a human watching" is never a security boundary in this system — do not reach for it.** Both `beadle-email` (its own poller, `cmd/beadle-email/admin_cmd.go`) and `beadle-daemon` can run unattended, on a timer, with nobody present. The two checks above apply identically either way. What actually differs between the two binaries is **what a permission grant unlocks**, not who triggered the check:
+
+- `beadle-email`'s `r`/`w` unlocks a message becoming a genuine prompt — the agent reads it and responds using judgment, whether that happened live or via the `/inbox` skill running on a schedule.
+- `beadle-daemon`'s `x` unlocks selecting among a fixed set of pre-signed recipes (`internal/daemon.Command` files) — the email never gets to freely instruct anything, it only picks.
+
+That distinction is also the real reason only recipes get the extra authorizer-signature lock: reading a message and applying judgment has a safety net built in — the agent can notice something's off. Running a fixed recipe has none; it just executes exactly as written. The lock exists because of that difference in action type, never because of who's watching.
+
 ## Identity
 
 You are **Claude Agento** (`claude`), an agent in the Punt Labs org. Your identity is managed by ethos (`ethos show claude`). Beadle is your email system — you read, send, and manage email as `claude@punt-labs.com`.
