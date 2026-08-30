@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // PipelineStore persists pipeline state to JSON files for crash recovery.
@@ -14,6 +15,14 @@ type PipelineStore struct {
 	Dir    string
 	Logger *slog.Logger
 }
+
+// DefaultRetention is how long a pipeline record is kept on disk before
+// Prune removes it. Each record carries email metadata (from, subject,
+// message_id) plus every stage's output, so unbounded retention is a
+// data-retention concern, not just a disk one. Thirty days is long enough
+// to debug a failed run days after the fact, short enough that a mailbox
+// running for months does not accumulate an unbounded audit trail.
+const DefaultRetention = 30 * 24 * time.Hour
 
 // Save writes a pipeline to dir/<id>.json via atomic rename.
 func (s *PipelineStore) Save(p *Pipeline) error {
@@ -87,4 +96,57 @@ func (s *PipelineStore) LoadRunning() ([]*Pipeline, error) {
 		}
 	}
 	return running, nil
+}
+
+// Prune deletes pipeline records older than maxAge, judged by CreatedAt.
+// A record still "running" is left alone regardless of age: Prune must
+// never destroy the only record of a pipeline that might still be
+// executing. Call the startup stale-pipeline sweep (LoadRunning, mark
+// failed, Save) before Prune runs, so a pipeline orphaned by a daemon
+// crash is marked failed -- and therefore eligible for removal -- first.
+// Unreadable or corrupt files are logged and skipped, same as LoadRunning.
+// It returns the number of files removed.
+func (s *PipelineStore) Prune(maxAge time.Duration) (int, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read pipeline dir %s: %w", s.Dir, err)
+	}
+
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			continue
+		}
+
+		path := filepath.Join(s.Dir, e.Name())
+		data, err := os.ReadFile(filepath.Clean(path))
+		if err != nil {
+			s.Logger.Warn("skip unreadable pipeline file during prune", "path", path, "error", err)
+			continue
+		}
+
+		var p Pipeline
+		if err := json.Unmarshal(data, &p); err != nil {
+			s.Logger.Warn("skip corrupt pipeline file during prune", "path", path, "error", err)
+			continue
+		}
+
+		if p.Status == "running" || p.CreatedAt.After(cutoff) {
+			continue
+		}
+
+		if err := os.Remove(path); err != nil {
+			s.Logger.Warn("remove aged pipeline file", "path", path, "error", err)
+			continue
+		}
+		removed++
+	}
+	return removed, nil
 }
