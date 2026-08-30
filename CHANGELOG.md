@@ -20,11 +20,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   machine-readable protocol rather than locale-dependent stderr matching.
   `pgp.CheckKeyExpiry` gained a `Homedir` functional option so expiry is
   checked against the same key material the signature is verified
-  against, never a stale ambient-keyring copy. This function has no
-  caller yet — wiring it into the daemon's command-file loader is
-  deferred to the headless GPG email agent epic (beadle-9zh); see
-  `docs/gpg-signature-verification.md` for the full design and migration
-  plan.
+  against, never a stale ambient-keyring copy. This function had no
+  caller at merge time; wiring it into the daemon's command-file loader
+  is DES-035 (`docs/wire-verifysignature.md`), tracked under beadle-iru
+  — see `docs/gpg-signature-verification.md` for `VerifySignature`'s own
+  design.
 
 ### Fixed
 

@@ -1,13 +1,15 @@
 # Command-File Signature Verification
 
 Design for `internal/daemon.VerifySignature`, implemented in
-`internal/daemon/signature.go` (DES-034) but with no caller yet — the
-stub this design replaced (`internal/daemon/command.go:280-285`) has been
-removed. This document covers the verification logic and its function
-contract only. Wiring `VerifySignature` into a live execution path — the
-daemon startup loader, the mission pipeline — is a separate concern for the
-headless GPG email agent epic (beadle-9zh) and is addressed here only as a
-forward-looking migration note.
+`internal/daemon/signature.go` (DES-034). This document covers the
+verification logic and its function contract only. Wiring `VerifySignature`
+into a live execution path — the daemon startup loader — is a separate
+design, DES-035 (`docs/wire-verifysignature.md`), addressed here only as a
+forward-looking migration note. That note originally pointed at the
+headless GPG email agent epic (beadle-9zh) as the place this wiring would
+land; that epic closed without ever covering it (its six children were
+outbound signing, inbound decryption, and Docker distribution, not command-
+file verification), so DES-035 tracks the wiring under beadle-iru instead.
 
 ## Problem
 
@@ -454,10 +456,12 @@ by the time it arrives (per the migration plan's startup-time check, item 2).
 
 ## Migration / wiring plan (forward-looking; not implemented here)
 
-This section describes how a future caller — the daemon startup loader, in
-the headless GPG email agent epic (beadle-9zh) — would consume the function
-above. It is signature-only: no wiring code is written as part of this
-mission.
+This section describes how a future caller — the daemon startup loader —
+would consume the function above. It is signature-only: no wiring code is
+written as part of this mission. See DES-035 (`docs/wire-verifysignature.md`)
+for the design that actually implements this plan; where the two disagree,
+DES-035 is the current, ratified answer and this section is the original
+sketch it started from.
 
 1. **Add `owner_handle` to daemon-level config**, distinct from `email.json`
    and from `.punt-labs/ethos.yaml`'s `agent:` field, per §1. Daemon startup
@@ -613,6 +617,7 @@ justify the extra branch); checking key expiry against the ambient system
 keyring (split-brain against the isolated key material the signature is
 actually checked against).
 
-See `docs/gpg-signature-verification.md` for the full design and the
-migration plan for wiring this into the daemon startup loader (beadle-9zh).
+See `docs/gpg-signature-verification.md` for the full design and DES-035
+(`docs/wire-verifysignature.md`) for wiring this into the daemon startup
+loader.
 ```

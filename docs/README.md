@@ -38,7 +38,7 @@ gitignored. Rebuild and commit the `.tex` when the design changes.
 |-----|-----------|
 | [`architecture.tex`](architecture.tex) | Long-form architecture spec behind `ARCHITECTURE.md`. |
 | [`beadle-identity.tex`](beadle-identity.tex) | The two-party identity trust model (DES-012). |
-| [`audit-beadle.tex`](audit-beadle.tex) | Audit-log design. |
+| [`audit-beadle.tex`](audit-beadle.tex) | Beadle vs. Punt Labs user-facing CLI/UX standards, March 2026 — a compliance report, not an audit-log design. `ARCHITECTURE.md`'s "tamperproof audit log" invariant has no implementation to point at yet (found during DES-035). |
 | [`checklist.tex`](checklist.tex) | Release / conformance checklist. |
 
 ## Design docs — implemented or historical
@@ -52,7 +52,8 @@ architecture from these; cross-check against `ARCHITECTURE.md`.
 | [`pipeline-v2-design.md`](pipeline-v2-design.md) | Pipeline v2 design — implemented (see the pipeline-v2 release). |
 | [`pipeline-v2.md`](pipeline-v2.md) | Pipeline v2 implementation notes — implemented. |
 | [`email-channel-plan.md`](email-channel-plan.md) | Email-channel implementation plan — implemented. |
-| [`gpg-signature-verification.md`](gpg-signature-verification.md) | Command-file signature verification (DES-034) — design ratified, `VerifySignature` implemented; wiring into the daemon's command-file loader deferred to beadle-9zh. |
+| [`gpg-signature-verification.md`](gpg-signature-verification.md) | Command-file signature verification (DES-034) — design ratified, `VerifySignature` implemented. |
+| [`wire-verifysignature.md`](wire-verifysignature.md) | Wiring `VerifySignature` into the daemon (DES-035) — `daemon.json`, the `owner_handle`/`owner_gpg_key_id` owner-key sources, and the `loadCommand` call site. |
 
 ## Archive
 

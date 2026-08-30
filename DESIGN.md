@@ -2544,5 +2544,65 @@ justify the extra branch); checking key expiry against the ambient system
 keyring (split-brain against the isolated key material the signature is
 actually checked against).
 
-See `docs/gpg-signature-verification.md` for the full design and the
-migration plan for wiring this into the daemon startup loader (beadle-9zh).
+See `docs/gpg-signature-verification.md` for the full design; wiring this
+into the daemon startup loader is DES-035, below (the migration note's
+original "beadle-9zh" pointer was wrong — that epic never covered this;
+see DES-035's rationale).
+
+## DES-035: Wiring VerifySignature into daemon startup — daemon.json, owner_gpg_key_id, and the no-ethos owner-key path
+
+**Decision:** a new `~/.punt-labs/beadle/daemon.json` (`internal/daemon.Config`)
+holds exactly one owner-key source: `owner_handle` (resolved through
+`identity.Resolver.ResolveHandle`, per DES-034 §1) or `owner_gpg_key_id` (a
+full 40-hex fingerprint written directly into config). Both fields set,
+neither set, or either failing to resolve to a valid fingerprint disables
+command loading — never the daemon process, which has no other dependency
+on the commands map (verified against `cmd/beadle-daemon/main.go`'s call
+graph: mail polling and the MCP server, a separate binary, do not consume
+it). Whichever path resolves a value, it is validated against the same
+fingerprint pattern `VerifySignature` itself enforces before it is accepted.
+`ownerKeyID` is resolved once at `beadle-daemon run` startup and threaded
+into `LoadCommands(dir, gpgBinary, ownerKeyID)` → `loadCommand`, which
+calls `VerifySignature` — gated on `ownerKeyID != ""`, so an unconfigured
+daemon behaves exactly as it does today — immediately after YAML decode and
+before `validateCommand`. A rejected signature logs at `slog.Error` with a
+structured `reason` field, distinct from the existing `slog.Warn` treatment
+of an ordinary parse/validation failure.
+
+**Why:** DES-034 implemented `VerifySignature` correctly but left it with
+no caller and an inaccurate assumption in its migration note — that a
+`fromDefault`-style flat-file fallback already covers the no-ethos case.
+It does not: `fromDefault` populates only an email address, with no GPG-key
+concept, and `ResolveHandle` has no fallback branch at all. Without
+`owner_gpg_key_id`, a deployment with no ethos installed would have no way
+to adopt this feature — a real completeness gap in a codebase that
+otherwise treats ethos as optional everywhere else (see the README's
+identity section). `owner_gpg_key_id` closes that gap with the smallest
+addition that matches the format `VerifySignature` already demands: a bare
+fingerprint, obtainable from `gpg --list-secret-keys --with-colons` with no
+ethos apparatus required. Separately, `docs/audit-beadle.tex` turned out not
+to be an audit-log design at all (it is a March 2026 CLI/UX
+standards-compliance report), so a rejected signature's interim record is
+`slog.Error`, not a route into an audit-log implementation that does not
+exist yet — `docs/README.md`'s docs map is corrected accordingly.
+
+**Rejected:** silently preferring one field over the other when both are
+set (hides a misconfiguration instead of failing loudly); a field inside
+`email.json` instead of a dedicated `daemon.json` (wrong scope — a daemon
+has one owner independent of which identity's mailbox it polls);
+re-resolving `ownerKeyID` per command file instead of once at startup
+(redundant, no benefit); verifying the signature after schema validation
+instead of before (misreports an authorization failure as a schema error);
+calling `VerifySignature` unconditionally regardless of whether an owner
+key resolved (rejects every command file the moment `daemon.json` is
+unset, since an empty `ownerKeyID` fails the fingerprint check — the
+opposite of the intended zero-behavior-change default); failing the whole
+daemon process when the owner key can't be resolved (disproportionate —
+verified that no other daemon subsystem depends on command loading
+succeeding); routing a rejected signature into `docs/audit-beadle.tex`'s
+audit log (no such implementation exists — that document is a CLI/UX
+compliance report, not an audit-log design); scoping the no-ethos gap out
+silently instead of deciding it in this document.
+
+See `docs/wire-verifysignature.md` for the full design, the rejected-
+alternatives table, and the implementation plan.
