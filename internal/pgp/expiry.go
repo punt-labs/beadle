@@ -227,7 +227,7 @@ func parseColonExpiry(output, keyID string) error {
 		return fmt.Errorf("key %q is ambiguous: matched %d public keys; use a unique key identifier (fingerprint)", keyID, pubCount)
 	}
 	if sawSigningSubkey && !haveValidSigningSubkey {
-		return fmt.Errorf("key %q has signing-capable subkeys but none with a current, unexpired expiration date: non-expiring or expired signing subkeys are not permitted", keyID)
+		return fmt.Errorf("key %q has signing-capable subkeys but none with a current, unexpired expiration date: every signing subkey has expired", keyID)
 	}
 
 	return nil
