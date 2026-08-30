@@ -60,6 +60,25 @@ func testLoggerCapture() (*slog.Logger, *bytes.Buffer) {
 	return slog.New(slog.NewTextHandler(&buf, nil)), &buf
 }
 
+// logLineContaining returns the single line of buf containing substr, and
+// fails the test if zero or more than one line matches. A whole-buffer
+// assert.Contains proves substr appeared somewhere in the capture, but not
+// that it landed on the same line as a pipeline ID logged by a different
+// call -- e.g. fireElse's own "pipeline failed" line, logged unconditionally
+// before the guard under test runs. Pinning the match to one line is what
+// proves the ID and the diagnostic detail are actually correlated.
+func logLineContaining(t *testing.T, buf *bytes.Buffer, substr string) string {
+	t.Helper()
+	var matches []string
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(line, substr) {
+			matches = append(matches, line)
+		}
+	}
+	require.Len(t, matches, 1, "expected exactly one log line containing %q, got %d:\n%s", substr, len(matches), buf.String())
+	return matches[0]
+}
+
 func testCommands() map[string]*Command {
 	return map[string]*Command{
 		"greet": {
@@ -388,6 +407,40 @@ func TestExecutor_AutoReplyArgs(t *testing.T) {
 	assert.Equal(t, "reply", runner.calls[1].Cmd)
 }
 
+// TestExecutor_AutoReplyFailureRecorded is the regression test for the
+// record-honesty half of beadle-5k5's round-2 fix: when the auto-reply
+// runner itself fails (as opposed to a validation guard rejecting it
+// beforehand), the pipeline used to complete with p.Error still empty --
+// the only way to notice a lost reply was to count len(p.Results) against
+// len(p.Commands)+1, a convention documented nowhere. p.Status stays
+// "completed" (the pipeline's own commands did all succeed, and
+// persist.go's only consumer of Status checks for "running"); p.Error now
+// carries the auto-reply failure so the record is honest about it.
+func TestExecutor_AutoReplyFailureRecorded(t *testing.T) {
+	runner := &mockClaudeRunner{
+		results: []WorkerResult{{Output: "done"}},
+		errs:    []error{nil, fmt.Errorf("smtp connection refused")},
+	}
+
+	exec := &Executor{
+		Planner: &StubPlanner{
+			Result: []CommandCall{{Command: "greet", Args: map[string]any{}}},
+		},
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
+	}
+
+	meta := EmailMeta{MessageID: "23", From: "jim@test.com", Subject: "Reply fails"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.NoError(t, err)
+
+	assert.Equal(t, "completed", p.Status)
+	assert.Len(t, p.Results, 1) // auto-reply's own result never appended
+	assert.Contains(t, p.Error, "auto-reply failed")
+	assert.Contains(t, p.Error, "smtp connection refused")
+}
+
 func TestExecutor_NoReplyCommand(t *testing.T) {
 	runner := &mockClaudeRunner{
 		results: []WorkerResult{
@@ -448,7 +501,9 @@ func TestExecutor_ElseReply(t *testing.T) {
 // beadle-5k5's first guard: an invalid auto-reply arg set used to be
 // swallowed silently. reply here requires an "extra" arg the auto-reply
 // call never supplies, so ValidateArgs fails and the failure must be
-// logged with the pipeline ID and the underlying error.
+// logged with the pipeline ID and the underlying error, at Error level
+// since a signed reply command's argument shape never changes between
+// runs -- this is permanent misconfiguration, not a transient failure.
 func TestExecutor_AutoReplyInvalidArgsLogged(t *testing.T) {
 	runner := &mockClaudeRunner{
 		results: []WorkerResult{{Output: "Hello, Jim!"}},
@@ -477,9 +532,9 @@ func TestExecutor_AutoReplyInvalidArgsLogged(t *testing.T) {
 	assert.Len(t, p.Results, 1) // no auto-reply appended: args invalid
 	assert.Len(t, runner.calls, 1)
 
-	logged := buf.String()
-	assert.Contains(t, logged, p.ID)
-	assert.Contains(t, logged, "missing required arg")
+	line := logLineContaining(t, buf, "missing required arg")
+	assert.Contains(t, line, p.ID)
+	assert.Contains(t, line, "level=ERROR")
 }
 
 // TestExecutor_FireElseInvalidArgsLogged is the regression test for
@@ -508,9 +563,8 @@ func TestExecutor_FireElseInvalidArgsLogged(t *testing.T) {
 	assert.Equal(t, "failed", p.Status)
 	assert.Len(t, runner.calls, 0) // else reply never ran: args invalid
 
-	logged := buf.String()
-	assert.Contains(t, logged, p.ID)
-	assert.Contains(t, logged, "missing required arg")
+	line := logLineContaining(t, buf, "missing required arg")
+	assert.Contains(t, line, p.ID)
 }
 
 // TestExecutor_FireElseRunnerNotRegisteredLogged is the regression test for
@@ -539,9 +593,8 @@ func TestExecutor_FireElseRunnerNotRegisteredLogged(t *testing.T) {
 	assert.Equal(t, "failed", p.Status)
 	assert.Len(t, runner.calls, 0)
 
-	logged := buf.String()
-	assert.Contains(t, logged, p.ID)
-	assert.Contains(t, logged, "nonexistent")
+	line := logLineContaining(t, buf, "nonexistent")
+	assert.Contains(t, line, p.ID)
 }
 
 func TestExecutor_ElseNoReplyCommand(t *testing.T) {
@@ -566,6 +619,38 @@ func TestExecutor_ElseNoReplyCommand(t *testing.T) {
 	assert.Equal(t, "failed", p.Status)
 	// No reply command — else handler logs but does not call runner.
 	assert.Len(t, runner.calls, 0)
+}
+
+// TestExecutor_ElseNoReplyCommandLogged is the regression test for
+// beadle-5k5's round-2 fix: fireElse's own "reply command not registered"
+// guard used to return with no log line at all, unlike the identical
+// condition on the auto-reply path (which already logged) and unlike
+// fireElse's own doc comment, which claimed this case was logged.
+func TestExecutor_ElseNoReplyCommandLogged(t *testing.T) {
+	runner := &mockClaudeRunner{}
+	logger, buf := testLoggerCapture()
+
+	// Build commands without the reply command.
+	cmds := map[string]*Command{
+		"greet": testCommands()["greet"],
+	}
+
+	exec := &Executor{
+		Planner:  &StubPlanner{Err: fmt.Errorf("no match")},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	meta := EmailMeta{MessageID: "14", From: "erin@test.com", Subject: "Unknown"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.Error(t, err)
+
+	assert.Equal(t, "failed", p.Status)
+	assert.Len(t, runner.calls, 0)
+
+	line := logLineContaining(t, buf, "skipping else reply")
+	assert.Contains(t, line, p.ID)
 }
 
 func TestStageContext(t *testing.T) {
@@ -769,7 +854,12 @@ func TestBuildStageContract_PromptUncappedMetadataCapped(t *testing.T) {
 // (mission storage, identity/personality/role/team resolution) from cwd or
 // the ETHOS_REPO_ROOT override -- so both must be redirected together, or
 // half the state (e.g. the global session binding) still lands on the real
-// ambient trees.
+// ambient trees. Every ETHOS_* variable is stripped, not just
+// ETHOS_REPO_ROOT: the calling agent's own session sets ETHOS_SESSION, and
+// leaving it in place would let the exec'd CLI resolve a real session
+// identifier while its backing storage is redirected to the scratch
+// roots -- the same half-redirect this comment warns against for HOME and
+// ETHOS_REPO_ROOT, just for a different variable.
 //
 // This repo runs in a shared, multi-agent environment: without this,
 // `ethos mission create`/`ethos mission abandon` corrupt whatever mission a
@@ -809,7 +899,7 @@ func isolatedEthosEnv(t *testing.T) []string {
 
 	env := make([]string, 0, len(os.Environ())+2)
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "ETHOS_REPO_ROOT=") {
+		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "ETHOS_") {
 			continue
 		}
 		env = append(env, kv)

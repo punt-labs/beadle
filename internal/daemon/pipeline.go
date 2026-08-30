@@ -122,6 +122,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 		p.Status = "failed"
 		p.Error = fmt.Sprintf("marshal pipe: %v", err)
 		e.save(p)
+		e.fireElse(p)
 		return p, fmt.Errorf("pipeline %s: marshal pipe: %w", p.ID, err)
 	}
 	pipe := string(pipeData)
@@ -162,7 +163,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			}
 			pipe = result
 		}
-		// passthrough: pipe unchanged, result logged only
+		// passthrough: pipe unchanged, result recorded like any other stage
 
 		p.Results = append(p.Results, result)
 		e.save(p)
@@ -177,13 +178,17 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			},
 		}
 		if err := ValidateArgs(replyCmd, replyCall.Args); err != nil {
-			e.Logger.Warn("auto-reply args invalid", "pipeline", p.ID, "error", err)
+			// Permanent misconfiguration: the reply command's signature never
+			// changes, so this fails on every pipeline run, forever.
+			e.Logger.Error("auto-reply args invalid", "pipeline", p.ID, "error", err)
 		} else if runner, rok := e.Runners[replyCmd.Runner]; !rok {
-			e.Logger.Warn("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
+			// Same: a runner registration gap does not clear itself between runs.
+			e.Logger.Error("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
 		} else {
 			replyResult, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe)
 			if err != nil {
 				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
+				p.Error = fmt.Sprintf("auto-reply failed: %v", err)
 			} else {
 				p.Results = append(p.Results, replyResult)
 			}
@@ -360,6 +365,7 @@ func (e *Executor) fireElse(p *Pipeline) {
 
 	replyCmd, ok := e.Commands["reply"]
 	if !ok {
+		e.Logger.Warn("reply command not in registry, skipping else reply", "pipeline", p.ID)
 		return
 	}
 
