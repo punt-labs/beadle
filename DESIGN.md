@@ -1703,10 +1703,10 @@ env_vars:
 > CHANGELOG entry.
 
 **Critical: no `{input}` string interpolation.** Args flow as structured
-data in the mission contract's `inputs.args` field (superseded — see the
-note above; this is now the top-level `context` field), not as string
-substitution into prompts. The worker reads args from the contract
-via `ethos mission show`. When calling Bash, the worker assembles
+data in the mission contract's top-level `context` field (the prompt above
+predates this and still says `inputs.args` — see the superseded note), not
+as string substitution into prompts. The worker reads args from the
+contract via `ethos mission show`. When calling Bash, the worker assembles
 argument lists from structured data, never from template strings.
 This prevents shell injection via attacker-influenced planner output.
 

@@ -208,10 +208,11 @@ env_vars:
 > CHANGELOG entry.
 
 **No string interpolation.** Args flow as structured data in the mission
-contract's `inputs.args` field (superseded — see the note above; this is
-now the top-level `context` field). The worker reads them from the contract.
-When calling Bash, the worker passes args as direct arguments, never via
-template string substitution. This prevents shell injection.
+contract's top-level `context` field (the prompt above predates this and
+still says `inputs.args` — see the superseded note). The worker reads them
+from the contract. When calling Bash, the worker passes args as direct
+arguments, never via template string substitution. This prevents shell
+injection.
 
 **GPG-signed.** Command files are signed by the owner's key. The daemon
 verifies signatures at startup and rejects unsigned or tampered files.
