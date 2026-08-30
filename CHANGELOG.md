@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **`internal/daemon.VerifySignature` now performs real GPG signature
+  verification** (DES-034), replacing a hard-coded `return nil` that made
+  the "zero agent authority" invariant unenforceable — anything trusting
+  the old stub's return value was trusting nothing at all. Verification
+  signs/checks the canonical YAML re-serialization of a command file
+  (`Signature` cleared), imports only the configured owner's key into an
+  isolated GNUPGHOME per check, asserts exactly one key with that exact
+  40-hex fingerprint landed there, checks its expiry against that same
+  isolated keyring, and classifies the outcome via GnuPG's `--status-fd`
+  machine-readable protocol rather than locale-dependent stderr matching.
+  `pgp.CheckKeyExpiry` gained a `Homedir` functional option (backward
+  compatible; existing callers are unaffected) so expiry is checked
+  against the same key material the signature is verified against, never
+  a stale ambient-keyring copy. This function has no caller yet — wiring
+  it into the daemon's command-file loader is deferred to the headless
+  GPG email agent epic (beadle-9zh); see `docs/gpg-signature-verification.md`
+  for the full design and migration plan.
+
 ## [0.16.5] - 2026-08-29
 
 ### Fixed
