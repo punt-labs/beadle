@@ -61,12 +61,35 @@ var validArgTypes = map[string]bool{
 	"bool":   true,
 }
 
+// verificationError wraps an operational failure that happened while
+// attempting to verify a command file's signature -- the gpg binary
+// couldn't run, a temp homedir couldn't be created, and the like -- as
+// opposed to a *SignatureError, which is a definitive signature verdict
+// (missing, wrong key, expired, invalid). VerifySignature returns both
+// kinds through the same error interface; this wrapper is how loadCommand
+// tags the operational kind so LoadCommands can log it distinctly instead
+// of folding it into the generic "skip invalid command file" path an
+// ordinary parse or validation failure takes. It can only occur on the
+// enforcement-active path (ownerKeyID != ""), since that is the only place
+// loadCommand constructs one.
+type verificationError struct {
+	err error
+}
+
+func (e *verificationError) Error() string { return e.err.Error() }
+func (e *verificationError) Unwrap() error { return e.err }
+
 // LoadCommands scans dir for *.yaml files, parses each as a Command,
 // validates required fields, and returns a map keyed by command name.
 // Invalid files are logged and skipped. gpgBinary and ownerKeyID thread
 // through to loadCommand for signature verification (see loadCommand);
-// ownerKeyID == "" disables verification entirely.
-func LoadCommands(dir, gpgBinary, ownerKeyID string) (map[string]*Command, error) {
+// ownerKeyID == "" disables verification entirely. logger receives every
+// skip/reject log line; a nil logger falls back to slog.Default().
+func LoadCommands(dir, gpgBinary, ownerKeyID string, logger *slog.Logger) (map[string]*Command, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read command dir %s: %w", dir, err)
@@ -81,16 +104,21 @@ func LoadCommands(dir, gpgBinary, ownerKeyID string) (map[string]*Command, error
 		cmd, err := loadCommand(path, gpgBinary, ownerKeyID)
 		if err != nil {
 			var sigErr *SignatureError
-			if errors.As(err, &sigErr) {
-				slog.Error("reject command file: signature verification failed",
+			var verErr *verificationError
+			switch {
+			case errors.As(err, &sigErr):
+				logger.Error("reject command file: signature verification failed",
 					"path", path, "reason", sigErr.Reason, "detail", sigErr.Detail)
-			} else {
-				slog.Warn("skip invalid command file", "path", path, "error", err)
+			case errors.As(err, &verErr):
+				logger.Error("signature verification unavailable, skipping command file",
+					"path", path, "error", err)
+			default:
+				logger.Warn("skip invalid command file", "path", path, "error", err)
 			}
 			continue
 		}
 		if _, dup := cmds[cmd.Name]; dup {
-			slog.Warn("skip duplicate command name", "name", cmd.Name, "path", path)
+			logger.Warn("skip duplicate command name", "name", cmd.Name, "path", path)
 			continue
 		}
 		cmds[cmd.Name] = cmd
@@ -113,7 +141,11 @@ func loadCommand(path, gpgBinary, ownerKeyID string) (*Command, error) {
 
 	if ownerKeyID != "" {
 		if err := VerifySignature(&cmd, gpgBinary, ownerKeyID); err != nil {
-			return nil, fmt.Errorf("verify signature %s: %w", path, err)
+			var sigErr *SignatureError
+			if errors.As(err, &sigErr) {
+				return nil, fmt.Errorf("verify signature %s: %w", path, sigErr)
+			}
+			return nil, fmt.Errorf("verify signature %s: %w", path, &verificationError{err: err})
 		}
 	}
 	// ownerKeyID == "" means signing enforcement is not configured --

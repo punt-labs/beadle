@@ -327,7 +327,7 @@ args:
 				writeYAML(t, dir, name, content)
 			}
 
-			cmds, err := LoadCommands(dir, "gpg", "")
+			cmds, err := LoadCommands(dir, "gpg", "", nil)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -358,7 +358,7 @@ budget:
   rounds: 1
 `)
 
-	cmds, err := LoadCommands(dir, "gpg", "")
+	cmds, err := LoadCommands(dir, "gpg", "", nil)
 	require.NoError(t, err)
 	// One wins, one is skipped. Only one entry for "wall".
 	assert.Len(t, cmds, 1)
@@ -366,7 +366,7 @@ budget:
 }
 
 func TestLoadCommands_NonexistentDir(t *testing.T) {
-	_, err := LoadCommands(filepath.Join(t.TempDir(), "does-not-exist"), "gpg", "")
+	_, err := LoadCommands(filepath.Join(t.TempDir(), "does-not-exist"), "gpg", "", nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read command dir")
 }
@@ -375,7 +375,7 @@ func TestLoadCommands_FieldValues(t *testing.T) {
 	dir := t.TempDir()
 	writeYAML(t, dir, "wall.yaml", validCommandYAML)
 
-	cmds, err := LoadCommands(dir, "gpg", "")
+	cmds, err := LoadCommands(dir, "gpg", "", nil)
 	require.NoError(t, err)
 	require.Contains(t, cmds, "wall")
 
@@ -413,7 +413,7 @@ output_schema: text
 budget:
   rounds: 1
 `)
-	cmds, err := LoadCommands(dir, "gpg", "")
+	cmds, err := LoadCommands(dir, "gpg", "", nil)
 	require.NoError(t, err)
 	require.Contains(t, cmds, "min")
 	assert.Equal(t, "claude", cmds["min"].Runner)
@@ -633,7 +633,7 @@ func TestLoadCommands_SignatureEnforcement(t *testing.T) {
 		dir := t.TempDir()
 		writeSignedCommand(t, gpgBin, home, dir, "good.yaml", ownerEmail, "good")
 
-		cmds, err := LoadCommands(dir, gpgBin, ownerFpr)
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr, nil)
 		require.NoError(t, err)
 		assert.Contains(t, cmds, "good")
 	})
@@ -648,7 +648,7 @@ budget:
 `)
 		h := installCapturingHandler(t)
 
-		cmds, err := LoadCommands(dir, gpgBin, ownerFpr)
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr, nil)
 		require.NoError(t, err)
 		assert.NotContains(t, cmds, "unsigned")
 
@@ -662,7 +662,7 @@ budget:
 		writeSignedCommand(t, gpgBin, home, dir, "wrongkey.yaml", otherEmail, "wrongkey")
 		h := installCapturingHandler(t)
 
-		cmds, err := LoadCommands(dir, gpgBin, ownerFpr)
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr, nil)
 		require.NoError(t, err)
 		assert.NotContains(t, cmds, "wrongkey")
 
@@ -681,7 +681,7 @@ budget:
   rounds: 1
 `)
 
-		cmds, err := LoadCommands(dir, gpgBin, ownerFpr)
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr, nil)
 		require.NoError(t, err)
 		assert.Contains(t, cmds, "good")
 		assert.NotContains(t, cmds, "bad")
@@ -697,11 +697,72 @@ budget:
 `)
 		h := installCapturingHandler(t)
 
-		cmds, err := LoadCommands(dir, gpgBin, "")
+		cmds, err := LoadCommands(dir, gpgBin, "", nil)
 		require.NoError(t, err)
 		assert.Contains(t, cmds, "unsigned")
 
 		_, ok := h.find(slog.LevelError, "reject command file: signature verification failed")
 		assert.False(t, ok, "no signature rejection must be logged when ownerKeyID is unset")
+	})
+
+	t.Run("operational verification failure logs distinctly, not as generic skip", func(t *testing.T) {
+		dir := t.TempDir()
+		cmd := &Command{
+			Name:         "unavailable",
+			Runner:       "claude",
+			Mode:         "process",
+			Prompt:       "do the thing",
+			OutputSchema: "text",
+			Signature:    "bogus-signature-content",
+		}
+		cmd.Budget.Rounds = 1
+		data, err := yaml.Marshal(cmd)
+		require.NoError(t, err)
+		writeYAML(t, dir, "unavailable.yaml", string(data))
+
+		h := installCapturingHandler(t)
+
+		// A gpg binary that cannot run at all is an operational failure
+		// inside VerifySignature (export never runs to completion), not a
+		// signature verdict -- distinct from both the SignatureError path
+		// and an ordinary parse/validation failure.
+		cmds, err := LoadCommands(dir, filepath.Join(t.TempDir(), "no-such-gpg-binary"), ownerFpr, nil)
+		require.NoError(t, err)
+		assert.NotContains(t, cmds, "unavailable")
+
+		_, rejected := h.find(slog.LevelError, "reject command file: signature verification failed")
+		assert.False(t, rejected, "an operational failure is not a signature verdict")
+		_, skipped := h.find(slog.LevelWarn, "skip invalid command file")
+		assert.False(t, skipped, "an operational failure while enforcement is active must not be logged as a generic skip")
+
+		attrs, ok := h.find(slog.LevelError, "signature verification unavailable, skipping command file")
+		require.True(t, ok, "expected the distinct operational-failure Error record")
+		assert.Contains(t, attrs["path"], "unavailable.yaml")
+	})
+
+	t.Run("rejection is observable through a logger passed into LoadCommands, not just the package default", func(t *testing.T) {
+		dir := t.TempDir()
+		writeYAML(t, dir, "unsigned.yaml", `name: unsigned
+prompt: hello
+output_schema: text
+budget:
+  rounds: 1
+`)
+		explicit := &capturingHandler{}
+		explicitLogger := slog.New(explicit)
+		// The package default is a distinct handler here, so a pass if the
+		// record only reached slog.Default() -- and not the logger actually
+		// passed in -- is impossible.
+		defaultHandler := installCapturingHandler(t)
+
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr, explicitLogger)
+		require.NoError(t, err)
+		assert.NotContains(t, cmds, "unsigned")
+
+		_, ok := explicit.find(slog.LevelError, "reject command file: signature verification failed")
+		assert.True(t, ok, "expected the rejection to be logged through the explicitly passed logger")
+
+		_, onDefault := defaultHandler.find(slog.LevelError, "reject command file: signature verification failed")
+		assert.False(t, onDefault, "the rejection must not also land on the package default when an explicit logger is passed")
 	})
 }
