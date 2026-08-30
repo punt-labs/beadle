@@ -141,6 +141,32 @@ func TestCheckKeyExpiry_MissingGPGBinary(t *testing.T) {
 	assert.Contains(t, err.Error(), "gpg list-keys")
 }
 
+// TestRanToCompletion covers the exported classification rule directly,
+// independent of gpg: nil and *exec.ExitError both mean the process ran to
+// completion, everything else means it never started. internal/daemon's
+// isOperationalExecFailure builds on this exact table, so a regression here
+// would silently misclassify command-signature verification too.
+func TestRanToCompletion(t *testing.T) {
+	exitErr := &exec.ExitError{}
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, true},
+		{"exec.ExitError", exitErr, true},
+		{"wrapped exec.ExitError", fmt.Errorf("wrapped: %w", exitErr), true},
+		{"exec.Error (PATH lookup failure)", &exec.Error{Name: "gpg", Err: exec.ErrNotFound}, false},
+		{"plain error", errors.New("disk full"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, RanToCompletion(tt.err))
+		})
+	}
+}
+
 // fingerprintOf returns the 40-hex fingerprint gpg assigned to keyID in home.
 func fingerprintOf(t *testing.T, gpgBin, home, keyID string) string {
 	t.Helper()

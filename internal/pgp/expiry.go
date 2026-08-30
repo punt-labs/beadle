@@ -21,6 +21,30 @@ import (
 // look like.
 var ErrKeyExpiryFinding = errors.New("key expiry finding")
 
+// RanToCompletion reports whether err represents an exec.Cmd that ran to
+// completion, as opposed to one that never started. A nil error or an
+// *exec.ExitError both mean the process ran and exited, successfully or
+// not; every other error shape -- *exec.Error for a $PATH lookup failure,
+// *fs.PathError for a binary that exists but lacks execute permission, or
+// whatever else a platform or a future Go release adds for a start
+// failure -- means it never got that far. This inverts the question
+// deliberately: enumerating every start-failure shape would need updating
+// each time the platform or toolchain adds one, while nil-or-*exec.ExitError
+// is a closed, two-member set that never changes.
+//
+// Callers across internal/pgp and internal/daemon share this single
+// definition so the classification cannot drift between them the way it
+// did before this function existed -- see internal/daemon/signature.go's
+// isOperationalExecFailure, which wraps this with its own domain-specific
+// exception on top.
+func RanToCompletion(err error) bool {
+	if err == nil {
+		return true
+	}
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr)
+}
+
 // ExpiryOption configures CheckKeyExpiry.
 type ExpiryOption func(*expiryConfig)
 
@@ -65,13 +89,9 @@ func CheckKeyExpiry(gpgBinary, keyID string, opts ...ExpiryOption) error {
 	// keyring -- an expected domain outcome that parseColonExpiry's
 	// pubCount == 0 branch already handles. Only a process that never ran
 	// to completion at all (binary missing, or present but not executable)
-	// is an operational failure; that shape is anything but nil or
-	// *exec.ExitError.
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
-			return fmt.Errorf("gpg list-keys %q: %w: %s", keyID, err, stderr.String())
-		}
+	// is an operational failure.
+	if err := cmd.Run(); !RanToCompletion(err) {
+		return fmt.Errorf("gpg list-keys %q: %w: %s", keyID, err, stderr.String())
 	}
 
 	if err := parseColonExpiry(stdout.String(), keyID); err != nil {

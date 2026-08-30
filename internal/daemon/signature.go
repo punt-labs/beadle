@@ -47,15 +47,16 @@ var fingerprintPattern = regexp.MustCompile(`^[0-9A-Fa-f]{40}$`)
 
 // isOperationalExecFailure reports whether err represents a gpg subprocess
 // that never ran to completion, as opposed to one that ran and produced an
-// outcome worth parsing. Rather than enumerate the error shapes a failed
-// *exec.Cmd can take — *exec.Error for a $PATH lookup failure, *fs.PathError
-// for a binary that exists but lacks execute permission, and whatever else
-// the platform or a future Go release adds — it inverts the question: the
-// only outcome that means "the process ran to completion" is a nil error or
-// an *exec.ExitError, so every other non-nil error is operational. This is
-// exhaustive by construction: a new error shape a future Go release or
-// platform introduces for a start failure is operational by default, with
-// nothing to update here.
+// outcome worth parsing. The nil-or-*exec.ExitError classification rule
+// itself lives once, in pgp.RanToCompletion, because internal/pgp cannot
+// import this package (this package already imports pgp) and both need the
+// same answer: pgp.CheckKeyExpiry uses it directly, and this function wraps
+// it with the one exception below. Sharing the primitive is what keeps the
+// two packages from independently drifting on the answer, which is exactly
+// what happened here before pgp.RanToCompletion existed — the same defect,
+// an incomplete *exec.Error-only check that missed a permission-denied
+// binary, was fixed piecemeal at two call sites in this file before either
+// of them shared a definition with the other.
 //
 // The one exception is pgp.ErrKeyExpiryFinding, checked first. It is not a
 // carve-out for another exec-failure shape — it is the opposite kind of
@@ -71,13 +72,20 @@ var fingerprintPattern = regexp.MustCompile(`^[0-9A-Fa-f]{40}$`)
 // without inspecting message text or reaching into a broader family of
 // domain-error types.
 //
-// This one function is the single place every exec.Command call site in
-// this package decides operational-versus-domain, so the three call sites
-// below (and any future one) can never independently drift on the answer —
-// the same defect, an incomplete *exec.Error-only check that missed a
-// permission-denied binary, was fixed piecemeal twice at two of these three
-// sites before this function existed, and an allowlist of exactly two types
-// would only trade one incomplete enumeration for another.
+// This function's classification is used at three of this file's five
+// exec.Command call sites: assertSingleOwnerKey's list-keys lookup,
+// verifyDetachedSignature's verify, and (via pgp.RanToCompletion,
+// indirectly) pgp.CheckKeyExpiry's own list-keys call, whose result reaches
+// this function through VerifySignature. Those three all parse a domain
+// outcome from gpg's output when it exits non-zero, so they need to tell
+// "gpg ran and gave an answer" apart from "gpg never ran." The remaining
+// two sites — importOwnerKey's export and import steps — do not call it:
+// gpg --export and --import of an absent key both exit 0 with empty output
+// (verified against real gpg; see the "owner key absent from ambient
+// keyring entirely" case in signature_test.go), so neither step has a
+// legitimate non-zero domain outcome to fail open on. Any non-zero exit
+// from either is a real error, operational or not, and importOwnerKey
+// returns it as such without needing this function's help.
 func isOperationalExecFailure(err error) bool {
 	if err == nil {
 		return false
@@ -85,8 +93,7 @@ func isOperationalExecFailure(err error) bool {
 	if errors.Is(err, pgp.ErrKeyExpiryFinding) {
 		return false
 	}
-	var exitErr *exec.ExitError
-	return !errors.As(err, &exitErr)
+	return !pgp.RanToCompletion(err)
 }
 
 // CanonicalCommandBytes returns the deterministic YAML encoding of cmd used
