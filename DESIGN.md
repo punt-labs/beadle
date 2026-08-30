@@ -1696,12 +1696,21 @@ env_vars:
   - BIFF_TOKEN            # daemon resolves from secret store
 ```
 
-**Critical: no `{input}` string interpolation.** Args flow as structured
-data in the mission contract's `inputs.args` field, not as string
-substitution into prompts. The worker reads args from the contract
-via `ethos mission show`. When calling Bash, the worker assembles
-argument lists from structured data, never from template strings.
-This prevents shell injection via attacker-influenced planner output.
+> Superseded: `inputs.args` above is stale. ethos's mission schema
+> strict-rejects unknown `inputs.*` fields; stage args are carried in the
+> contract's top-level `context` field instead. See
+> `internal/daemon/pipeline.go`'s `stageContext` and the beadle-8gt
+> CHANGELOG entry.
+
+**Critical: no `{input}` string interpolation.** Stage args are formatted
+as free text (`key=value` pairs) into the mission contract's top-level
+`context` field by `stageContext` (the prompt above predates this and
+still says `inputs.args` — see the superseded note), not as string
+substitution into prompts. The worker parses args from the contract text
+via `ethos mission show`, not by interpolating the raw context blob into a
+shell command. When calling Bash, the worker assembles argument lists from
+parsed values, never from template strings. This prevents shell injection
+via attacker-influenced planner output.
 
 Commands are YAML files in `~/.punt-labs/beadle/commands/`. Each file
 is GPG-signed by the owner's key. The daemon verifies signatures at
@@ -2077,6 +2086,9 @@ invoking a shell.
   (with `filepath.EvalSymlinks` to follow symlinks)
 - 1 MB output cap via `io.LimitReader` on the read side
 - Pipe value passed as `inputs.pipeline_output` in mission contracts
+  (superseded — now the top-level `context` field; see
+  `internal/daemon/pipeline.go`'s `stageContext` and the beadle-8gt
+  CHANGELOG entry)
 - Else-path reply receives fixed-text error, not internal pipe state
 
 **Full design document:** `docs/pipeline-v2-design.md`
@@ -2272,7 +2284,9 @@ the terminal stage — the executor enforces this in two ways:
 
 - **Claude runner:** The pipe JSON (including `files` with resolved
   absolute paths) is passed via `inputs.pipeline_output` in the
-  mission contract. The worker reads files by absolute path. To add a
+  mission contract (superseded — now the top-level `context` field; see
+  `internal/daemon/pipeline.go`'s `stageContext` and the beadle-8gt
+  CHANGELOG entry). The worker reads files by absolute path. To add a
   file, the worker writes it to the pipeline directory (path provided
   in the contract) and includes the relative path in its output.
 - **CLI runner:** The pipe JSON is provided on stdin. CLI tools use

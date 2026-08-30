@@ -201,10 +201,20 @@ env_vars:
   - BIFF_TOKEN
 ```
 
-**No string interpolation.** Args flow as structured data in the mission
-contract's `inputs.args` field. The worker reads them from the contract.
-When calling Bash, the worker passes args as direct arguments, never via
-template string substitution. This prevents shell injection.
+> Superseded: `inputs.args` above is stale. ethos's mission schema
+> strict-rejects unknown `inputs.*` fields; stage args are carried in the
+> contract's top-level `context` field instead. See
+> `internal/daemon/pipeline.go`'s `stageContext` and the beadle-8gt
+> CHANGELOG entry.
+
+**No string interpolation.** Stage args are formatted as free text
+(`key=value` pairs) into the mission contract's top-level `context` field
+by `stageContext` (the prompt above predates this and still says
+`inputs.args` — see the superseded note). The worker parses them from the
+contract text, not by interpolating the raw context blob into a shell
+string. When calling Bash, the worker passes parsed values as direct
+arguments, never via template string substitution. This prevents shell
+injection.
 
 **GPG-signed.** Command files are signed by the owner's key. The daemon
 verifies signatures at startup and rejects unsigned or tampered files.

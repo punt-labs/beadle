@@ -16,6 +16,12 @@ type EmailMeta struct {
 	Subject   string
 }
 
+// maxContractFieldRunes bounds the length of a single user-controlled
+// mission-contract field (an escaped YAML value or a stage arg embedded in
+// the context field). Shared so the two cap sites cannot silently drift
+// apart.
+const maxContractFieldRunes = 500
+
 // BuildContract generates a mission contract YAML string from email metadata.
 // Email provenance is recorded in inputs.trigger (structured metadata for audit).
 // The subject is in inputs.trigger, NOT in success_criteria — success_criteria
@@ -48,13 +54,13 @@ budget:
 // escapeYAMLValue returns a double-quoted YAML scalar with proper escaping.
 // Always quotes to avoid type ambiguity (bare "99" parses as integer,
 // bare "true" parses as boolean).
-// NUL bytes are stripped and the value is capped at 500 characters to
-// limit adversarial input from email subjects.
+// NUL bytes are stripped and the value is capped at maxContractFieldRunes
+// runes to limit adversarial input from email subjects.
 func escapeYAMLValue(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
-	if utf8.RuneCountInString(s) > 500 {
+	if utf8.RuneCountInString(s) > maxContractFieldRunes {
 		runes := []rune(s)
-		s = string(runes[:500])
+		s = string(runes[:maxContractFieldRunes])
 	}
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)

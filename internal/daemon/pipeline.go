@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -196,17 +199,13 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 }
 
 // buildStageContract generates a mission contract string for one pipeline stage.
+//
+// ethos's inputs schema recognizes only trigger, files, ticket, and
+// references (see ethos's internal/mission/inputs.go) -- there is no
+// inputs.args or inputs.pipeline_output. Stage args and the prior stage's
+// pipeline output are carried instead as free text in the top-level
+// context field, which exists for exactly this kind of information.
 func buildStageContract(meta EmailMeta, cmd *Command, call CommandCall, pipe string) string {
-	pipeValue := "none"
-	if pipe != "" {
-		pipeValue = escapeYAMLPipe(pipe)
-	}
-
-	argsYAML := ""
-	for k, v := range call.Args {
-		argsYAML += fmt.Sprintf("      %s: %s\n", k, escapeYAMLValue(fmt.Sprint(v)))
-	}
-
 	return fmt.Sprintf(`leader: claude
 worker: bwk
 evaluator:
@@ -217,8 +216,7 @@ inputs:
     message_id: %s
     from: %s
     subject: %s
-  args:
-%s  pipeline_output: %s
+context: %s
 write_set:
   - %s
 success_criteria:
@@ -230,13 +228,58 @@ budget:
 		escapeYAMLValue(meta.MessageID),
 		escapeYAMLValue(meta.From),
 		escapeYAMLValue(meta.Subject),
-		argsYAML,
-		pipeValue,
+		escapeYAMLPipe(stageContext(call.Args, pipe)),
 		writeSetYAML(cmd.WriteSet),
 		escapeYAMLValue(cmd.Prompt),
 		cmd.Budget.Rounds,
 		cmd.Budget.ReflectionAfterEach,
 	)
+}
+
+// stageContext formats a stage's call args and the prior stage's pipeline
+// output as the free-text content of the mission contract's context field.
+// Args are sorted by key for deterministic output. Each arg value is capped
+// at maxContractFieldRunes, matching escapeYAMLValue's cap on other
+// user-controlled contract fields -- the pipe value itself is left
+// uncapped, since pipe data can be up to 1MB and escapeYAMLPipe (applied by
+// the caller to the whole returned string) is the field meant to carry it
+// uncapped.
+func stageContext(args map[string]any, pipe string) string {
+	pipeValue := "none"
+	if pipe != "" {
+		pipeValue = pipe
+	}
+
+	argsText := "none"
+	if len(args) > 0 {
+		keys := make([]string, 0, len(args))
+		for k := range args {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		parts := make([]string, len(keys))
+		for i, k := range keys {
+			parts[i] = fmt.Sprintf("%s=%s", k, capRunes(fmt.Sprint(args[k]), maxContractFieldRunes))
+		}
+		argsText = strings.Join(parts, ", ")
+	}
+
+	return "stage args: " + argsText + "\npipeline output: " + pipeValue
+}
+
+// truncationMarker is appended by capRunes when a value is actually cut, so
+// a worker reading the context field can tell it is looking at a partial
+// value rather than the whole thing.
+const truncationMarker = " …[truncated]"
+
+// capRunes truncates s to at most n runes. If truncation occurred,
+// truncationMarker is appended, so the returned string can exceed n runes.
+func capRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n]) + truncationMarker
 }
 
 // writeSetYAML formats a write_set slice as YAML list items.
