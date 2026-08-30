@@ -294,7 +294,10 @@ switching. When ethos is present, resolution checks, in order:
 3. **Handle → ethos identity YAML** --- `~/.punt-labs/ethos/identities/<handle>.yaml` supplies name and email; `~/.punt-labs/ethos/identities/<handle>.ext/beadle.yaml` supplies a GPG key ID that `beadle-email identity` reports (it doesn't drive signing --- that's `email.json`'s `gpg_signer` field either way). Always global, never a repo-local vendored copy.
 
 If no step resolves a handle --- ethos isn't installed, or nothing pins
-one --- beadle falls back to the plain `default-identity` file above.
+one --- beadle falls back to the plain `default-identity` file above. If a
+handle *is* resolved but its ethos identity file is missing or unreadable,
+beadle fails closed instead of falling back --- operating as the wrong
+identity is worse than failing.
 
 Each identity gets its own directory under `~/.punt-labs/beadle/identities/<email>/` with separate `email.json`, `contacts.json`, and `attachments/`. Root files are auto-migrated on first use.
 

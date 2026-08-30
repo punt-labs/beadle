@@ -2,8 +2,10 @@
 
 ## Prerequisites
 
-- Go 1.26+ (`go.mod` declares `toolchain go1.26.6`; if your installed `go` is
-  older, `make build` downloads the pinned toolchain automatically)
+- Go 1.21+ to start (the `toolchain` directive itself needs 1.21+ to parse).
+  `go.mod` declares `toolchain go1.26.6`; if your installed `go` is 1.21–1.26,
+  `make build` downloads the pinned toolchain automatically. Older than 1.21,
+  `go.mod` fails to parse before that auto-download can happen.
 - [shellcheck](https://www.shellcheck.net/) --- `make check` hard-fails
   without it
 - Node.js / `npx` --- `make check` runs `markdownlint-cli2` through it
