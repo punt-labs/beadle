@@ -55,7 +55,7 @@ budget:
 // Always quotes to avoid type ambiguity (bare "99" parses as integer,
 // bare "true" parses as boolean).
 // NUL bytes are stripped and the value is capped at maxContractFieldRunes
-// characters to limit adversarial input from email subjects.
+// runes to limit adversarial input from email subjects.
 func escapeYAMLValue(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
 	if utf8.RuneCountInString(s) > maxContractFieldRunes {

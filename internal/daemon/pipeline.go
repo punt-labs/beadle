@@ -273,8 +273,8 @@ func stageContext(args map[string]any, pipe string) string {
 // value rather than the whole thing.
 const truncationMarker = " …[truncated]"
 
-// capRunes returns s truncated to at most n runes. If truncation occurred,
-// truncationMarker is appended so the cut is visible to a reader.
+// capRunes truncates s to at most n runes. If truncation occurred,
+// truncationMarker is appended, so the returned string can exceed n runes.
 func capRunes(s string, n int) string {
 	if utf8.RuneCountInString(s) <= n {
 		return s
