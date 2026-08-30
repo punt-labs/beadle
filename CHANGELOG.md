@@ -66,6 +66,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A daemon command's `prompt` was silently truncated at 500 runes when it
+  became a mission's `success_criteria`.**
+  `internal/daemon.buildStageContract` escaped `cmd.Prompt` with
+  `escapeYAMLValue`, whose rune cap exists to bound *adversarial*
+  email-derived metadata (`message_id`, `from`, `subject`). A command's
+  prompt is neither adversarial nor short: it comes from a GPG-signed
+  command file and carries the worker's actual task instructions. It was
+  being cut mid-sentence with no marker and no log — observed live, when a
+  spawned worker noticed and reported that its own success criteria ended
+  mid-word. `cmd.Prompt` now uses the uncapped `escapeYAMLPipe`; the
+  adversarial metadata fields remain capped, proven by a test that parses
+  the generated contract and asserts both properties at once (beadle-bvo).
+
+- **Five guard clauses in the mail-triggered pipeline abandoned work with no
+  log line.** `internal/daemon`'s auto-reply path and `fireElse` between them
+  had five early returns that left an operator with a pipeline that simply
+  never replied and nothing to diagnose from. Most consequential:
+  `fireElse`'s unregistered-`reply`-command branch, whose own doc comment
+  claimed the case *was* logged — so with no `reply.yaml`, or one whose
+  signature failed at startup, every failed pipeline logged `"pipeline
+  failed, else handler"` at Error and returned without notifying the sender,
+  while the operator reasonably read that line as meaning the sender had been
+  told. All five now log with the pipeline ID and the underlying error. The
+  two auto-reply configuration guards log at Error rather than Warn: a signed
+  `reply` command that declares an arg the daemon never supplies, or names an
+  unregistered runner, fails on every pipeline forever rather than
+  transiently. A failed auto-reply is now also recorded on the pipeline
+  record via `Error`, which previously reported success with the failure
+  visible only in an ephemeral log line (beadle-5k5).
+
 - **`beadle-daemon`'s mail-triggered `ClaudeRunner` execution path never
   actually worked against a real `ethos` CLI, ever, until now.**
   `internal/daemon.buildStageContract` generated a mission contract with
