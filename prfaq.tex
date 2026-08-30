@@ -1119,9 +1119,10 @@ creep and clarifies the product's identity.
   \featureitem{Scheduler catch-up}{missed scheduled runs are skipped, not
     replayed. Catch-up logic adds complexity and ambiguity about which version
     of a command should execute}\label{feat:no-catchup}
-  \featureitem{Non-expiring command-signing keys}{all command-signing keys must
-    have an expiration date. This is a security invariant, not a
-    convenience trade-off}\label{feat:no-nonexpiring}
+  \featureitem{Expired or non-expiring command-signing keys}{all
+    command-signing keys must carry an expiration date that has not yet
+    passed. This is a security invariant, not a convenience
+    trade-off}\label{feat:no-nonexpiring}
 \end{enumerate}
 
 % ══════════════════════════════════════════════════════════════════════════════
