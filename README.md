@@ -347,9 +347,8 @@ scoped the same way.
 
 ## Documentation
 
+[Setup Guide](docs/setup-guide.md) |
 [Design Log](DESIGN.md) |
-[Pipeline v2 Design](docs/pipeline-v2-design.md) |
-[Email Channel Plan](docs/email-channel-plan.md) |
 [Contributing](CONTRIBUTING.md) |
 [Changelog](CHANGELOG.md)
 
