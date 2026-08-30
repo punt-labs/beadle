@@ -81,7 +81,7 @@ outside the module.
 \texttt{internal/channel/}  & Channel interface: \texttt{Message}, \texttt{TrustLevel}, shared types \\
 \texttt{internal/email/}    & IMAP client, MIME parser, trust classifier, SMTP/Resend senders \\
 \texttt{internal/pgp/}      & GPG signature verification (isolated GNUPGHOME) and signing (system keyring) \\
-\texttt{internal/mcp/}      & MCP tool definitions and handlers (8 tools) \\
+\texttt{internal/mcp/}      & MCP tool definitions and handlers (21 always-on tools; 2 poll tools gated on config) \\
 \texttt{internal/secret/}   & Credential resolution: OS keychain $\to$ file $\to$ env var \\
 \bottomrule
 \end{tabular}

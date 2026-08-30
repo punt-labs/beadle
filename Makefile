@@ -60,17 +60,20 @@ prfaq: ## Compile .tex files to .pdf and clean intermediate artifacts
 	@for f in $(TEX_FILES); do \
 	  echo "Compiling $$f ..."; \
 	  dir=$$(dirname "$$f"); base=$$(basename "$$f" .tex); \
-	  pdflatex -interaction=nonstopmode -output-directory="$$dir" "$$f" > /dev/null 2>&1; \
-	  if [ -f "$$dir/$$base.bib" ] && command -v biber > /dev/null 2>&1; then \
-	    (cd "$$dir" && biber "$$base") > /dev/null 2>&1 || true; \
-	    pdflatex -interaction=nonstopmode -output-directory="$$dir" "$$f" > /dev/null 2>&1; \
+	  rm -f "$$dir/$$base.pdf"; \
+	  pdflatex -interaction=nonstopmode -halt-on-error -output-directory="$$dir" "$$f" > /dev/null 2>&1 \
+	    || { echo "Error: $$f failed to compile (pdflatex)" >&2; exit 1; }; \
+	  if [ -f "$$dir/$$base.bcf" ]; then \
+	    command -v biber > /dev/null 2>&1 \
+	      || { echo "Error: $$f uses biblatex but biber is not installed" >&2; exit 1; }; \
+	    (cd "$$dir" && biber "$$base") > /dev/null 2>&1 \
+	      || { echo "Error: $$f failed to resolve citations (biber)" >&2; exit 1; }; \
+	    pdflatex -interaction=nonstopmode -halt-on-error -output-directory="$$dir" "$$f" > /dev/null 2>&1 \
+	      || { echo "Error: $$f failed to compile (pdflatex, post-biber)" >&2; exit 1; }; \
 	  fi; \
-	  pdflatex -interaction=nonstopmode -output-directory="$$dir" "$$f" > /dev/null 2>&1; \
-	  if [ -f "$$dir/$$base.pdf" ]; then \
-	    echo "  $$dir/$$base.pdf"; \
-	  else \
-	    echo "Error: $$f failed to compile" >&2; exit 1; \
-	  fi; \
+	  pdflatex -interaction=nonstopmode -halt-on-error -output-directory="$$dir" "$$f" > /dev/null 2>&1 \
+	    || { echo "Error: $$f failed to compile (pdflatex, final pass)" >&2; exit 1; }; \
+	  echo "  $$dir/$$base.pdf"; \
 	done
 	@rm -f $(LATEX_ARTIFACTS)
 
