@@ -19,7 +19,7 @@
   title        = {Cisco's 2025 Data Privacy Benchmark Study},
   year         = {2025},
   url          = {https://newsroom.cisco.com/c/r/newsroom/en/us/a/y2025/m04/cisco-2025-data-privacy-benchmark-study-privacy-landscape-grows-increasingly-complex-in-the-age-of-ai.html},
-  note         = {2,600 professionals across 12 countries; 90\% see local storage as safer; 64\% worry about cloud GenAI data exposure},
+  note         = {2,600 professionals across 12 countries; 64\% worry about inadvertently sharing sensitive info publicly/with competitors via GenAI (not cloud-specific); 90\% see local storage as safer; 91\% (up 5pp YoY) trust global providers for better data protection},
 }
 
 @online{humanlayer2024acp,
@@ -103,7 +103,7 @@
   title        = {{AutoGPT}},
   year         = {2024},
   url          = {https://github.com/Significant-Gravitas/AutoGPT},
-  note         = {182,000+ GitHub stars; autonomous AI agent framework with local deployment},
+  note         = {187,000+ GitHub stars as of 2026-08; autonomous AI agent framework with local deployment},
 }
 
 @online{unit42_2026_openclaw,
@@ -136,4 +136,52 @@
   year         = {2024},
   url          = {https://proton.me/blog/proton-100-million-accounts},
   note         = {100M+ accounts; demonstrates demand for privacy-focused communication},
+}
+
+@online{socradar2026cve25253,
+  author       = {{SOCRadar}},
+  title        = {{CVE-2026-25253}: 1-Click {RCE} in {OpenClaw} Through Auth Token Exfiltration},
+  year         = {2026},
+  url          = {https://socradar.io/blog/cve-2026-25253-rce-openclaw-auth-token/},
+  note         = {Primary technical writeup of the gatewayUrl/WebSocket-token-exfiltration RCE chain, CVSS 8.8},
+}
+
+@online{thn2026openclawrce,
+  author       = {{The Hacker News}},
+  title        = {{OpenClaw} Bug Enables One-Click Remote Code Execution via Malicious Link},
+  year         = {2026},
+  url          = {https://thehackernews.com/2026/02/openclaw-bug-enables-one-click-remote.html},
+  note         = {Corroborates CVE-2026-25253 attack chain; disclosed 2026-01-26, patched in v2026.1.29},
+}
+
+@online{ghsa2026mc68clawdocker,
+  author       = {{OpenClaw / {GitHub} Security Advisory}},
+  title        = {{GHSA}-mc68-q9jw-2h3v: Command Injection in Clawdbot Docker Execution via {PATH} Environment Variable},
+  year         = {2026},
+  url          = {https://github.com/openclaw/openclaw/security/advisories/GHSA-mc68-q9jw-2h3v},
+  note         = {Official advisory for CVE-2026-24763: authenticated command injection (CWE-78) via unsafe PATH handling in Docker sandbox execution, unrelated to the skill directory},
+}
+
+@online{koisecurity2026clawhub,
+  author       = {Yomtov, Oren and {Koi Security}},
+  title        = {Analysis of {ClawHub} Malicious Skills Poisoning ({ClawHavoc})},
+  year         = {2026},
+  url          = {https://www.esecurityplanet.com/threats/hundreds-of-malicious-skills-found-in-openclaws-clawhub/},
+  note         = {Audit of all 2,857 ClawHub skills found 341 malicious (11.9\%); 335 traced to the ClawHavoc campaign distributing AMOS infostealer malware to an estimated 300,000 OpenClaw users},
+}
+
+@online{langchain2025agenteng,
+  author       = {{LangChain}},
+  title        = {State of Agent Engineering},
+  year         = {2025},
+  url          = {https://www.langchain.com/state-of-agent-engineering},
+  note         = {Survey of 1,340 practitioners, Nov 18--Dec 2, 2025; 57.3\% have agents in production, up from 51\% the prior year; supersedes/updates langchain2024agents production figure},
+}
+
+@online{cnbc2026openclawstars,
+  author       = {{CNBC}},
+  title        = {From Clawdbot to Moltbot to {OpenClaw}: Meet the {AI} Agent Generating Buzz and Fear Globally},
+  year         = {2026},
+  url          = {https://www.cnbc.com/2026/02/02/openclaw-open-source-ai-agent-rise-controversy-clawdbot-moltbot-moltbook.html},
+  note         = {Reports 145,000+ GitHub stars and 20,000 forks as of 2026-02-02, the commonly-cited viral-growth milestone},
 }
