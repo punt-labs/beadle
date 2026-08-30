@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // mockClaudeRunner implements Runner for pipeline tests.
@@ -449,4 +452,184 @@ func TestExecutor_ElseNoReplyCommand(t *testing.T) {
 	assert.Equal(t, "failed", p.Status)
 	// No reply command — else handler logs but does not call runner.
 	assert.Len(t, runner.calls, 0)
+}
+
+func TestStageContext(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]any
+		pipe string
+		want string
+	}{
+		{
+			name: "no args, no pipe",
+			args: map[string]any{},
+			pipe: "",
+			want: "stage args: none\npipeline output: none",
+		},
+		{
+			name: "one arg, no pipe",
+			args: map[string]any{"env": "prod"},
+			pipe: "",
+			want: "stage args: env=prod\npipeline output: none",
+		},
+		{
+			name: "multiple args sorted by key",
+			args: map[string]any{"zebra": "z", "alpha": "a", "mid": 1},
+			pipe: "",
+			want: "stage args: alpha=a, mid=1, zebra=z\npipeline output: none",
+		},
+		{
+			name: "pipe carried through",
+			args: map[string]any{},
+			pipe: `{"title":"x"}`,
+			want: `stage args: none` + "\n" + `pipeline output: {"title":"x"}`,
+		},
+		{
+			name: "args and pipe together",
+			args: map[string]any{"to": "jim@test.com"},
+			pipe: "prior output",
+			want: "stage args: to=jim@test.com\npipeline output: prior output",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stageContext(tt.args, tt.pipe)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestStageContext_LongArgValueCapped(t *testing.T) {
+	long := ""
+	for i := 0; i < 600; i++ {
+		long += "a"
+	}
+	got := stageContext(map[string]any{"note": long}, "")
+
+	capped := ""
+	for i := 0; i < 500; i++ {
+		capped += "a"
+	}
+	assert.Equal(t, "stage args: note="+capped+"\npipeline output: none", got)
+}
+
+// TestBuildStageContract asserts the generated contract no longer emits
+// inputs.args or inputs.pipeline_output -- both are unknown fields that
+// ethos's strict-decode mission-contract schema rejects (only inputs.trigger,
+// inputs.files, inputs.ticket, and inputs.references are recognized). The
+// content those two fields used to carry must survive in the top-level
+// context field instead.
+func TestBuildStageContract(t *testing.T) {
+	meta := EmailMeta{MessageID: "42", From: "alice@example.com", Subject: "Deploy please"}
+	cmd := &Command{
+		Prompt:   "Deploy to production",
+		WriteSet: []string{"deploy/manifest.yaml"},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+		}{Rounds: 2, ReflectionAfterEach: true},
+	}
+	call := CommandCall{Command: "deploy", Args: map[string]any{"env": "prod"}}
+
+	out := buildStageContract(meta, cmd, call, `{"summary":"prior stage output"}`)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+
+	assert.Equal(t, "claude", doc["leader"])
+	assert.Equal(t, "bwk", doc["worker"])
+
+	inputs, ok := doc["inputs"].(map[string]any)
+	require.True(t, ok, "inputs must be a map")
+	_, hasArgs := inputs["args"]
+	assert.False(t, hasArgs, "inputs.args must not be emitted -- unknown field rejected by ethos")
+	_, hasPipelineOutput := inputs["pipeline_output"]
+	assert.False(t, hasPipelineOutput, "inputs.pipeline_output must not be emitted -- unknown field rejected by ethos")
+
+	trigger, ok := inputs["trigger"].(map[string]any)
+	require.True(t, ok, "inputs.trigger must be a map")
+	assert.Equal(t, "email", trigger["type"])
+	assert.Equal(t, meta.MessageID, trigger["message_id"])
+
+	contextVal, ok := doc["context"].(string)
+	require.True(t, ok, "context must be a string")
+	assert.Contains(t, contextVal, "env=prod")
+	assert.Contains(t, contextVal, `{"summary":"prior stage output"}`)
+
+	ws, ok := doc["write_set"].([]any)
+	require.True(t, ok, "write_set must be a list")
+	assert.Equal(t, []any{"deploy/manifest.yaml"}, ws)
+
+	budget, ok := doc["budget"].(map[string]any)
+	require.True(t, ok, "budget must be a map")
+	assert.Equal(t, 2, budget["rounds"])
+	assert.Equal(t, true, budget["reflection_after_each"])
+}
+
+func TestBuildStageContract_NoArgsNoPipe(t *testing.T) {
+	meta := EmailMeta{MessageID: "7", From: "bob@example.com", Subject: "Greet"}
+	cmd := &Command{
+		Prompt:   "Greet the user",
+		WriteSet: []string{"output/greet.txt"},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+		}{Rounds: 1},
+	}
+	call := CommandCall{Command: "greet", Args: map[string]any{}}
+
+	out := buildStageContract(meta, cmd, call, "")
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+
+	contextVal, ok := doc["context"].(string)
+	require.True(t, ok, "context must be a string")
+	assert.Equal(t, "stage args: none\npipeline output: none", contextVal)
+}
+
+// TestBuildStageContract_ValidatesAgainstRealEthosCLI invokes the real
+// `ethos mission create --file <path>` binary (via os/exec, the same
+// mechanism createMissionFromContract in mission.go uses) against a
+// contract built by buildStageContract, and asserts it succeeds. This is
+// the exact bug that shipped undetected: the generated contract was never
+// validated against the real CLI, only against a hand-rolled string or
+// struct shape that did not encode ethos's actual schema. A test that only
+// checks the Go string, without handing it to the real ethos binary, would
+// not have caught it and must not be trusted to catch a recurrence.
+func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
+	ethosPath, err := exec.LookPath("ethos")
+	if err != nil {
+		t.Skip("ethos not on PATH; skipping real-CLI mission-contract validation")
+	}
+
+	meta := EmailMeta{MessageID: "regression-8gt", From: "jim@test.com", Subject: "beadle-8gt regression test"}
+	cmd := &Command{
+		Prompt:   "Deploy to production",
+		WriteSet: []string{"internal/daemon/testdata/mission-regression-fixture-8gt.txt"},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+		}{Rounds: 1, ReflectionAfterEach: false},
+	}
+	call := CommandCall{Command: "deploy", Args: map[string]any{"env": "prod"}}
+
+	contract := buildStageContract(meta, cmd, call, `{"prior":"output"}`)
+
+	f, err := os.CreateTemp(t.TempDir(), "contract-*.yaml")
+	require.NoError(t, err)
+	_, err = f.WriteString(contract)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	out, err := exec.Command(ethosPath, "mission", "create", "--file", f.Name()).CombinedOutput()
+	require.NoError(t, err, "ethos mission create rejected the generated contract: %s", string(out))
+
+	missionID, parseErr := parseMissionID(string(out))
+	require.NoError(t, parseErr)
+
+	t.Cleanup(func() {
+		_ = exec.Command(ethosPath, "mission", "abandon", missionID, "--reason", "test cleanup").Run()
+	})
 }
