@@ -239,10 +239,11 @@ budget:
 // stageContext formats a stage's call args and the prior stage's pipeline
 // output as the free-text content of the mission contract's context field.
 // Args are sorted by key for deterministic output. Each arg value is capped
-// at 500 runes, matching escapeYAMLValue's cap on other user-controlled
-// contract fields -- the pipe value itself is left uncapped, since pipe
-// data can be up to 1MB and escapeYAMLPipe (applied by the caller to the
-// whole returned string) is the field meant to carry it uncapped.
+// at maxContractFieldRunes, matching escapeYAMLValue's cap on other
+// user-controlled contract fields -- the pipe value itself is left
+// uncapped, since pipe data can be up to 1MB and escapeYAMLPipe (applied by
+// the caller to the whole returned string) is the field meant to carry it
+// uncapped.
 func stageContext(args map[string]any, pipe string) string {
 	pipeValue := "none"
 	if pipe != "" {
@@ -259,7 +260,7 @@ func stageContext(args map[string]any, pipe string) string {
 
 		parts := make([]string, len(keys))
 		for i, k := range keys {
-			parts[i] = fmt.Sprintf("%s=%s", k, capRunes(fmt.Sprint(args[k]), 500))
+			parts[i] = fmt.Sprintf("%s=%s", k, capRunes(fmt.Sprint(args[k]), maxContractFieldRunes))
 		}
 		argsText = strings.Join(parts, ", ")
 	}
@@ -267,12 +268,18 @@ func stageContext(args map[string]any, pipe string) string {
 	return "stage args: " + argsText + "\npipeline output: " + pipeValue
 }
 
-// capRunes returns s truncated to at most n runes.
+// truncationMarker is appended by capRunes when a value is actually cut, so
+// a worker reading the context field can tell it is looking at a partial
+// value rather than the whole thing.
+const truncationMarker = " …[truncated]"
+
+// capRunes returns s truncated to at most n runes. If truncation occurred,
+// truncationMarker is appended so the cut is visible to a reader.
 func capRunes(s string, n int) string {
 	if utf8.RuneCountInString(s) <= n {
 		return s
 	}
-	return string([]rune(s)[:n])
+	return string([]rune(s)[:n]) + truncationMarker
 }
 
 // writeSetYAML formats a write_set slice as YAML list items.
