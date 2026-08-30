@@ -230,7 +230,7 @@ budget:
 		escapeYAMLValue(meta.Subject),
 		escapeYAMLPipe(stageContext(call.Args, pipe)),
 		writeSetYAML(cmd.WriteSet),
-		escapeYAMLValue(cmd.Prompt),
+		escapeYAMLPipe(cmd.Prompt),
 		cmd.Budget.Rounds,
 		cmd.Budget.ReflectionAfterEach,
 	)

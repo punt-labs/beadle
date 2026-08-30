@@ -612,6 +612,47 @@ func TestBuildStageContract_NoArgsNoPipe(t *testing.T) {
 	assert.Equal(t, "stage args: none\npipeline output: none", contextVal)
 }
 
+// TestBuildStageContract_PromptUncappedMetadataCapped is the regression test
+// for beadle-bvo: cmd.Prompt is trusted, GPG-signed command-file content
+// that becomes success_criteria, not adversarial email metadata, so it must
+// not be silently truncated at maxContractFieldRunes the way message_id,
+// from, and subject still are.
+func TestBuildStageContract_PromptUncappedMetadataCapped(t *testing.T) {
+	longPrompt := strings.Repeat("p", maxContractFieldRunes+250)
+	longMeta := strings.Repeat("m", maxContractFieldRunes+250)
+
+	meta := EmailMeta{MessageID: longMeta, From: longMeta, Subject: longMeta}
+	cmd := &Command{
+		Prompt:   longPrompt,
+		WriteSet: []string{"output/greet.txt"},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+		}{Rounds: 1},
+	}
+	call := CommandCall{Command: "greet", Args: map[string]any{}}
+
+	out := buildStageContract(meta, cmd, call, "")
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+
+	sc, ok := doc["success_criteria"].([]any)
+	require.True(t, ok, "success_criteria must be a list")
+	require.Len(t, sc, 1)
+	assert.Equal(t, longPrompt, sc[0], "cmd.Prompt must survive byte-identical, uncapped")
+
+	inputs, ok := doc["inputs"].(map[string]any)
+	require.True(t, ok, "inputs must be a map")
+	trigger, ok := inputs["trigger"].(map[string]any)
+	require.True(t, ok, "inputs.trigger must be a map")
+
+	wantCapped := longMeta[:maxContractFieldRunes]
+	assert.Equal(t, wantCapped, trigger["message_id"], "message_id must remain capped")
+	assert.Equal(t, wantCapped, trigger["from"], "from must remain capped")
+	assert.Equal(t, wantCapped, trigger["subject"], "subject must remain capped")
+}
+
 // isolatedEthosEnv builds a process environment for exec'ing the real ethos
 // CLI that reads the real, current identity/archetype data but writes
 // nothing to it. ethos derives its global root (session bindings, mission

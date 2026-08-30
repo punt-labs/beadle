@@ -70,9 +70,12 @@ func escapeYAMLValue(s string) string {
 	return `"` + escaped + `"`
 }
 
-// escapeYAMLPipe returns a double-quoted YAML scalar suitable for pipeline
-// output values. Unlike escapeYAMLValue it has no length cap, since pipe
-// data can be up to 1MB. NUL bytes are still stripped.
+// escapeYAMLPipe returns a double-quoted YAML scalar for trusted content
+// that must not be silently truncated: pipeline stage output (which can run
+// to 1MB) and a Command's Prompt, which becomes a mission's success_criteria
+// and is authored by the recipe's GPG-signed command file, not by an email
+// sender. Unlike escapeYAMLValue it has no length cap. NUL bytes are still
+// stripped.
 func escapeYAMLPipe(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
