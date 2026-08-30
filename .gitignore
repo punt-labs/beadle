@@ -238,8 +238,13 @@ docs/*.toc
 # mcp-proxy, prfaq, punt-kit, quarry, vox, biff, lux, z-spec, and
 # public-website. prfaq.tex/prfaq.pdf/prfaq.bib are tracked again for the
 # same reason: they are root-level files under the same disproven theory.
+# prfaq.pdf additionally needs a negation here: the broader `*.pdf` LaTeX
+# build-artifact rule above (line 169) still matches it, so removing only
+# the specific prfaq.pdf line above left it re-ignored for anyone who
+# doesn't already have it tracked (caught by Bugbot on PR #246).
 research/
 meetings/
+!prfaq.pdf
 
 # Mount path of the former `.punt-labs/ethos` submodule (punt-labs/team). Same
 # payload argument as the trim above: the registry is ~1 MB / 245 files of
