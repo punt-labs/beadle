@@ -28,8 +28,10 @@ type Pipeline struct {
 	Current   int           `json:"current"`
 	Results   []string      `json:"results"`
 	Status    string        `json:"status"`
-	Error     string        `json:"error"`
-	WriteSet  []string      `json:"write_set"`
+	// Error may be set even when Status is "completed" -- it records a
+	// non-fatal auto-reply failure. Test Status for success, not Error.
+	Error    string   `json:"error"`
+	WriteSet []string `json:"write_set"`
 }
 
 // Spawner runs a Claude Code worker session for a mission.
