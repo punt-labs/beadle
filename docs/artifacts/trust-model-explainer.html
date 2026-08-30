@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Beadle — What it can do, and why you can trust it</title>
 <style>
   :root {
@@ -179,8 +180,8 @@
   <h2>Whose mailbox is this?</h2>
   <p>Beadle isn't a tool that reads a person's personal inbox. It gives an <strong>autonomous agent</strong> (say, <code>claude@punt-labs.com</code>) a mailbox of its own. Email becomes a channel people can use to send that agent instructions — from anywhere, without a live session. That's powerful, and it's exactly why it needs a real trust model: anyone who can get a message into that mailbox is, in some sense, talking directly to the agent.</p>
 
-  <h2>Two checks. Always. No exceptions.</h2>
-  <p>Every message that arrives in the agent's mailbox goes through the same two checks, whether a human is driving right now or a background process is running unattended:</p>
+  <h2>Two checks decide everything the agent does</h2>
+  <p>Every message is labeled with its verification rung the moment it's read — check 1 always runs, whether a human is looking at the mailbox right now or a background process is. But check 2, the permission grant, only gates the agent <em>acting</em> on a message — replying, unattended processing, or triggering a recipe. Reading requires nothing; those two checks are what stand between reading and acting:</p>
 
   <div class="checks">
     <div class="check-card">
