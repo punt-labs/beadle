@@ -181,7 +181,7 @@
   <p>Beadle isn't a tool that reads a person's personal inbox. It gives an <strong>autonomous agent</strong> (say, <code>claude@punt-labs.com</code>) a mailbox of its own. Email becomes a channel people can use to send that agent instructions — from anywhere, without a live session. That's powerful, and it's exactly why it needs a real trust model: anyone who can get a message into that mailbox is, in some sense, talking directly to the agent.</p>
 
   <h2>Two checks decide everything the agent does</h2>
-  <p>Every message is labeled with its verification rung the moment it's read — check 1 always runs, whether a human is looking at the mailbox right now or a background process is. But check 2, the permission grant, only gates the agent <em>acting</em> on a message — replying, unattended processing, or triggering a recipe. Reading requires nothing; those two checks are what stand between reading and acting:</p>
+  <p>Every message shows up with its verification rung — check 1 always runs and needs no grant from anyone. Check 2, the permission grant, is what decides everything past that: without <code>r</code>, a sender's message appears with its subject redacted and can't be opened at all. Hold <code>r</code> and it opens; hold <code>w</code> and the agent can reply to it; hold <code>x</code> and it can trigger a recipe. Nothing happens without an explicit grant for it:</p>
 
   <div class="checks">
     <div class="check-card">
@@ -267,7 +267,7 @@
   <h2>Quick reference</h2>
   <table>
     <tr><th>What's happening</th><th>Check 1 — verified?</th><th>Check 2 — granted?</th><th>What happens</th></tr>
-    <tr><td>A session reads the mailbox</td><td>Shown, not required</td><td>—</td><td>Everything is shown, labeled by trust rung; a human or agent decides</td></tr>
+    <tr><td>A session reads the mailbox</td><td>Shown regardless</td><td><code>r</code> (per sender)</td><td>Permitted senders' messages open fully; everyone else's subject is redacted and the body can't be opened</td></tr>
     <tr><td>Getting a reply sent</td><td>Sealed or Signed &amp; checked</td><td><code>w</code></td><td>The agent reads the message and replies using judgment</td></tr>
     <tr><td>Unattended inbox processing</td><td>Sealed or Signed &amp; checked</td><td><code>r</code>/<code>w</code></td><td>Same as above, just running on a timer instead of on request</td></tr>
     <tr><td>Email triggers a background task</td><td>Sealed or Signed &amp; checked</td><td><code>x</code></td><td>One recipe signed by this daemon's authorizer runs — nothing else can</td></tr>
