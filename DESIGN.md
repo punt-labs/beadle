@@ -2565,11 +2565,10 @@ fingerprint pattern `VerifySignature` itself enforces before it is accepted.
 `resolveDaemonOwnerKeyID`, which returns `(ownerKeyID string,
 loadCommandsEnabled bool)` — the second value is what actually enforces
 "disables command loading, never the daemon process": `loadDaemonCommands`
-checks `loadCommandsEnabled` before ever calling `LoadCommands`, so a
-present-but-unresolvable `daemon.json` never reaches the loader at all,
-never mind loading commands unverified. Only a genuinely absent
-`daemon.json` yields `("", true)` — legacy, pre-DES-035 behavior. The
-resolved values thread into `LoadCommands(dir, gpgBinary, ownerKeyID,
+checks `loadCommandsEnabled` before ever calling `LoadCommands`, so no
+`daemon.json` — present-but-unresolvable, or entirely absent — ever
+reaches the loader (beadle-kua, amending the original shipped behavior
+below). The resolved values thread into `LoadCommands(dir, gpgBinary, ownerKeyID,
 logger)` → `loadCommand`, which calls `VerifySignature` — gated on
 `ownerKeyID != ""` — immediately after YAML decode and before
 `validateCommand`. `LoadCommands` takes the daemon's own configured
@@ -2606,9 +2605,10 @@ re-resolving `ownerKeyID` per command file instead of once at startup
 (redundant, no benefit); verifying the signature after schema validation
 instead of before (misreports an authorization failure as a schema error);
 calling `VerifySignature` unconditionally regardless of whether an owner
-key resolved (rejects every command file the moment `daemon.json` is
-unset, since an empty `ownerKeyID` fails the fingerprint check — the
-opposite of the intended zero-behavior-change default); failing the whole
+key resolved (produces a confusing per-file rejection error for every
+command instead of one clear "command loading disabled" state — the
+mechanism is wrong even independent of what the unset-config default
+should be); failing the whole
 daemon process when the owner key can't be resolved (disproportionate —
 verified that no other daemon subsystem depends on command loading
 succeeding); routing a rejected signature into `docs/audit-beadle.tex`'s
@@ -2618,3 +2618,21 @@ silently instead of deciding it in this document.
 
 See `docs/wire-verifysignature.md` for the full design, the rejected-
 alternatives table, and the implementation plan.
+
+**Amendment (beadle-kua, 2026-08-30):** shipped DES-035 preserved one
+legacy path — a genuinely absent `daemon.json` returned `("", true)` and
+`loadDaemonCommands` loaded every command file unsigned, the exact
+pre-DES-035 posture, kept for backward compatibility with an unconfigured
+deployment. Operator ruling: no software using this feature has shipped
+yet, so there is no deployment to be compatible with — a legacy fallback
+path here is clutter defending a compatibility need that does not exist,
+and it directly contradicts `docs/ARCHITECTURE.md`'s "zero agent
+authority" invariant, which states the default should require
+authorization, not assume it absent explicit configuration. Fixed: the
+absent-`daemon.json` branch now returns `("", false)`, identical to the
+present-but-unresolvable branch — `loadDaemonCommands` already treated
+that value as "never call `LoadCommands`," so no change was needed there.
+The one property preserved on purpose: the absent case still logs nothing
+at Error — it remains the ordinary, expected "not configured yet" state,
+distinct from a misconfiguration, even though both now result in zero
+commands loading.
