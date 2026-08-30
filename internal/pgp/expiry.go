@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // ExpiryOption configures CheckKeyExpiry.
@@ -56,14 +58,16 @@ func CheckKeyExpiry(gpgBinary, keyID string, opts ...ExpiryOption) error {
 
 // parseColonExpiry inspects gpg --with-colons output for pub and sub
 // records. It requires the pub record's expiry field (column 6, 0-indexed)
-// to be non-empty and non-zero, and applies the same requirement to any sub
-// record whose capabilities field (column 11, 0-indexed) marks it signing-
-// capable ("s") — a signing subkey with no expiry is exactly as dangerous
-// as a non-expiring primary key. Returns an error if any such key or subkey
-// has no expiry, if no pub record is found, or if more than one pub record
-// matches (ambiguous keyID).
+// to be non-empty, non-zero, and not already in the past, and applies the
+// same requirement to any sub record whose capabilities field (column 11,
+// 0-indexed) marks it signing-capable ("s") — a signing subkey with no
+// expiry, or one that has already expired, is exactly as dangerous as a
+// non-expiring or expired primary key. Returns an error if any such key or
+// subkey has no expiry or has already expired, if no pub record is found,
+// or if more than one pub record matches (ambiguous keyID).
 func parseColonExpiry(output, keyID string) error {
 	pubCount := 0
+	now := time.Now().Unix()
 
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Split(line, ":")
@@ -80,12 +84,18 @@ func parseColonExpiry(output, keyID string) error {
 			if fields[6] == "" || fields[6] == "0" {
 				return fmt.Errorf("key %q has no expiration date: non-expiring signing keys are not permitted", keyID)
 			}
+			if err := checkNotExpired(fields[6], now); err != nil {
+				return fmt.Errorf("key %q %w", keyID, err)
+			}
 		case "sub":
 			if len(fields) < 12 || !strings.Contains(fields[11], "s") {
 				continue
 			}
 			if fields[6] == "" || fields[6] == "0" {
 				return fmt.Errorf("key %q has a signing subkey with no expiration date: non-expiring signing keys are not permitted", keyID)
+			}
+			if err := checkNotExpired(fields[6], now); err != nil {
+				return fmt.Errorf("key %q signing subkey %w", keyID, err)
 			}
 		}
 	}
@@ -97,5 +107,21 @@ func parseColonExpiry(output, keyID string) error {
 		return fmt.Errorf("key %q is ambiguous: matched %d public keys; use a unique key identifier (fingerprint)", keyID, pubCount)
 	}
 
+	return nil
+}
+
+// checkNotExpired parses a gpg --with-colons expiry field — a Unix
+// timestamp string — and returns an error if it names a time at or before
+// now. The caller has already ruled out the "no expiry set" case (an empty
+// field or "0"): every field reaching this function is expected to hold a
+// real timestamp.
+func checkNotExpired(field string, now int64) error {
+	exp, err := strconv.ParseInt(field, 10, 64)
+	if err != nil {
+		return fmt.Errorf("has an unparseable expiry timestamp %q: %w", field, err)
+	}
+	if exp <= now {
+		return fmt.Errorf("has expired: expiration was %s", time.Unix(exp, 0).UTC().Format(time.RFC3339))
+	}
 	return nil
 }

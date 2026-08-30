@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,6 +39,36 @@ Expire-Date: 1y
 
 	err = CheckKeyExpiry(gpgBin, "expiry@example.com")
 	assert.NoError(t, err, "key with expiry should be accepted")
+}
+
+// TestCheckKeyExpiry_Expired proves CheckKeyExpiry rejects a key whose
+// expiration date has genuinely passed -- as distinct from
+// TestCheckKeyExpiry_WithoutExpiry, which covers a key that never had an
+// expiry at all. Both are real, separate rejections: no expiry, and
+// expired. This generates a key with a 3-second expiry, waits for it to
+// actually expire, then confirms CheckKeyExpiry now reports it -- gpg
+// --with-colons keeps the same expiry timestamp in its output whether or
+// not that time has passed, so a check that only tested presence and
+// non-zero-ness (the prior behavior) could never observe this.
+func TestCheckKeyExpiry_Expired(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+
+	home := shortGPGHome(t)
+	base := []string{"--homedir", home, "--batch", "--no-tty"}
+
+	genCmd := exec.Command(gpgBin, append(base, "--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-generate-key", "Expired Test <expired@example.com>", "default", "default", "seconds=3")...)
+	genCmd.Stderr = os.Stderr
+	require.NoError(t, genCmd.Run(), "key generation failed")
+
+	time.Sleep(5 * time.Second)
+
+	err = CheckKeyExpiry(gpgBin, "expired@example.com", Homedir(home))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expired")
 }
 
 func TestCheckKeyExpiry_WithoutExpiry(t *testing.T) {
@@ -244,6 +275,31 @@ func TestParseColonExpiry(t *testing.T) {
 			keyID:   "test@example.com",
 			wantErr: true,
 			errMsg:  "signing subkey with no expiration date",
+		},
+		{
+			// 1000000000 (Sept 2001) is in the past regardless of when this
+			// test runs -- distinct from "expiry field zero" above, which
+			// covers "no expiry set" rather than "expiry set, and passed."
+			name:    "primary key expiry is in the past",
+			output:  "pub:e:2048:1:ABCDEF:1234567890:1000000000::u:::scESC:::\n",
+			keyID:   "test@example.com",
+			wantErr: true,
+			errMsg:  "expired",
+		},
+		{
+			name: "signing subkey expiry is in the past",
+			output: "pub:u:2048:1:ABCDEF:1234567890:1893456000::u:::scESC:::\n" +
+				"sub:e:2048:1:111111:1234567890:1000000000:::::s:::\n",
+			keyID:   "test@example.com",
+			wantErr: true,
+			errMsg:  "expired",
+		},
+		{
+			name:    "unparseable expiry field",
+			output:  "pub:u:2048:1:ABCDEF:1234567890:not-a-timestamp::u:::scESC:::\n",
+			keyID:   "test@example.com",
+			wantErr: true,
+			errMsg:  "unparseable",
 		},
 	}
 	for _, tt := range tests {
