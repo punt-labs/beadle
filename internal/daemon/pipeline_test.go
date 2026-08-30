@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -49,6 +50,14 @@ func (m *mockClaudeRunner) Run(_ context.Context, _ *Executor, _ *Pipeline, idx 
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// testLoggerCapture returns a logger that writes to buf, so a test can
+// assert on the text of a specific log line rather than only its side
+// effects.
+func testLoggerCapture() (*slog.Logger, *bytes.Buffer) {
+	var buf bytes.Buffer
+	return slog.New(slog.NewTextHandler(&buf, nil)), &buf
 }
 
 func testCommands() map[string]*Command {
@@ -433,6 +442,106 @@ func TestExecutor_ElseReply(t *testing.T) {
 	// Else handler fires a reply.
 	require.Len(t, runner.calls, 1)
 	assert.Equal(t, "reply", runner.calls[0].Cmd)
+}
+
+// TestExecutor_AutoReplyInvalidArgsLogged is the regression test for
+// beadle-5k5's first guard: an invalid auto-reply arg set used to be
+// swallowed silently. reply here requires an "extra" arg the auto-reply
+// call never supplies, so ValidateArgs fails and the failure must be
+// logged with the pipeline ID and the underlying error.
+func TestExecutor_AutoReplyInvalidArgsLogged(t *testing.T) {
+	runner := &mockClaudeRunner{
+		results: []WorkerResult{{Output: "Hello, Jim!"}},
+	}
+	logger, buf := testLoggerCapture()
+
+	cmds := testCommands()
+	reply := *cmds["reply"]
+	reply.Args = append(append([]CommandArg{}, reply.Args...), CommandArg{Name: "extra", Type: "string", Required: true})
+	cmds["reply"] = &reply
+
+	exec := &Executor{
+		Planner: &StubPlanner{
+			Result: []CommandCall{{Command: "greet", Args: map[string]any{}}},
+		},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	meta := EmailMeta{MessageID: "20", From: "jim@test.com", Subject: "Test"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.NoError(t, err)
+
+	assert.Equal(t, "completed", p.Status)
+	assert.Len(t, p.Results, 1) // no auto-reply appended: args invalid
+	assert.Len(t, runner.calls, 1)
+
+	logged := buf.String()
+	assert.Contains(t, logged, p.ID)
+	assert.Contains(t, logged, "missing required arg")
+}
+
+// TestExecutor_FireElseInvalidArgsLogged is the regression test for
+// beadle-5k5's second guard: fireElse's ValidateArgs failure used to
+// return with no log line at all.
+func TestExecutor_FireElseInvalidArgsLogged(t *testing.T) {
+	runner := &mockClaudeRunner{}
+	logger, buf := testLoggerCapture()
+
+	cmds := testCommands()
+	reply := *cmds["reply"]
+	reply.Args = append(append([]CommandArg{}, reply.Args...), CommandArg{Name: "extra", Type: "string", Required: true})
+	cmds["reply"] = &reply
+
+	exec := &Executor{
+		Planner:  &StubPlanner{Err: fmt.Errorf("no match")},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	meta := EmailMeta{MessageID: "21", From: "carol@test.com", Subject: "Unknown"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.Error(t, err)
+
+	assert.Equal(t, "failed", p.Status)
+	assert.Len(t, runner.calls, 0) // else reply never ran: args invalid
+
+	logged := buf.String()
+	assert.Contains(t, logged, p.ID)
+	assert.Contains(t, logged, "missing required arg")
+}
+
+// TestExecutor_FireElseRunnerNotRegisteredLogged is the regression test for
+// beadle-5k5's third guard: fireElse's runner-lookup failure used to return
+// with no log line, unlike the identical condition on the auto-reply path.
+func TestExecutor_FireElseRunnerNotRegisteredLogged(t *testing.T) {
+	runner := &mockClaudeRunner{}
+	logger, buf := testLoggerCapture()
+
+	cmds := testCommands()
+	reply := *cmds["reply"]
+	reply.Runner = "nonexistent"
+	cmds["reply"] = &reply
+
+	exec := &Executor{
+		Planner:  &StubPlanner{Err: fmt.Errorf("no match")},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	meta := EmailMeta{MessageID: "22", From: "dave@test.com", Subject: "Unknown"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.Error(t, err)
+
+	assert.Equal(t, "failed", p.Status)
+	assert.Len(t, runner.calls, 0)
+
+	logged := buf.String()
+	assert.Contains(t, logged, p.ID)
+	assert.Contains(t, logged, "nonexistent")
 }
 
 func TestExecutor_ElseNoReplyCommand(t *testing.T) {

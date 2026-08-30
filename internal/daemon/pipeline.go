@@ -176,17 +176,16 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 				"to": email.ExtractEmailAddress(p.Email.From),
 			},
 		}
-		if err := ValidateArgs(replyCmd, replyCall.Args); err == nil {
-			runner, rok := e.Runners[replyCmd.Runner]
-			if !rok {
-				e.Logger.Warn("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
+		if err := ValidateArgs(replyCmd, replyCall.Args); err != nil {
+			e.Logger.Warn("auto-reply args invalid", "pipeline", p.ID, "error", err)
+		} else if runner, rok := e.Runners[replyCmd.Runner]; !rok {
+			e.Logger.Warn("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
+		} else {
+			replyResult, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe)
+			if err != nil {
+				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
 			} else {
-				replyResult, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe)
-				if err != nil {
-					e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
-				} else {
-					p.Results = append(p.Results, replyResult)
-				}
+				p.Results = append(p.Results, replyResult)
 			}
 		}
 	} else {
@@ -373,11 +372,13 @@ func (e *Executor) fireElse(p *Pipeline) {
 		},
 	}
 	if err := ValidateArgs(replyCmd, replyCall.Args); err != nil {
+		e.Logger.Warn("else reply args invalid", "pipeline", p.ID, "error", err)
 		return
 	}
 
 	runner, ok := e.Runners[replyCmd.Runner]
 	if !ok {
+		e.Logger.Warn("else reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
 		return
 	}
 
