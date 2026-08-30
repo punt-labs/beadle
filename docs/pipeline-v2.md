@@ -794,7 +794,9 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 ### How pipe is passed to each runner
 
 **ClaudeRunner:** pipe value goes into the mission contract as
-`inputs.pipeline_output`. See T7 for the contract format change.
+`inputs.pipeline_output` (superseded — now the top-level `context` field;
+see `internal/daemon/pipeline.go`'s `stageContext` and the beadle-8gt
+CHANGELOG entry). See T7 for the contract format change.
 The ClaudeRunner.Run signature already receives `pipe string`.
 
 **CLIRunner:** pipe value is written to the command's stdin
@@ -1043,6 +1045,12 @@ The `message` arg is removed. The pipe value is passed via the
 prompt instructs the Claude worker to read `inputs.pipeline_output`
 from the mission contract and format it as a reply.
 
+> Superseded: `inputs.pipeline_output` above is stale. ethos's mission
+> schema strict-rejects unknown `inputs.*` fields; the pipe value is
+> carried in the contract's top-level `context` field instead. See
+> `internal/daemon/pipeline.go`'s `stageContext` and the beadle-8gt
+> CHANGELOG entry.
+
 The runner dispatch in the auto-reply block:
 
 ```go
@@ -1083,6 +1091,12 @@ prompt: |
   the data to send. Format it as a readable email body before sending.
   Use beadle-email tools to send the reply.
 ```
+
+> Superseded: `inputs.pipeline_output` in the prompt above is stale.
+> ethos's mission schema strict-rejects unknown `inputs.*` fields; the
+> pipe value is carried in the contract's top-level `context` field
+> instead. See `internal/daemon/pipeline.go`'s `stageContext` and the
+> beadle-8gt CHANGELOG entry.
 
 ### fireElse changes
 

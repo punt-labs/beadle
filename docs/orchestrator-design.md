@@ -201,8 +201,15 @@ env_vars:
   - BIFF_TOKEN
 ```
 
+> Superseded: `inputs.args` above is stale. ethos's mission schema
+> strict-rejects unknown `inputs.*` fields; stage args are carried in the
+> contract's top-level `context` field instead. See
+> `internal/daemon/pipeline.go`'s `stageContext` and the beadle-8gt
+> CHANGELOG entry.
+
 **No string interpolation.** Args flow as structured data in the mission
-contract's `inputs.args` field. The worker reads them from the contract.
+contract's `inputs.args` field (superseded — see the note above; this is
+now the top-level `context` field). The worker reads them from the contract.
 When calling Bash, the worker passes args as direct arguments, never via
 template string substitution. This prevents shell injection.
 
