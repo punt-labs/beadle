@@ -20,6 +20,15 @@ type PipelineStore struct {
 	Now func() time.Time
 }
 
+// logger returns s.Logger, or slog.Default if unset. A store built without
+// a Logger (as some tests do) must still be safe to call on error paths.
+func (s *PipelineStore) logger() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.Default()
+}
+
 // DefaultRetention is how long a pipeline record is kept on disk before
 // Prune removes it. Each record carries email metadata (from, subject,
 // message_id) plus every stage's output, so unbounded retention is a
@@ -85,13 +94,13 @@ func (s *PipelineStore) LoadRunning() ([]*Pipeline, error) {
 		path := filepath.Join(s.Dir, e.Name())
 		data, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
-			s.Logger.Warn("skip unreadable pipeline file", "path", path, "error", err)
+			s.logger().Warn("skip unreadable pipeline file", "path", path, "error", err)
 			continue
 		}
 
 		var p Pipeline
 		if err := json.Unmarshal(data, &p); err != nil {
-			s.Logger.Warn("skip corrupt pipeline file", "path", path, "error", err)
+			s.logger().Warn("skip corrupt pipeline file", "path", path, "error", err)
 			continue
 		}
 
@@ -136,13 +145,13 @@ func (s *PipelineStore) Prune(maxAge time.Duration) (int, error) {
 		path := filepath.Join(s.Dir, e.Name())
 		data, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
-			s.Logger.Warn("skip unreadable pipeline file during prune", "path", path, "error", err)
+			s.logger().Warn("skip unreadable pipeline file during prune", "path", path, "error", err)
 			continue
 		}
 
 		var p Pipeline
 		if err := json.Unmarshal(data, &p); err != nil {
-			s.Logger.Warn("skip corrupt pipeline file during prune", "path", path, "error", err)
+			s.logger().Warn("skip corrupt pipeline file during prune", "path", path, "error", err)
 			continue
 		}
 
@@ -151,7 +160,7 @@ func (s *PipelineStore) Prune(maxAge time.Duration) (int, error) {
 		}
 
 		if err := os.Remove(path); err != nil {
-			s.Logger.Warn("remove aged pipeline file failed", "path", path, "error", err)
+			s.logger().Warn("remove aged pipeline file failed", "path", path, "error", err)
 			continue
 		}
 		removed++

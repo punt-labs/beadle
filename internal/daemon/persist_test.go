@@ -257,6 +257,29 @@ func TestPipelineStore_PruneNonexistentDir(t *testing.T) {
 	assert.Equal(t, 0, removed)
 }
 
+func TestPipelineStore_NilLoggerDoesNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir} // no Logger set
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{corrupt"), 0o600))
+
+	assert.NotPanics(t, func() {
+		got, err := s.LoadRunning()
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	old := &Pipeline{Version: 1, ID: "old-done", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: time.Now().Add(-60 * 24 * time.Hour)}
+	require.NoError(t, s.Save(old))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad2.json"), []byte("{corrupt"), 0o600))
+
+	assert.NotPanics(t, func() {
+		removed, err := s.Prune(DefaultRetention)
+		require.NoError(t, err)
+		assert.Equal(t, 1, removed)
+	})
+}
+
 func TestPipelineStore_PruneSkipsCorruptFiles(t *testing.T) {
 	dir := t.TempDir()
 	s := &PipelineStore{Dir: dir, Logger: testLogger()}
