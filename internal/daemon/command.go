@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -62,8 +63,10 @@ var validArgTypes = map[string]bool{
 
 // LoadCommands scans dir for *.yaml files, parses each as a Command,
 // validates required fields, and returns a map keyed by command name.
-// Invalid files are logged and skipped.
-func LoadCommands(dir string) (map[string]*Command, error) {
+// Invalid files are logged and skipped. gpgBinary and ownerKeyID thread
+// through to loadCommand for signature verification (see loadCommand);
+// ownerKeyID == "" disables verification entirely.
+func LoadCommands(dir, gpgBinary, ownerKeyID string) (map[string]*Command, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read command dir %s: %w", dir, err)
@@ -75,9 +78,15 @@ func LoadCommands(dir string) (map[string]*Command, error) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
-		cmd, err := loadCommand(path)
+		cmd, err := loadCommand(path, gpgBinary, ownerKeyID)
 		if err != nil {
-			slog.Warn("skip invalid command file", "path", path, "error", err)
+			var sigErr *SignatureError
+			if errors.As(err, &sigErr) {
+				slog.Error("reject command file: signature verification failed",
+					"path", path, "reason", sigErr.Reason, "detail", sigErr.Detail)
+			} else {
+				slog.Warn("skip invalid command file", "path", path, "error", err)
+			}
 			continue
 		}
 		if _, dup := cmds[cmd.Name]; dup {
@@ -89,7 +98,7 @@ func LoadCommands(dir string) (map[string]*Command, error) {
 	return cmds, nil
 }
 
-func loadCommand(path string) (*Command, error) {
+func loadCommand(path, gpgBinary, ownerKeyID string) (*Command, error) {
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
@@ -101,6 +110,15 @@ func loadCommand(path string) (*Command, error) {
 	if err := dec.Decode(&cmd); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+
+	if ownerKeyID != "" {
+		if err := VerifySignature(&cmd, gpgBinary, ownerKeyID); err != nil {
+			return nil, fmt.Errorf("verify signature %s: %w", path, err)
+		}
+	}
+	// ownerKeyID == "" means signing enforcement is not configured --
+	// VerifySignature is never called, and loadCommand behaves exactly as
+	// it does today.
 
 	if err := validateCommand(&cmd); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)

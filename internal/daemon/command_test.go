@@ -1,12 +1,16 @@
 package daemon
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 const validCommandYAML = `name: wall
@@ -323,7 +327,7 @@ args:
 				writeYAML(t, dir, name, content)
 			}
 
-			cmds, err := LoadCommands(dir)
+			cmds, err := LoadCommands(dir, "gpg", "")
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -354,7 +358,7 @@ budget:
   rounds: 1
 `)
 
-	cmds, err := LoadCommands(dir)
+	cmds, err := LoadCommands(dir, "gpg", "")
 	require.NoError(t, err)
 	// One wins, one is skipped. Only one entry for "wall".
 	assert.Len(t, cmds, 1)
@@ -362,7 +366,7 @@ budget:
 }
 
 func TestLoadCommands_NonexistentDir(t *testing.T) {
-	_, err := LoadCommands(filepath.Join(t.TempDir(), "does-not-exist"))
+	_, err := LoadCommands(filepath.Join(t.TempDir(), "does-not-exist"), "gpg", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read command dir")
 }
@@ -371,7 +375,7 @@ func TestLoadCommands_FieldValues(t *testing.T) {
 	dir := t.TempDir()
 	writeYAML(t, dir, "wall.yaml", validCommandYAML)
 
-	cmds, err := LoadCommands(dir)
+	cmds, err := LoadCommands(dir, "gpg", "")
 	require.NoError(t, err)
 	require.Contains(t, cmds, "wall")
 
@@ -409,7 +413,7 @@ output_schema: text
 budget:
   rounds: 1
 `)
-	cmds, err := LoadCommands(dir)
+	cmds, err := LoadCommands(dir, "gpg", "")
 	require.NoError(t, err)
 	require.Contains(t, cmds, "min")
 	assert.Equal(t, "claude", cmds["min"].Runner)
@@ -532,4 +536,172 @@ func TestValidateArgs_EmptyArgsMap(t *testing.T) {
 	}
 	err := ValidateArgs(cmd, map[string]any{})
 	assert.NoError(t, err)
+}
+
+// capturingHandler is a slog.Handler that records every log.Record it
+// receives, so a test can assert on the level, message, and structured
+// attrs a call site logged -- not just its side effects (e.g. whether an
+// entry made it into LoadCommands' returned map).
+type capturingHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *capturingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+
+func (h *capturingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(string) slog.Handler      { return h }
+
+// find returns the first captured record at level with the given message,
+// and its attrs as a map, or ok == false if none matches.
+func (h *capturingHandler) find(level slog.Level, msg string) (attrs map[string]any, ok bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Level != level || r.Message != msg {
+			continue
+		}
+		attrs = make(map[string]any)
+		r.Attrs(func(a slog.Attr) bool {
+			attrs[a.Key] = a.Value.Any()
+			return true
+		})
+		return attrs, true
+	}
+	return nil, false
+}
+
+// installCapturingHandler swaps slog's package-level default for a
+// capturingHandler for the duration of t, restoring the previous default on
+// cleanup. LoadCommands logs via the package-level slog.Error/slog.Warn
+// functions, which write through slog.Default() -- this is the seam a test
+// has to intercept to observe them.
+func installCapturingHandler(t *testing.T) *capturingHandler {
+	t.Helper()
+	h := &capturingHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return h
+}
+
+// writeSignedCommand builds a minimal claude-runner Command named name,
+// signs its canonical bytes with signerEmail's key in gpgHome, marshals the
+// signed command to YAML, and writes it to dir/filename.
+func writeSignedCommand(t *testing.T, gpgBin, gpgHome, dir, filename, signerEmail, name string) {
+	t.Helper()
+	cmd := &Command{
+		Name:         name,
+		Runner:       "claude",
+		Mode:         "process",
+		Prompt:       "do the thing",
+		OutputSchema: "text",
+	}
+	cmd.Budget.Rounds = 1
+
+	canon, err := CanonicalCommandBytes(cmd)
+	require.NoError(t, err)
+	cmd.Signature = signCanonical(t, gpgBin, gpgHome, signerEmail, canon)
+
+	data, err := yaml.Marshal(cmd)
+	require.NoError(t, err)
+	writeYAML(t, dir, filename, string(data))
+}
+
+// TestLoadCommands_SignatureEnforcement covers §4 of
+// docs/wire-verifysignature.md: LoadCommands' loadCommand call site enforces
+// VerifySignature when ownerKeyID is configured, and a rejected file logs at
+// slog.Error with structured reason/detail fields distinct from the
+// slog.Warn path an ordinary parse/validation failure already takes.
+func TestLoadCommands_SignatureEnforcement(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := shortGPGHome(t)
+	const ownerEmail = "owner-enforcement@example.com"
+	const otherEmail = "other-enforcement@example.com"
+	ownerFpr := genOwnerKey(t, gpgBin, home, ownerEmail, "1y")
+	genOwnerKey(t, gpgBin, home, otherEmail, "1y")
+	t.Setenv("GNUPGHOME", home)
+
+	t.Run("signed and valid loads", func(t *testing.T) {
+		dir := t.TempDir()
+		writeSignedCommand(t, gpgBin, home, dir, "good.yaml", ownerEmail, "good")
+
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr)
+		require.NoError(t, err)
+		assert.Contains(t, cmds, "good")
+	})
+
+	t.Run("unsigned is rejected and logged at slog.Error", func(t *testing.T) {
+		dir := t.TempDir()
+		writeYAML(t, dir, "unsigned.yaml", `name: unsigned
+prompt: hello
+output_schema: text
+budget:
+  rounds: 1
+`)
+		h := installCapturingHandler(t)
+
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr)
+		require.NoError(t, err)
+		assert.NotContains(t, cmds, "unsigned")
+
+		attrs, ok := h.find(slog.LevelError, "reject command file: signature verification failed")
+		require.True(t, ok, "expected a slog.Error record for the rejected file")
+		assert.Equal(t, ReasonMissing, attrs["reason"])
+	})
+
+	t.Run("signed by an unrelated keypair is rejected as wrong-key", func(t *testing.T) {
+		dir := t.TempDir()
+		writeSignedCommand(t, gpgBin, home, dir, "wrongkey.yaml", otherEmail, "wrongkey")
+		h := installCapturingHandler(t)
+
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr)
+		require.NoError(t, err)
+		assert.NotContains(t, cmds, "wrongkey")
+
+		attrs, ok := h.find(slog.LevelError, "reject command file: signature verification failed")
+		require.True(t, ok, "expected a slog.Error record for the rejected file")
+		assert.Equal(t, ReasonWrongKey, attrs["reason"])
+	})
+
+	t.Run("a rejected file is excluded while a sibling valid file still loads", func(t *testing.T) {
+		dir := t.TempDir()
+		writeSignedCommand(t, gpgBin, home, dir, "good.yaml", ownerEmail, "good")
+		writeYAML(t, dir, "bad.yaml", `name: bad
+prompt: hello
+output_schema: text
+budget:
+  rounds: 1
+`)
+
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr)
+		require.NoError(t, err)
+		assert.Contains(t, cmds, "good")
+		assert.NotContains(t, cmds, "bad")
+	})
+
+	t.Run("ownerKeyID empty disables verification -- unsigned file loads with zero rejection", func(t *testing.T) {
+		dir := t.TempDir()
+		writeYAML(t, dir, "unsigned.yaml", `name: unsigned
+prompt: hello
+output_schema: text
+budget:
+  rounds: 1
+`)
+		h := installCapturingHandler(t)
+
+		cmds, err := LoadCommands(dir, gpgBin, "")
+		require.NoError(t, err)
+		assert.Contains(t, cmds, "unsigned")
+
+		_, ok := h.find(slog.LevelError, "reject command file: signature verification failed")
+		assert.False(t, ok, "no signature rejection must be logged when ownerKeyID is unset")
+	})
 }
