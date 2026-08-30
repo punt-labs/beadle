@@ -1,66 +1,20 @@
 # beadle
 
-> A programmable agent daemon controlled by email, secured by GPG.
+> Email for your AI engineering assistant.
 
 [![License](https://img.shields.io/github/license/punt-labs/beadle)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/beadle/test.yml?label=CI)](https://github.com/punt-labs/beadle/actions/workflows/test.yml)
-[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Go Report Card](https://goreportcard.com/badge/github.com/punt-labs/beadle)](https://goreportcard.com/report/github.com/punt-labs/beadle)
-[![Working Backwards](https://img.shields.io/badge/Working_Backwards-hypothesis-lightgrey)](./prfaq.pdf)
+[![Go Reference](https://pkg.go.dev/badge/github.com/punt-labs/beadle.svg)](https://pkg.go.dev/github.com/punt-labs/beadle)
 
-Beadle is an autonomous agent that receives instructions via email and
-executes them as multi-stage pipelines. Commands are programs, the
-daemon is the shell, pipelines are pipes, and GPG signatures are sudo.
-By design, the owner controls what beadle can do by signing command
-definitions, and the trust gate controls who can trigger it. The trust
-gate is enforced today; command-signature enforcement is defined but not
-yet wired (see below).
-
-**How it works.** You send an email. Beadle verifies your identity
-(PGP signature or Proton E2E encryption), checks your permissions,
-decomposes your instruction into a pipeline of commands, and executes
-them — mixing AI reasoning with fast CLI tools. You get the result
-back as an email reply. The daemon runs on your machine. No cloud
-service, no API keys shared with third parties.
-
-**Example.** You email "summarize this" from your PGP-verified account:
-
-1. Beadle verifies your identity and `x` (execute) permission
-2. The planner maps "summarize" to a pipeline: `[summarize, notify, reply]`
-3. Stage 0: Claude reads your email and produces a structured summary (45s)
-4. Stage 1: `biff wall` broadcasts "New summary: Deploy plan" to the team (10ms)
-5. Stage 2: Claude formats the summary and emails it back to you (45s)
-
-The summary flows through the pipeline as JSON. Stage 1 is a
-side-effect (passthrough) — it reads the data but doesn't modify it.
-Stage 2 receives the full summary, not stage 1's "ok" output.
-
-**Two types of commands:**
-
-- **Claude commands** spawn an AI session for reasoning tasks:
-  summarization, analysis, code generation. 45-60 seconds per stage.
-- **CLI commands** exec binaries directly for deterministic operations:
-  notifications, status checks, data transforms. Milliseconds per stage.
-
-Both types are defined as YAML files with a `signature` field for owner
-GPG-signing. Command-signature verification is currently a stub and is
-not yet enforced; today the daemon gates execution on transport trust —
-a PGP-verified sender matched to a permitted contact — not on the command
-definitions themselves. Signature enforcement is the planned next step.
-
-## beadle-email
-
-The shipping component is `beadle-email` — an MCP server that gives
-Claude Code a real email address with cryptographic trust at every
-layer.
-
-- **Claude emails you.** Session summaries, build reports, deploy
-  notifications — anything Claude produces can be mailed to you or
-  your team. No webhook plumbing, no Slack integration. Just email.
-- **You email Claude.** Send instructions, ask questions, or forward
-  context from your phone. Beadle's four-level PGP trust model and
-  per-contact permissions (`rwx`) control exactly what Claude can
-  read, reply to, and act on — nothing is implicit.
+beadle-email is an MCP server that gives Claude Code, or any MCP client, a
+real email address --- for developers who want their AI coding assistant to
+receive and send email under cryptographic control. Every message is
+classified into one of four trust levels, from Proton-to-Proton
+end-to-end encryption down to an unverified message with no signature, and
+per-contact `rwx` permissions gate what the agent can read, reply to, and
+act on. It is the first shipping piece of a larger vision for a
+GPG-signed, autonomous agent daemon; that daemon is hypothesis stage and
+not yet part of this release.
 
 **Platforms:** macOS, Linux
 
@@ -79,7 +33,13 @@ Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/4cc7f6b/install.sh -o install.sh
+```
+
+```bash
 cat install.sh
+```
+
+```bash
 sh install.sh
 ```
 
@@ -90,7 +50,13 @@ sh install.sh
 
 ```bash
 mkdir -p ~/.local/bin
+```
+
+```bash
 curl -fsSL https://github.com/punt-labs/beadle/releases/latest/download/beadle-email-darwin-arm64 -o ~/.local/bin/beadle-email
+```
+
+```bash
 chmod +x ~/.local/bin/beadle-email
 ```
 
@@ -103,7 +69,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 <summary>Prerequisites</summary>
 
 - An IMAP server for reading (Proton Bridge on localhost, Fastmail, Gmail IMAP, etc.)
-- An SMTP server for sending (Proton Bridge, or any SMTP with STARTTLS support; implicit TLS/SMTPS on port 465 is not yet supported)
+- An SMTP server for sending (Proton Bridge, or any SMTP with STARTTLS support, or implicit TLS/SMTPS on port 465)
 - [GPG](https://gnupg.org/) for signature verification
 - (Optional) [Resend](https://resend.com) API key for fallback sending
 
@@ -116,11 +82,33 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 - **Two-dimensional trust** --- transport trust (trusted/verified/untrusted/unverified) + identity permissions (rwx per contact per identity). Both must pass before autonomous action
 - **Four-level transport trust** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
 - **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically
-- **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound), `/beadle` (enable/disable repo guidance)
+- **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound), `/contacts` (manage the address book), `/beadle` (enable/disable repo guidance)
 - **Two-channel display** (plugin only) --- compact panel summaries with full data in context, no raw JSON in conversation
 - **Proton Bridge native** --- IMAP STARTTLS for reading, SMTP for sending, Resend API fallback
 - **Credential isolation** --- secrets resolved at runtime from OS keychain, never stored in config files
 - **Health checks** --- `doctor` validates all dependencies; `status` shows active identity and configuration
+
+## What It Looks Like
+
+```text
+$ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/4cc7f6b/install.sh | sh
+...
+▶ Running doctor...
+[+] version          0.16.5
+[+] identity         you@example.com (source: ethos)
+[+] secret_backends  pass, secret-tool, file (~/.punt-labs/beadle/secrets/), environment variable
+[+] config           ~/.punt-labs/beadle/identities/you@example.com/email.json
+[+] imap_password
+[+] resend_api_key
+[+] gpg              /usr/bin/gpg
+[+] gpg_signing_key  you@example.com
+[+] gpg_passphrase   not required (you@example.com has no passphrase — filesystem access grants signing authority)
+[+] smtp             127.0.0.1:1025
+[+] contacts         2 contacts at ~/.punt-labs/beadle/identities/you@example.com/contacts.json
+[+] mcp_registration plugin provides the MCP server (no standalone duplicate)
+
+beadle-email v0.16.5 is ready!
+```
 
 ## MCP Tools
 
@@ -171,29 +159,69 @@ Available when installed as a Claude Code plugin.
 
 Beadle resolves credentials at runtime through a priority chain: OS keychain → secret file → environment variable. On Linux, the keychain layer tries `pass` first, then `secret-tool` (libsecret / GNOME Keyring). On macOS, it uses the system Keychain.
 
+**macOS Keychain:**
+
 ```bash
-# macOS Keychain (macOS)
 security add-generic-password -s beadle -a imap-password -w 'your-bridge-password'
+```
+
+```bash
 security add-generic-password -s beadle -a resend-api-key -w 'your-resend-key'
+```
+
+```bash
 security add-generic-password -s beadle -a gpg-passphrase -w 'your-gpg-passphrase'
+```
 
-# pass (Linux, recommended — GPG-encrypted at rest with your own key)
-pass insert beadle/imap-password    # prompts for the value, hides input
+**pass** (Linux, recommended --- GPG-encrypted at rest with your own key):
+
+```bash
+pass insert beadle/imap-password
+```
+
+```bash
 pass insert beadle/resend-api-key
+```
+
+```bash
 pass insert beadle/gpg-passphrase
+```
 
-# secret-tool (Linux, fallback — GNOME Keyring via libsecret)
+**secret-tool** (Linux, fallback --- GNOME Keyring via libsecret):
+
+```bash
 secret-tool store --label='beadle imap-password' service beadle account imap-password
+```
+
+```bash
 secret-tool store --label='beadle resend-api-key' service beadle account resend-api-key
+```
+
+```bash
 secret-tool store --label='beadle gpg-passphrase' service beadle account gpg-passphrase
+```
 
-# Or secret files (~/.punt-labs/beadle/secrets/<name>, mode 600)
+**Secret files** (`~/.punt-labs/beadle/secrets/<name>`, mode 600):
+
+```bash
 mkdir -p ~/.punt-labs/beadle/secrets
-printf '%s' 'your-bridge-password' > ~/.punt-labs/beadle/secrets/imap-password
-chmod 600 ~/.punt-labs/beadle/secrets/imap-password
+```
 
-# Or environment variables
+```bash
+printf '%s' 'your-bridge-password' > ~/.punt-labs/beadle/secrets/imap-password
+```
+
+```bash
+chmod 600 ~/.punt-labs/beadle/secrets/imap-password
+```
+
+**Environment variables:**
+
+```bash
 export BEADLE_IMAP_PASSWORD='your-bridge-password'
+```
+
+```bash
 export BEADLE_RESEND_API_KEY='your-resend-key'
 ```
 
@@ -203,6 +231,9 @@ Create the configuration file (`~/.punt-labs/beadle/email.json`) with your conne
 
 ```bash
 mkdir -p ~/.punt-labs/beadle
+```
+
+```bash
 cat > ~/.punt-labs/beadle/email.json << 'EOF'
 {
   "imap_host": "127.0.0.1",
@@ -247,12 +278,12 @@ PGP verification uses an isolated GNUPGHOME per operation. When no key is attach
 
 ## Identity
 
-Beadle reads identity from [ethos](https://github.com/punt-labs/ethos) (sidecar pattern — file reads, no import dependency). Resolution chain:
+Beadle reads identity from [ethos](https://github.com/punt-labs/ethos) (sidecar pattern --- file reads, no import dependency). Resolution chain:
 
-1. **Repo-local config** — `.punt-labs/ethos.yaml` with `agent: <handle>`
-2. **Global ethos active** — `~/.punt-labs/ethos/active`
-3. **Handle → ethos identity YAML** — `~/.punt-labs/ethos/identities/<handle>.yaml` supplies name and email; `~/.punt-labs/ethos/identities/<handle>.ext/beadle.yaml` supplies the GPG key id. Always global, never a repo-local vendored copy.
-4. **Default identity** — `~/.punt-labs/beadle/default-identity` (plain email string)
+1. **Repo-local config** --- `.punt-labs/ethos.yaml` with `agent: <handle>`
+2. **Global ethos active** --- `~/.punt-labs/ethos/active`
+3. **Handle → ethos identity YAML** --- `~/.punt-labs/ethos/identities/<handle>.yaml` supplies name and email; `~/.punt-labs/ethos/identities/<handle>.ext/beadle.yaml` supplies the GPG key id. Always global, never a repo-local vendored copy.
+4. **Default identity** --- `~/.punt-labs/beadle/default-identity` (plain email string)
 
 Each identity gets its own directory under `~/.punt-labs/beadle/identities/<email>/` with separate `email.json`, `contacts.json`, and `attachments/`. Root files are auto-migrated on first use.
 
@@ -266,7 +297,7 @@ Each contact has an optional `permissions` map keyed by identity email. Permissi
 | `w` (write) | Beadle may compose and send replies to this contact. |
 | `x` (execute) | Beadle may execute instructions from this contact. |
 
-All permissions are stored explicitly. There are no implicit overrides. Contacts without explicit permissions default to `---` (no permissions). The address book is a whitelist: messages from unknown senders appear redacted in listings and cannot be read. `r` and `w` are enforced; `x` enforcement is planned. This is orthogonal to transport trust — both must be sufficient for autonomous action.
+All permissions are stored explicitly. There are no implicit overrides. Contacts without explicit permissions default to `---` (no permissions). The address book is a whitelist: messages from unknown senders appear redacted in listings and cannot be read. `r` and `w` are enforced; `x` enforcement is planned. This is orthogonal to transport trust --- both must be sufficient for autonomous action.
 
 ## CLI
 
@@ -311,27 +342,15 @@ When a single mailbox is shared by an agent across repos, `list` shows only the
 current repo's mail by default (matched by the `X-Beadle-Repo` header or the
 `[owner/repo]` subject tag, with the repo taken from the git `origin` remote).
 Pass `--all-repos` to see the whole mailbox. If the current directory has no
-repo, `list` shows everything. The background new-mail poller's count is scoped
-the same way; the `beadle-daemon` mission runner is not (it processes owner
-commands from every repo).
+repo, `list` shows everything. The background new-mail poller's count is
+scoped the same way.
 
 ## Documentation
 
+[Setup Guide](docs/setup-guide.md) |
 [Design Log](DESIGN.md) |
-[Pipeline v2 Design](docs/pipeline-v2-design.md) |
-[Email Channel Plan](docs/email-channel-plan.md) |
+[Contributing](CONTRIBUTING.md) |
 [Changelog](CHANGELOG.md)
-
-## Development
-
-```bash
-make build                 # Build beadle-email binary
-make check                 # All quality gates: vet + staticcheck + markdownlint + tests
-make lint                  # Lint only (vet + staticcheck)
-make test                  # Tests only (go test -race)
-make dist                  # Cross-compile for darwin/linux arm64/amd64
-make help                  # List all targets
-```
 
 ## License
 
