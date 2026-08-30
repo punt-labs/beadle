@@ -181,18 +181,18 @@
   <p>Beadle isn't a tool that reads a person's personal inbox. It gives an <strong>autonomous agent</strong> (say, <code>claude@punt-labs.com</code>) a mailbox of its own. Email becomes a channel people can use to send that agent instructions — from anywhere, without a live session. That's powerful, and it's exactly why it needs a real trust model: anyone who can get a message into that mailbox is, in some sense, talking directly to the agent.</p>
 
   <h2>Two checks decide everything the agent does</h2>
-  <p>Every message shows up with its verification rung — check 1 always runs and needs no grant from anyone. Check 2, the permission grant, is what decides everything past that: without <code>r</code>, a sender's message appears with its subject redacted and can't be opened at all. Hold <code>r</code> and it opens; hold <code>w</code> and the agent can reply to it; hold <code>x</code> and it can trigger a recipe. Nothing happens without an explicit grant for it:</p>
+  <p>Every message shows up with its verification rung — check 1 always runs and needs no grant from anyone. Check 2, the permission grant, is the one that's actually enforced everywhere: without <code>r</code> a message can't be opened, without <code>w</code> it can't be replied to, without <code>x</code> it can't trigger a recipe. Verification isn't a second hard lock on every one of those — it's a hard requirement only for triggering a recipe. Everywhere else it's shown so the agent can weigh it with its own judgment, not something a tool refuses to act on by itself.</p>
 
   <div class="checks">
     <div class="check-card">
       <span class="num">1</span>
       <h3>How well-verified is this message?</h3>
-      <p>Can the claimed sender actually be proven — or could anyone have written that "From:" line?</p>
+      <p>Can the claimed sender actually be proven — or could anyone have written that "From:" line? Always computed, always shown — enforced as a requirement only for triggering a recipe.</p>
     </div>
     <div class="check-card">
       <span class="num">2</span>
       <h3>What has this specific sender been granted?</h3>
-      <p>Being verified isn't enough on its own — the sender also needs an explicit grant for whatever they're asking the agent to do.</p>
+      <p>The one check that's a hard gate everywhere: no grant, no action — reading, replying, and recipe-triggering each need their own.</p>
     </div>
   </div>
 
@@ -247,7 +247,7 @@
     <div class="fork-card judgment">
       <span class="tag">r / w — judgment</span>
       <h3>The agent reads it and decides</h3>
-      <p>Once a message clears both checks, its content becomes something the agent actually reasons about — it reads what the sender is asking and decides how to respond, using judgment, the same as if someone had typed the request straight into a session with it.</p>
+      <p>Once <code>r</code> or <code>w</code> lets the agent see a message, its content becomes something the agent actually reasons about — it reads what the sender is asking, weighs how well-verified the message is itself, and decides how to respond. The tool doesn't refuse to reply just because the trust rung is lower; the agent's judgment is the safeguard, the same as if someone had typed the request straight into a session with it.</p>
     </div>
     <div class="fork-card recipe">
       <span class="tag">x — fixed recipe</span>
@@ -267,15 +267,15 @@
   <h2>Quick reference</h2>
   <table>
     <tr><th>What's happening</th><th>Check 1 — verified?</th><th>Check 2 — granted?</th><th>What happens</th></tr>
-    <tr><td>A session reads the mailbox</td><td>Shown regardless</td><td><code>r</code> (per sender)</td><td>Permitted senders' messages open fully; everyone else's subject is redacted and the body can't be opened</td></tr>
-    <tr><td>Getting a reply sent</td><td>Sealed or Signed &amp; checked</td><td><code>w</code></td><td>The agent reads the message and replies using judgment</td></tr>
-    <tr><td>Unattended inbox processing</td><td>Sealed or Signed &amp; checked</td><td><code>r</code>/<code>w</code></td><td>Same as above, just running on a timer instead of on request</td></tr>
-    <tr><td>Email triggers a background task</td><td>Sealed or Signed &amp; checked</td><td><code>x</code></td><td>One recipe signed by this daemon's authorizer runs — nothing else can</td></tr>
+    <tr><td>A session reads the mailbox</td><td>Shown, not enforced</td><td><code>r</code> (per sender)</td><td>Permitted senders' messages open fully; everyone else's subject is redacted and the body can't be opened</td></tr>
+    <tr><td>Getting a reply sent</td><td>Shown, weighed by the agent's own judgment — not enforced by the tool</td><td><code>w</code></td><td>The agent reads the message, factors in how well-verified it is, and replies using judgment</td></tr>
+    <tr><td>Unattended inbox processing</td><td>Same as above — shown, not enforced</td><td><code>r</code>/<code>w</code></td><td>Same as above, just running on a timer instead of on request</td></tr>
+    <tr><td>Email triggers a background task</td><td><strong>Enforced</strong> — must be Sealed or Signed &amp; checked</td><td><code>x</code></td><td>One recipe signed by this daemon's authorizer runs — nothing else can</td></tr>
   </table>
 
   <details>
     <summary>For the technically curious</summary>
-    <p>Check 1 = the four-level classifier (<code>trusted</code>/<code>verified</code>/<code>untrusted</code>/<code>unverified</code>), backed by PGP signature verification and Proton's end-to-end headers. Check 2 = the per-contact <code>rwx</code> bits (<code>contacts.CheckPermission</code>) — a plain lookup with no special-cased identity, so any number of contacts can independently hold any combination. The authorizer concept is currently named <code>owner_handle</code>/<code>owner_gpg_key_id</code> in <code>daemon.json</code> and <code>ownerKeyID</code> through <code>internal/daemon</code>'s code — that naming is being corrected to "authorizer" (tracked as <code>beadle-4ul</code>) because "owner" wrongly implied a general position of authority that doesn't exist anywhere else in the system. The mechanism itself, <code>VerifySignature</code> gating <code>beadle-daemon</code>'s command loader (DES-034/035), is unaffected by the rename — only the name is wrong today, not the design.</p>
+    <p>Check 1 = the four-level classifier (<code>trusted</code>/<code>verified</code>/<code>untrusted</code>/<code>unverified</code>), backed by PGP signature verification and Proton's end-to-end headers. Check 2 = the per-contact <code>rwx</code> bits (<code>contacts.CheckPermission</code>) — a plain lookup with no special-cased identity, so any number of contacts can independently hold any combination. Check 2 is enforced in code everywhere it applies (<code>internal/mcp/tools.go</code>'s <code>perm.Read</code>/<code>enforceWritePermission</code> checks, and the daemon's own <code>x</code> check in <code>internal/daemon/handler.go</code>). Check 1 is computed and surfaced everywhere too, but only <code>internal/daemon/handler.go</code>'s <code>verifyTrust</code> — gating whether a mission is created at all — actually enforces it as a requirement; <code>beadle-email</code>'s <code>reply_message</code> and friends check permission only, leaving trust level as a signal for the agent's own judgment. The authorizer concept is currently named <code>owner_handle</code>/<code>owner_gpg_key_id</code> in <code>daemon.json</code> and <code>ownerKeyID</code> through <code>internal/daemon</code>'s code — that naming is being corrected to "authorizer" (tracked as <code>beadle-4ul</code>) because "owner" wrongly implied a general position of authority that doesn't exist anywhere else in the system. The mechanism itself, <code>VerifySignature</code> gating <code>beadle-daemon</code>'s command loader (DES-034/035), is unaffected by the rename — only the name is wrong today, not the design.</p>
   </details>
 
   <div class="footer">Beadle — GPG-signed recipes, permission grants per sender, zero agent authority by default.</div>
