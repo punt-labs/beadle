@@ -83,6 +83,6 @@ The config file stores only connection parameters, never secrets. It is resolved
 
 - **Zero agent authority.** Every action requires a GPG-signed instruction from the owner. The daemon has no independent decision-making.
 - **Preflight before execute.** All permissions are validated before any command runs. No partial execution.
-- **Isolated keychain.** PGP operations use temporary GNUPGHOME directories, never touching the user's system GPG keyring.
+- **Isolated verification.** Inbound signature verification (`internal/pgp/verify.go`) runs in a temporary GNUPGHOME so an untrusted sender's key never touches the system keyring. Signing and decryption (`internal/pgp/sign.go`, `decrypt.go`) use the owner's own key from the system keyring, since that's where the owner's private key already lives — there is no isolation to provide there.
 - **Non-expiring keys rejected.** All command-signing keys must have an expiration date. This is a security invariant.
 - **Audit log is tamperproof.** Append-only, GPG-signed entries. Only the owner can clear the log.

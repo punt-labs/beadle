@@ -177,7 +177,8 @@
 \vspace{0.5em}
 
 \noindent\textbf{\color{RiskAmber}What's real today, as of v0.16.5:} Everything
-below the Call to Action describes Beadle's target end state --- a signed,
+from here through the Call to Action --- the whole Press Release
+section --- describes Beadle's target end state --- a signed,
 autonomous command-pipeline daemon --- written in the Working Backwards
 convention, as if that end state already shipped. It hasn't. What ships
 today, and is what a user installing Beadle actually gets, is
@@ -388,10 +389,12 @@ commands, and the pipeline design document are in the repository.
 
 \begin{faqpair}{What happens to my data?}\label{faq:data}
   Nothing leaves your machine unless a command document explicitly sends it
-  somewhere. Beadle runs locally as a daemon. Email flows through Proton Bridge
-  on your machine to Proton's encrypted servers. Command documents, audit logs,
-  and results stay on your local filesystem. There is no telemetry, no cloud
-  service, and no account with Punt Labs.
+  somewhere. Beadle runs locally as a daemon. With the recommended Proton
+  Bridge setup, email flows through Bridge on your machine to Proton's
+  encrypted servers; with any other IMAP/SMTP provider, it flows to that
+  provider's servers instead (see \faqref{faq:pricing}). Command documents,
+  audit logs, and results stay on your local filesystem. There is no
+  telemetry, no cloud service, and no account with Punt Labs.
 \end{faqpair}
 
 \begin{faqpair}{Do I need to know GPG?}\label{faq:gpg-knowledge}
@@ -423,17 +426,20 @@ commands, and the pipeline design document are in the repository.
 
 \begin{faqpair}{What is the total addressable market?}\label{faq:tam}
   The primary market is developers who already use AI coding assistants and want
-  unattended execution. The LangChain 2024 State of AI Agents report surveyed
-  1,300+ professionals and found that 51\% are using AI agents in production
-  today, with 78\% planning to deploy agents soon \cite{langchain2024agents}.
+  unattended execution. LangChain's November--December 2025 survey (1,340
+  practitioners) found 57.3\% have agents in production, up from 51\% the
+  year before \cite{langchain2025agenteng, langchain2024agents}.
   The subset who need local-first, authenticated, autonomous execution is
   narrower --- likely tens of thousands of developers who work with sensitive
   codebases, regulated environments, or privacy-conscious infrastructure
   (the Proton Mail user base is an imperfect proxy for this audience).
 
-  This is a bottoms-up estimate. We are not claiming a billion-dollar TAM.
-  The honest framing: Beadle targets a niche of security-conscious developers
-  who value auditability over convenience.
+  This is not a rigorous bottoms-up estimate --- there's no segment count
+  or willingness-to-pay analysis behind it, just a top-down survey stat and
+  an imperfect proxy. We are not claiming a billion-dollar TAM. The honest
+  framing: Beadle targets a niche of security-conscious developers who
+  value auditability over convenience, sized by inference, not
+  arithmetic.
 \end{faqpair}
 
 \begin{faqpair}{What evidence do we have that customers want this?}\label{faq:customer-evidence}
@@ -467,7 +473,7 @@ commands, and the pipeline design document are in the repository.
   \end{itemize}
 
   \textbf{Next validation step:} see \faqref{faq:next-step} --- it is no
-  longer "generalize the prototype." The prototype has been generalized.
+  longer ``generalize the prototype.'' The prototype has been generalized.
   What's missing is distribution and the onboarding flow that would let
   an external developer reach it at all.
 \end{faqpair}
@@ -596,12 +602,18 @@ commands, and the pipeline design document are in the repository.
       Labs tools. A user with no ethos installed at all still gets a working
       identity from one plain-text file
       ({\small\texttt{\textasciitilde/.punt-labs/beadle/default-identity}}).
-      Signing already uses an isolated {\small\texttt{GNUPGHOME}} per
-      operation --- the user's own GPG key, not a Beadle-generated one ---
-      configured via a {\small\texttt{gpg\_signer}} field the install flow
-      already prompts for. The user never runs \texttt{gpg} directly today,
-      for the reason this FAQ originally proposed:
-      {\small\texttt{beadle-email install}} handles it.
+      Signing uses the user's own GPG key from the system keyring ---
+      not a Beadle-generated one, and not an isolated keychain; only
+      inbound signature \textit{verification} runs in an isolated
+      {\small\texttt{GNUPGHOME}}, since that's where an untrusted
+      sender's key needs to be quarantined. The signer is configured via
+      a {\small\texttt{gpg\_signer}} field the install flow already
+      prompts for, and Beadle rejects non-expiring keys before every
+      sign. The user never types a \texttt{gpg} command --- but does need
+      to already own an expiring key and place its passphrase in the
+      keychain by hand during {\small\texttt{beadle-email install}}; that
+      residual friction is exactly what {\small\texttt{beadle init}}
+      exists to remove.
 
       \textit{What's still vision:} dedicated {\small\texttt{beadle
       init}}/{\small\texttt{sign}}/{\small\texttt{verify}} subcommands, and
@@ -694,11 +706,14 @@ commands, and the pipeline design document are in the repository.
       signed command documents on disk has no runtime cost until invoked.
     \item \textbf{Proton Bridge longevity.} The daemon depends on Bridge staying
       online for email-triggered execution. Bridge was not designed for months
-      of continuous uptime. The mitigation is operational: Beadle checks Bridge
-      health on a configurable interval, the system service manager (LaunchAgent
-      or systemd) restarts both Beadle and Bridge on failure, and pending result
-      deliveries are queued and retried once Bridge recovers. Local and
-      cron-triggered pipelines are unaffected by Bridge downtime.
+      of continuous uptime. \textit{Design, not yet built:} the mitigation
+      should be operational --- Beadle should check Bridge health on a
+      configurable interval, a service manager should restart both Beadle
+      and Bridge on failure, and pending result deliveries should queue and
+      retry once Bridge recovers. None of this exists today (see
+      \faqref{faq:tech-risks}, \featureref{feat:bridge-health}); an
+      internal scheduler that would let non-email-triggered pipelines run
+      independently of Bridge is also unbuilt (\featureref{feat:scheduler}).
   \end{itemize}
 
   The honest constraint: Beadle does not scale to teams, organizations, or
@@ -787,6 +802,15 @@ commands, and the pipeline design document are in the repository.
   honest statement that the current metrics are a proxy for a different,
   adjacent hypothesis (``does an MCP email server with a trust model have
   users?'') than the one this document exists to test.
+
+  \textbf{Recommendation:} do not run the kill switch as originally
+  written --- it would fire on a metric that was never measuring the
+  right thing. Re-baseline the clock to \texttt{beadle-daemon}'s actual
+  distribution date (see \featureref{feat:daemon-dist}), and hold the
+  Must Do items to their own accountability instead: if signing
+  enforcement, {\small\texttt{beadle init}}, and daemon distribution
+  aren't shipped within one quarter of this revision, that --- not a
+  star count --- is the signal to archive.
 
   \textbf{Where the clock actually stands, as of this revision:} 3 GitHub
   stars against a first-release date of 2026-03-13, with the 6-month mark
@@ -910,8 +934,8 @@ Feasibility & \textcolor{RiskAmber}{Medium} &
   Proton Bridge has run continuously for weeks, not the months this
   document's own scaling FAQ (\faqref{faq:scaling}) says is the real bar,
   and the primary Usability mitigation ({\small\texttt{beadle init}}) is
-  entirely unwritten --- rated Low, this risk hid that the hardest
-  remaining work is distribution and onboarding, not pipeline mechanics. \\
+  entirely unwritten. The hardest remaining work is distribution and
+  onboarding, not pipeline mechanics. \\
 Viability & \textcolor{RiskAmber}{Medium} &
   No revenue requirement, no infrastructure cost beyond the developer's
   own machine --- on that axis the risk is genuinely low. But the stated
@@ -919,9 +943,9 @@ Viability & \textcolor{RiskAmber}{Medium} &
   can only mean \texttt{beadle-email} downloads, since that's the only
   binary distributed, and a download of the email MCP server says nothing
   about whether the signed-pipeline-daemon vision this document is named
-  for has any pull. The 6-month-post-release clock is also undated in
-  this document and may already have run out (see \faqref{faq:pnl} and
-  \faqref{faq:metrics} for both problems). \\
+  for has any pull. The 6-month-post-release clock lands 2026-09-13 ---
+  see \faqref{faq:pnl} and \faqref{faq:metrics} for the current numbers
+  and the recommendation to re-baseline it. \\
 \bottomrule
 \end{tabularx}
 \renewcommand{\arraystretch}{1.0}
@@ -934,7 +958,13 @@ Viability & \textcolor{RiskAmber}{Medium} &
 \section*{Feature Appendix}
 
 Defines the scope boundary for the product. Every feature is explicitly
-categorized to prevent scope creep and force prioritization decisions upfront.
+categorized to prevent scope creep and force prioritization decisions
+upfront. This revision deliberately splits the usual Must/Should/Won't Do
+into five categories instead of three --- Shipped, Built-Not-Distributed,
+and Must Do stand in for what would otherwise be a single undifferentiated
+Must Do, because the distribution gap between ``exists in the repo'' and
+``a user can get it'' is this document's central finding (see the scope
+note at the top).
 
 \subsection*{Shipped (distributed to users)}
 
