@@ -70,6 +70,17 @@ Expire-Date: 0
 	assert.Contains(t, err.Error(), "no expiration date")
 }
 
+// TestCheckKeyExpiry_MissingGPGBinary covers the case gpg is entirely
+// absent from the system -- a missing-dependency failure, distinct from
+// gpg running and reporting a real key problem. No gpg installation is
+// required for this test: it deliberately names a binary that cannot
+// exist, so it runs even on a machine with no gpg at all.
+func TestCheckKeyExpiry_MissingGPGBinary(t *testing.T) {
+	err := CheckKeyExpiry("no-such-gpg-binary-anywhere-on-path", "someone@example.com")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "gpg list-keys")
+}
+
 // fingerprintOf returns the 40-hex fingerprint gpg assigned to keyID in home.
 func fingerprintOf(t *testing.T, gpgBin, home, keyID string) string {
 	t.Helper()

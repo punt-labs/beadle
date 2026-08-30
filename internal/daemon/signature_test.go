@@ -188,6 +188,25 @@ func TestVerifySignature(t *testing.T) {
 			},
 			reason: ReasonInvalid,
 		},
+		{
+			// A well-formed fingerprint that does not correspond to any
+			// key in the ambient keyring at all — distinct from "wrong
+			// key" above, where the owner's own key does exist but the
+			// signature was made by someone else. gpg's --export of an
+			// absent key exits 0 with empty output (verified against real
+			// gpg), so importOwnerKey skips the import step entirely and
+			// assertSingleOwnerKey's own list-keys lookup is what fails.
+			name: "owner key absent from ambient keyring entirely",
+			setup: func(t *testing.T) (*Command, string) {
+				home := shortGPGHome(t)
+				t.Setenv("GNUPGHOME", home)
+
+				cmd := newFixtureCommand()
+				cmd.Signature = "-----BEGIN PGP SIGNATURE-----\nnot a real signature\n-----END PGP SIGNATURE-----\n"
+				return cmd, strings.Repeat("B", 40)
+			},
+			reason: ReasonInvalid,
+		},
 	}
 
 	for _, tt := range tests {
@@ -236,6 +255,35 @@ func TestVerifySignature_InvalidFingerprintFormat(t *testing.T) {
 			assert.Equal(t, ReasonInvalid, sigErr.Reason)
 		})
 	}
+}
+
+// TestSignatureError_Error covers the Error() method's message format
+// directly. Every other test in this file inspects sigErr.Reason via
+// errors.As and never formats the error, so the "command signature %s: %s"
+// template itself was previously never exercised.
+func TestSignatureError_Error(t *testing.T) {
+	err := &SignatureError{Reason: ReasonWrongKey, Detail: "NO_PUBKEY ABCDEF"}
+	assert.Equal(t, "command signature wrong-key: NO_PUBKEY ABCDEF", err.Error())
+}
+
+// TestVerifySignature_MissingGPGBinary covers the exported VerifySignature
+// entry point when gpg is entirely absent from the system -- as opposed to
+// TestVerifyDetachedSignature_ExecStartFailure, which exercises the same
+// failure mode at the narrower internal verifyDetachedSignature helper.
+// VerifySignature reaches the missing binary earlier, in importOwnerKey's
+// export step, and that path wraps the *exec.Error in a plain error rather
+// than special-casing it the way verifyDetachedSignature does -- this test
+// confirms the public entry point still surfaces it as an unwrapped
+// operational failure, never as a *SignatureError.
+func TestVerifySignature_MissingGPGBinary(t *testing.T) {
+	cmd := newFixtureCommand()
+	cmd.Signature = "-----BEGIN PGP SIGNATURE-----\nnot a real signature\n-----END PGP SIGNATURE-----\n"
+
+	err := VerifySignature(cmd, "no-such-gpg-binary-anywhere-on-path", strings.Repeat("C", 40))
+	require.Error(t, err)
+
+	var sigErr *SignatureError
+	assert.False(t, errors.As(err, &sigErr), "missing gpg binary must not be classified as a *SignatureError, got: %v", err)
 }
 
 // TestVerifyDetachedSignature_ExecStartFailure covers the case gpg never
@@ -309,6 +357,63 @@ budget:
 	assert.Equal(t, bytesA, bytesB)
 }
 
+// erroringMarshaler implements yaml.Marshaler and always fails. yaml.v3
+// panics on a genuinely unmarshalable Go value (e.g. a chan), so the only
+// realistic, non-panicking way to reach CanonicalCommandBytes' own error
+// branch is a value whose MarshalYAML method itself returns an error --
+// exactly the case this fixture exists to exercise.
+type erroringMarshaler struct{}
+
+func (erroringMarshaler) MarshalYAML() (any, error) {
+	return nil, errors.New("boom")
+}
+
+func TestCanonicalCommandBytes_MarshalError(t *testing.T) {
+	cmd := &Command{Name: "x", Prompt: "p", OutputSchema: erroringMarshaler{}}
+
+	_, err := CanonicalCommandBytes(cmd)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "marshal canonical command")
+}
+
+// TestVerifySignature_CanonicalizeError covers VerifySignature's own
+// wrapping of a CanonicalCommandBytes failure (line "canonicalize command
+// for verification"), distinct from TestCanonicalCommandBytes_MarshalError
+// above, which only reaches CanonicalCommandBytes directly. This is an
+// operational failure, not a signature verdict, so it must not be a
+// *SignatureError.
+func TestVerifySignature_CanonicalizeError(t *testing.T) {
+	cmd := newFixtureCommand()
+	cmd.OutputSchema = erroringMarshaler{}
+	cmd.Signature = "present"
+
+	err := VerifySignature(cmd, "gpg", strings.Repeat("D", 40))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "canonicalize command for verification")
+
+	var sigErr *SignatureError
+	assert.False(t, errors.As(err, &sigErr), "a canonicalization failure must not be classified as a *SignatureError, got: %v", err)
+}
+
+func TestWithCLocale(t *testing.T) {
+	in := []string{"PATH=/bin", "LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8"}
+
+	out := withCLocale(in)
+
+	assert.Contains(t, out, "PATH=/bin")
+	assert.Contains(t, out, "LANG=en_US.UTF-8")
+	assert.Contains(t, out, "LC_ALL=C")
+	assert.NotContains(t, out, "LC_ALL=en_US.UTF-8")
+
+	count := 0
+	for _, e := range out {
+		if strings.HasPrefix(e, "LC_ALL=") {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "exactly one LC_ALL entry, the replacement")
+}
+
 func TestClassifyStatusLines(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -363,6 +468,15 @@ func TestClassifyStatusLines(t *testing.T) {
 		{
 			name:       "no status lines at all",
 			output:     "gpg: some human-readable line, no [GNUPG:] prefix\n",
+			wantReason: ReasonInvalid,
+		},
+		{
+			// A line carrying the "[GNUPG:] " prefix but nothing after it
+			// (or only whitespace) has fields == nil after strings.Fields,
+			// exercising the len(fields) == 0 skip -- distinct from a line
+			// that lacks the prefix altogether, above.
+			name:       "status prefix with no fields",
+			output:     "[GNUPG:] \n[GNUPG:] GOODSIG_TYPO\n",
 			wantReason: ReasonInvalid,
 		},
 	}
@@ -421,6 +535,21 @@ func TestCountOwnerKeyMatches(t *testing.T) {
 				"fpr:::::::::" + fpr + ":\n",
 			want: 2,
 		},
+		{
+			// A pub record with nothing after it at all -- no paired fpr
+			// line follows because there are no more lines.
+			name:   "pub is the last line, no paired fpr line follows",
+			output: "pub:u:255:22:B9FD49C7EA2984C2:1788060399:1819596399::u:::scESC:::::ed25519:::0:",
+			want:   0,
+		},
+		{
+			// The line immediately after pub exists but isn't an fpr
+			// record at all.
+			name: "line after pub is not an fpr record",
+			output: "pub:u:255:22:B9FD49C7EA2984C2:1788060399:1819596399::u:::scESC:::::ed25519:::0:\n" +
+				"uid:u::::1788060399::842D16BA::Owner <owner@example.com>::::::::::0:\n",
+			want: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -443,4 +572,36 @@ func TestAssertSingleOwnerKey_AmbiguityIsSignatureError(t *testing.T) {
 	var sigErr *SignatureError
 	require.ErrorAs(t, err, &sigErr)
 	assert.Equal(t, ReasonInvalid, sigErr.Reason)
+}
+
+// TestAssertSingleOwnerKey_EmailQueryFindsZeroExactMatches covers the
+// switch's n == 0 arm on a *successful* gpg list-keys run — as opposed to
+// TestAssertSingleOwnerKey_AmbiguityIsSignatureError above, where gpg's own
+// exit status is already non-zero for a query that matches nothing.
+// Querying by email rather than fingerprint is exactly what
+// VerifySignature's upstream fingerprint-format check exists to prevent
+// (see the design doc's §1 "Key identifier format"): here two real keys
+// share one email, so gpg finds and lists both (exit 0), but
+// countOwnerKeyMatches only counts a pub record whose own fpr equals the
+// query string exactly — an email never does — so the count is zero and
+// assertSingleOwnerKey fails closed with "not found," never silently
+// picking one of the two matches.
+func TestAssertSingleOwnerKey_EmailQueryFindsZeroExactMatches(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := shortGPGHome(t)
+	const email = "shared-ambiguous@example.com"
+
+	genOwnerKey(t, gpgBin, home, email, "1y")
+	cmd := exec.Command(gpgBin, "--homedir", home, "--batch", "--no-tty",
+		"--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-generate-key", fmt.Sprintf("Second Owner <%s>", email), "default", "default", "1y")
+	cmd.Stderr = os.Stderr
+	require.NoError(t, cmd.Run(), "second key generation failed")
+
+	err := assertSingleOwnerKey(gpgBin, home, email)
+	require.Error(t, err)
+	var sigErr *SignatureError
+	require.ErrorAs(t, err, &sigErr)
+	assert.Equal(t, ReasonInvalid, sigErr.Reason)
+	assert.Contains(t, sigErr.Detail, "not found")
 }
