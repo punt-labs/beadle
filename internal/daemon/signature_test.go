@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/punt-labs/beadle/internal/pgp"
 )
 
 // shortGPGHome creates a GPG homedir with a path short enough for
@@ -346,6 +349,44 @@ func TestVerifyDetachedSignature_ExpiredKey(t *testing.T) {
 	assert.Equal(t, ReasonKeyExpired, sigErr.Reason)
 }
 
+// nonExecutableFile writes a file that exists but has no execute bit set --
+// distinct from a name exec.LookPath can't find at all
+// (TestVerifyDetachedSignature_ExecStartFailure's and
+// TestAssertSingleOwnerKey_ExecStartFailure's "no-such-gpg-binary" case,
+// which produces a *exec.Error). Pointing gpgBinary at the returned path
+// makes (*exec.Cmd).Run return a *fs.PathError directly, never wrapped in
+// *exec.Error -- the exact gap isOperationalExecFailure closes.
+func nonExecutableFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "not-executable")
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\necho hi\n"), 0o644))
+	return path
+}
+
+// TestVerifyDetachedSignature_PermissionDenied covers the case gpg exists
+// but lacks execute permission -- a *fs.PathError from (*exec.Cmd).Run,
+// never wrapped in *exec.Error -- so the *exec.Error-only check this
+// function used before isOperationalExecFailure existed would have missed
+// it and misclassified it as a signature verdict. It must surface as the
+// unwrapped operational error VerifySignature's doc comment promises,
+// exactly like TestVerifyDetachedSignature_ExecStartFailure's missing-binary
+// case above.
+func TestVerifyDetachedSignature_PermissionDenied(t *testing.T) {
+	fakeGPG := nonExecutableFile(t)
+	tmpDir := t.TempDir()
+	gpgHome := filepath.Join(tmpDir, "g")
+	require.NoError(t, os.Mkdir(gpgHome, 0o700))
+
+	err := verifyDetachedSignature(fakeGPG, gpgHome, tmpDir, []byte("data"), "not-a-real-signature")
+	require.Error(t, err)
+
+	var sigErr *SignatureError
+	assert.False(t, errors.As(err, &sigErr), "permission-denied binary must not be classified as a *SignatureError, got: %v", err)
+
+	var pathErr *fs.PathError
+	assert.True(t, errors.As(err, &pathErr), "expected a *fs.PathError wrapped in the returned error, got: %v", err)
+}
+
 func TestCanonicalCommandBytes_ClearsSignature(t *testing.T) {
 	cmd := &Command{Name: "x", Signature: "deadbeef", Prompt: "p", OutputSchema: "text"}
 
@@ -662,6 +703,69 @@ func TestAssertSingleOwnerKey_ExecStartFailure(t *testing.T) {
 
 	var execErr *exec.Error
 	assert.True(t, errors.As(err, &execErr), "expected an *exec.Error wrapped in the returned error, got: %v", err)
+}
+
+// TestAssertSingleOwnerKey_PermissionDenied covers the case gpg exists but
+// lacks execute permission -- a *fs.PathError from (*exec.Cmd).Run, never
+// wrapped in *exec.Error -- so the *exec.Error-only check this function used
+// before isOperationalExecFailure existed would have missed it and
+// misclassified it as "owner key not found," a *SignatureError. It must
+// surface as the unwrapped operational error VerifySignature's doc comment
+// promises, exactly like TestAssertSingleOwnerKey_ExecStartFailure's
+// missing-binary case above.
+func TestAssertSingleOwnerKey_PermissionDenied(t *testing.T) {
+	fakeGPG := nonExecutableFile(t)
+	home := shortGPGHome(t)
+
+	err := assertSingleOwnerKey(fakeGPG, home, strings.Repeat("A", 40))
+	require.Error(t, err)
+
+	var sigErr *SignatureError
+	assert.False(t, errors.As(err, &sigErr), "permission-denied binary must not be classified as a *SignatureError, got: %v", err)
+
+	var pathErr *fs.PathError
+	assert.True(t, errors.As(err, &pathErr), "expected a *fs.PathError wrapped in the returned error, got: %v", err)
+}
+
+// TestVerifySignature_ExpiryCheckPermissionDenied proves VerifySignature's
+// own handling of pgp.CheckKeyExpiry's returned error (§4 of
+// docs/gpg-signature-verification.md) uses isOperationalExecFailure to tell
+// a genuine expiry finding apart from an operational failure in the expiry
+// check's own subprocess -- the third of the three call sites this file's
+// shared helper covers. It cannot be reproduced by calling VerifySignature
+// itself with a broken gpgBinary: every subprocess call VerifySignature
+// makes, including importOwnerKey's export step, shares that one gpgBinary
+// argument, so a binary broken enough to fail CheckKeyExpiry would already
+// have failed importOwnerKey first, before VerifySignature ever reaches the
+// CheckKeyExpiry line. Instead this calls pgp.CheckKeyExpiry directly, the
+// same call VerifySignature makes, and confirms isOperationalExecFailure
+// classifies its permission-denied result exactly the way VerifySignature's
+// own branch needs it to.
+func TestVerifySignature_ExpiryCheckPermissionDenied(t *testing.T) {
+	fakeGPG := nonExecutableFile(t)
+
+	err := pgp.CheckKeyExpiry(fakeGPG, "someone@example.com")
+	require.Error(t, err)
+	assert.True(t, isOperationalExecFailure(err),
+		"a permission-denied gpg binary during the expiry check must be classified as an operational failure, got: %v", err)
+}
+
+// TestVerifySignature_ExpiryFindingIsNotOperational is
+// TestVerifySignature_ExpiryCheckPermissionDenied's complement: a genuine
+// expiry finding from a real gpg run -- gpg ran to completion and
+// pgp.parseColonExpiry found a real problem -- must not be classified as an
+// operational failure, or VerifySignature's existing "key expired" case
+// (TestVerifySignature's "key expired — non-expiring owner key" subtest)
+// would regress from ReasonKeyExpired to an unwrapped operational error.
+func TestVerifySignature_ExpiryFindingIsNotOperational(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := shortGPGHome(t)
+	fpr := genOwnerKey(t, gpgBin, home, "expiry-not-operational@example.com", "0") // never expires
+
+	err := pgp.CheckKeyExpiry(gpgBin, fpr, pgp.Homedir(home))
+	require.Error(t, err)
+	assert.False(t, isOperationalExecFailure(err),
+		"a genuine expiry finding must not be classified as an operational failure, got: %v", err)
 }
 
 func TestAssertSingleOwnerKey_AmbiguityIsSignatureError(t *testing.T) {

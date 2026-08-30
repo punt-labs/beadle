@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,6 +45,30 @@ func (e *SignatureError) Error() string {
 // fingerprintPattern matches a full 40-hex-character OpenPGP fingerprint —
 // no "0x" prefix, no internal spaces, no short or long key ID.
 var fingerprintPattern = regexp.MustCompile(`^[0-9A-Fa-f]{40}$`)
+
+// isOperationalExecFailure reports whether err represents a gpg subprocess
+// that never ran to completion, as opposed to one that ran and produced an
+// outcome worth parsing. It matches a *exec.Error (a $PATH lookup failure,
+// gpgBinary not found by name) or a *fs.PathError (the shape (*exec.Cmd).Run
+// returns directly for a binary that exists but lacks execute permission —
+// never wrapped in *exec.Error). It is false for a nil error and for
+// *exec.ExitError: gpg exits non-zero for entirely expected outcomes — a bad
+// signature, a keyID with no match — and those are classified from parsed
+// output, never from the exit code alone. It is also false for a domain
+// error a caller has already produced from output gpg successfully
+// returned, such as pgp.CheckKeyExpiry's own expiry finding: that error
+// carries neither of the two operational-failure types, because gpg ran to
+// completion to produce it. This one function is the single place every
+// exec.Command call site in this package decides operational-versus-domain,
+// so the three call sites below (and any future one) can never independently
+// drift on the answer — the same defect, an incomplete *exec.Error-only
+// check that missed a permission-denied binary, was fixed piecemeal twice at
+// two of these three sites before this function existed.
+func isOperationalExecFailure(err error) bool {
+	var execErr *exec.Error
+	var pathErr *fs.PathError
+	return errors.As(err, &execErr) || errors.As(err, &pathErr)
+}
 
 // CanonicalCommandBytes returns the deterministic YAML encoding of cmd used
 // as the signed payload for command-file signatures: a copy of cmd with
@@ -105,6 +130,9 @@ func VerifySignature(cmd *Command, gpgBinary, ownerKeyID string) error {
 	}
 
 	if err := pgp.CheckKeyExpiry(gpgBinary, ownerKeyID, pgp.Homedir(gpgHome)); err != nil {
+		if isOperationalExecFailure(err) {
+			return err
+		}
 		return &SignatureError{Reason: ReasonKeyExpired, Detail: err.Error()}
 	}
 
@@ -166,10 +194,10 @@ func assertSingleOwnerKey(gpgBinary, gpgHome, ownerKeyID string) error {
 	cmd.Stderr = &stderr
 	// gpg --list-keys exits non-zero when ownerKeyID legitimately isn't in
 	// the keyring -- an expected outcome that countOwnerKeyMatches below
-	// turns into "zero matches." Only a process that never started at all
-	// (binary missing or not executable) is an operational failure.
-	var execErr *exec.Error
-	if err := cmd.Run(); errors.As(err, &execErr) {
+	// turns into "zero matches." Only a process that never ran to
+	// completion at all (binary missing, or present but not executable) is
+	// an operational failure.
+	if err := cmd.Run(); isOperationalExecFailure(err) {
 		return fmt.Errorf("run gpg list-keys for owner key %s: %w", ownerKeyID, err)
 	}
 
@@ -239,11 +267,10 @@ func verifyDetachedSignature(gpgBinary, gpgHome, tmpDir string, canon []byte, ar
 	cmd.Stderr = &stderr
 	// gpg --verify exits non-zero for a bad signature; that outcome is
 	// expected and classifyStatusLines reads it from stdout regardless of
-	// exit code. But if gpg itself never started (binary missing or not
-	// executable), Run returns an *exec.Error before any status-fd output
-	// exists — that is an operational failure, not a signature verdict.
-	var execErr *exec.Error
-	if err := cmd.Run(); errors.As(err, &execErr) {
+	// exit code. But if gpg itself never ran to completion (binary missing,
+	// or present but not executable), no status-fd output exists to
+	// classify — that is an operational failure, not a signature verdict.
+	if err := cmd.Run(); isOperationalExecFailure(err) {
 		return fmt.Errorf("run gpg verify: %w", err)
 	}
 
