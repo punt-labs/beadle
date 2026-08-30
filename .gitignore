@@ -220,9 +220,9 @@ docs/*.toc
 
 # Beadle-efv v0.16.3 payload trim: internal materials that used to be tracked
 # and therefore were believed to ship to every marketplace-plugin user's
-# cache. Re-evaluated and reverted for .envrc 2026-08-23 (see below);
-# research/meetings/prfaq.* are flagged for the same re-evaluation in a
-# follow-up (beadle tracker), not bundled into this fix.
+# cache. Re-evaluated and reverted for .envrc 2026-08-23 (see below), and for
+# prfaq.tex/prfaq.pdf/prfaq.bib on the same theory below. research/ and
+# meetings/ remain excluded pending their own re-evaluation.
 #
 # .envrc was excluded here from PR #238 through 2026-08-23 on the theory that
 # cone-mode sparse-checkout only excludes whole *directories* and therefore
@@ -236,12 +236,15 @@ docs/*.toc
 # disk. ARCHITECTURE.md's "Repository Layout" claim about cone mode is
 # corrected accordingly. .envrc is tracked again, matching dungeon, ethos,
 # mcp-proxy, prfaq, punt-kit, quarry, vox, biff, lux, z-spec, and
-# public-website.
+# public-website. prfaq.tex/prfaq.pdf/prfaq.bib are tracked again for the
+# same reason: they are root-level files under the same disproven theory.
+# prfaq.pdf additionally needs a negation here: the broader `*.pdf` LaTeX
+# build-artifact rule above (line 169) still matches it, so removing only
+# the specific prfaq.pdf line above left it re-ignored for anyone who
+# doesn't already have it tracked (caught by Bugbot on PR #246).
 research/
 meetings/
-prfaq.tex
-prfaq.pdf
-prfaq.bib
+!prfaq.pdf
 
 # `.punt-labs/ethos/` was excluded here on the theory that its ~1 MB / 245
 # files of org-wide identities, roles, personalities, and writing styles get
