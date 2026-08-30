@@ -126,33 +126,57 @@ func CheckKeyExpiry(gpgBinary, keyID string, opts ...ExpiryOption) error {
 //
 // Subkeys rotate over a key's lifetime, and gpg leaves an old subkey in
 // place (to verify historical signatures) when a new one is generated, so
-// the same all-or-nothing rule cannot apply to them. Instead, the
-// requirement is "at least one currently valid signing subkey, if the key
-// has any signing-capable subkeys at all": a sub record whose capabilities
-// field (column 11, 0-indexed) marks it signing-capable ("s") is noted, and
-// the key passes on this dimension as soon as one such subkey has a
-// non-empty, non-zero, unexpired expiry. A subkey with no expiry set is
-// treated the same as an expired one -- not currently valid, but not an
-// immediate hard failure either, since another subkey may still cover it.
-// The key is rejected for its subkeys only if it has signing-capable
-// subkeys and none of them are currently valid.
+// the same all-or-nothing rule cannot apply to a subkey that once carried a
+// real expiry and has since passed it. There, the requirement is "at least
+// one currently valid signing subkey, if the key has any signing-capable
+// subkeys at all": a sub record whose capabilities field (column 11,
+// 0-indexed) marks it signing-capable ("s") is noted, and the key passes on
+// this dimension as soon as one such subkey has a non-empty, non-zero,
+// unexpired expiry.
+//
+// A signing-capable subkey with NO expiry set at all gets no such
+// leniency: it fails the whole check immediately, exactly like the primary
+// key does, regardless of whether some other subkey is currently valid.
+// "No expiry" and "expired" are different findings and must not be
+// conflated. An expired subkey is provably dead to gpg's own key-selection
+// algorithm for a new signature -- verified empirically below -- so an
+// old, properly-expired subkey left in place by normal key rotation is not
+// a live bypass of the invariant. A subkey with no expiry is not dead: it
+// is a live, currently-selectable key, and gpg's own subkey-selection
+// algorithm can and does pick it over an older, properly-expiring subkey
+// when making a brand-new signature. Verified empirically against real
+// gpg (a cert-only primary key, an older signing subkey carrying a real
+// 1-year expiry, and a newer signing subkey created with no expiry at
+// all): gpg --detach-sign -u <identity> selects the newer, non-expiring
+// subkey to actually sign with, not the older, properly-expiring one.
+// Tolerating "no expiry, but another subkey is valid" would let
+// CheckKeyExpiry report a pass while Sign silently signs with the
+// non-expiring subkey -- exactly bypassing the invariant this function
+// exists to enforce.
 //
 // Returns an error if the pub record's own expiry fails its stricter check,
-// if the key has signing subkeys but none currently valid, if no pub record
-// is found, or if more than one pub record matches (ambiguous keyID).
+// if any signing-capable subkey has no expiration date at all, if the key
+// has signing subkeys but none currently valid, if no pub record is found,
+// or if more than one pub record matches (ambiguous keyID).
 //
-// The "at least one" leniency does not reopen a bypass: it only decides
-// whether this pre-check lets gpg's own signing or verification operation
-// proceed, and those operations independently enforce per-subkey expiry
-// regardless of what this function found. Verified empirically against real
-// gpg (a cert-only primary, an expired signing subkey, and a valid one):
-// gpg --detach-sign selects the valid subkey and refuses to sign at all
-// ("Unusable secret key") when every signing subkey is expired; gpg
-// --verify emits EXPKEYSIG -- not GOODSIG -- for a signature actually made
-// by an expired subkey, and VerifySignature's classifyStatusLines maps that
-// to ReasonKeyExpired independently of this pre-check's answer. This
+// The "at least one valid" leniency -- for subkeys that were properly
+// configured with a real expiry and have since passed it -- does not
+// reopen a bypass: it only decides whether this pre-check lets gpg's own
+// signing or verification operation proceed, and those operations
+// independently enforce per-subkey expiry regardless of what this function
+// found. Verified empirically against real gpg (a cert-only primary, an
+// expired signing subkey, and a valid one): gpg --detach-sign selects the
+// valid subkey and refuses to sign at all ("Unusable secret key") when
+// every signing subkey is expired -- gpg never falls back to an expired
+// subkey the way it falls forward to a non-expiring one; gpg --verify
+// emits EXPKEYSIG -- not GOODSIG -- for a signature actually made by an
+// expired subkey, and VerifySignature's classifyStatusLines maps that to
+// ReasonKeyExpired independently of this pre-check's answer. This
 // function's job is coarser: "can this identity sign at all right now,"
-// answered without needing to also duplicate gpg's own key-selection logic.
+// answered without needing to also duplicate gpg's own key-selection logic
+// for the properly-expired case -- but the no-expiry case gets no such
+// deference, precisely because gpg's own selection logic treats a
+// non-expiring subkey as eligible, not dead.
 func parseColonExpiry(output, keyID string) error {
 	pubCount := 0
 	sawSigningSubkey := false
@@ -183,11 +207,16 @@ func parseColonExpiry(output, keyID string) error {
 			}
 			sawSigningSubkey = true
 			if fields[6] == "" || fields[6] == "0" {
-				continue
+				return fmt.Errorf("key %q has a signing subkey with no expiration date: non-expiring signing keys are not permitted", keyID)
 			}
 			if checkNotExpired(fields[6], now) == nil {
 				haveValidSigningSubkey = true
 			}
+			// else: this subkey's expiry has passed. Tolerated as long as
+			// another signing-capable subkey is currently valid -- gpg will
+			// never select an expired subkey for a new signature (verified
+			// empirically above), so an old, properly-expired subkey left in
+			// place by normal key rotation is not a finding on its own.
 		}
 	}
 

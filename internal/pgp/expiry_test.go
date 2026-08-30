@@ -223,7 +223,7 @@ func TestCheckKeyExpiry_SigningSubkey(t *testing.T) {
 		wantErrSubstr string
 	}{
 		{name: "signing subkey with expiry", subkeyExpire: "6m", wantErr: false},
-		{name: "signing subkey without expiry", subkeyExpire: "0", wantErr: true, wantErrSubstr: "signing-capable subkeys"},
+		{name: "signing subkey without expiry", subkeyExpire: "0", wantErr: true, wantErrSubstr: "no expiration date"},
 	}
 
 	for _, tt := range tests {
@@ -297,6 +297,58 @@ func TestCheckKeyExpiry_SigningSubkeyRotation(t *testing.T) {
 
 	err = CheckKeyExpiry(gpgBin, fpr, Homedir(home))
 	assert.NoError(t, err, "a key with one expired and one current signing subkey should be accepted")
+}
+
+// TestCheckKeyExpiry_NonExpiringSubkeyAlongsideValidOne reproduces the exact
+// bypass Bugbot flagged on "Non-expiring subkeys bypass expiry check":
+// a cert-only primary key with one signing subkey carrying a real 1-year
+// expiry, plus a SECOND signing subkey created with no expiry at all
+// (expire=0). The prior leniency treated "no expiry" the same as
+// "expired," so the valid subkey covered for the non-expiring one and
+// CheckKeyExpiry passed -- but gpg --detach-sign -u <identity> selects the
+// newer, non-expiring subkey to actually sign with (verified empirically
+// against real gpg), completely bypassing the non-expiring-key invariant.
+// CheckKeyExpiry must now reject this key outright.
+func TestCheckKeyExpiry_NonExpiringSubkeyAlongsideValidOne(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+
+	home := shortGPGHome(t)
+
+	// Cert-only primary key: no signing capability of its own, so signing
+	// is delegated entirely to subkeys -- the scenario this function's
+	// leniency logic exists to handle.
+	genCmd := exec.Command(gpgBin, "--homedir", home, "--batch", "--no-tty",
+		"--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-generate-key", "Nonexpiring Subkey Test <nonexpiring-subkey@example.com>",
+		"default", "cert", "1y")
+	genCmd.Stderr = os.Stderr
+	require.NoError(t, genCmd.Run(), "primary key generation failed")
+
+	fpr := fingerprintOf(t, gpgBin, home, "nonexpiring-subkey@example.com")
+
+	// First signing subkey: a real 1-year expiry.
+	validCmd := exec.Command(gpgBin, "--homedir", home, "--batch", "--no-tty",
+		"--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-add-key", fpr, "ed25519", "sign", "1y")
+	validCmd.Stderr = os.Stderr
+	require.NoError(t, validCmd.Run(), "valid signing subkey generation failed")
+
+	// Second signing subkey: no expiry at all. Newer than the one above, so
+	// gpg's own key-selection algorithm prefers it for a new signature.
+	nonExpiringCmd := exec.Command(gpgBin, "--homedir", home, "--batch", "--no-tty",
+		"--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-add-key", fpr, "ed25519", "sign", "0")
+	nonExpiringCmd.Stderr = os.Stderr
+	require.NoError(t, nonExpiringCmd.Run(), "non-expiring signing subkey generation failed")
+
+	err = CheckKeyExpiry(gpgBin, fpr, Homedir(home))
+	require.Error(t, err, "a valid signing subkey must not excuse a non-expiring one")
+	assert.True(t, errors.Is(err, ErrKeyExpiryFinding),
+		"a non-expiring subkey is a domain finding, not an operational failure, got: %v", err)
+	assert.Contains(t, err.Error(), "no expiration date")
 }
 
 func TestParseColonExpiry(t *testing.T) {
@@ -379,15 +431,33 @@ func TestParseColonExpiry(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			// A single signing-capable subkey with no expiry at all: there is
-			// no other subkey to cover it, so this is the "signing capability
-			// delegated to subkeys but none currently usable" rejection.
+			// A single signing-capable subkey with no expiry at all is an
+			// immediate, unconditional rejection -- not the "none currently
+			// usable" leniency check at the end of the function, which only
+			// ever applies to subkeys that had a real expiry and it passed.
 			name: "signing subkey without expiry",
 			output: fmt.Sprintf("pub:u:2048:1:ABCDEF:1234567890:%s::u:::scESC:::\n"+
 				"sub:u:2048:1:111111:1234567890::::::s:::\n", future),
 			keyID:   "test@example.com",
 			wantErr: true,
-			errMsg:  "signing-capable subkeys",
+			errMsg:  "no expiration date",
+		},
+		{
+			// The exact Bugbot-found bypass: one signing-capable subkey has
+			// a valid, current expiry (222222); another signing-capable
+			// subkey (111111) has no expiry set at all. The prior leniency
+			// treated "no expiry" the same as "expired" and let this pass
+			// because 222222 covered it -- but gpg's own subkey selection
+			// can and does pick the non-expiring 111111 for a new signature,
+			// bypassing the invariant entirely. This must reject
+			// unconditionally, regardless of 222222's validity.
+			name: "one valid signing subkey alongside one with no expiry: rejected",
+			output: fmt.Sprintf("pub:u:2048:1:ABCDEF:1234567890:%s::u:::scESC:::\n"+
+				"sub:u:2048:1:111111:1234567890::::::s:::\n"+
+				"sub:u:2048:1:222222:1234567890:%s:::::s:::\n", future, future),
+			keyID:   "test@example.com",
+			wantErr: true,
+			errMsg:  "no expiration date",
 		},
 		{
 			// The exact scenario from Bugbot's "Expired subkeys reject valid
