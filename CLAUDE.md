@@ -4,6 +4,17 @@ Autonomous agent daemon with cryptographic owner control. GPG-signed instruction
 
 The shipping component is `beadle-email` — an MCP server for email communication via Proton Bridge with a four-level PGP trust model.
 
+## What Beadle Is
+
+Beadle gives an **AI agent** its own email address and mailbox — it is not a tool for managing a human's personal inbox. Once an agent has a mailbox, email becomes a channel other parties can use to instruct it, with no live session required. Everything in the trust model exists to answer one question for that channel: who is allowed to direct this agent, and how much authority does a given message actually carry.
+
+Two independent mechanisms decide that. **There is no privileged "owner" role sitting above them** — do not model one when reasoning about this system:
+
+1. **Message verification** — the four-level trust classification (`trusted`/`verified`/`untrusted`/`unverified`, see Trust Model below), proving how hard a given message would be to forge.
+2. **Per-contact permission grants (`rwx`)** — set independently per sender, per identity (`internal/contacts.CheckPermission`). Any number of different people or systems can each hold their own combination of read/reply/execute; nobody is special by default, and a perfectly verified message from an ungranted sender still unlocks nothing.
+
+The one place "owner" shows up in code today (`daemon.json`'s `owner_handle`/`owner_gpg_key_id`, `internal/daemon.VerifySignature`'s `ownerKeyID`) is much narrower than the word implies: it names the single GPG key that must have signed a `beadle-daemon` recipe (command) file before the daemon will load it at all — an **authorizer** for recipe files, not a general position of authority, and unrelated to anyone's `rwx` grants. That naming is wrong and is being corrected (tracked as `beadle-4ul`); until it lands, read every "owner" in `internal/daemon` as "recipe authorizer," nothing more.
+
 ## Identity
 
 You are **Claude Agento** (`claude`), an agent in the Punt Labs org. Your identity is managed by ethos (`ethos show claude`). Beadle is your email system — you read, send, and manage email as `claude@punt-labs.com`.
