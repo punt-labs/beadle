@@ -210,6 +210,30 @@ func TestPipelineStore_PruneRemovesAgedTerminalRecords(t *testing.T) {
 	assert.NoError(t, err, "recent record should survive prune")
 }
 
+func TestPipelineStore_PruneRetainsExactCutoffBoundary(t *testing.T) {
+	dir := t.TempDir()
+	fixedNow := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), Now: func() time.Time { return fixedNow }}
+
+	maxAge := 24 * time.Hour
+	cutoff := fixedNow.Add(-maxAge)
+
+	atCutoff := &Pipeline{Version: 1, ID: "at-cutoff", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: cutoff}
+	justPast := &Pipeline{Version: 1, ID: "just-past", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: cutoff.Add(-time.Nanosecond)}
+	require.NoError(t, s.Save(atCutoff))
+	require.NoError(t, s.Save(justPast))
+
+	removed, err := s.Prune(maxAge)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
+
+	_, err = os.Stat(filepath.Join(dir, "at-cutoff.json"))
+	assert.NoError(t, err, "a record aged exactly maxAge is not older than maxAge and must be kept")
+
+	_, err = os.Stat(filepath.Join(dir, "just-past.json"))
+	assert.True(t, os.IsNotExist(err), "a record one nanosecond past the cutoff is older than maxAge and must be removed")
+}
+
 func TestPipelineStore_PruneNeverRemovesRunning(t *testing.T) {
 	dir := t.TempDir()
 	s := &PipelineStore{Dir: dir, Logger: testLogger()}

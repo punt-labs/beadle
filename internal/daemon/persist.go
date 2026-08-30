@@ -14,6 +14,10 @@ import (
 type PipelineStore struct {
 	Dir    string
 	Logger *slog.Logger
+
+	// Now returns the current time. Nil means time.Now; tests override it
+	// to pin Prune's cutoff for exact boundary checks.
+	Now func() time.Time
 }
 
 // DefaultRetention is how long a pipeline record is kept on disk before
@@ -115,7 +119,11 @@ func (s *PipelineStore) Prune(maxAge time.Duration) (int, error) {
 		return 0, fmt.Errorf("read pipeline dir %s: %w", s.Dir, err)
 	}
 
-	cutoff := time.Now().Add(-maxAge)
+	now := s.Now
+	if now == nil {
+		now = time.Now
+	}
+	cutoff := now().Add(-maxAge)
 	removed := 0
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
@@ -138,7 +146,7 @@ func (s *PipelineStore) Prune(maxAge time.Duration) (int, error) {
 			continue
 		}
 
-		if p.Status == "running" || p.CreatedAt.After(cutoff) {
+		if p.Status == "running" || !p.CreatedAt.Before(cutoff) {
 			continue
 		}
 
