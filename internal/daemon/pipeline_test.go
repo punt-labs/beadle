@@ -531,8 +531,50 @@ func TestExecutor_AutoReplyInvalidArgsLogged(t *testing.T) {
 	assert.Equal(t, "completed", p.Status)
 	assert.Len(t, p.Results, 1) // no auto-reply appended: args invalid
 	assert.Len(t, runner.calls, 1)
+	assert.Contains(t, p.Error, "auto-reply args invalid")
+	assert.Contains(t, p.Error, "missing required arg")
 
 	line := logLineContaining(t, buf, "missing required arg")
+	assert.Contains(t, line, p.ID)
+	assert.Contains(t, line, "level=ERROR")
+}
+
+// TestExecutor_AutoReplyRunnerNotRegisteredRecorded is the regression test
+// for the second half of beadle-5k5's misconfiguration-vs-transient-failure
+// fix: a missing runner registration is a permanent misconfiguration, same
+// class as invalid args, and must leave p.Error populated -- not just a log
+// line -- so the record is honest about a reply that never went out.
+func TestExecutor_AutoReplyRunnerNotRegisteredRecorded(t *testing.T) {
+	runner := &mockClaudeRunner{
+		results: []WorkerResult{{Output: "Hello, Jim!"}},
+	}
+	logger, buf := testLoggerCapture()
+
+	cmds := testCommands()
+	reply := *cmds["reply"]
+	reply.Runner = "nonexistent"
+	cmds["reply"] = &reply
+
+	exec := &Executor{
+		Planner: &StubPlanner{
+			Result: []CommandCall{{Command: "greet", Args: map[string]any{}}},
+		},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	meta := EmailMeta{MessageID: "24", From: "jim@test.com", Subject: "Test"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.NoError(t, err)
+
+	assert.Equal(t, "completed", p.Status)
+	assert.Len(t, p.Results, 1) // no auto-reply appended: runner not registered
+	assert.Len(t, runner.calls, 1)
+	assert.Contains(t, p.Error, "auto-reply runner not registered")
+	assert.Contains(t, p.Error, "nonexistent")
+
+	line := logLineContaining(t, buf, "nonexistent")
 	assert.Contains(t, line, p.ID)
 	assert.Contains(t, line, "level=ERROR")
 }

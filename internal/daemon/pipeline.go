@@ -183,9 +183,11 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			// Permanent misconfiguration: the reply command's signature never
 			// changes, so this fails on every pipeline run, forever.
 			e.Logger.Error("auto-reply args invalid", "pipeline", p.ID, "error", err)
+			p.Error = fmt.Sprintf("auto-reply args invalid: %v", err)
 		} else if runner, rok := e.Runners[replyCmd.Runner]; !rok {
 			// Same: a runner registration gap does not clear itself between runs.
 			e.Logger.Error("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
+			p.Error = fmt.Sprintf("auto-reply runner not registered: %s", replyCmd.Runner)
 		} else {
 			replyResult, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe)
 			if err != nil {

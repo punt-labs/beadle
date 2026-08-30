@@ -70,14 +70,17 @@ func escapeYAMLValue(s string) string {
 	return `"` + escaped + `"`
 }
 
-// escapeYAMLPipe returns a double-quoted YAML scalar for trusted content
-// that must not be silently truncated: pipeline stage output (which can run
-// to 1MB) and a Command's Prompt, which becomes a mission's success_criteria.
-// A Prompt reaches here trusted because cmd/beadle-daemon/main.go's
-// loadDaemonCommands only loads commands whose signature daemon.LoadCommands
-// verified against the recipe authorizer's key -- that enforcement lives in
-// the caller, not in this function or in the Command type. Unlike
-// escapeYAMLValue it has no length cap. NUL bytes are still stripped.
+// escapeYAMLPipe returns a double-quoted YAML scalar for content that must
+// not be silently truncated: pipeline stage context (prior-stage output and
+// call args, which can run to 1MB and is not signature-verified -- it can
+// carry planner-supplied args or email-derived pipe data) and a Command's
+// Prompt, which becomes a mission's success_criteria. Only the Prompt call
+// site is trusted: a Prompt reaches here trusted because
+// cmd/beadle-daemon/main.go's loadDaemonCommands only loads commands whose
+// signature daemon.LoadCommands verified against the recipe authorizer's
+// key -- that enforcement lives in the caller, not in this function or in
+// the Command type. Unlike escapeYAMLValue it has no length cap. NUL bytes
+// are still stripped.
 func escapeYAMLPipe(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
