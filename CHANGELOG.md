@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`beadle-daemon` now actually persists pipeline records, and its crash
+  recovery actually runs.** Both features existed in code and neither
+  worked: `Executor.Store` was never assigned outside tests, so every
+  `save()` was a silent no-op and nothing reached disk, which in turn meant
+  the startup sweep for pipelines a dead daemon left `"running"` always
+  scanned an empty directory. The code read as though a durable record and
+  crash recovery both existed; if the daemon died mid-job the sender who
+  emailed it waited forever with no trace the job had started. The store is
+  now threaded from `cmd/beadle-daemon` through `NewMailHandler` into the
+  `Executor` — the same instance the startup sweep uses, so both halves
+  agree on one directory — and a pipeline orphaned by a daemon crash is
+  marked failed with `"daemon stopped while pipeline was running"`. Per
+  `PipelineStore.LoadRunning`'s trust boundary, state read back from disk is
+  still only relabelled and saved, never resumed: on-disk JSON is untrusted
+  input and must not drive execution (beadle-aw4).
+
+- **Pipeline records are pruned after 30 days (`PipelineStore.Prune`).**
+  Each record carries email metadata (sender, subject, message ID) plus
+  every stage's output, so unbounded retention is a data-retention concern
+  and not only a disk one. Thirty days is long enough to debug a failed run
+  days later, short enough that a long-lived mailbox does not accumulate an
+  open-ended audit trail. A record still `"running"` is never removed
+  regardless of age, and pruning is deliberately sequenced after the stale
+  sweep so a pipeline just marked failed becomes eligible in the same pass.
+  **Pruning currently runs only at daemon startup**, so a daemon that never
+  restarts never prunes — periodic pruning is tracked as beadle-721a. The
+  30-day window is an engineering default, not a ratified data-retention
+  policy; if beadle mail ever carries regulated content it needs a policy
+  owner rather than a default.
+
 ### Changed
 
 - **BREAKING: `beadle-daemon` now loads zero commands when `daemon.json` is
