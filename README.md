@@ -278,21 +278,22 @@ PGP verification uses an isolated GNUPGHOME per operation. When no key is attach
 
 ## Identity
 
-The simplest setup needs one file: `~/.punt-labs/beadle/default-identity`, a
-plain-text email address. Beadle uses that identity for everything --- no
-other configuration required.
+The simplest identity setup needs one file:
+`~/.punt-labs/beadle/default-identity`, a plain-text email address. Beadle
+uses that identity for everything --- no other identity configuration
+required (see [Setup](#setup) for the separate IMAP/SMTP config every
+identity still needs).
 
 Beadle works better with [ethos](https://github.com/punt-labs/ethos) (sidecar
 pattern --- file reads, no import dependency) if you want more than one
-identity: per-repo identity pinning, mid-session `switch_identity` switching,
-and GPG key ID resolution without hand-editing config. When ethos is present,
-resolution checks, in order:
+identity: per-repo identity pinning, or mid-session `switch_identity`
+switching. When ethos is present, resolution checks, in order:
 
 1. **Repo-local config** --- `.punt-labs/ethos.yaml` with `agent: <handle>`
 2. **Global ethos active** --- `~/.punt-labs/ethos/active`
-3. **Handle → ethos identity YAML** --- `~/.punt-labs/ethos/identities/<handle>.yaml` supplies name and email; `~/.punt-labs/ethos/identities/<handle>.ext/beadle.yaml` supplies the GPG key id. Always global, never a repo-local vendored copy.
+3. **Handle → ethos identity YAML** --- `~/.punt-labs/ethos/identities/<handle>.yaml` supplies name and email; `~/.punt-labs/ethos/identities/<handle>.ext/beadle.yaml` supplies a GPG key ID that `beadle-email identity` reports (it doesn't drive signing --- that's `email.json`'s `gpg_signer` field either way). Always global, never a repo-local vendored copy.
 
-If neither step resolves a handle --- ethos isn't installed, or nothing pins
+If no step resolves a handle --- ethos isn't installed, or nothing pins
 one --- beadle falls back to the plain `default-identity` file above.
 
 Each identity gets its own directory under `~/.punt-labs/beadle/identities/<email>/` with separate `email.json`, `contacts.json`, and `attachments/`. Root files are auto-migrated on first use.

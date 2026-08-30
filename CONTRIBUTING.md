@@ -2,9 +2,14 @@
 
 ## Prerequisites
 
-Go 1.26+. `go.mod` declares `toolchain go1.26.6`; if your installed `go` is
-older, `make build` (or any `go` command) downloads the pinned toolchain
-automatically.
+- Go 1.26+ (`go.mod` declares `toolchain go1.26.6`; if your installed `go` is
+  older, `make build` downloads the pinned toolchain automatically)
+- [shellcheck](https://www.shellcheck.net/) --- `make check` hard-fails
+  without it
+- Node.js / `npx` --- `make check` runs `markdownlint-cli2` through it
+- [GPG](https://gnupg.org/) --- optional. Without it, PGP-layer tests skip
+  themselves rather than fail, so `make test` stays green with reduced
+  coverage; install it to exercise that layer.
 
 ## Getting Started
 
@@ -29,9 +34,16 @@ and copies it to `~/.local/bin`.
 make test
 ```
 
-Runs the full suite with the race detector (`go test -race`). See
-[`docs/TESTING.md`](docs/TESTING.md) for the test pyramid and the
-GPG ephemeral-keyring conventions integration tests rely on.
+Runs the unit, PGP, and MCP suites with the race detector (`go test -race`).
+
+```bash
+make test-integration
+```
+
+Adds the build-tagged, in-process IMAP/SMTP tests (`-tags=integration`) that
+`make test` skips. See [`docs/TESTING.md`](docs/TESTING.md) for the full
+test pyramid and the GPG ephemeral-keyring conventions the PGP layer relies
+on.
 
 ## Quality Gates
 
