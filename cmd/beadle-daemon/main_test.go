@@ -98,3 +98,20 @@ func TestResolveDaemonOwnerKeyID_UnresolvableOwnerLogsError(t *testing.T) {
 	assert.Empty(t, keyID)
 	assert.True(t, h.hasLevel(slog.LevelError))
 }
+
+// TestResolveDaemonOwnerKeyID_DirectFingerprintResolves is the success
+// path: a well-formed daemon.json with a valid owner_gpg_key_id resolves
+// to that fingerprint, with nothing logged at Error.
+func TestResolveDaemonOwnerKeyID_DirectFingerprintResolves(t *testing.T) {
+	h := &capturingHandler{}
+	logger := slog.New(h)
+
+	const fpr = "0123456789ABCDEF0123456789ABCDEF01234567"
+	path := filepath.Join(t.TempDir(), "daemon.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"owner_gpg_key_id": "`+fpr+`"}`), 0o600))
+
+	keyID := resolveDaemonOwnerKeyID(path, &identity.Resolver{}, logger)
+
+	assert.Equal(t, fpr, keyID)
+	assert.False(t, h.hasLevel(slog.LevelError))
+}
