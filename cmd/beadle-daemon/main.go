@@ -113,14 +113,20 @@ var runCmd = &cobra.Command{
 			logger.Warn("worker spawning disabled: no API key found (checked: secret backends, ANTHROPIC_API_KEY env)")
 		}
 
+		// gpgBinary is the gpg binary used to verify command-file
+		// signatures. It is not identity-scoped: command verification
+		// runs once at startup, before any identity's mailbox is
+		// polled, so there is no per-message email.Config to read
+		// gpg_binary from yet. "gpg" matches email.Config's own
+		// default (internal/email/config.go).
+		const gpgBinary = "gpg"
+
+		ownerKeyID, loadCommandsEnabled := resolveDaemonOwnerKeyID(filepath.Join(dataDir, "daemon.json"), resolver, logger)
+
 		// Load command definitions.
 		cmdDir := filepath.Join(dataDir, "commands")
-		commands, err := daemon.LoadCommands(cmdDir)
-		if err != nil {
-			logger.Warn("load commands", "dir", cmdDir, "error", err)
-			commands = make(map[string]*daemon.Command)
-		}
-		logger.Info("commands loaded", "count", len(commands), "dir", cmdDir)
+		commands := loadDaemonCommands(cmdDir, gpgBinary, ownerKeyID, loadCommandsEnabled, logger)
+		logger.Info("commands loaded", "count", len(commands), "dir", cmdDir, "signature_enforcement", ownerKeyID != "")
 
 		// Configure planner. Use RulePlanner with a "summarize" rule.
 		// Reply is auto-appended by the executor after the last stage.
@@ -175,6 +181,72 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// resolveDaemonOwnerKeyID resolves the daemon's signing-enforcement policy
+// from configPath (DES-035). It distinguishes two shapes of failure that
+// must never be conflated:
+//
+//   - "not configured" -- no daemon.json at all, the common, expected case
+//     for a daemon that has not opted into this feature. Returns ("", true):
+//     command loading proceeds, unchanged legacy behavior, and
+//     VerifySignature is never called (loadCommand's ownerKeyID == ""
+//     branch).
+//   - "configured but unresolvable" -- daemon.json exists but its content
+//     could not be turned into a usable fingerprint: unreadable file,
+//     malformed JSON, both owner fields set, an unresolvable owner_handle,
+//     or a malformed owner_gpg_key_id. Returns ("", false): command loading
+//     must be disabled entirely at the call site, never fall through to
+//     loading commands unverified with an empty ownerKeyID -- that would be
+//     the always-authorize backdoor DES-034/DES-035 exist to close, and it
+//     would hit exactly the operators who opted in and misconfigured
+//     something.
+//
+// Either failure disables command loading only, never the daemon process:
+// mail polling and the MCP server (a separate binary) have no dependency on
+// the commands map. The first case is silent; the second logs at Error,
+// since it means the operator tried to configure enforcement and it did not
+// take effect. errors.Is (not os.IsNotExist, which does not unwrap %w
+// chains) is required here because LoadConfig wraps the underlying
+// os.ReadFile error.
+func resolveDaemonOwnerKeyID(configPath string, resolver *identity.Resolver, logger *slog.Logger) (ownerKeyID string, loadCommandsEnabled bool) {
+	cfg, err := daemon.LoadConfig(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", true
+		}
+		logger.Error("daemon config unreadable, command loading disabled", "error", err)
+		return "", false
+	}
+	ownerKeyID, err = cfg.ResolveOwnerKeyID(resolver)
+	if err != nil {
+		logger.Error("signature policy unavailable, command loading disabled", "error", err)
+		return "", false // explicit: falls back to disabled, never to "trust anyway"
+	}
+	return ownerKeyID, true
+}
+
+// loadDaemonCommands builds the daemon's command map from
+// resolveDaemonOwnerKeyID's outcome. When loadCommandsEnabled is false --
+// daemon.json was present but its owner config could not be resolved --
+// daemon.LoadCommands is never invoked at all, and commands is an empty
+// map: falling through with ownerKeyID == "" would silently disable
+// verification while still loading every command file, exactly the
+// backdoor this design closes. When enabled, a LoadCommands error (e.g. an
+// unreadable commands directory) is logged and treated the same as an
+// empty directory, matching the daemon's existing partial-fail-open
+// posture.
+func loadDaemonCommands(cmdDir, gpgBinary, ownerKeyID string, loadCommandsEnabled bool, logger *slog.Logger) map[string]*daemon.Command {
+	if !loadCommandsEnabled {
+		logger.Warn("command loading disabled: signing enforcement could not be resolved", "dir", cmdDir)
+		return make(map[string]*daemon.Command)
+	}
+	commands, err := daemon.LoadCommands(cmdDir, gpgBinary, ownerKeyID, logger)
+	if err != nil {
+		logger.Warn("load commands", "dir", cmdDir, "error", err)
+		return make(map[string]*daemon.Command)
+	}
+	return commands
 }
 
 // newResolver creates an identity resolver using standard paths.

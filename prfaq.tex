@@ -618,15 +618,19 @@ commands, and the pipeline design document are in the repository.
       exists to remove.
 
       \textit{What's still vision:} dedicated {\small\texttt{beadle
-      init}}/{\small\texttt{sign}}/{\small\texttt{verify}} subcommands, and
-      --- the actual differentiator this document is named for --- signature
-      \textit{enforcement}. The daemon's command-signature verifier
-      ({\small\texttt{VerifySignature}}, DES-034) is implemented --- canonical
-      signing, isolated verification against a known owner key, GnuPG
-      status-fd classification --- but is not yet wired into the command-file
-      loader, so nothing currently rejects an unsigned or tampered command
-      file. Wiring it in, not more onboarding UX, is the higher-priority gap
-      (see \faqref{faq:next-step}).
+      init}}/{\small\texttt{sign}}/{\small\texttt{verify}} subcommands. The
+      daemon's command-signature verifier ({\small\texttt{VerifySignature}},
+      DES-034) is implemented --- canonical signing, isolated verification
+      against a known owner key, GnuPG status-fd classification --- and wired
+      into the command-file loader (DES-035), so a configured daemon now
+      rejects an unsigned or tampered command file. Enforcement is opt-in,
+      though: it activates only once an operator sets
+      {\small\texttt{owner\_handle}} or {\small\texttt{owner\_gpg\_key\_id}}
+      in {\small\texttt{daemon.json}}, and there is still no
+      {\small\texttt{beadle init}} onboarding to make that step easy or a
+      dedicated signing tool for a new user to sign their own command files
+      with --- that onboarding gap, not the verification or wiring, is now
+      the higher-priority remaining piece (see \faqref{faq:next-step}).
     \item \textbf{Claude interpreter sandboxing.} When Beadle invokes Claude
       as a command interpreter, the LLM may attempt actions outside the
       command's declared permissions --- or a message's \textit{content},
@@ -1056,11 +1060,16 @@ just code that passes tests. Launch-blocking.
 \begin{enumerate}[nosep,leftmargin=2.5em]
   \featureitem{GPG command signing enforcement}{verify GPG signatures on
     command YAML files at daemon startup. Reject unsigned or tampered
-    files. The verifier itself is implemented
-    ({\small\texttt{VerifySignature}}, DES-034) --- this is the mechanism
-    the document's headline is named for --- but it is not yet wired into
-    daemon startup, so nothing rejects an unsigned or tampered file
-    today}\label{feat:signing}
+    files. The verifier is implemented
+    ({\small\texttt{VerifySignature}}, DES-034) and wired into the
+    daemon's command loader (DES-035) --- this is the mechanism the
+    document's headline is named for. It is opt-in, not yet the default:
+    an operator sets {\small\texttt{owner\_handle}} or
+    {\small\texttt{owner\_gpg\_key\_id}} in a new
+    {\small\texttt{daemon.json}} to turn enforcement on; a daemon that
+    has not configured either still loads command files unsigned, since
+    no signing tool exists yet for a new user to sign them
+    with}\label{feat:signing}
   \featureitem{\texttt{beadle init} onboarding}{abstract identity and
     signing setup so a new user never touches raw \texttt{gpg}. The
     Usability risk in this document is rated High specifically because
