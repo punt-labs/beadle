@@ -61,8 +61,17 @@ func CheckKeyExpiry(gpgBinary, keyID string, opts ...ExpiryOption) error {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	// gpg --list-keys exits non-zero when keyID legitimately isn't in the
+	// keyring -- an expected domain outcome that parseColonExpiry's
+	// pubCount == 0 branch already handles. Only a process that never ran
+	// to completion at all (binary missing, or present but not executable)
+	// is an operational failure; that shape is anything but nil or
+	// *exec.ExitError.
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("gpg list-keys %q: %w: %s", keyID, err, stderr.String())
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			return fmt.Errorf("gpg list-keys %q: %w: %s", keyID, err, stderr.String())
+		}
 	}
 
 	if err := parseColonExpiry(stdout.String(), keyID); err != nil {

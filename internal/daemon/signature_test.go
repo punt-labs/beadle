@@ -768,6 +768,36 @@ func TestVerifySignature_ExpiryFindingIsNotOperational(t *testing.T) {
 		"a genuine expiry finding must not be classified as an operational failure, got: %v", err)
 }
 
+// TestVerifySignature_KeyNotFoundIsDomainFinding is
+// TestVerifySignature_ExpiryFindingIsNotOperational's sibling for the
+// key-not-found case, fixed alongside internal/pgp/expiry.go's cmd.Run()
+// handling: gpg legitimately exits non-zero when the keyID it was asked to
+// look up simply isn't in the keyring, and that domain outcome must now
+// reach pgp.CheckKeyExpiry's caller wrapped in pgp.ErrKeyExpiryFinding, the
+// same sentinel a genuine expired-key finding carries -- not as an
+// unwrapped operational error that happened to look non-operational only
+// because it carried a real *exec.ExitError.
+//
+// This cannot be driven through VerifySignature itself: importOwnerKey's
+// own assertSingleOwnerKey call already fails closed with a *SignatureError
+// (ReasonInvalid, "not found in isolated keyring") the moment ownerKeyID is
+// absent, so VerifySignature never reaches its CheckKeyExpiry line for a
+// missing key at all. This test instead calls pgp.CheckKeyExpiry directly,
+// the same call VerifySignature makes, mirroring how
+// TestVerifySignature_ExpiryCheckPermissionDenied covers CheckKeyExpiry's
+// operational-failure side.
+func TestVerifySignature_KeyNotFoundIsDomainFinding(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := shortGPGHome(t)
+
+	err := pgp.CheckKeyExpiry(gpgBin, "no-such-key@example.com", pgp.Homedir(home))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, pgp.ErrKeyExpiryFinding),
+		"a key-not-found result must be a domain finding, not an operational failure, got: %v", err)
+	assert.False(t, isOperationalExecFailure(err),
+		"a key-not-found result must not be classified as an operational failure, got: %v", err)
+}
+
 // TestIsOperationalExecFailure_ExhaustiveByConstruction proves the point of
 // inverting the check: a fabricated error that is none of *exec.Error,
 // *fs.PathError, *exec.ExitError, or pgp.ErrKeyExpiryFinding -- a shape an

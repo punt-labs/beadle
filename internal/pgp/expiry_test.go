@@ -2,6 +2,7 @@ package pgp
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -99,6 +100,33 @@ Expire-Date: 0
 	err = CheckKeyExpiry(gpgBin, "noexpiry@example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no expiration date")
+}
+
+// TestCheckKeyExpiry_KeyNotFound proves the real gpg exec path reaches
+// parseColonExpiry's pubCount == 0 branch when gpg exits non-zero because
+// keyID genuinely isn't in the keyring -- gpg's own behavior for a missing
+// key, confirmed live: exit status 2, "gpg: error reading key: No public
+// key." Before CheckKeyExpiry's cmd.Run() handling was made symmetric with
+// its sibling exec.Command sites in internal/daemon/signature.go, that
+// non-zero exit short-circuited straight past parseColonExpiry, so this
+// branch was reachable only through TestParseColonExpiry's direct fixture
+// calls, never through a real gpg invocation. The returned error must wrap
+// ErrKeyExpiryFinding: a key-not-found result is a domain outcome gpg ran
+// to completion to produce, not an operational failure to start gpg at
+// all.
+func TestCheckKeyExpiry_KeyNotFound(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+
+	home := shortGPGHome(t)
+
+	err = CheckKeyExpiry(gpgBin, "no-such-key@example.com", Homedir(home))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrKeyExpiryFinding),
+		"a key-not-found result must be a domain finding, not an operational failure, got: %v", err)
+	assert.Contains(t, err.Error(), "not found in gpg output")
 }
 
 // TestCheckKeyExpiry_MissingGPGBinary covers the case gpg is entirely
