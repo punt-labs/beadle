@@ -11,6 +11,15 @@ import (
 
 // Config holds daemon-instance configuration — settings that describe the
 // daemon process itself, not any one email identity it operates as.
+//
+// OwnerHandle and OwnerGPGKeyID are mutually exclusive: at most one may be
+// set. A freshly-parsed Config (straight out of LoadConfig) is not yet
+// validated — both fields empty, both fields set, an OwnerHandle that
+// cannot be resolved, and a malformed OwnerGPGKeyID are all possible zero-
+// or ill-formed states at this point. ResolveOwnerKeyID is what turns a
+// Config into a single validated fingerprint or an error naming exactly
+// why none is usable; nothing about Config's fields should be trusted
+// before that call runs.
 type Config struct {
 	OwnerHandle   string `json:"owner_handle,omitempty"`
 	OwnerGPGKeyID string `json:"owner_gpg_key_id,omitempty"`
