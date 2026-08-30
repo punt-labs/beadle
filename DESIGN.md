@@ -2561,13 +2561,25 @@ on the commands map (verified against `cmd/beadle-daemon/main.go`'s call
 graph: mail polling and the MCP server, a separate binary, do not consume
 it). Whichever path resolves a value, it is validated against the same
 fingerprint pattern `VerifySignature` itself enforces before it is accepted.
-`ownerKeyID` is resolved once at `beadle-daemon run` startup and threaded
-into `LoadCommands(dir, gpgBinary, ownerKeyID)` → `loadCommand`, which
-calls `VerifySignature` — gated on `ownerKeyID != ""`, so an unconfigured
-daemon behaves exactly as it does today — immediately after YAML decode and
-before `validateCommand`. A rejected signature logs at `slog.Error` with a
-structured `reason` field, distinct from the existing `slog.Warn` treatment
-of an ordinary parse/validation failure.
+`ownerKeyID` is resolved once at `beadle-daemon run` startup by
+`resolveDaemonOwnerKeyID`, which returns `(ownerKeyID string,
+loadCommandsEnabled bool)` — the second value is what actually enforces
+"disables command loading, never the daemon process": `loadDaemonCommands`
+checks `loadCommandsEnabled` before ever calling `LoadCommands`, so a
+present-but-unresolvable `daemon.json` never reaches the loader at all,
+never mind loading commands unverified. Only a genuinely absent
+`daemon.json` yields `("", true)` — legacy, pre-DES-035 behavior. The
+resolved values thread into `LoadCommands(dir, gpgBinary, ownerKeyID,
+logger)` → `loadCommand`, which calls `VerifySignature` — gated on
+`ownerKeyID != ""` — immediately after YAML decode and before
+`validateCommand`. `LoadCommands` takes the daemon's own configured
+`*slog.Logger` (not `slog.Default()`), so a rejection is durable in
+`~/.punt-labs/beadle/logs/beadle-daemon.log`, and distinguishes three
+outcomes: a genuine signature rejection (`*SignatureError`, `slog.Error`
+with a structured `reason` field), an operational failure inside
+verification itself — a broken `gpg` binary, a keyring that can't be
+created — while enforcement is active (`slog.Error`, a distinct message),
+and an ordinary parse/validation failure (`slog.Warn`, unchanged).
 
 **Why:** DES-034 implemented `VerifySignature` correctly but left it with
 no caller and an inaccurate assumption in its migration note — that a
