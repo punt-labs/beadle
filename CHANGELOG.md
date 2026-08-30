@@ -66,6 +66,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`beadle-daemon`'s mail-triggered `ClaudeRunner` execution path never
+  actually worked against a real `ethos` CLI, ever, until now.**
+  `internal/daemon.buildStageContract` generated a mission contract with
+  `inputs.args` and `inputs.pipeline_output`, both unknown fields under
+  `ethos mission create`'s strict-decode schema — every real invocation
+  failed at contract creation with `inputs: unknown field "args"`. This
+  went undiscovered because `VerifySignature` had zero callers until
+  DES-035 shipped, so no signed command file had ever loaded successfully
+  in a live daemon before, and this was the first real inbound-email
+  trigger run against a correctly configured `beadle-daemon`. Fixed by
+  moving the stage's args and prior-stage pipe output into the
+  top-level `context` field (a documented, valid field) instead of
+  inventing unrecognized `inputs` sub-fields; `inputs.trigger` is
+  unchanged. New regression test shells out to the real `ethos` binary
+  (same as production) and asserts the generated contract is accepted,
+  not just a string-shape check on the Go side — the entire failure mode
+  here was "never validated against the real CLI."
 - **`pgp.CheckKeyExpiry` now rejects a key whose expiry date has actually
   passed, not just a key with no expiry field set.** Previously it only
   checked that a `pub`/`sub` record's expiry field was present and
