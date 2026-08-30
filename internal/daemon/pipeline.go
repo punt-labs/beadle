@@ -28,8 +28,10 @@ type Pipeline struct {
 	Current   int           `json:"current"`
 	Results   []string      `json:"results"`
 	Status    string        `json:"status"`
-	Error     string        `json:"error"`
-	WriteSet  []string      `json:"write_set"`
+	// Error may be set even when Status is "completed" -- it records a
+	// non-fatal auto-reply failure. Test Status for success, not Error.
+	Error    string   `json:"error"`
+	WriteSet []string `json:"write_set"`
 }
 
 // Spawner runs a Claude Code worker session for a mission.
@@ -122,6 +124,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 		p.Status = "failed"
 		p.Error = fmt.Sprintf("marshal pipe: %v", err)
 		e.save(p)
+		e.fireElse(p)
 		return p, fmt.Errorf("pipeline %s: marshal pipe: %w", p.ID, err)
 	}
 	pipe := string(pipeData)
@@ -162,7 +165,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			}
 			pipe = result
 		}
-		// passthrough: pipe unchanged, result logged only
+		// passthrough: pipe unchanged, result recorded like any other stage
 
 		p.Results = append(p.Results, result)
 		e.save(p)
@@ -176,17 +179,22 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 				"to": email.ExtractEmailAddress(p.Email.From),
 			},
 		}
-		if err := ValidateArgs(replyCmd, replyCall.Args); err == nil {
-			runner, rok := e.Runners[replyCmd.Runner]
-			if !rok {
-				e.Logger.Warn("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
+		if err := ValidateArgs(replyCmd, replyCall.Args); err != nil {
+			// Permanent misconfiguration: the reply command's signature never
+			// changes, so this fails on every pipeline run, forever.
+			e.Logger.Error("auto-reply args invalid", "pipeline", p.ID, "error", err)
+			p.Error = fmt.Sprintf("auto-reply args invalid: %v", err)
+		} else if runner, rok := e.Runners[replyCmd.Runner]; !rok {
+			// Same: a runner registration gap does not clear itself between runs.
+			e.Logger.Error("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
+			p.Error = fmt.Sprintf("auto-reply runner not registered: %s", replyCmd.Runner)
+		} else {
+			replyResult, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe)
+			if err != nil {
+				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
+				p.Error = fmt.Sprintf("auto-reply failed: %v", err)
 			} else {
-				replyResult, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe)
-				if err != nil {
-					e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
-				} else {
-					p.Results = append(p.Results, replyResult)
-				}
+				p.Results = append(p.Results, replyResult)
 			}
 		}
 	} else {
@@ -230,7 +238,7 @@ budget:
 		escapeYAMLValue(meta.Subject),
 		escapeYAMLPipe(stageContext(call.Args, pipe)),
 		writeSetYAML(cmd.WriteSet),
-		escapeYAMLValue(cmd.Prompt),
+		escapeYAMLPipe(cmd.Prompt),
 		cmd.Budget.Rounds,
 		cmd.Budget.ReflectionAfterEach,
 	)
@@ -361,6 +369,7 @@ func (e *Executor) fireElse(p *Pipeline) {
 
 	replyCmd, ok := e.Commands["reply"]
 	if !ok {
+		e.Logger.Warn("reply command not in registry, skipping else reply", "pipeline", p.ID)
 		return
 	}
 
@@ -373,11 +382,13 @@ func (e *Executor) fireElse(p *Pipeline) {
 		},
 	}
 	if err := ValidateArgs(replyCmd, replyCall.Args); err != nil {
+		e.Logger.Warn("else reply args invalid", "pipeline", p.ID, "error", err)
 		return
 	}
 
 	runner, ok := e.Runners[replyCmd.Runner]
 	if !ok {
+		e.Logger.Warn("else reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
 		return
 	}
 

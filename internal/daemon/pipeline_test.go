@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -49,6 +50,33 @@ func (m *mockClaudeRunner) Run(_ context.Context, _ *Executor, _ *Pipeline, idx 
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// testLoggerCapture returns a logger that writes to buf, so a test can
+// assert on the text of a specific log line rather than only its side
+// effects.
+func testLoggerCapture() (*slog.Logger, *bytes.Buffer) {
+	var buf bytes.Buffer
+	return slog.New(slog.NewTextHandler(&buf, nil)), &buf
+}
+
+// logLineContaining returns the single line of buf containing substr, and
+// fails the test if zero or more than one line matches. A whole-buffer
+// assert.Contains proves substr appeared somewhere in the capture, but not
+// that it landed on the same line as a pipeline ID logged by a different
+// call -- e.g. fireElse's own "pipeline failed" line, logged unconditionally
+// before the guard under test runs. Pinning the match to one line is what
+// proves the ID and the diagnostic detail are actually correlated.
+func logLineContaining(t *testing.T, buf *bytes.Buffer, substr string) string {
+	t.Helper()
+	var matches []string
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(line, substr) {
+			matches = append(matches, line)
+		}
+	}
+	require.Len(t, matches, 1, "expected exactly one log line containing %q, got %d:\n%s", substr, len(matches), buf.String())
+	return matches[0]
 }
 
 func testCommands() map[string]*Command {
@@ -379,6 +407,40 @@ func TestExecutor_AutoReplyArgs(t *testing.T) {
 	assert.Equal(t, "reply", runner.calls[1].Cmd)
 }
 
+// TestExecutor_AutoReplyFailureRecorded is the regression test for the
+// record-honesty half of beadle-5k5's round-2 fix: when the auto-reply
+// runner itself fails (as opposed to a validation guard rejecting it
+// beforehand), the pipeline used to complete with p.Error still empty --
+// the only way to notice a lost reply was to count len(p.Results) against
+// len(p.Commands)+1, a convention documented nowhere. p.Status stays
+// "completed" (the pipeline's own commands did all succeed, and
+// persist.go's only consumer of Status checks for "running"); p.Error now
+// carries the auto-reply failure so the record is honest about it.
+func TestExecutor_AutoReplyFailureRecorded(t *testing.T) {
+	runner := &mockClaudeRunner{
+		results: []WorkerResult{{Output: "done"}},
+		errs:    []error{nil, fmt.Errorf("smtp connection refused")},
+	}
+
+	exec := &Executor{
+		Planner: &StubPlanner{
+			Result: []CommandCall{{Command: "greet", Args: map[string]any{}}},
+		},
+		Commands: testCommands(),
+		Runners:  testRunners(runner),
+		Logger:   testLogger(),
+	}
+
+	meta := EmailMeta{MessageID: "23", From: "jim@test.com", Subject: "Reply fails"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.NoError(t, err)
+
+	assert.Equal(t, "completed", p.Status)
+	assert.Len(t, p.Results, 1) // auto-reply's own result never appended
+	assert.Contains(t, p.Error, "auto-reply failed")
+	assert.Contains(t, p.Error, "smtp connection refused")
+}
+
 func TestExecutor_NoReplyCommand(t *testing.T) {
 	runner := &mockClaudeRunner{
 		results: []WorkerResult{
@@ -435,6 +497,148 @@ func TestExecutor_ElseReply(t *testing.T) {
 	assert.Equal(t, "reply", runner.calls[0].Cmd)
 }
 
+// TestExecutor_AutoReplyInvalidArgsLogged is the regression test for
+// beadle-5k5's first guard: an invalid auto-reply arg set used to be
+// swallowed silently. reply here requires an "extra" arg the auto-reply
+// call never supplies, so ValidateArgs fails and the failure must be
+// logged with the pipeline ID and the underlying error, at Error level
+// since a signed reply command's argument shape never changes between
+// runs -- this is permanent misconfiguration, not a transient failure.
+func TestExecutor_AutoReplyInvalidArgsLogged(t *testing.T) {
+	runner := &mockClaudeRunner{
+		results: []WorkerResult{{Output: "Hello, Jim!"}},
+	}
+	logger, buf := testLoggerCapture()
+
+	cmds := testCommands()
+	reply := *cmds["reply"]
+	reply.Args = append(append([]CommandArg{}, reply.Args...), CommandArg{Name: "extra", Type: "string", Required: true})
+	cmds["reply"] = &reply
+
+	exec := &Executor{
+		Planner: &StubPlanner{
+			Result: []CommandCall{{Command: "greet", Args: map[string]any{}}},
+		},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	meta := EmailMeta{MessageID: "20", From: "jim@test.com", Subject: "Test"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.NoError(t, err)
+
+	assert.Equal(t, "completed", p.Status)
+	assert.Len(t, p.Results, 1) // no auto-reply appended: args invalid
+	assert.Len(t, runner.calls, 1)
+	assert.Contains(t, p.Error, "auto-reply args invalid")
+	assert.Contains(t, p.Error, "missing required arg")
+
+	line := logLineContaining(t, buf, "missing required arg")
+	assert.Contains(t, line, p.ID)
+	assert.Contains(t, line, "level=ERROR")
+}
+
+// TestExecutor_AutoReplyRunnerNotRegisteredRecorded is the regression test
+// for the second half of beadle-5k5's misconfiguration-vs-transient-failure
+// fix: a missing runner registration is a permanent misconfiguration, same
+// class as invalid args, and must leave p.Error populated -- not just a log
+// line -- so the record is honest about a reply that never went out.
+func TestExecutor_AutoReplyRunnerNotRegisteredRecorded(t *testing.T) {
+	runner := &mockClaudeRunner{
+		results: []WorkerResult{{Output: "Hello, Jim!"}},
+	}
+	logger, buf := testLoggerCapture()
+
+	cmds := testCommands()
+	reply := *cmds["reply"]
+	reply.Runner = "nonexistent"
+	cmds["reply"] = &reply
+
+	exec := &Executor{
+		Planner: &StubPlanner{
+			Result: []CommandCall{{Command: "greet", Args: map[string]any{}}},
+		},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	meta := EmailMeta{MessageID: "24", From: "jim@test.com", Subject: "Test"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.NoError(t, err)
+
+	assert.Equal(t, "completed", p.Status)
+	assert.Len(t, p.Results, 1) // no auto-reply appended: runner not registered
+	assert.Len(t, runner.calls, 1)
+	assert.Contains(t, p.Error, "auto-reply runner not registered")
+	assert.Contains(t, p.Error, "nonexistent")
+
+	line := logLineContaining(t, buf, "nonexistent")
+	assert.Contains(t, line, p.ID)
+	assert.Contains(t, line, "level=ERROR")
+}
+
+// TestExecutor_FireElseInvalidArgsLogged is the regression test for
+// beadle-5k5's second guard: fireElse's ValidateArgs failure used to
+// return with no log line at all.
+func TestExecutor_FireElseInvalidArgsLogged(t *testing.T) {
+	runner := &mockClaudeRunner{}
+	logger, buf := testLoggerCapture()
+
+	cmds := testCommands()
+	reply := *cmds["reply"]
+	reply.Args = append(append([]CommandArg{}, reply.Args...), CommandArg{Name: "extra", Type: "string", Required: true})
+	cmds["reply"] = &reply
+
+	exec := &Executor{
+		Planner:  &StubPlanner{Err: fmt.Errorf("no match")},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	meta := EmailMeta{MessageID: "21", From: "carol@test.com", Subject: "Unknown"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.Error(t, err)
+
+	assert.Equal(t, "failed", p.Status)
+	assert.Len(t, runner.calls, 0) // else reply never ran: args invalid
+
+	line := logLineContaining(t, buf, "missing required arg")
+	assert.Contains(t, line, p.ID)
+}
+
+// TestExecutor_FireElseRunnerNotRegisteredLogged is the regression test for
+// beadle-5k5's third guard: fireElse's runner-lookup failure used to return
+// with no log line, unlike the identical condition on the auto-reply path.
+func TestExecutor_FireElseRunnerNotRegisteredLogged(t *testing.T) {
+	runner := &mockClaudeRunner{}
+	logger, buf := testLoggerCapture()
+
+	cmds := testCommands()
+	reply := *cmds["reply"]
+	reply.Runner = "nonexistent"
+	cmds["reply"] = &reply
+
+	exec := &Executor{
+		Planner:  &StubPlanner{Err: fmt.Errorf("no match")},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	meta := EmailMeta{MessageID: "22", From: "dave@test.com", Subject: "Unknown"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.Error(t, err)
+
+	assert.Equal(t, "failed", p.Status)
+	assert.Len(t, runner.calls, 0)
+
+	line := logLineContaining(t, buf, "nonexistent")
+	assert.Contains(t, line, p.ID)
+}
+
 func TestExecutor_ElseNoReplyCommand(t *testing.T) {
 	runner := &mockClaudeRunner{}
 
@@ -457,6 +661,38 @@ func TestExecutor_ElseNoReplyCommand(t *testing.T) {
 	assert.Equal(t, "failed", p.Status)
 	// No reply command — else handler logs but does not call runner.
 	assert.Len(t, runner.calls, 0)
+}
+
+// TestExecutor_ElseNoReplyCommandLogged is the regression test for
+// beadle-5k5's round-2 fix: fireElse's own "reply command not registered"
+// guard used to return with no log line at all, unlike the identical
+// condition on the auto-reply path (which already logged) and unlike
+// fireElse's own doc comment, which claimed this case was logged.
+func TestExecutor_ElseNoReplyCommandLogged(t *testing.T) {
+	runner := &mockClaudeRunner{}
+	logger, buf := testLoggerCapture()
+
+	// Build commands without the reply command.
+	cmds := map[string]*Command{
+		"greet": testCommands()["greet"],
+	}
+
+	exec := &Executor{
+		Planner:  &StubPlanner{Err: fmt.Errorf("no match")},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	meta := EmailMeta{MessageID: "14", From: "erin@test.com", Subject: "Unknown"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.Error(t, err)
+
+	assert.Equal(t, "failed", p.Status)
+	assert.Len(t, runner.calls, 0)
+
+	line := logLineContaining(t, buf, "skipping else reply")
+	assert.Contains(t, line, p.ID)
 }
 
 func TestStageContext(t *testing.T) {
@@ -612,6 +848,47 @@ func TestBuildStageContract_NoArgsNoPipe(t *testing.T) {
 	assert.Equal(t, "stage args: none\npipeline output: none", contextVal)
 }
 
+// TestBuildStageContract_PromptUncappedMetadataCapped is the regression test
+// for beadle-bvo: cmd.Prompt is trusted, GPG-signed command-file content
+// that becomes success_criteria, not adversarial email metadata, so it must
+// not be silently truncated at maxContractFieldRunes the way message_id,
+// from, and subject still are.
+func TestBuildStageContract_PromptUncappedMetadataCapped(t *testing.T) {
+	longPrompt := strings.Repeat("p", maxContractFieldRunes+250)
+	longMeta := strings.Repeat("m", maxContractFieldRunes+250)
+
+	meta := EmailMeta{MessageID: longMeta, From: longMeta, Subject: longMeta}
+	cmd := &Command{
+		Prompt:   longPrompt,
+		WriteSet: []string{"output/greet.txt"},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+		}{Rounds: 1},
+	}
+	call := CommandCall{Command: "greet", Args: map[string]any{}}
+
+	out := buildStageContract(meta, cmd, call, "")
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+
+	sc, ok := doc["success_criteria"].([]any)
+	require.True(t, ok, "success_criteria must be a list")
+	require.Len(t, sc, 1)
+	assert.Equal(t, longPrompt, sc[0], "cmd.Prompt must survive byte-identical, uncapped")
+
+	inputs, ok := doc["inputs"].(map[string]any)
+	require.True(t, ok, "inputs must be a map")
+	trigger, ok := inputs["trigger"].(map[string]any)
+	require.True(t, ok, "inputs.trigger must be a map")
+
+	wantCapped := longMeta[:maxContractFieldRunes]
+	assert.Equal(t, wantCapped, trigger["message_id"], "message_id must remain capped")
+	assert.Equal(t, wantCapped, trigger["from"], "from must remain capped")
+	assert.Equal(t, wantCapped, trigger["subject"], "subject must remain capped")
+}
+
 // isolatedEthosEnv builds a process environment for exec'ing the real ethos
 // CLI that reads the real, current identity/archetype data but writes
 // nothing to it. ethos derives its global root (session bindings, mission
@@ -619,7 +896,12 @@ func TestBuildStageContract_NoArgsNoPipe(t *testing.T) {
 // (mission storage, identity/personality/role/team resolution) from cwd or
 // the ETHOS_REPO_ROOT override -- so both must be redirected together, or
 // half the state (e.g. the global session binding) still lands on the real
-// ambient trees.
+// ambient trees. Every ETHOS_* variable is stripped, not just
+// ETHOS_REPO_ROOT: the calling agent's own session sets ETHOS_SESSION, and
+// leaving it in place would let the exec'd CLI resolve a real session
+// identifier while its backing storage is redirected to the scratch
+// roots -- the same half-redirect this comment warns against for HOME and
+// ETHOS_REPO_ROOT, just for a different variable.
 //
 // This repo runs in a shared, multi-agent environment: without this,
 // `ethos mission create`/`ethos mission abandon` corrupt whatever mission a
@@ -659,7 +941,7 @@ func isolatedEthosEnv(t *testing.T) []string {
 
 	env := make([]string, 0, len(os.Environ())+2)
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "ETHOS_REPO_ROOT=") {
+		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "ETHOS_") {
 			continue
 		}
 		env = append(env, kv)
