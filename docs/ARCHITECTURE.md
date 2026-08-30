@@ -81,7 +81,7 @@ The config file stores only connection parameters, never secrets. It is resolved
 
 ## Design Invariants
 
-- **Zero agent authority.** Every action requires a GPG-signed instruction from the owner. The daemon has no independent decision-making. Design invariant, not yet enforced: `internal/daemon/command.go`'s `VerifySignature` is currently a hard-coded no-op — see `prfaq.tex`'s Feature Appendix ("Must Do") for the gap.
+- **Zero agent authority (target state, not yet enforced).** Every action is meant to require a GPG-signed instruction from the owner, with the daemon holding no independent decision-making. `internal/daemon/command.go`'s `VerifySignature` is currently a hard-coded no-op, so nothing yet rejects an unsigned or tampered command file — see `prfaq.tex`'s Feature Appendix ("Must Do") for the gap.
 - **Preflight before execute.** All permissions are validated before any command runs. No partial execution.
 - **Isolated verification.** Inbound signature verification (`internal/pgp/verify.go`) runs in a temporary GNUPGHOME so an untrusted sender's key never touches the system keyring. Signing and decryption (`internal/pgp/sign.go`, `decrypt.go`) use the owner's own key from the system keyring, since that's where the owner's private key already lives — there is no isolation to provide there.
 - **Non-expiring keys rejected.** All command-signing keys must have an expiration date. This is a security invariant.

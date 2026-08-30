@@ -671,7 +671,8 @@ commands, and the pipeline design document are in the repository.
 
   \begin{enumerate}[nosep]
     \item \textbf{Foundation (shipped, distributed)} --- MCP email server
-      with 23 tools, four-level PGP trust model, per-contact rwx
+      with 21 always-on tools plus 2 poll tools gated on config,
+      four-level PGP trust model, per-contact rwx
       permissions, multi-identity via ethos (with a plain-file fallback
       that needs no ethos at all), credential isolation (OS keychain).
       Released as \texttt{beadle-email}, currently \texttt{v0.16.5}. This
@@ -990,7 +991,8 @@ product --- \texttt{beadle-email} --- and nothing else in this appendix
 reaches a user without it.
 
 \begin{enumerate}[nosep,leftmargin=2.5em]
-  \featureitem{MCP email server}{23 tools --- list, search, read, send,
+  \featureitem{MCP email server}{21 always-on tools plus 2 poll tools
+    gated on config --- list, search, read, send,
     reply, mark, move (single + batch), attachments, verify signatures,
     MIME inspection, trust classification, address book, identity
     switching, inbox polling}\label{feat:mcp}
