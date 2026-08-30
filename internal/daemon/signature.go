@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,11 +164,13 @@ func assertSingleOwnerKey(gpgBinary, gpgHome, ownerKeyID string) error {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return &SignatureError{
-			Reason: ReasonInvalid,
-			Detail: fmt.Sprintf("owner key %s not present in isolated keyring after import: %v: %s", ownerKeyID, err, stderr.String()),
-		}
+	// gpg --list-keys exits non-zero when ownerKeyID legitimately isn't in
+	// the keyring -- an expected outcome that countOwnerKeyMatches below
+	// turns into "zero matches." Only a process that never started at all
+	// (binary missing or not executable) is an operational failure.
+	var execErr *exec.Error
+	if err := cmd.Run(); errors.As(err, &execErr) {
+		return fmt.Errorf("run gpg list-keys for owner key %s: %w", ownerKeyID, err)
 	}
 
 	switch n := countOwnerKeyMatches(stdout.String(), ownerKeyID); {
@@ -233,9 +234,9 @@ func verifyDetachedSignature(gpgBinary, gpgHome, tmpDir string, canon []byte, ar
 		"--verify", sigFile, dataFile,
 	)
 	cmd.Env = withCLocale(os.Environ())
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &stderr
 	// gpg --verify exits non-zero for a bad signature; that outcome is
 	// expected and classifyStatusLines reads it from stdout regardless of
 	// exit code. But if gpg itself never started (binary missing or not
@@ -246,7 +247,7 @@ func verifyDetachedSignature(gpgBinary, gpgHome, tmpDir string, canon []byte, ar
 		return fmt.Errorf("run gpg verify: %w", err)
 	}
 
-	return classifyStatusLines(stdout.String())
+	return classifyStatusLines(stdout.String(), stderr.String())
 }
 
 // withCLocale returns env with LC_ALL pinned to "C", replacing any existing
@@ -269,8 +270,11 @@ func withCLocale(env []string) []string {
 // missing, and "missing key" is the more specific diagnosis of the two.
 // Every branch except GOODSIG constructs a non-nil *SignatureError,
 // including the default case for a status line this switch does not
-// recognize — there is no implicit fallthrough to nil.
-func classifyStatusLines(output string) error {
+// recognize — there is no implicit fallthrough to nil. stderr is gpg's own
+// diagnostic output; it is folded into the default arm's detail only, since
+// that is the one outcome where a human trying to diagnose "unrecognized
+// gpg verification outcome" from an audit-log entry alone would want it.
+func classifyStatusLines(output, stderr string) error {
 	var noPubkeyLine, invalidLine, goodLine string
 
 	for _, line := range strings.Split(output, "\n") {
@@ -302,9 +306,10 @@ func classifyStatusLines(output string) error {
 	case invalidLine != "":
 		return &SignatureError{Reason: ReasonInvalid, Detail: invalidLine}
 	default:
-		return &SignatureError{
-			Reason: ReasonInvalid,
-			Detail: fmt.Sprintf("unrecognized gpg verification outcome: %q", strings.TrimSpace(output)),
+		detail := fmt.Sprintf("unrecognized gpg verification outcome: %q", strings.TrimSpace(output))
+		if s := strings.TrimSpace(stderr); s != "" {
+			detail += fmt.Sprintf("; gpg stderr: %q", s)
 		}
+		return &SignatureError{Reason: ReasonInvalid, Detail: detail}
 	}
 }

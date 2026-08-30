@@ -418,8 +418,10 @@ func TestClassifyStatusLines(t *testing.T) {
 	tests := []struct {
 		name       string
 		output     string
+		stderr     string
 		wantNil    bool
 		wantReason SignatureReason
+		wantDetail string // substring; empty means not checked
 	}{
 		{
 			name:    "goodsig",
@@ -471,6 +473,17 @@ func TestClassifyStatusLines(t *testing.T) {
 			wantReason: ReasonInvalid,
 		},
 		{
+			// The default arm is the one place gpg's stderr is worth
+			// surfacing: an unrecognized outcome is exactly when a human
+			// reading the audit log later needs gpg's own diagnostic text,
+			// not just the (empty) status-fd output.
+			name:       "unrecognized status line carries gpg stderr in the detail",
+			output:     "[GNUPG:] TRUST_UNDEFINED 0 pgp owner@example.com\n",
+			stderr:     "gpg: WARNING: something gpg printed to stderr\n",
+			wantReason: ReasonInvalid,
+			wantDetail: "gpg: WARNING: something gpg printed to stderr",
+		},
+		{
 			// A line carrying the "[GNUPG:] " prefix but nothing after it
 			// (or only whitespace) has fields == nil after strings.Fields,
 			// exercising the len(fields) == 0 skip -- distinct from a line
@@ -483,7 +496,7 @@ func TestClassifyStatusLines(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := classifyStatusLines(tt.output)
+			err := classifyStatusLines(tt.output, tt.stderr)
 			if tt.wantNil {
 				assert.NoError(t, err)
 				return
@@ -492,6 +505,9 @@ func TestClassifyStatusLines(t *testing.T) {
 			var sigErr *SignatureError
 			require.ErrorAs(t, err, &sigErr)
 			assert.Equal(t, tt.wantReason, sigErr.Reason)
+			if tt.wantDetail != "" {
+				assert.Contains(t, sigErr.Detail, tt.wantDetail)
+			}
 		})
 	}
 }
@@ -557,6 +573,25 @@ func TestCountOwnerKeyMatches(t *testing.T) {
 			assert.Equal(t, tt.want, countOwnerKeyMatches(tt.output, fpr))
 		})
 	}
+}
+
+// TestAssertSingleOwnerKey_ExecStartFailure covers the case gpg never
+// starts at all -- binary missing from $PATH -- as distinct from gpg
+// running and exiting non-zero (the normal outcome when ownerKeyID simply
+// isn't in the keyring, which countOwnerKeyMatches handles from stdout
+// regardless of exit code). It must surface as the unwrapped operational
+// error VerifySignature's doc comment promises, never as a *SignatureError.
+func TestAssertSingleOwnerKey_ExecStartFailure(t *testing.T) {
+	home := shortGPGHome(t)
+
+	err := assertSingleOwnerKey("no-such-gpg-binary-anywhere-on-path", home, strings.Repeat("A", 40))
+	require.Error(t, err)
+
+	var sigErr *SignatureError
+	assert.False(t, errors.As(err, &sigErr), "exec-start failure must not be classified as a *SignatureError, got: %v", err)
+
+	var execErr *exec.Error
+	assert.True(t, errors.As(err, &execErr), "expected an *exec.Error wrapped in the returned error, got: %v", err)
 }
 
 func TestAssertSingleOwnerKey_AmbiguityIsSignatureError(t *testing.T) {
