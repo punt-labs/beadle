@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -309,6 +310,42 @@ func TestVerifyDetachedSignature_ExecStartFailure(t *testing.T) {
 	assert.True(t, errors.As(err, &execErr), "expected an *exec.Error wrapped in the returned error, got: %v", err)
 }
 
+// TestVerifyDetachedSignature_ExpiredKey proves classifyStatusLines
+// correctly maps gpg's real EXPKEYSIG status line to ReasonKeyExpired,
+// driven end to end through an actual gpg subprocess rather than a fixture
+// string. It generates a short-lived key, signs while the key is still
+// valid (gpg refuses to sign with an already-expired key), waits for the
+// key to expire, then verifies -- the one path that still reaches
+// EXPKEYSIG in practice, since VerifySignature's own CheckKeyExpiry gate
+// (internal/pgp/expiry.go) would otherwise reject an already-expired key
+// before gpg --verify ever runs.
+func TestVerifyDetachedSignature_ExpiredKey(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := shortGPGHome(t)
+	const email = "expkeysig-e2e@example.com"
+
+	genCmd := exec.Command(gpgBin, "--homedir", home, "--batch", "--no-tty",
+		"--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-generate-key", fmt.Sprintf("Test <%s>", email), "default", "default", "seconds=5")
+	genCmd.Stderr = os.Stderr
+	require.NoError(t, genCmd.Run(), "key generation failed")
+
+	fixture := newFixtureCommand()
+	canon, err := CanonicalCommandBytes(fixture)
+	require.NoError(t, err)
+	sig := signCanonical(t, gpgBin, home, email, canon)
+
+	time.Sleep(7 * time.Second)
+
+	tmpDir := t.TempDir()
+	err = verifyDetachedSignature(gpgBin, home, tmpDir, canon, sig)
+	require.Error(t, err)
+
+	var sigErr *SignatureError
+	require.ErrorAs(t, err, &sigErr)
+	assert.Equal(t, ReasonKeyExpired, sigErr.Reason)
+}
+
 func TestCanonicalCommandBytes_ClearsSignature(t *testing.T) {
 	cmd := &Command{Name: "x", Signature: "deadbeef", Prompt: "p", OutputSchema: "text"}
 
@@ -442,6 +479,39 @@ func TestClassifyStatusLines(t *testing.T) {
 			name:       "revkeysig",
 			output:     "[GNUPG:] REVKEYSIG ABCDEF Owner <owner@example.com>\n",
 			wantReason: ReasonInvalid,
+		},
+		{
+			// Captured verbatim from a real gpg 2.4.4 --verify run against a
+			// signature made while a short-lived key was still valid, then
+			// verified after that key expired -- see
+			// TestVerifyDetachedSignature_ExpiredKey for the live,
+			// end-to-end reproduction this line comes from. gpg replaces
+			// GOODSIG with EXPKEYSIG in this case; before this case existed,
+			// that outcome fell into the unrecognized-outcome default arm
+			// below and was misreported as ReasonInvalid.
+			name:       "expkeysig — key expired after signing",
+			output:     "[GNUPG:] EXPKEYSIG C44ED308E6A3BAA8 Expkeysig Test <expkeysig@example.com>\n",
+			wantReason: ReasonKeyExpired,
+		},
+		{
+			// EXPSIG (the signature itself carries an expiration, now
+			// passed -- a different, rarer gpg feature from key expiry)
+			// folds into ReasonInvalid alongside BADSIG/ERRSIG/REVKEYSIG,
+			// same as those three: none of them is "the key needs
+			// renewing."
+			name:       "expsig — signature itself has expired",
+			output:     "[GNUPG:] EXPSIG ABCDEF Owner <owner@example.com>\n",
+			wantReason: ReasonInvalid,
+		},
+		{
+			// NO_PUBKEY must still win over EXPKEYSIG, matching its existing
+			// precedence over BADSIG/ERRSIG/REVKEYSIG above -- an
+			// unreachable combination in practice (gpg can't know a key has
+			// expired if it never found the key), but the switch's ordering
+			// should still be deliberate, not incidental.
+			name:       "no_pubkey then expkeysig — no_pubkey wins",
+			output:     "[GNUPG:] NO_PUBKEY ABCDEF\n[GNUPG:] EXPKEYSIG ABCDEF Owner <owner@example.com>\n",
+			wantReason: ReasonWrongKey,
 		},
 		{
 			name:       "no_pubkey alone",

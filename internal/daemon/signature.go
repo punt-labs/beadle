@@ -23,9 +23,9 @@ type SignatureReason string
 // these — see VerifySignature.
 const (
 	ReasonMissing    SignatureReason = "missing"     // no signature present
-	ReasonInvalid    SignatureReason = "invalid"     // BADSIG, ERRSIG, REVKEYSIG, or an unrecognized outcome
+	ReasonInvalid    SignatureReason = "invalid"     // BADSIG, ERRSIG, REVKEYSIG, EXPSIG, or an unrecognized outcome
 	ReasonWrongKey   SignatureReason = "wrong-key"   // NO_PUBKEY: not signed by the owner's key
-	ReasonKeyExpired SignatureReason = "key-expired" // owner key non-expiring or expired
+	ReasonKeyExpired SignatureReason = "key-expired" // owner key non-expiring or expired, or EXPKEYSIG
 )
 
 // SignatureError reports why a command file's signature failed to verify.
@@ -266,16 +266,24 @@ func withCLocale(env []string) []string {
 
 // classifyStatusLines maps gpg's [GNUPG:]-prefixed status-fd output to a
 // verification outcome. NO_PUBKEY takes precedence over BADSIG/ERRSIG/
-// REVKEYSIG: gpg emits ERRSIG alongside NO_PUBKEY when the signer's key is
-// missing, and "missing key" is the more specific diagnosis of the two.
-// Every branch except GOODSIG constructs a non-nil *SignatureError,
-// including the default case for a status line this switch does not
-// recognize — there is no implicit fallthrough to nil. stderr is gpg's own
-// diagnostic output; it is folded into the default arm's detail only, since
-// that is the one outcome where a human trying to diagnose "unrecognized
-// gpg verification outcome" from an audit-log entry alone would want it.
+// REVKEYSIG/EXPSIG: gpg emits ERRSIG alongside NO_PUBKEY when the signer's
+// key is missing, and "missing key" is the more specific diagnosis of the
+// two. EXPKEYSIG is gpg's replacement for GOODSIG when the signature is
+// otherwise valid but the signing key has since expired — a distinct,
+// expected domain outcome (ReasonKeyExpired), not the unrecognized-outcome
+// default arm it fell into before this case existed. EXPSIG (the rarer
+// case of a signature that itself carries an expiration, now passed) folds
+// into ReasonInvalid alongside BADSIG/ERRSIG/REVKEYSIG: none of those
+// outcomes are "the key needs renewing," they are "do not trust this
+// signature." Every branch except GOODSIG constructs a non-nil
+// *SignatureError, including the default case for a status line this
+// switch does not recognize — there is no implicit fallthrough to nil.
+// stderr is gpg's own diagnostic output; it is folded into the default
+// arm's detail only, since that is the one outcome where a human trying to
+// diagnose "unrecognized gpg verification outcome" from an audit-log entry
+// alone would want it.
 func classifyStatusLines(output, stderr string) error {
-	var noPubkeyLine, invalidLine, goodLine string
+	var noPubkeyLine, invalidLine, goodLine, expiredLine string
 
 	for _, line := range strings.Split(output, "\n") {
 		rest, ok := strings.CutPrefix(line, "[GNUPG:] ")
@@ -289,9 +297,11 @@ func classifyStatusLines(output, stderr string) error {
 		switch fields[0] {
 		case "GOODSIG":
 			goodLine = line
+		case "EXPKEYSIG":
+			expiredLine = line
 		case "NO_PUBKEY":
 			noPubkeyLine = line
-		case "BADSIG", "ERRSIG", "REVKEYSIG":
+		case "BADSIG", "ERRSIG", "REVKEYSIG", "EXPSIG":
 			if invalidLine == "" {
 				invalidLine = line
 			}
@@ -303,6 +313,8 @@ func classifyStatusLines(output, stderr string) error {
 		return &SignatureError{Reason: ReasonWrongKey, Detail: noPubkeyLine}
 	case goodLine != "":
 		return nil
+	case expiredLine != "":
+		return &SignatureError{Reason: ReasonKeyExpired, Detail: expiredLine}
 	case invalidLine != "":
 		return &SignatureError{Reason: ReasonInvalid, Detail: invalidLine}
 	default:
