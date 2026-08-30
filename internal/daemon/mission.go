@@ -72,10 +72,12 @@ func escapeYAMLValue(s string) string {
 
 // escapeYAMLPipe returns a double-quoted YAML scalar for trusted content
 // that must not be silently truncated: pipeline stage output (which can run
-// to 1MB) and a Command's Prompt, which becomes a mission's success_criteria
-// and is authored by the recipe's GPG-signed command file, not by an email
-// sender. Unlike escapeYAMLValue it has no length cap. NUL bytes are still
-// stripped.
+// to 1MB) and a Command's Prompt, which becomes a mission's success_criteria.
+// A Prompt reaches here trusted because cmd/beadle-daemon/main.go's
+// loadDaemonCommands only loads commands whose signature daemon.LoadCommands
+// verified against the recipe authorizer's key -- that enforcement lives in
+// the caller, not in this function or in the Command type. Unlike
+// escapeYAMLValue it has no length cap. NUL bytes are still stripped.
 func escapeYAMLPipe(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
 	escaped := strings.ReplaceAll(s, `\`, `\\`)
