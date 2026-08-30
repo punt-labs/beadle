@@ -186,9 +186,12 @@ today, and is what a user installing Beadle actually gets, is
 model and per-contact permissions, installed via a single script (see
 \href{https://github.com/punt-labs/beadle\#readme}{README.md}). The
 pipeline daemon (\texttt{beadle-daemon}) exists as tested, unreleased
-code; GPG command-signing enforcement --- the mechanism this document's
-headline is named for --- is not yet built at all. The Feature Appendix
-states the exact split.
+code. GPG command-signing enforcement --- the mechanism this document's
+headline is named for --- is implemented and wired into the daemon's
+command loader, and a fresh, unconfigured deployment runs zero
+daemon-triggered commands rather than unsigned ones; what does not yet
+exist is a \texttt{beadle init}/\texttt{sign} onboarding flow for an
+operator to configure it. The Feature Appendix states the exact split.
 
 \vspace{0.5em}
 
@@ -621,7 +624,7 @@ commands, and the pipeline design document are in the repository.
       init}}/{\small\texttt{sign}}/{\small\texttt{verify}} subcommands. The
       daemon's command-signature verifier ({\small\texttt{VerifySignature}},
       DES-034) is implemented --- canonical signing, isolated verification
-      against a known recipe authorizer key, GnuPG status-fd classification
+      against a known command-file authorizer key, GnuPG status-fd classification
       --- and wired into the command-file loader (DES-035), so the daemon
       rejects an unsigned or tampered command file, and starts with zero
       loadable commands until an operator sets {\small\texttt{owner\_handle}}
@@ -1066,10 +1069,10 @@ just code that passes tests. Launch-blocking.
     daemon's command loader (DES-035) --- this is the mechanism the
     document's headline is named for. An operator sets
     {\small\texttt{owner\_handle}} or {\small\texttt{owner\_gpg\_key\_id}}
-    in a new {\small\texttt{daemon.json}} to name who may sign recipe
+    in a new {\small\texttt{daemon.json}} to name who may sign command
     files; a daemon that has not configured either loads zero commands at
     all, never unsigned ones --- no signing tool exists yet for a new user
-    to sign their own recipe files with, so a fresh deployment runs no
+    to sign their own command files with, so a fresh deployment runs no
     daemon-triggered commands until one exists}\label{feat:signing}
   \featureitem{\texttt{beadle init} onboarding}{abstract identity and
     signing setup so a new user never touches raw \texttt{gpg}. The
