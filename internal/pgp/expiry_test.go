@@ -223,7 +223,7 @@ func TestCheckKeyExpiry_SigningSubkey(t *testing.T) {
 		wantErrSubstr string
 	}{
 		{name: "signing subkey with expiry", subkeyExpire: "6m", wantErr: false},
-		{name: "signing subkey without expiry", subkeyExpire: "0", wantErr: true, wantErrSubstr: "signing subkey"},
+		{name: "signing subkey without expiry", subkeyExpire: "0", wantErr: true, wantErrSubstr: "signing-capable subkeys"},
 	}
 
 	for _, tt := range tests {
@@ -254,6 +254,49 @@ func TestCheckKeyExpiry_SigningSubkey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCheckKeyExpiry_SigningSubkeyRotation proves the exact scenario from
+// Bugbot's "Expired subkeys reject valid keys" finding against real gpg: a
+// key that has rotated its signing subkey once carries an old, expired one
+// alongside a valid current one, because gpg never deletes a subkey on
+// rotation. CheckKeyExpiry must accept this key -- gpg itself would select
+// only the valid current subkey to sign with.
+func TestCheckKeyExpiry_SigningSubkeyRotation(t *testing.T) {
+	gpgBin, err := exec.LookPath("gpg")
+	if err != nil {
+		t.Skip("gpg not installed")
+	}
+
+	home := shortGPGHome(t)
+
+	genCmd := exec.Command(gpgBin, "--homedir", home, "--batch", "--no-tty",
+		"--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-generate-key", "Subkey Rotation Test <subkey-rotation@example.com>",
+		"default", "default", "1y")
+	genCmd.Stderr = os.Stderr
+	require.NoError(t, genCmd.Run(), "primary key generation failed")
+
+	fpr := fingerprintOf(t, gpgBin, home, "subkey-rotation@example.com")
+
+	// Old signing subkey: expires in 3 seconds, will actually expire below.
+	oldCmd := exec.Command(gpgBin, "--homedir", home, "--batch", "--no-tty",
+		"--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-add-key", fpr, "ed25519", "sign", "seconds=3")
+	oldCmd.Stderr = os.Stderr
+	require.NoError(t, oldCmd.Run(), "old signing subkey generation failed")
+
+	time.Sleep(5 * time.Second)
+
+	// Current signing subkey: valid for a year.
+	newCmd := exec.Command(gpgBin, "--homedir", home, "--batch", "--no-tty",
+		"--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-add-key", fpr, "ed25519", "sign", "1y")
+	newCmd.Stderr = os.Stderr
+	require.NoError(t, newCmd.Run(), "current signing subkey generation failed")
+
+	err = CheckKeyExpiry(gpgBin, fpr, Homedir(home))
+	assert.NoError(t, err, "a key with one expired and one current signing subkey should be accepted")
 }
 
 func TestParseColonExpiry(t *testing.T) {
@@ -336,12 +379,41 @@ func TestParseColonExpiry(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			// A single signing-capable subkey with no expiry at all: there is
+			// no other subkey to cover it, so this is the "signing capability
+			// delegated to subkeys but none currently usable" rejection.
 			name: "signing subkey without expiry",
 			output: fmt.Sprintf("pub:u:2048:1:ABCDEF:1234567890:%s::u:::scESC:::\n"+
 				"sub:u:2048:1:111111:1234567890::::::s:::\n", future),
 			keyID:   "test@example.com",
 			wantErr: true,
-			errMsg:  "signing subkey with no expiration date",
+			errMsg:  "signing-capable subkeys",
+		},
+		{
+			// The exact scenario from Bugbot's "Expired subkeys reject valid
+			// keys" finding: normal subkey rotation leaves an old, expired
+			// signing subkey (111111) alongside a valid current one (222222).
+			// gpg never deletes the old one, and it is still usable to
+			// verify historical signatures, so its presence must not reject
+			// the key -- at least one currently valid signing subkey exists.
+			name: "one expired and one valid signing subkey: rotation is accepted",
+			output: fmt.Sprintf("pub:u:2048:1:ABCDEF:1234567890:%s::u:::scESC:::\n"+
+				"sub:e:2048:1:111111:1234567890:1000000000:::::s:::\n"+
+				"sub:u:2048:1:222222:1234567890:%s:::::s:::\n", future, future),
+			keyID:   "test@example.com",
+			wantErr: false,
+		},
+		{
+			// Two signing-capable subkeys, both expired: unlike the rotation
+			// case above, there is no currently usable signing subkey at
+			// all, so this must still reject.
+			name: "two expired signing subkeys: no usable signing subkey",
+			output: fmt.Sprintf("pub:u:2048:1:ABCDEF:1234567890:%s::u:::scESC:::\n"+
+				"sub:e:2048:1:111111:1234567890:1000000000:::::s:::\n"+
+				"sub:e:2048:1:222222:1234567890:1000000001:::::s:::\n", future),
+			keyID:   "test@example.com",
+			wantErr: true,
+			errMsg:  "signing-capable subkeys",
 		},
 		{
 			// 1000000000 (Sept 2001) is in the past regardless of when this
@@ -359,7 +431,7 @@ func TestParseColonExpiry(t *testing.T) {
 				"sub:e:2048:1:111111:1234567890:1000000000:::::s:::\n", future),
 			keyID:   "test@example.com",
 			wantErr: true,
-			errMsg:  "expired",
+			errMsg:  "signing-capable subkeys",
 		},
 		{
 			name:    "unparseable expiry field",

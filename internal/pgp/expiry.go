@@ -61,8 +61,11 @@ func Homedir(dir string) ExpiryOption {
 
 // CheckKeyExpiry verifies that the given GPG key has an expiration date set.
 // Keys without an expiry are rejected because non-expiring signing keys violate
-// the beadle security invariant. Any signing-capable subkey present must also
-// carry its own expiration date.
+// the beadle security invariant. If the key has any signing-capable subkeys,
+// at least one of them must carry a current, non-expired expiration date --
+// gpg never deletes a subkey on rotation, so an owner who has ever rotated
+// their signing subkey will have old, expired signing-capable subkeys sitting
+// alongside the current one, and that is not itself a finding.
 //
 // gpgBinary is the path to the gpg executable. keyID is a key fingerprint,
 // email address, or any identifier gpg accepts for --list-keys. With no
@@ -101,16 +104,31 @@ func CheckKeyExpiry(gpgBinary, keyID string, opts ...ExpiryOption) error {
 }
 
 // parseColonExpiry inspects gpg --with-colons output for pub and sub
-// records. It requires the pub record's expiry field (column 6, 0-indexed)
-// to be non-empty, non-zero, and not already in the past, and applies the
-// same requirement to any sub record whose capabilities field (column 11,
-// 0-indexed) marks it signing-capable ("s") — a signing subkey with no
-// expiry, or one that has already expired, is exactly as dangerous as a
-// non-expiring or expired primary key. Returns an error if any such key or
-// subkey has no expiry or has already expired, if no pub record is found,
-// or if more than one pub record matches (ambiguous keyID).
+// records. The pub record's expiry field (column 6, 0-indexed) must be
+// non-empty, non-zero, and not already in the past -- the primary key never
+// rotates, so it gets no leniency: a missing or expired expiry on it is
+// always a rejection.
+//
+// Subkeys rotate over a key's lifetime, and gpg leaves an old subkey in
+// place (to verify historical signatures) when a new one is generated, so
+// the same all-or-nothing rule cannot apply to them. Instead, the
+// requirement is "at least one currently valid signing subkey, if the key
+// has any signing-capable subkeys at all": a sub record whose capabilities
+// field (column 11, 0-indexed) marks it signing-capable ("s") is noted, and
+// the key passes on this dimension as soon as one such subkey has a
+// non-empty, non-zero, unexpired expiry. A subkey with no expiry set is
+// treated the same as an expired one -- not currently valid, but not an
+// immediate hard failure either, since another subkey may still cover it.
+// The key is rejected for its subkeys only if it has signing-capable
+// subkeys and none of them are currently valid.
+//
+// Returns an error if the pub record's own expiry fails its stricter check,
+// if the key has signing subkeys but none currently valid, if no pub record
+// is found, or if more than one pub record matches (ambiguous keyID).
 func parseColonExpiry(output, keyID string) error {
 	pubCount := 0
+	sawSigningSubkey := false
+	haveValidSigningSubkey := false
 	now := time.Now().Unix()
 
 	for _, line := range strings.Split(output, "\n") {
@@ -135,11 +153,12 @@ func parseColonExpiry(output, keyID string) error {
 			if len(fields) < 12 || !strings.Contains(fields[11], "s") {
 				continue
 			}
+			sawSigningSubkey = true
 			if fields[6] == "" || fields[6] == "0" {
-				return fmt.Errorf("key %q has a signing subkey with no expiration date: non-expiring signing keys are not permitted", keyID)
+				continue
 			}
-			if err := checkNotExpired(fields[6], now); err != nil {
-				return fmt.Errorf("key %q signing subkey %w", keyID, err)
+			if checkNotExpired(fields[6], now) == nil {
+				haveValidSigningSubkey = true
 			}
 		}
 	}
@@ -149,6 +168,9 @@ func parseColonExpiry(output, keyID string) error {
 	}
 	if pubCount > 1 {
 		return fmt.Errorf("key %q is ambiguous: matched %d public keys; use a unique key identifier (fingerprint)", keyID, pubCount)
+	}
+	if sawSigningSubkey && !haveValidSigningSubkey {
+		return fmt.Errorf("key %q has signing-capable subkeys but none with a current, unexpired expiration date: non-expiring or expired signing subkeys are not permitted", keyID)
 	}
 
 	return nil
