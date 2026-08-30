@@ -93,33 +93,123 @@ func newFixtureCommand() *Command {
 	}
 }
 
-func TestVerifySignature_Success(t *testing.T) {
+// TestVerifySignature is table-driven, one subtest per SignatureReason
+// plus a genuine end-to-end success case. Each case's setup produces a
+// *Command and an ownerKeyID against real gpg state (ephemeral keys under
+// an isolated GNUPGHOME) or, for the fingerprint-format cases, no gpg
+// state at all — the check fails before gpg is ever invoked.
+func TestVerifySignature(t *testing.T) {
 	gpgBin := gpgBinary(t)
-	home := shortGPGHome(t)
-	const ownerEmail = "owner-success@example.com"
-	fpr := genOwnerKey(t, gpgBin, home, ownerEmail, "1y")
-	t.Setenv("GNUPGHOME", home)
 
-	cmd := newFixtureCommand()
-	canon, err := CanonicalCommandBytes(cmd)
-	require.NoError(t, err)
-	cmd.Signature = signCanonical(t, gpgBin, home, ownerEmail, canon)
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T) (cmd *Command, ownerKeyID string)
+		wantNil bool
+		reason  SignatureReason
+	}{
+		{
+			name: "success",
+			setup: func(t *testing.T) (*Command, string) {
+				home := shortGPGHome(t)
+				const email = "owner-success@example.com"
+				fpr := genOwnerKey(t, gpgBin, home, email, "1y")
+				t.Setenv("GNUPGHOME", home)
 
-	err = VerifySignature(cmd, gpgBin, fpr)
-	assert.NoError(t, err)
+				cmd := newFixtureCommand()
+				canon, err := CanonicalCommandBytes(cmd)
+				require.NoError(t, err)
+				cmd.Signature = signCanonical(t, gpgBin, home, email, canon)
+				return cmd, fpr
+			},
+			wantNil: true,
+		},
+		{
+			name: "missing signature",
+			setup: func(*testing.T) (*Command, string) {
+				cmd := newFixtureCommand()
+				cmd.Signature = ""
+				return cmd, strings.Repeat("A", 40)
+			},
+			reason: ReasonMissing,
+		},
+		{
+			name: "wrong key — signed by an unrelated keypair",
+			setup: func(t *testing.T) (*Command, string) {
+				home := shortGPGHome(t)
+				const ownerEmail = "owner-wrongkey@example.com"
+				const otherEmail = "other-wrongkey@example.com"
+				ownerFpr := genOwnerKey(t, gpgBin, home, ownerEmail, "1y")
+				genOwnerKey(t, gpgBin, home, otherEmail, "1y")
+				t.Setenv("GNUPGHOME", home)
+
+				cmd := newFixtureCommand()
+				canon, err := CanonicalCommandBytes(cmd)
+				require.NoError(t, err)
+				// Signed by a key other than the configured owner's.
+				cmd.Signature = signCanonical(t, gpgBin, home, otherEmail, canon)
+				return cmd, ownerFpr
+			},
+			reason: ReasonWrongKey,
+		},
+		{
+			name: "key expired — non-expiring owner key",
+			setup: func(t *testing.T) (*Command, string) {
+				home := shortGPGHome(t)
+				const email = "owner-expired@example.com"
+				fpr := genOwnerKey(t, gpgBin, home, email, "0") // "0" = never expires
+				t.Setenv("GNUPGHOME", home)
+
+				cmd := newFixtureCommand()
+				canon, err := CanonicalCommandBytes(cmd)
+				require.NoError(t, err)
+				cmd.Signature = signCanonical(t, gpgBin, home, email, canon)
+				return cmd, fpr
+			},
+			reason: ReasonKeyExpired,
+		},
+		{
+			name: "invalid — tampered after signing",
+			setup: func(t *testing.T) (*Command, string) {
+				home := shortGPGHome(t)
+				const email = "owner-tampered@example.com"
+				fpr := genOwnerKey(t, gpgBin, home, email, "1y")
+				t.Setenv("GNUPGHOME", home)
+
+				cmd := newFixtureCommand()
+				canon, err := CanonicalCommandBytes(cmd)
+				require.NoError(t, err)
+				cmd.Signature = signCanonical(t, gpgBin, home, email, canon)
+
+				// Tamper after signing: the canonical bytes at verify
+				// time no longer match what was signed.
+				cmd.Description = "tampered after signing"
+				return cmd, fpr
+			},
+			reason: ReasonInvalid,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, ownerKeyID := tt.setup(t)
+
+			err := VerifySignature(cmd, gpgBin, ownerKeyID)
+			if tt.wantNil {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var sigErr *SignatureError
+			require.ErrorAs(t, err, &sigErr)
+			assert.Equal(t, tt.reason, sigErr.Reason)
+		})
+	}
 }
 
-func TestVerifySignature_MissingSignature(t *testing.T) {
-	cmd := newFixtureCommand()
-	cmd.Signature = ""
-
-	err := VerifySignature(cmd, "gpg", strings.Repeat("A", 40))
-	require.Error(t, err)
-	var sigErr *SignatureError
-	require.ErrorAs(t, err, &sigErr)
-	assert.Equal(t, ReasonMissing, sigErr.Reason)
-}
-
+// TestVerifySignature_InvalidFingerprintFormat covers the precondition
+// VerifySignature enforces on ownerKeyID before touching gpg at all: it
+// must be a full 40-hex OpenPGP fingerprint. No gpg state is needed —
+// every case fails at the regex check.
 func TestVerifySignature_InvalidFingerprintFormat(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -145,70 +235,6 @@ func TestVerifySignature_InvalidFingerprintFormat(t *testing.T) {
 			assert.Equal(t, ReasonInvalid, sigErr.Reason)
 		})
 	}
-}
-
-func TestVerifySignature_WrongKey(t *testing.T) {
-	gpgBin := gpgBinary(t)
-	home := shortGPGHome(t)
-	const ownerEmail = "owner-wrongkey@example.com"
-	const otherEmail = "other-wrongkey@example.com"
-	ownerFpr := genOwnerKey(t, gpgBin, home, ownerEmail, "1y")
-	genOwnerKey(t, gpgBin, home, otherEmail, "1y")
-	t.Setenv("GNUPGHOME", home)
-
-	cmd := newFixtureCommand()
-	canon, err := CanonicalCommandBytes(cmd)
-	require.NoError(t, err)
-	// Signed by a key other than the configured owner's.
-	cmd.Signature = signCanonical(t, gpgBin, home, otherEmail, canon)
-
-	err = VerifySignature(cmd, gpgBin, ownerFpr)
-	require.Error(t, err)
-	var sigErr *SignatureError
-	require.ErrorAs(t, err, &sigErr)
-	assert.Equal(t, ReasonWrongKey, sigErr.Reason)
-}
-
-func TestVerifySignature_KeyExpired(t *testing.T) {
-	gpgBin := gpgBinary(t)
-	home := shortGPGHome(t)
-	const ownerEmail = "owner-expired@example.com"
-	fpr := genOwnerKey(t, gpgBin, home, ownerEmail, "0") // "0" = never expires -> rejected
-	t.Setenv("GNUPGHOME", home)
-
-	cmd := newFixtureCommand()
-	canon, err := CanonicalCommandBytes(cmd)
-	require.NoError(t, err)
-	cmd.Signature = signCanonical(t, gpgBin, home, ownerEmail, canon)
-
-	err = VerifySignature(cmd, gpgBin, fpr)
-	require.Error(t, err)
-	var sigErr *SignatureError
-	require.ErrorAs(t, err, &sigErr)
-	assert.Equal(t, ReasonKeyExpired, sigErr.Reason)
-}
-
-func TestVerifySignature_Tampered(t *testing.T) {
-	gpgBin := gpgBinary(t)
-	home := shortGPGHome(t)
-	const ownerEmail = "owner-tampered@example.com"
-	fpr := genOwnerKey(t, gpgBin, home, ownerEmail, "1y")
-	t.Setenv("GNUPGHOME", home)
-
-	cmd := newFixtureCommand()
-	canon, err := CanonicalCommandBytes(cmd)
-	require.NoError(t, err)
-	cmd.Signature = signCanonical(t, gpgBin, home, ownerEmail, canon)
-
-	// Tamper with the command after signing: the canonical bytes at
-	// verify time no longer match what was signed.
-	cmd.Description = "tampered after signing"
-
-	err = VerifySignature(cmd, gpgBin, fpr)
-	require.Error(t, err)
-	var sigErr *SignatureError
-	require.ErrorAs(t, err, &sigErr)
-	assert.Equal(t, ReasonInvalid, sigErr.Reason)
 }
 
 func TestCanonicalCommandBytes_ClearsSignature(t *testing.T) {
