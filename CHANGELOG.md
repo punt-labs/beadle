@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `beadle-daemon` now loads zero commands when `daemon.json` is
+  absent, instead of loading every command file unsigned.** DES-035
+  (previous entry below) preserved a legacy fallback for a genuinely
+  absent `daemon.json`, returning to the pre-DES-035 unsigned-loading
+  behavior. That contradicted `docs/ARCHITECTURE.md`'s "zero agent
+  authority" invariant and defended a backward-compatibility need that
+  does not exist, since nothing consuming this feature has shipped yet
+  (beadle-kua). An absent `daemon.json` now behaves identically to a
+  present-but-unresolvable one: command loading is disabled entirely,
+  `daemon.LoadCommands` is never called, and the daemon starts with zero
+  commands. Mail polling and the MCP server are unaffected either way. The
+  absent case still logs nothing at Error — it remains the ordinary,
+  expected "not configured yet" state, distinct from a misconfiguration.
+  Anyone relying on unsigned command loading with no `daemon.json` must
+  now configure `owner_handle`/`owner_gpg_key_id` and sign their command
+  files (no `beadle sign` tooling exists yet — tracked as beadle-7gm).
+
 ### Security
 
 - **`internal/daemon.VerifySignature` now performs real GPG signature

@@ -126,7 +126,11 @@ var runCmd = &cobra.Command{
 		// Load command definitions.
 		cmdDir := filepath.Join(dataDir, "commands")
 		commands := loadDaemonCommands(cmdDir, gpgBinary, ownerKeyID, loadCommandsEnabled, logger)
-		logger.Info("commands loaded", "count", len(commands), "dir", cmdDir, "signature_enforcement", ownerKeyID != "")
+		if loadCommandsEnabled {
+			logger.Info("commands loaded", "count", len(commands), "dir", cmdDir, "signature_enforcement", true)
+		} else {
+			logger.Info("commands loaded", "count", len(commands), "dir", cmdDir, "command_loading", "disabled")
+		}
 
 		// Configure planner. Use RulePlanner with a "summarize" rule.
 		// Reply is auto-appended by the executor after the last stage.
@@ -184,36 +188,32 @@ func main() {
 }
 
 // resolveDaemonOwnerKeyID resolves the daemon's signing-enforcement policy
-// from configPath (DES-035). It distinguishes two shapes of failure that
-// must never be conflated:
+// from configPath. Per the "zero agent authority" invariant
+// (docs/ARCHITECTURE.md), nothing is authorized to run unless the operator
+// has explicitly configured who may authorize it -- so both shapes of
+// failure below disable command loading, and only their logging differs:
 //
-//   - "not configured" -- no daemon.json at all, the common, expected case
-//     for a daemon that has not opted into this feature. Returns ("", true):
-//     command loading proceeds, unchanged legacy behavior, and
-//     VerifySignature is never called (loadCommand's ownerKeyID == ""
-//     branch).
+//   - "not configured" -- no daemon.json at all. This is the common,
+//     expected case for a daemon whose operator has not yet set up signing
+//     enforcement, not a misconfiguration, so it stays silent: no Error log.
+//     Returns ("", false).
 //   - "configured but unresolvable" -- daemon.json exists but its content
 //     could not be turned into a usable fingerprint: unreadable file,
 //     malformed JSON, both owner fields set, an unresolvable owner_handle,
-//     or a malformed owner_gpg_key_id. Returns ("", false): command loading
-//     must be disabled entirely at the call site, never fall through to
-//     loading commands unverified with an empty ownerKeyID -- that would be
-//     the always-authorize backdoor DES-034/DES-035 exist to close, and it
-//     would hit exactly the operators who opted in and misconfigured
-//     something.
+//     or a malformed owner_gpg_key_id. This means the operator tried to
+//     configure enforcement and it did not take effect, so it logs at
+//     Error. Returns ("", false).
 //
 // Either failure disables command loading only, never the daemon process:
 // mail polling and the MCP server (a separate binary) have no dependency on
-// the commands map. The first case is silent; the second logs at Error,
-// since it means the operator tried to configure enforcement and it did not
-// take effect. errors.Is (not os.IsNotExist, which does not unwrap %w
+// the commands map. errors.Is (not os.IsNotExist, which does not unwrap %w
 // chains) is required here because LoadConfig wraps the underlying
 // os.ReadFile error.
 func resolveDaemonOwnerKeyID(configPath string, resolver *identity.Resolver, logger *slog.Logger) (ownerKeyID string, loadCommandsEnabled bool) {
 	cfg, err := daemon.LoadConfig(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", true
+			return "", false
 		}
 		logger.Error("daemon config unreadable, command loading disabled", "error", err)
 		return "", false
@@ -228,17 +228,19 @@ func resolveDaemonOwnerKeyID(configPath string, resolver *identity.Resolver, log
 
 // loadDaemonCommands builds the daemon's command map from
 // resolveDaemonOwnerKeyID's outcome. When loadCommandsEnabled is false --
-// daemon.json was present but its owner config could not be resolved --
-// daemon.LoadCommands is never invoked at all, and commands is an empty
-// map: falling through with ownerKeyID == "" would silently disable
-// verification while still loading every command file, exactly the
-// backdoor this design closes. When enabled, a LoadCommands error (e.g. an
-// unreadable commands directory) is logged and treated the same as an
-// empty directory, matching the daemon's existing partial-fail-open
-// posture.
+// daemon.json is absent, or present but its owner config could not be
+// resolved -- daemon.LoadCommands is never invoked at all, and commands is
+// an empty map: falling through with ownerKeyID == "" would silently
+// disable verification while still loading every command file, exactly the
+// backdoor the "zero agent authority" invariant closes. resolveDaemonOwnerKeyID
+// already logged whatever the disabled case warrants -- Error for a genuine
+// misconfiguration, nothing for the ordinary absent-config case -- so this
+// function logs nothing more here; it doesn't need to know why loading is
+// disabled, only that it is. When enabled, a LoadCommands error (e.g. an
+// unreadable commands directory) is logged and treated the same as an empty
+// directory, matching the daemon's existing partial-fail-open posture.
 func loadDaemonCommands(cmdDir, gpgBinary, ownerKeyID string, loadCommandsEnabled bool, logger *slog.Logger) map[string]*daemon.Command {
 	if !loadCommandsEnabled {
-		logger.Warn("command loading disabled: signing enforcement could not be resolved", "dir", cmdDir)
 		return make(map[string]*daemon.Command)
 	}
 	commands, err := daemon.LoadCommands(cmdDir, gpgBinary, ownerKeyID, logger)

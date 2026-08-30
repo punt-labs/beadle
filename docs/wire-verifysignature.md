@@ -160,23 +160,31 @@ Failing the whole daemon over a misconfigured or absent `daemon.json` would
 take mail polling down with it for no invariant-preserving reason — strictly
 more disruptive than "you'll notice no commands run and the log names why,"
 with no invariant the harsher failure protects that the softer one doesn't
-already protect. **Total** fail-closed is reserved for the one thing the
-invariant is actually about — command loading never returning a command
-that skipped verification while claiming to have passed it — never for the
-daemon process as a whole. `cfg.ResolveOwnerKeyID`'s error (either variant
-above) is therefore handled the same way at the `run` call site: caught,
-logged loudly, and treated as "command loading disabled," not propagated as
-a `RunE` failure that would exit the process:
+already protect. That fail-soft posture is scoped to the *daemon process* —
+mail polling and the MCP server keep running regardless of what
+`daemon.json` says. It does not extend to *command loading* itself: no
+`daemon.json` at all, or one that fails to resolve, both disable command
+loading entirely (`beadle-kua`, amending this design's original shipped
+behavior, which treated a genuinely absent `daemon.json` as "load every
+command file unsigned" for backward compatibility with an unconfigured
+deployment — a compatibility need that does not exist, since nothing
+consuming this feature has shipped). `cfg.ResolveOwnerKeyID`'s error, and
+the absence of `daemon.json` in the first place, are therefore handled the
+same way at the `run` call site: caught, and — except for the ordinary
+absent-file case, which stays silent — logged loudly, then treated as
+"command loading disabled," never propagated as a `RunE` failure that would
+exit the process:
 
 ```go
-    ownerKeyID := resolveDaemonOwnerKeyID(filepath.Join(dataDir, "daemon.json"), resolver, logger)
-    // ownerKeyID == "" here means VerifySignature is never called at all
-    // (see §3) -- LoadCommands loads unsigned files exactly as it does
-    // today, the same steady state as an empty commands directory.
+    ownerKeyID, loadCommandsEnabled := resolveDaemonOwnerKeyID(filepath.Join(dataDir, "daemon.json"), resolver, logger)
+    commands := loadDaemonCommands(cmdDir, gpgBinary, ownerKeyID, loadCommandsEnabled, logger)
+    // loadCommandsEnabled == false -- absent daemon.json, or one that
+    // failed to resolve -- means loadDaemonCommands never calls
+    // daemon.LoadCommands at all. commands stays an empty map either way.
 
 // resolveDaemonOwnerKeyID (extracted so it's independently testable —
 // cmd/beadle-daemon had zero test coverage before this design shipped):
-func resolveDaemonOwnerKeyID(configPath string, resolver *identity.Resolver, logger *slog.Logger) string {
+func resolveDaemonOwnerKeyID(configPath string, resolver *identity.Resolver, logger *slog.Logger) (ownerKeyID string, loadCommandsEnabled bool) {
     cfg, err := daemon.LoadConfig(configPath)
     if err != nil {
         // errors.Is, not os.IsNotExist: LoadConfig wraps the underlying
@@ -186,23 +194,29 @@ func resolveDaemonOwnerKeyID(configPath string, resolver *identity.Resolver, log
         // startup with no daemon.json logged at Error forever. Fixed
         // during implementation review; see the shipped code for the
         // empirical confirmation.
-        if !errors.Is(err, os.ErrNotExist) {
-            logger.Error("daemon config unreadable, command loading disabled", "error", err)
+        if errors.Is(err, os.ErrNotExist) {
+            // The ordinary, expected "not configured yet" case -- silent,
+            // but loadCommandsEnabled is still false (beadle-kua): no
+            // daemon.json means no commands load, not unsigned loading.
+            return "", false
         }
-        return ""
+        logger.Error("daemon config unreadable, command loading disabled", "error", err)
+        return "", false
     }
-    ownerKeyID, err := cfg.ResolveOwnerKeyID(resolver)
+    ownerKeyID, err = cfg.ResolveOwnerKeyID(resolver)
     if err != nil {
         logger.Error("signature policy unavailable, command loading disabled", "error", err)
-        return "" // explicit: falls back to disabled, never to "trust anyway"
+        return "", false // explicit: falls back to disabled, never to "trust anyway"
     }
-    return ownerKeyID
+    return ownerKeyID, true
 }
 ```
 
-This is not a new decision — it is round 1 of this design, verified against
-the same call graph and restated here because it is the load-bearing reason
-the config-loading code above never returns a fatal error to `RunE`.
+This is not a new decision — it is round 1 of this design's own stated
+principle two paragraphs up ("a `daemon.json` that is absent... must never
+silently mean 'skip verification'"), which the originally shipped code
+briefly contradicted for the absent-file case before `beadle-kua` corrected
+it to match.
 Rejected for the same reasons round 1 gave: refusing to start over a config
 field unrelated to mail polling or MCP tooling is disproportionate, and
 "preflight before execute" is satisfied exactly as well by disabling the one
@@ -439,13 +453,17 @@ on the commands map (verified against `cmd/beadle-daemon/main.go`'s call
 graph: mail polling and the MCP server, a separate binary, do not consume
 it). Whichever path resolves a value, it is validated against the same
 fingerprint pattern `VerifySignature` itself enforces before it is accepted.
-`ownerKeyID` is resolved once at `beadle-daemon run` startup and threaded
-into `LoadCommands(dir, gpgBinary, ownerKeyID)` → `loadCommand`, which
-calls `VerifySignature` — gated on `ownerKeyID != ""`, so an unconfigured
-daemon behaves exactly as it does today — immediately after YAML decode and
-before `validateCommand`. A rejected signature logs at `slog.Error` with a
-structured `reason` field, distinct from the existing `slog.Warn` treatment
-of an ordinary parse/validation failure.
+`ownerKeyID` is resolved once at `beadle-daemon run` startup by
+`resolveDaemonOwnerKeyID`, which returns `(ownerKeyID string,
+loadCommandsEnabled bool)` — no `daemon.json` (absent or unresolvable)
+means `loadCommandsEnabled` is false and `LoadCommands` is never called at
+all (`beadle-kua`, amending this decision's original absent-file
+exception). When enabled, the values thread into `LoadCommands(dir,
+gpgBinary, ownerKeyID, logger)` → `loadCommand`, which calls
+`VerifySignature` — gated on `ownerKeyID != ""` — immediately after YAML
+decode and before `validateCommand`. A rejected signature logs at
+`slog.Error` with a structured `reason` field, distinct from the existing
+`slog.Warn` treatment of an ordinary parse/validation failure.
 
 **Why:** DES-034 implemented `VerifySignature` correctly but left it with
 no caller and an inaccurate assumption in its migration note — that a
@@ -468,16 +486,15 @@ re-resolving `ownerKeyID` per command file instead of once at startup
 (redundant, no benefit); verifying the signature after schema validation
 instead of before (misreports an authorization failure as a schema error);
 calling `VerifySignature` unconditionally regardless of whether an owner
-key resolved (rejects every command file the moment `daemon.json` is
-unset, since an empty `ownerKeyID` fails the fingerprint check — the
-opposite of the intended zero-behavior-change default); failing the whole
-daemon process when the owner key can't be resolved (disproportionate —
-verified that no other daemon subsystem depends on command loading
-succeeding); routing a rejected signature into `docs/audit-beadle.tex`'s
-audit log (no such implementation exists — that document is a CLI/UX
-compliance report, not an audit-log design, corrected here from DES-034's
-note); scoping the no-ethos gap out silently instead of deciding it in
-this document.
+key resolved (produces a confusing per-file rejection error for every
+command instead of one clear "command loading disabled" state); failing
+the whole daemon process when the owner key can't be resolved
+(disproportionate — verified that no other daemon subsystem depends on
+command loading succeeding); routing a rejected signature into
+`docs/audit-beadle.tex`'s audit log (no such implementation exists — that
+document is a CLI/UX compliance report, not an audit-log design, corrected
+here from DES-034's note); scoping the no-ethos gap out silently instead
+of deciding it in this document.
 
 See `docs/wire-verifysignature.md` for the full design, the rejected-
 alternatives table, and the implementation plan.
