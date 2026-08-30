@@ -3,6 +3,7 @@ package pgp
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -230,6 +231,13 @@ func TestCheckKeyExpiry_SigningSubkey(t *testing.T) {
 }
 
 func TestParseColonExpiry(t *testing.T) {
+	// future is a Unix timestamp a year out from whenever this test runs --
+	// never a fixed date. parseColonExpiry compares an expiry field against
+	// time.Now(), so a hardcoded "still valid" fixture becomes a date bomb:
+	// it silently starts failing (or worse, passing for the wrong reason)
+	// once the clock catches up to it.
+	future := fmt.Sprintf("%d", time.Now().Add(365*24*time.Hour).Unix())
+
 	tests := []struct {
 		name    string
 		output  string
@@ -239,7 +247,7 @@ func TestParseColonExpiry(t *testing.T) {
 	}{
 		{
 			name:    "expiry set",
-			output:  "pub:u:2048:1:ABCDEF:1234567890:1893456000::u:::scESC:::\nsub:...\n",
+			output:  fmt.Sprintf("pub:u:2048:1:ABCDEF:1234567890:%s::u:::scESC:::\nsub:...\n", future),
 			keyID:   "test@example.com",
 			wantErr: false,
 		},
@@ -272,10 +280,15 @@ func TestParseColonExpiry(t *testing.T) {
 			errMsg:  "not found",
 		},
 		{
-			// Two pub records with the same email — keyID is ambiguous.
+			// Two pub records, BOTH with a valid, non-expired expiry — keyID
+			// is ambiguous regardless of whether either key has an expiry
+			// problem. parseColonExpiry returns from inside its loop on the
+			// first bad expiry it finds, so a fixture that let either record
+			// fail on expiry first would never reach the pubCount > 1 check
+			// this case exists to prove.
 			name: "multiple pub records",
-			output: "pub:u:2048:1:AAAAAA:1234567890:1893456000::u:::scESC:::\n" +
-				"pub:u:2048:1:BBBBBB:1234567890:1893456000::u:::scESC:::\n",
+			output: fmt.Sprintf("pub:u:2048:1:AAAAAA:1234567890:%s::u:::scESC:::\n"+
+				"pub:u:2048:1:BBBBBB:1234567890:%s::u:::scESC:::\n", future, future),
 			keyID:   "test@example.com",
 			wantErr: true,
 			errMsg:  "ambiguous",
@@ -284,22 +297,22 @@ func TestParseColonExpiry(t *testing.T) {
 			// Primary key expiry is fine; the sub record has no signing
 			// capability (encrypt-only "e"), so its empty expiry is ignored.
 			name: "non-signing subkey without expiry is ignored",
-			output: "pub:u:2048:1:ABCDEF:1234567890:1893456000::u:::scESC:::\n" +
-				"sub:u:2048:1:111111:1234567890::::::e:::\n",
+			output: fmt.Sprintf("pub:u:2048:1:ABCDEF:1234567890:%s::u:::scESC:::\n"+
+				"sub:u:2048:1:111111:1234567890::::::e:::\n", future),
 			keyID:   "test@example.com",
 			wantErr: false,
 		},
 		{
 			name: "signing subkey with expiry",
-			output: "pub:u:2048:1:ABCDEF:1234567890:1893456000::u:::scESC:::\n" +
-				"sub:u:2048:1:111111:1234567890:1893456000:::::s:::\n",
+			output: fmt.Sprintf("pub:u:2048:1:ABCDEF:1234567890:%s::u:::scESC:::\n"+
+				"sub:u:2048:1:111111:1234567890:%s:::::s:::\n", future, future),
 			keyID:   "test@example.com",
 			wantErr: false,
 		},
 		{
 			name: "signing subkey without expiry",
-			output: "pub:u:2048:1:ABCDEF:1234567890:1893456000::u:::scESC:::\n" +
-				"sub:u:2048:1:111111:1234567890::::::s:::\n",
+			output: fmt.Sprintf("pub:u:2048:1:ABCDEF:1234567890:%s::u:::scESC:::\n"+
+				"sub:u:2048:1:111111:1234567890::::::s:::\n", future),
 			keyID:   "test@example.com",
 			wantErr: true,
 			errMsg:  "signing subkey with no expiration date",
@@ -316,8 +329,8 @@ func TestParseColonExpiry(t *testing.T) {
 		},
 		{
 			name: "signing subkey expiry is in the past",
-			output: "pub:u:2048:1:ABCDEF:1234567890:1893456000::u:::scESC:::\n" +
-				"sub:e:2048:1:111111:1234567890:1000000000:::::s:::\n",
+			output: fmt.Sprintf("pub:u:2048:1:ABCDEF:1234567890:%s::u:::scESC:::\n"+
+				"sub:e:2048:1:111111:1234567890:1000000000:::::s:::\n", future),
 			keyID:   "test@example.com",
 			wantErr: true,
 			errMsg:  "expired",
