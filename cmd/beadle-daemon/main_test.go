@@ -191,7 +191,9 @@ func TestResolveDaemonOwnerKeyID_MalformedFingerprintDisablesLoading(t *testing.
 // loadCommandsEnabled being false. See
 // TestLoadDaemonCommands_AbsentConfigNeverCallsLoadCommands for the
 // companion absent-config case, which reaches loadCommandsEnabled == false
-// through resolveDaemonOwnerKeyID's other branch.
+// through resolveDaemonOwnerKeyID's other branch. loadDaemonCommands itself
+// logs nothing on this path -- resolveDaemonOwnerKeyID already logged
+// whatever this case warrants.
 func TestLoadDaemonCommands_DisabledNeverCallsLoadCommands(t *testing.T) {
 	h := &capturingHandler{}
 	logger := slog.New(h)
@@ -207,7 +209,6 @@ budget:
 	commands := loadDaemonCommands(dir, "gpg", "", false, logger)
 
 	assert.Empty(t, commands, "command loading must stay disabled -- a loadable file in cmdDir must not appear")
-	assert.True(t, h.hasRecord(slog.LevelWarn, "command loading disabled: signing enforcement could not be resolved"))
 }
 
 // TestLoadDaemonCommands_EnabledLoadsCommands is the companion success
@@ -228,7 +229,6 @@ budget:
 	commands := loadDaemonCommands(dir, "gpg", "", true, logger)
 
 	assert.Contains(t, commands, "wall")
-	assert.False(t, h.hasRecord(slog.LevelWarn, "command loading disabled: signing enforcement could not be resolved"))
 }
 
 // TestLoadDaemonCommands_AbsentConfigNeverCallsLoadCommands proves the
@@ -243,7 +243,11 @@ budget:
 // running unsigned commands. Unlike
 // TestLoadDaemonCommands_DisabledNeverCallsLoadCommands, which drives
 // loadCommandsEnabled == false through a present-but-unresolvable
-// daemon.json, this test drives it through the absent-file branch.
+// daemon.json, this test drives it through the absent-file branch. It also
+// checks logging on both sides of the loadDaemonCommands call: no Error
+// from resolveDaemonOwnerKeyID, and no Warn from loadDaemonCommands either --
+// an absent daemon.json is the ordinary unconfigured case, nothing was
+// misconfigured, and neither call site may imply otherwise.
 func TestLoadDaemonCommands_AbsentConfigNeverCallsLoadCommands(t *testing.T) {
 	h := &capturingHandler{}
 	logger := slog.New(h)
@@ -264,4 +268,5 @@ budget:
 	commands := loadDaemonCommands(cmdDir, "gpg", ownerKeyID, loadEnabled, logger)
 
 	assert.Empty(t, commands, "an unconfigured daemon must never load commands, signed or not")
+	assert.False(t, h.hasLevel(slog.LevelWarn), "an absent daemon.json must not log at Warn either -- nothing was misconfigured")
 }

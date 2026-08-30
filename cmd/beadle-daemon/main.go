@@ -228,13 +228,15 @@ func resolveDaemonOwnerKeyID(configPath string, resolver *identity.Resolver, log
 // resolved -- daemon.LoadCommands is never invoked at all, and commands is
 // an empty map: falling through with ownerKeyID == "" would silently
 // disable verification while still loading every command file, exactly the
-// backdoor the "zero agent authority" invariant closes. When enabled, a
-// LoadCommands error (e.g. an unreadable commands directory) is logged and
-// treated the same as an empty directory, matching the daemon's existing
-// partial-fail-open posture.
+// backdoor the "zero agent authority" invariant closes. resolveDaemonOwnerKeyID
+// already logged whatever the disabled case warrants -- Error for a genuine
+// misconfiguration, nothing for the ordinary absent-config case -- so this
+// function logs nothing more here; it doesn't need to know why loading is
+// disabled, only that it is. When enabled, a LoadCommands error (e.g. an
+// unreadable commands directory) is logged and treated the same as an empty
+// directory, matching the daemon's existing partial-fail-open posture.
 func loadDaemonCommands(cmdDir, gpgBinary, ownerKeyID string, loadCommandsEnabled bool, logger *slog.Logger) map[string]*daemon.Command {
 	if !loadCommandsEnabled {
-		logger.Warn("command loading disabled: signing enforcement could not be resolved", "dir", cmdDir)
 		return make(map[string]*daemon.Command)
 	}
 	commands, err := daemon.LoadCommands(cmdDir, gpgBinary, ownerKeyID, logger)
