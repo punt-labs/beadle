@@ -364,9 +364,11 @@ commands, and the pipeline design document are in the repository.
 \end{faqpair}
 
 \begin{faqpair}{How do I get started?}\label{faq:getting-started}
-  Run the install script ({\small\texttt{curl -fsSL .../install.sh | sh}})
-  to download the Go binary and install the Claude Code plugin. Configure
-  your email connection (IMAP/SMTP) and credentials. Start the daemon with
+  This is the target flow, not what's installable today (see
+  \faqref{faq:timeline} for the gap): run the install script
+  ({\small\texttt{curl -fsSL .../install.sh | sh}}) to download the Go
+  binary and install the Claude Code plugin. Configure your email
+  connection (IMAP/SMTP) and credentials. Start the daemon with
   {\small\texttt{beadle-daemon run}}. Send an email with ``summarize'' in
   the subject from a PGP-verified or Proton E2E contact, and receive the
   summary as a reply. Add commands by writing YAML files in
@@ -533,7 +535,7 @@ commands, and the pipeline design document are in the repository.
   document's v3.0 draft --- CLI runners, process/passthrough data flow,
   compound CLI steps, and JSON schema validation all merged in
   \texttt{v0.15.0} (2026-04-18). \texttt{beadle-email} itself has shipped
-  five releases since, through \texttt{v0.16.5}. Building has not been
+  six releases since, through \texttt{v0.16.5}. Building has not been
   the bottleneck.
 
   Validation has. The external test proposed at v3.0 --- 5--10 developers
@@ -624,10 +626,23 @@ commands, and the pipeline design document are in the repository.
       UX, is the higher-priority gap (see \faqref{faq:next-step}).
     \item \textbf{Claude interpreter sandboxing.} When Beadle invokes Claude
       as a command interpreter, the LLM may attempt actions outside the
-      command's declared permissions. \textit{Mitigation:} The two-level
-      try-catch model preflights all permissions before execution. The Claude
-      interpreter runs in a restricted context with only the declared
-      inputs available.
+      command's declared permissions --- or a message's \textit{content},
+      not just its sender, could carry a prompt injection, exactly the
+      vector Snyk demonstrated against ClawdBot (see \faqref{faq:why-now}).
+      \textit{Mitigation, already built:} workers spawn via
+      {\small\texttt{claude -p --bare}}, which skips CLAUDE.md, hooks,
+      plugins, and auto-memory; an adversarial system prompt frames every
+      worker invocation; the worker's \texttt{PATH} is restricted to the
+      Claude binary directory plus \texttt{/usr/bin}; and the daemon
+      withholds its own credentials from the worker's environment.
+      \textit{Still open:} permission preflighting is authorization
+      bookkeeping, not a content firewall --- it establishes who sent a
+      command, not what a message's body asks the interpreter to do once
+      inside its declared scope, and the worker still runs with the real
+      {\small\texttt{\$HOME}} and broad tool access
+      ({\small\texttt{Bash}}, {\small\texttt{Edit}}, {\small\texttt{Write}}).
+      There is no container-level isolation (network namespace, seccomp)
+      yet.
   \end{enumerate}
 \end{faqpair}
 
@@ -666,9 +681,10 @@ commands, and the pipeline design document are in the repository.
       Proton E2E), x-bit enforcement, pipeline orchestrator (command YAML
       loader, regex planner, sequential executor, auto-reply, crash-safe
       persistence), worker spawner via \texttt{claude -p --bare} with
-      adversarial isolation. Tested and e2e verified against a real
-      mailbox, but \texttt{make dist} and \texttt{install.sh} do not build
-      or ship it.
+      prompt-level adversarial hardening (see \faqref{faq:tech-risks} for
+      what that does and doesn't cover). Tested and e2e verified against a
+      real mailbox, but \texttt{make dist} and \texttt{install.sh} do not
+      build or ship it.
     \item \textbf{Pipeline v2 (built, not distributed)} --- CLI runners
       (execute tools in milliseconds instead of a full Claude session),
       the process/passthrough data-flow model, compound CLI steps
@@ -734,8 +750,9 @@ commands, and the pipeline design document are in the repository.
 
 \begin{faqpair}{What does the P\&L look like at steady state?}\label{faq:pnl}
   Beadle has no revenue, so the P\&L is cost-only. The primary cost is
-  developer-hours. Specific hour estimates are not attempted at hypothesis
-  stage --- the purpose of this document is to validate whether to build,
+  developer-hours. Specific \textit{development}-hour estimates are not
+  attempted at hypothesis stage --- the purpose of this document is to
+  validate whether to build,
   not to plan the schedule --- but the cost categories are known.
 
   \begin{tabularx}{\linewidth}{@{} l X @{}}

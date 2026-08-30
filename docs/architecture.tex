@@ -80,7 +80,7 @@ outside the module.
 \texttt{cmd/beadle-email/} & CLI entry point: subcommand dispatch \\
 \texttt{internal/channel/}  & Channel interface: \texttt{Message}, \texttt{TrustLevel}, shared types \\
 \texttt{internal/email/}    & IMAP client, MIME parser, trust classifier, SMTP/Resend senders \\
-\texttt{internal/pgp/}      & GPG signature verification and signing via isolated GNUPGHOME \\
+\texttt{internal/pgp/}      & GPG signature verification (isolated GNUPGHOME) and signing (system keyring) \\
 \texttt{internal/mcp/}      & MCP tool definitions and handlers (8 tools) \\
 \texttt{internal/secret/}   & Credential resolution: OS keychain $\to$ file $\to$ env var \\
 \bottomrule
@@ -475,9 +475,11 @@ all operations:
   \item \textbf{Preflight before execute.}  All permissions are
     validated before any command runs.  No partial execution.
 
-  \item \textbf{Isolated keychain.}  PGP operations use temporary
-    GNUPGHOME directories, never touching the user's system GPG
-    keyring for writes.
+  \item \textbf{Isolated verification.}  Inbound signature verification
+    runs in a temporary GNUPGHOME so an untrusted sender's key never
+    touches the system keyring. Signing and decryption use the owner's
+    own key from the system keyring, since that is where it already
+    lives.
 
   \item \textbf{Non-expiring keys rejected.}  All command-signing
     keys must have an expiration date.
@@ -519,7 +521,8 @@ all operations:
 \subsection{Process Boundary}
 
 \begin{itemize}
-  \item \textbf{GPG}: subprocess with isolated GNUPGHOME.
+  \item \textbf{GPG}: subprocess. Verification uses an isolated
+    GNUPGHOME; signing and decryption use the system keyring.
     Passphrase passed via temp file (mode 600), never via
     arguments or environment.
   \item \textbf{Keychain}: subprocess (\texttt{security} on macOS,
