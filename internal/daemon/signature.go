@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -235,7 +236,15 @@ func verifyDetachedSignature(gpgBinary, gpgHome, tmpDir string, canon []byte, ar
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = io.Discard
-	_ = cmd.Run() // the status lines carry the outcome, not the exit code
+	// gpg --verify exits non-zero for a bad signature; that outcome is
+	// expected and classifyStatusLines reads it from stdout regardless of
+	// exit code. But if gpg itself never started (binary missing or not
+	// executable), Run returns an *exec.Error before any status-fd output
+	// exists — that is an operational failure, not a signature verdict.
+	var execErr *exec.Error
+	if err := cmd.Run(); errors.As(err, &execErr) {
+		return fmt.Errorf("run gpg verify: %w", err)
+	}
 
 	return classifyStatusLines(stdout.String())
 }

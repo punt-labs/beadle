@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -235,6 +236,29 @@ func TestVerifySignature_InvalidFingerprintFormat(t *testing.T) {
 			assert.Equal(t, ReasonInvalid, sigErr.Reason)
 		})
 	}
+}
+
+// TestVerifyDetachedSignature_ExecStartFailure covers the case gpg never
+// starts at all -- binary missing from $PATH -- as distinct from gpg
+// running and exiting non-zero (the normal outcome for a bad signature,
+// which classifyStatusLines handles from stdout regardless of exit code).
+// gpgBinary is ordinarily a bare name ("gpg", the config default) resolved
+// via exec.LookPath, so a name LookPath can't find is the realistic
+// failure: it must surface as the unwrapped operational error
+// VerifySignature's doc comment promises, never as a *SignatureError.
+func TestVerifyDetachedSignature_ExecStartFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	gpgHome := filepath.Join(tmpDir, "g")
+	require.NoError(t, os.Mkdir(gpgHome, 0o700))
+
+	err := verifyDetachedSignature("no-such-gpg-binary-anywhere-on-path", gpgHome, tmpDir, []byte("data"), "not-a-real-signature")
+	require.Error(t, err)
+
+	var sigErr *SignatureError
+	assert.False(t, errors.As(err, &sigErr), "exec-start failure must not be classified as a *SignatureError, got: %v", err)
+
+	var execErr *exec.Error
+	assert.True(t, errors.As(err, &execErr), "expected an *exec.Error wrapped in the returned error, got: %v", err)
 }
 
 func TestCanonicalCommandBytes_ClearsSignature(t *testing.T) {
