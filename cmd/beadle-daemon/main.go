@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -204,7 +203,7 @@ func main() {
 func resolveDaemonOwnerKeyID(configPath string, resolver *identity.Resolver, logger *slog.Logger) string {
 	cfg, err := daemon.LoadConfig(configPath)
 	if err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
+		if !errors.Is(err, os.ErrNotExist) {
 			logger.Error("daemon config unreadable, command loading disabled", "error", err)
 		}
 		return ""

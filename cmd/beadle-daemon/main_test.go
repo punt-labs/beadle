@@ -45,6 +45,24 @@ func (h *capturingHandler) hasLevel(level slog.Level) bool {
 	return false
 }
 
+// hasRecord reports whether a record at level with exactly msg was
+// captured. Distinguishing by message, not just level, matters here
+// specifically: resolveDaemonOwnerKeyID has two distinct Error-level call
+// sites ("daemon config unreadable..." vs "signature policy
+// unavailable..."), and hasLevel alone cannot tell a test that the wrong
+// one fired -- a bug that swapped which branch logs which message would
+// still pass a hasLevel(LevelError) assertion.
+func (h *capturingHandler) hasRecord(level slog.Level, msg string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Level == level && r.Message == msg {
+			return true
+		}
+	}
+	return false
+}
+
 // TestResolveDaemonOwnerKeyID_MissingConfigIsSilent proves the fix for the
 // bug where os.IsNotExist(err) never matched daemon.LoadConfig's wrapped
 // error (fmt.Errorf("read config %s: %w", path, err)) -- os.IsNotExist does
@@ -78,7 +96,7 @@ func TestResolveDaemonOwnerKeyID_UnreadableConfigLogsError(t *testing.T) {
 	keyID := resolveDaemonOwnerKeyID(path, &identity.Resolver{}, logger)
 
 	assert.Empty(t, keyID)
-	assert.True(t, h.hasLevel(slog.LevelError),
+	assert.True(t, h.hasRecord(slog.LevelError, "daemon config unreadable, command loading disabled"),
 		"a present but unparseable daemon.json is a real misconfiguration and must log at Error")
 }
 
@@ -96,7 +114,7 @@ func TestResolveDaemonOwnerKeyID_UnresolvableOwnerLogsError(t *testing.T) {
 	keyID := resolveDaemonOwnerKeyID(path, &identity.Resolver{}, logger)
 
 	assert.Empty(t, keyID)
-	assert.True(t, h.hasLevel(slog.LevelError))
+	assert.True(t, h.hasRecord(slog.LevelError, "signature policy unavailable, command loading disabled"))
 }
 
 // TestResolveDaemonOwnerKeyID_DirectFingerprintResolves is the success

@@ -169,20 +169,35 @@ logged loudly, and treated as "command loading disabled," not propagated as
 a `RunE` failure that would exit the process:
 
 ```go
-    daemonCfg, err := daemon.LoadConfig(filepath.Join(dataDir, "daemon.json"))
-    var ownerKeyID string
-    if err != nil && !os.IsNotExist(err) {
-        logger.Error("daemon config unreadable, command loading disabled", "error", err)
-    } else if err == nil {
-        ownerKeyID, err = daemonCfg.ResolveOwnerKeyID(resolver)
-        if err != nil {
-            logger.Error("signature policy unavailable, command loading disabled", "error", err)
-            ownerKeyID = "" // explicit: falls back to disabled, never to "trust anyway"
-        }
-    }
+    ownerKeyID := resolveDaemonOwnerKeyID(filepath.Join(dataDir, "daemon.json"), resolver, logger)
     // ownerKeyID == "" here means VerifySignature is never called at all
     // (see §3) -- LoadCommands loads unsigned files exactly as it does
     // today, the same steady state as an empty commands directory.
+
+// resolveDaemonOwnerKeyID (extracted so it's independently testable —
+// cmd/beadle-daemon had zero test coverage before this design shipped):
+func resolveDaemonOwnerKeyID(configPath string, resolver *identity.Resolver, logger *slog.Logger) string {
+    cfg, err := daemon.LoadConfig(configPath)
+    if err != nil {
+        // errors.Is, not os.IsNotExist: LoadConfig wraps the underlying
+        // os.ReadFile error via %w, and os.IsNotExist does not unwrap %w
+        // chains (only errors.Is does) -- an earlier version of this
+        // design used os.IsNotExist here, which never matched, so every
+        // startup with no daemon.json logged at Error forever. Fixed
+        // during implementation review; see the shipped code for the
+        // empirical confirmation.
+        if !errors.Is(err, os.ErrNotExist) {
+            logger.Error("daemon config unreadable, command loading disabled", "error", err)
+        }
+        return ""
+    }
+    ownerKeyID, err := cfg.ResolveOwnerKeyID(resolver)
+    if err != nil {
+        logger.Error("signature policy unavailable, command loading disabled", "error", err)
+        return "" // explicit: falls back to disabled, never to "trust anyway"
+    }
+    return ownerKeyID
+}
 ```
 
 This is not a new decision — it is round 1 of this design, verified against

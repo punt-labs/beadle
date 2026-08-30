@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,7 +128,7 @@ func TestLoadConfig(t *testing.T) {
 	t.Run("absent file", func(t *testing.T) {
 		_, err := LoadConfig(filepath.Join(t.TempDir(), "daemon.json"))
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, fs.ErrNotExist))
+		assert.True(t, errors.Is(err, os.ErrNotExist))
 	})
 
 	t.Run("corrupt JSON", func(t *testing.T) {
