@@ -25,6 +25,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is DES-035 (`docs/wire-verifysignature.md`), tracked under beadle-iru
   — see `docs/gpg-signature-verification.md` for `VerifySignature`'s own
   design.
+- **`VerifySignature` is now wired into the daemon's command-file loader**
+  (DES-035, `docs/wire-verifysignature.md`), closing the gap the entry
+  above left open — this is what actually makes the "zero agent
+  authority" invariant enforceable, not just implemented. A new
+  `internal/daemon.Config` (`daemon.json`) names the owner key via
+  `owner_handle` (resolved through ethos, `internal/identity.Resolver`)
+  or `owner_gpg_key_id` (a direct 40-hex fingerprint, for a no-ethos
+  deployment); setting both is rejected as ambiguous. `LoadCommands` and
+  `loadCommand` now take a `gpgBinary`/`ownerKeyID` pair and call
+  `VerifySignature` immediately after YAML decode, before
+  `validateCommand` — but only when `ownerKeyID != ""`, so an
+  unconfigured daemon has zero behavior change. A missing or
+  unresolvable owner-key configuration disables command loading only —
+  never mail polling or the MCP server, which have no dependency on it —
+  logged at Error except for the common, expected case of no
+  `daemon.json` at all (an absent-file `LoadConfig` error), which stays
+  silent. Enforcement is opt-in until an operator configures
+  `daemon.json`; there is not yet a `beadle init`/`sign` onboarding flow
+  to make that configuration step easy.
 
 ### Fixed
 
