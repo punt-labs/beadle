@@ -207,10 +207,12 @@ env_vars:
 > `internal/daemon/pipeline.go`'s `stageContext` and the beadle-8gt
 > CHANGELOG entry.
 
-**No string interpolation.** Args flow as structured data in the mission
-contract's top-level `context` field (the prompt above predates this and
-still says `inputs.args` — see the superseded note). The worker reads them
-from the contract. When calling Bash, the worker passes args as direct
+**No string interpolation.** Stage args are formatted as free text
+(`key=value` pairs) into the mission contract's top-level `context` field
+by `stageContext` (the prompt above predates this and still says
+`inputs.args` — see the superseded note). The worker parses them from the
+contract text, not by interpolating the raw context blob into a shell
+string. When calling Bash, the worker passes parsed values as direct
 arguments, never via template string substitution. This prevents shell
 injection.
 

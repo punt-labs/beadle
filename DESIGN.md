@@ -1702,13 +1702,15 @@ env_vars:
 > `internal/daemon/pipeline.go`'s `stageContext` and the beadle-8gt
 > CHANGELOG entry.
 
-**Critical: no `{input}` string interpolation.** Args flow as structured
-data in the mission contract's top-level `context` field (the prompt above
-predates this and still says `inputs.args` — see the superseded note), not
-as string substitution into prompts. The worker reads args from the
-contract via `ethos mission show`. When calling Bash, the worker assembles
-argument lists from structured data, never from template strings.
-This prevents shell injection via attacker-influenced planner output.
+**Critical: no `{input}` string interpolation.** Stage args are formatted
+as free text (`key=value` pairs) into the mission contract's top-level
+`context` field by `stageContext` (the prompt above predates this and
+still says `inputs.args` — see the superseded note), not as string
+substitution into prompts. The worker parses args from the contract text
+via `ethos mission show`, not by interpolating the raw context blob into a
+shell command. When calling Bash, the worker assembles argument lists from
+parsed values, never from template strings. This prevents shell injection
+via attacker-influenced planner output.
 
 Commands are YAML files in `~/.punt-labs/beadle/commands/`. Each file
 is GPG-signed by the owner's key. The daemon verifies signatures at
