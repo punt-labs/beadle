@@ -7,11 +7,15 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/punt-labs/beadle/internal/enable"
 )
 
 // mockClaudeRunner implements Runner for pipeline tests.
@@ -511,7 +515,25 @@ func TestStageContext_LongArgValueCapped(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		capped += "a"
 	}
-	assert.Equal(t, "stage args: note="+capped+"\npipeline output: none", got)
+	assert.Equal(t, "stage args: note="+capped+truncationMarker+"\npipeline output: none", got)
+}
+
+func TestCapRunes(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		n    int
+		want string
+	}{
+		{"under cap, unchanged, no marker", "short", 500, "short"},
+		{"exactly at cap, unchanged, no marker", "abcde", 5, "abcde"},
+		{"over cap, truncated with marker", "abcdef", 5, "abcde" + truncationMarker},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, capRunes(tt.s, tt.n))
+		})
+	}
 }
 
 // TestBuildStageContract asserts the generated contract no longer emits
@@ -589,6 +611,54 @@ func TestBuildStageContract_NoArgsNoPipe(t *testing.T) {
 	assert.Equal(t, "stage args: none\npipeline output: none", contextVal)
 }
 
+// isolatedEthosEnv builds a process environment for exec'ing the real ethos
+// CLI that reads the real, current identity/archetype data but writes
+// nothing to it. ethos derives its global root (session bindings, mission
+// ID counters, delegations, locks) from os.UserHomeDir(), and its repo root
+// (mission storage, identity/personality/role/team resolution) from cwd or
+// the ETHOS_REPO_ROOT override -- so both must be redirected together, or
+// half the state (e.g. the global session binding) still lands on the real
+// ambient trees.
+//
+// This repo runs in a shared, multi-agent environment: without this,
+// `ethos mission create`/`ethos mission abandon` corrupt whatever mission a
+// real concurrent session has bound (bindDispatchedMission,
+// clearClosedSessionBindings), and burn real per-date mission-ID counter
+// slots.
+//
+// Every subtree ethos might WRITE to (global sessions/missions/delegations/
+// locks/counters; repo missions/sessions) is left absent, so ethos creates
+// a fresh, empty one under the scratch roots. Every subtree ethos only
+// READS (global archetypes; repo identities/personalities/roles/teams/
+// talents/writing-styles) is symlinked to the real, current data so
+// contract validation exercises the genuine schema and identity graph.
+func isolatedEthosEnv(t *testing.T) []string {
+	t.Helper()
+
+	realHome, err := os.UserHomeDir()
+	require.NoError(t, err)
+	realRepoRoot, err := enable.RepoRoot()
+	require.NoError(t, err)
+
+	scratchHome := t.TempDir()
+	scratchGlobalEthos := filepath.Join(scratchHome, ".punt-labs", "ethos")
+	require.NoError(t, os.MkdirAll(scratchGlobalEthos, 0o700))
+	require.NoError(t, os.Symlink(
+		filepath.Join(realHome, ".punt-labs", "ethos", "archetypes"),
+		filepath.Join(scratchGlobalEthos, "archetypes"),
+	))
+
+	scratchRepo := t.TempDir()
+	scratchRepoEthos := filepath.Join(scratchRepo, ".punt-labs", "ethos")
+	require.NoError(t, os.MkdirAll(scratchRepoEthos, 0o700))
+	realRepoEthos := filepath.Join(realRepoRoot, ".punt-labs", "ethos")
+	for _, sub := range []string{"identities", "personalities", "roles", "teams", "talents", "writing-styles"} {
+		require.NoError(t, os.Symlink(filepath.Join(realRepoEthos, sub), filepath.Join(scratchRepoEthos, sub)))
+	}
+
+	return append(os.Environ(), "HOME="+scratchHome, "ETHOS_REPO_ROOT="+scratchRepo)
+}
+
 // TestBuildStageContract_ValidatesAgainstRealEthosCLI invokes the real
 // `ethos mission create --file <path>` binary (via os/exec, the same
 // mechanism createMissionFromContract in mission.go uses) against a
@@ -598,16 +668,27 @@ func TestBuildStageContract_NoArgsNoPipe(t *testing.T) {
 // struct shape that did not encode ethos's actual schema. A test that only
 // checks the Go string, without handing it to the real ethos binary, would
 // not have caught it and must not be trusted to catch a recurrence.
+//
+// Both exec.Command calls run with isolatedEthosEnv so ethos's writes never
+// touch the real ambient ~/.punt-labs/ethos or this checkout's real mission
+// history -- see isolatedEthosEnv's doc comment.
 func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
 	ethosPath, err := exec.LookPath("ethos")
 	if err != nil {
 		t.Skip("ethos not on PATH; skipping real-CLI mission-contract validation")
 	}
 
+	isolatedEnv := isolatedEthosEnv(t)
+
 	meta := EmailMeta{MessageID: "regression-8gt", From: "jim@test.com", Subject: "beadle-8gt regression test"}
+	// A unique write_set path per run: ethos refuses to create a mission
+	// whose write_set overlaps any currently-open mission's write_set, so a
+	// fixed path would let a mission leaked by a prior failed/killed test
+	// run permanently wedge every later run.
+	writeSetPath := fmt.Sprintf("internal/daemon/testdata/mission-regression-fixture-8gt-%s.txt", uuid.New().String())
 	cmd := &Command{
 		Prompt:   "Deploy to production",
-		WriteSet: []string{"internal/daemon/testdata/mission-regression-fixture-8gt.txt"},
+		WriteSet: []string{writeSetPath},
 		Budget: struct {
 			Rounds              int  `yaml:"rounds"`
 			ReflectionAfterEach bool `yaml:"reflection_after_each"`
@@ -623,13 +704,29 @@ func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	out, err := exec.Command(ethosPath, "mission", "create", "--file", f.Name()).CombinedOutput()
+	createCmd := exec.Command(ethosPath, "mission", "create", "--file", f.Name())
+	createCmd.Env = isolatedEnv
+	out, err := createCmd.CombinedOutput()
 	require.NoError(t, err, "ethos mission create rejected the generated contract: %s", string(out))
+	rawOut := string(out)
 
-	missionID, parseErr := parseMissionID(string(out))
-	require.NoError(t, parseErr)
-
+	// Register cleanup before parsing the mission ID below: a
+	// parseMissionID failure there must not orphan the just-created
+	// mission with no cleanup registered. The closure re-parses rawOut
+	// independently so it does not depend on the outer parse succeeding.
 	t.Cleanup(func() {
-		_ = exec.Command(ethosPath, "mission", "abandon", missionID, "--reason", "test cleanup").Run()
+		missionID, parseErr := parseMissionID(rawOut)
+		if parseErr != nil {
+			t.Errorf("cleanup: could not parse mission ID from create output, mission is leaked and must be abandoned by hand: %v (output: %s)", parseErr, rawOut)
+			return
+		}
+		abandonCmd := exec.Command(ethosPath, "mission", "abandon", missionID, "--reason", "test cleanup")
+		abandonCmd.Env = isolatedEnv
+		if abandonOut, abandonErr := abandonCmd.CombinedOutput(); abandonErr != nil {
+			t.Errorf("cleanup: ethos mission abandon %s failed, mission is leaked and must be abandoned by hand: %v (output: %s)", missionID, abandonErr, string(abandonOut))
+		}
 	})
+
+	_, parseErr := parseMissionID(rawOut)
+	require.NoError(t, parseErr, "output: %s", rawOut)
 }
