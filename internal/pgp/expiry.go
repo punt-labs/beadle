@@ -2,12 +2,24 @@ package pgp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// ErrKeyExpiryFinding wraps every error CheckKeyExpiry returns after gpg has
+// run to completion and produced output worth parsing -- a key with no
+// expiry, an already-expired key, a signing subkey missing its own expiry,
+// an ambiguous or missing keyID. It is never wrapped around a failure to run
+// gpg at all; that case is returned unwrapped, straight from
+// (*exec.Cmd).Run(). Callers use errors.Is against this sentinel to tell a
+// genuine expiry finding apart from an operational failure in the
+// subprocess itself, without needing to enumerate what a start failure can
+// look like.
+var ErrKeyExpiryFinding = errors.New("key expiry finding")
 
 // ExpiryOption configures CheckKeyExpiry.
 type ExpiryOption func(*expiryConfig)
@@ -53,7 +65,10 @@ func CheckKeyExpiry(gpgBinary, keyID string, opts ...ExpiryOption) error {
 		return fmt.Errorf("gpg list-keys %q: %w: %s", keyID, err, stderr.String())
 	}
 
-	return parseColonExpiry(stdout.String(), keyID)
+	if err := parseColonExpiry(stdout.String(), keyID); err != nil {
+		return fmt.Errorf("%w: %w", ErrKeyExpiryFinding, err)
+	}
+	return nil
 }
 
 // parseColonExpiry inspects gpg --with-colons output for pub and sub

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,26 +47,46 @@ var fingerprintPattern = regexp.MustCompile(`^[0-9A-Fa-f]{40}$`)
 
 // isOperationalExecFailure reports whether err represents a gpg subprocess
 // that never ran to completion, as opposed to one that ran and produced an
-// outcome worth parsing. It matches a *exec.Error (a $PATH lookup failure,
-// gpgBinary not found by name) or a *fs.PathError (the shape (*exec.Cmd).Run
-// returns directly for a binary that exists but lacks execute permission —
-// never wrapped in *exec.Error). It is false for a nil error and for
-// *exec.ExitError: gpg exits non-zero for entirely expected outcomes — a bad
-// signature, a keyID with no match — and those are classified from parsed
-// output, never from the exit code alone. It is also false for a domain
-// error a caller has already produced from output gpg successfully
-// returned, such as pgp.CheckKeyExpiry's own expiry finding: that error
-// carries neither of the two operational-failure types, because gpg ran to
-// completion to produce it. This one function is the single place every
-// exec.Command call site in this package decides operational-versus-domain,
-// so the three call sites below (and any future one) can never independently
-// drift on the answer — the same defect, an incomplete *exec.Error-only
-// check that missed a permission-denied binary, was fixed piecemeal twice at
-// two of these three sites before this function existed.
+// outcome worth parsing. Rather than enumerate the error shapes a failed
+// *exec.Cmd can take — *exec.Error for a $PATH lookup failure, *fs.PathError
+// for a binary that exists but lacks execute permission, and whatever else
+// the platform or a future Go release adds — it inverts the question: the
+// only outcome that means "the process ran to completion" is a nil error or
+// an *exec.ExitError, so every other non-nil error is operational. This is
+// exhaustive by construction: a new error shape a future Go release or
+// platform introduces for a start failure is operational by default, with
+// nothing to update here.
+//
+// The one exception is pgp.ErrKeyExpiryFinding, checked first. It is not a
+// carve-out for another exec-failure shape — it is the opposite kind of
+// exception, a positive identification of "this was never a subprocess
+// result at all." pgp.CheckKeyExpiry returns two structurally different
+// things through the same error interface: a wrapped cmd.Run() failure when
+// gpg never ran to completion, or a fresh domain error built from output gpg
+// successfully returned (no expiry, an already-expired key) when it did. A
+// domain error carries no wrapped *exec.ExitError — it never touched
+// exec.Cmd at all — so the nil/*exec.ExitError test alone would misclassify
+// it as operational. pgp.CheckKeyExpiry wraps every domain finding in
+// ErrKeyExpiryFinding specifically so this function can tell the two apart
+// without inspecting message text or reaching into a broader family of
+// domain-error types.
+//
+// This one function is the single place every exec.Command call site in
+// this package decides operational-versus-domain, so the three call sites
+// below (and any future one) can never independently drift on the answer —
+// the same defect, an incomplete *exec.Error-only check that missed a
+// permission-denied binary, was fixed piecemeal twice at two of these three
+// sites before this function existed, and an allowlist of exactly two types
+// would only trade one incomplete enumeration for another.
 func isOperationalExecFailure(err error) bool {
-	var execErr *exec.Error
-	var pathErr *fs.PathError
-	return errors.As(err, &execErr) || errors.As(err, &pathErr)
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, pgp.ErrKeyExpiryFinding) {
+		return false
+	}
+	var exitErr *exec.ExitError
+	return !errors.As(err, &exitErr)
 }
 
 // CanonicalCommandBytes returns the deterministic YAML encoding of cmd used

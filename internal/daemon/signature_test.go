@@ -768,6 +768,17 @@ func TestVerifySignature_ExpiryFindingIsNotOperational(t *testing.T) {
 		"a genuine expiry finding must not be classified as an operational failure, got: %v", err)
 }
 
+// TestIsOperationalExecFailure_ExhaustiveByConstruction proves the point of
+// inverting the check: a fabricated error that is none of *exec.Error,
+// *fs.PathError, *exec.ExitError, or pgp.ErrKeyExpiryFinding -- a shape an
+// allowlist could never have enumerated in advance -- is still classified
+// as operational, because it is neither nil nor *exec.ExitError.
+func TestIsOperationalExecFailure_ExhaustiveByConstruction(t *testing.T) {
+	err := errors.New("something else entirely")
+	assert.True(t, isOperationalExecFailure(err),
+		"an unenumerated error shape must default to operational, got: %v", err)
+}
+
 func TestAssertSingleOwnerKey_AmbiguityIsSignatureError(t *testing.T) {
 	// countOwnerKeyMatches is exercised directly above; this confirms
 	// assertSingleOwnerKey's zero-match path (a real, reachable case: the
