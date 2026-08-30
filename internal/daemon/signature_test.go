@@ -157,7 +157,7 @@ func TestVerifySignature(t *testing.T) {
 			reason: ReasonWrongKey,
 		},
 		{
-			name: "key expired — non-expiring owner key",
+			name: "key expired — no expiration date configured",
 			setup: func(t *testing.T) (*Command, string) {
 				home := shortGPGHome(t)
 				const email = "owner-expired@example.com"
@@ -755,7 +755,7 @@ func TestVerifySignature_ExpiryCheckPermissionDenied(t *testing.T) {
 // expiry finding from a real gpg run -- gpg ran to completion and
 // pgp.parseColonExpiry found a real problem -- must not be classified as an
 // operational failure, or VerifySignature's existing "key expired" case
-// (TestVerifySignature's "key expired — non-expiring owner key" subtest)
+// (TestVerifySignature's "key expired — no expiration date configured" subtest)
 // would regress from ReasonKeyExpired to an unwrapped operational error.
 func TestVerifySignature_ExpiryFindingIsNotOperational(t *testing.T) {
 	gpgBin := gpgBinary(t)

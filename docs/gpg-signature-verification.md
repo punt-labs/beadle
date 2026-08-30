@@ -1,18 +1,20 @@
 # Command-File Signature Verification
 
-Design for `internal/daemon.VerifySignature`, currently a hard-coded no-op
-(`internal/daemon/command.go:280-285`) tracked as beadle-iru. This document
-covers the verification logic and its function contract only. Wiring
-`VerifySignature` into a live execution path — the daemon startup loader,
-the mission pipeline — is a separate concern for the headless GPG email
-agent epic (beadle-9zh) and is addressed here only as a forward-looking
-migration note.
+Design for `internal/daemon.VerifySignature`, implemented in
+`internal/daemon/signature.go` (DES-034) but with no caller yet — the
+stub this design replaced (`internal/daemon/command.go:280-285`) has been
+removed. This document covers the verification logic and its function
+contract only. Wiring `VerifySignature` into a live execution path — the
+daemon startup loader, the mission pipeline — is a separate concern for the
+headless GPG email agent epic (beadle-9zh) and is addressed here only as a
+forward-looking migration note.
 
 ## Problem
 
 `ARCHITECTURE.md`'s "Zero agent authority" invariant says every action
 requires a GPG-signed instruction from the owner. `VerifySignature` is the
-function meant to enforce that for command YAML files, and it doesn't:
+function meant to enforce that for command YAML files. Before this design,
+it didn't:
 
 ```go
 func VerifySignature(_ *Command, _ string) error {

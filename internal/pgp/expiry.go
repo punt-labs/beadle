@@ -10,16 +10,31 @@ import (
 	"time"
 )
 
-// ErrKeyExpiryFinding wraps every error CheckKeyExpiry returns after gpg has
-// run to completion and produced output worth parsing -- a key with no
-// expiry, an already-expired key, a signing subkey missing its own expiry,
-// an ambiguous or missing keyID. It is never wrapped around a failure to run
-// gpg at all; that case is returned unwrapped, straight from
+// ErrKeyExpiryFinding classifies every error CheckKeyExpiry returns after
+// gpg has run to completion and produced output worth parsing -- a key with
+// no expiry, an already-expired key, a signing subkey missing its own
+// expiry, an ambiguous or missing keyID. It is never associated with a
+// failure to run gpg at all; that case is returned unwrapped, straight from
 // (*exec.Cmd).Run(). Callers use errors.Is against this sentinel to tell a
 // genuine expiry finding apart from an operational failure in the
 // subprocess itself, without needing to enumerate what a start failure can
-// look like.
+// look like. Match it with errors.Is, not by inspecting its own message --
+// it is intentionally never rendered into a user-facing error string; see
+// keyExpiryFinding below.
 var ErrKeyExpiryFinding = errors.New("key expiry finding")
+
+// keyExpiryFinding wraps a domain-finding error from parseColonExpiry so
+// errors.Is matches ErrKeyExpiryFinding, without ErrKeyExpiryFinding's own
+// text appearing anywhere in the visible error message -- Error() returns
+// exactly the wrapped error's own text, and the sentinel is reachable only
+// through Unwrap for classification.
+type keyExpiryFinding struct {
+	err error
+}
+
+func (e *keyExpiryFinding) Error() string { return e.err.Error() }
+
+func (e *keyExpiryFinding) Unwrap() []error { return []error{ErrKeyExpiryFinding, e.err} }
 
 // RanToCompletion reports whether err represents an exec.Cmd that ran to
 // completion, as opposed to one that never started. A nil error or an
@@ -98,7 +113,7 @@ func CheckKeyExpiry(gpgBinary, keyID string, opts ...ExpiryOption) error {
 	}
 
 	if err := parseColonExpiry(stdout.String(), keyID); err != nil {
-		return fmt.Errorf("%w: %w", ErrKeyExpiryFinding, err)
+		return &keyExpiryFinding{err: err}
 	}
 	return nil
 }
@@ -125,6 +140,19 @@ func CheckKeyExpiry(gpgBinary, keyID string, opts ...ExpiryOption) error {
 // Returns an error if the pub record's own expiry fails its stricter check,
 // if the key has signing subkeys but none currently valid, if no pub record
 // is found, or if more than one pub record matches (ambiguous keyID).
+//
+// The "at least one" leniency does not reopen a bypass: it only decides
+// whether this pre-check lets gpg's own signing or verification operation
+// proceed, and those operations independently enforce per-subkey expiry
+// regardless of what this function found. Verified empirically against real
+// gpg (a cert-only primary, an expired signing subkey, and a valid one):
+// gpg --detach-sign selects the valid subkey and refuses to sign at all
+// ("Unusable secret key") when every signing subkey is expired; gpg
+// --verify emits EXPKEYSIG -- not GOODSIG -- for a signature actually made
+// by an expired subkey, and VerifySignature's classifyStatusLines maps that
+// to ReasonKeyExpired independently of this pre-check's answer. This
+// function's job is coarser: "can this identity sign at all right now,"
+// answered without needing to also duplicate gpg's own key-selection logic.
 func parseColonExpiry(output, keyID string) error {
 	pubCount := 0
 	sawSigningSubkey := false
