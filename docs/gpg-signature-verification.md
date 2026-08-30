@@ -319,6 +319,8 @@ against the human-readable stderr stream `verify.go` uses.
 | `BADSIG` | signature does not verify against the signed data | `ReasonInvalid` |
 | `ERRSIG` | verification could not complete (unsupported algorithm, corrupt signature, etc.) | `ReasonInvalid` |
 | `REVKEYSIG` | signature is by a key gpg considers revoked | `ReasonInvalid` (see below) |
+| `EXPKEYSIG` | signature is otherwise valid but the signing key has since expired | `ReasonKeyExpired` |
+| `EXPSIG` | the signature itself carries an expiration, now passed (distinct from key expiry) | `ReasonInvalid` |
 | *(no recognized status line, or an unhandled one)* | unclassified gpg outcome — the default arm | `ReasonInvalid` |
 | `cmd.Signature == ""` | no signature present in the file at all (checked before `gpg --verify` ever runs) | `ReasonMissing` |
 | `CheckKeyExpiry` (§4) returns non-nil for the imported key | owner's key has expired or has no expiry set | `ReasonKeyExpired` (checked before signature verification runs) |
@@ -347,6 +349,23 @@ status text, so a human reading an audit entry or a log line can tell a
 `REVKEYSIG` outcome apart from a `BADSIG` even though `Reason` collapses
 them to the same value.
 
+**`EXPKEYSIG` and `EXPSIG` were found missing during implementation, not
+designed here originally.** `CheckKeyExpiry` (§4) is meant to catch an
+expired owner key before `gpg --verify` ever runs, but a full-diff review
+after implementation found that its original form only checked that an
+expiry field was *present*, never that the date it named had actually
+passed — so an already-expired key reached `gpg --verify` regardless, which
+emits `EXPKEYSIG` (not `GOODSIG`) for a signature that is otherwise valid
+but made by an expired key. Fixed in both places: `CheckKeyExpiry` now
+compares the expiry timestamp against the current time (closing the gate
+this section always intended), and `classifyStatusLines` gained an explicit
+`EXPKEYSIG` → `ReasonKeyExpired` case as defense in depth for the rare path
+that still reaches `gpg --verify` directly. `EXPSIG` — a signature that
+itself carries an expiration, a different gpg feature from key expiry —
+folds into `ReasonInvalid` alongside `BADSIG`/`ERRSIG`/`REVKEYSIG`: none of
+those outcomes mean "the key needs renewing," they mean "do not trust this
+signature."
+
 **The default arm never returns `nil`.** Any status-line outcome
 `VerifySignature` does not explicitly recognize — a future gpg version's new
 status keyword, an unexpected combination of lines, a partially-completed
@@ -374,7 +393,7 @@ type SignatureReason string
 
 const (
     ReasonMissing    SignatureReason = "missing"     // no signature present
-    ReasonInvalid    SignatureReason = "invalid"     // BADSIG, ERRSIG, REVKEYSIG, or an unrecognized outcome
+    ReasonInvalid    SignatureReason = "invalid"     // BADSIG, ERRSIG, REVKEYSIG, EXPSIG, or an unrecognized outcome
     ReasonWrongKey   SignatureReason = "wrong-key"   // NO_PUBKEY: not signed by the owner's key
     ReasonKeyExpired SignatureReason = "key-expired" // owner key non-expiring or expired
 )
