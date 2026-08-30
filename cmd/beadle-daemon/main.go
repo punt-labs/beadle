@@ -152,7 +152,7 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0, planner, commands)
+		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0, planner, commands, store)
 		defer handler.Stop()
 
 		// The daemon acts on owner commands — untagged and repo-agnostic,
