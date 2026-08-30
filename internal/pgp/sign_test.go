@@ -133,6 +133,26 @@ Expire-Date: 0
 	assert.Contains(t, err.Error(), "signing key rejected")
 }
 
+// TestSign_ExpiryCheckOperationalFailure covers the case CheckKeyExpiry's
+// own gpg subprocess never runs to completion — as opposed to
+// TestSign_NonExpiringKeyRejected, where gpg runs fine and reports a real
+// key-hygiene problem. Both errors flow through the same CheckKeyExpiry
+// call, but they must read differently: an operator scanning logs for
+// "signing key rejected" should never land here chasing a key-hygiene
+// issue that doesn't exist when the real cause is an infra failure. A
+// non-executable file in place of gpgBinary reproduces a start failure
+// without needing a real gpg installation.
+func TestSign_ExpiryCheckOperationalFailure(t *testing.T) {
+	fakeGPG := filepath.Join(t.TempDir(), "not-a-real-binary")
+	require.NoError(t, os.WriteFile(fakeGPG, []byte("not a real binary"), 0o600))
+
+	_, err := Sign(fakeGPG, "someone@example.com", "",
+		"to@example.com", "Subject", "Body")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "checking signing key expiry")
+	assert.NotContains(t, err.Error(), "signing key rejected")
+}
+
 func TestDetachSign_TempFileCleanup(t *testing.T) {
 	gpgBin, err := exec.LookPath("gpg")
 	if err != nil {

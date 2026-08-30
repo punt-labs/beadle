@@ -3,6 +3,7 @@ package pgp
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -22,7 +23,8 @@ type SignedMessage struct {
 // It composes the body as a MIME part, detach-signs it with gpg, and wraps
 // both in a multipart/signed envelope. The passphrase is passed to gpg via
 // a temp file descriptor to avoid exposing it in process arguments.
-// Sign rejects keys without an expiration date.
+// Sign rejects keys with no expiration date, or whose expiration date
+// has already passed.
 func Sign(gpgBinary, signer, passphrase, to, subject, textBody string) (*SignedMessage, error) {
 	// Reject CR/LF in header fields to prevent header injection.
 	for _, field := range []string{signer, to, subject} {
@@ -31,8 +33,8 @@ func Sign(gpgBinary, signer, passphrase, to, subject, textBody string) (*SignedM
 		}
 	}
 
-	if err := CheckKeyExpiry(gpgBinary, signer); err != nil {
-		return nil, fmt.Errorf("signing key rejected: %w", err)
+	if err := checkSignerKeyExpiry(gpgBinary, signer); err != nil {
+		return nil, err
 	}
 
 	boundary, err := RandomBoundary()
@@ -72,12 +74,31 @@ func Sign(gpgBinary, signer, passphrase, to, subject, textBody string) (*SignedM
 }
 
 // DetachSignBody creates an ASCII-armored detached PGP signature for data.
-// Rejects keys without an expiration date.
+// Rejects keys with no expiration date, or whose expiration date has
+// already passed.
 func DetachSignBody(gpgBinary, signer, passphrase string, data []byte) ([]byte, error) {
-	if err := CheckKeyExpiry(gpgBinary, signer); err != nil {
-		return nil, fmt.Errorf("signing key rejected: %w", err)
+	if err := checkSignerKeyExpiry(gpgBinary, signer); err != nil {
+		return nil, err
 	}
 	return detachSign(gpgBinary, signer, passphrase, data)
+}
+
+// checkSignerKeyExpiry runs CheckKeyExpiry and wraps its error to tell a
+// genuine key-hygiene finding apart from an operational failure in the
+// expiry-check subprocess itself (gpg crashed, disk full, permission
+// denied). Both wrap the full underlying error via %w, so no diagnostic
+// detail is lost either way — but a "signing key rejected" message that
+// actually means "gpg failed to run" would send an operator chasing a
+// key-hygiene problem that doesn't exist.
+func checkSignerKeyExpiry(gpgBinary, signer string) error {
+	err := CheckKeyExpiry(gpgBinary, signer)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrKeyExpiryFinding) {
+		return fmt.Errorf("signing key rejected: %w", err)
+	}
+	return fmt.Errorf("checking signing key expiry: %w", err)
 }
 
 // detachSign runs gpg --detach-sign --armor, passing the passphrase via

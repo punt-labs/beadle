@@ -620,10 +620,13 @@ commands, and the pipeline design document are in the repository.
       \textit{What's still vision:} dedicated {\small\texttt{beadle
       init}}/{\small\texttt{sign}}/{\small\texttt{verify}} subcommands, and
       --- the actual differentiator this document is named for --- signature
-      \textit{enforcement}. The daemon's command-signature verifier is a
-      hard-coded no-op today; nothing currently rejects an unsigned or
-      tampered command file. Building that enforcement, not more onboarding
-      UX, is the higher-priority gap (see \faqref{faq:next-step}).
+      \textit{enforcement}. The daemon's command-signature verifier
+      ({\small\texttt{VerifySignature}}, DES-034) is implemented --- canonical
+      signing, isolated verification against a known owner key, GnuPG
+      status-fd classification --- but is not yet wired into the command-file
+      loader, so nothing currently rejects an unsigned or tampered command
+      file. Wiring it in, not more onboarding UX, is the higher-priority gap
+      (see \faqref{faq:next-step}).
     \item \textbf{Claude interpreter sandboxing.} When Beadle invokes Claude
       as a command interpreter, the LLM may attempt actions outside the
       command's declared permissions --- or a message's \textit{content},
@@ -694,10 +697,12 @@ commands, and the pipeline design document are in the repository.
       \texttt{v0.15.0} (2026-04-18) --- the same distribution gap as
       Pipeline v1 applies.
     \item \textbf{Future (not built)} --- GPG command-signing enforcement
-      (currently a hard-coded no-op), the {\small\texttt{beadle init}}
-      onboarding flow, daemon distribution, an LLM planner (replace regex
-      with Claude decomposition), multi-channel triggers (biff chat,
-      webhooks), an internal scheduler, key rotation management.
+      ({\small\texttt{VerifySignature}} is implemented, DES-034, but not
+      wired into the command-file loader --- see \faqref{faq:next-step}),
+      the {\small\texttt{beadle init}} onboarding flow, daemon distribution,
+      an LLM planner (replace regex with Claude decomposition),
+      multi-channel triggers (biff chat, webhooks), an internal scheduler,
+      key rotation management.
   \end{enumerate}
 
   \textbf{Cut order:} Future items are cut first, but the first three ---
@@ -1051,9 +1056,11 @@ just code that passes tests. Launch-blocking.
 \begin{enumerate}[nosep,leftmargin=2.5em]
   \featureitem{GPG command signing enforcement}{verify GPG signatures on
     command YAML files at daemon startup. Reject unsigned or tampered
-    files. Currently a hard-coded no-op --- this is the mechanism the
-    document's headline is named for, and it does not exist
-    yet}\label{feat:signing}
+    files. The verifier itself is implemented
+    ({\small\texttt{VerifySignature}}, DES-034) --- this is the mechanism
+    the document's headline is named for --- but it is not yet wired into
+    daemon startup, so nothing rejects an unsigned or tampered file
+    today}\label{feat:signing}
   \featureitem{\texttt{beadle init} onboarding}{abstract identity and
     signing setup so a new user never touches raw \texttt{gpg}. The
     Usability risk in this document is rated High specifically because
@@ -1112,9 +1119,10 @@ creep and clarifies the product's identity.
   \featureitem{Scheduler catch-up}{missed scheduled runs are skipped, not
     replayed. Catch-up logic adds complexity and ambiguity about which version
     of a command should execute}\label{feat:no-catchup}
-  \featureitem{Non-expiring command-signing keys}{all command-signing keys must
-    have an expiration date. This is a security invariant, not a
-    convenience trade-off}\label{feat:no-nonexpiring}
+  \featureitem{Expired or non-expiring command-signing keys}{all
+    command-signing keys must carry an expiration date that has not yet
+    passed. This is a security invariant, not a convenience
+    trade-off}\label{feat:no-nonexpiring}
 \end{enumerate}
 
 % ══════════════════════════════════════════════════════════════════════════════

@@ -52,6 +52,7 @@ architecture from these; cross-check against `ARCHITECTURE.md`.
 | [`pipeline-v2-design.md`](pipeline-v2-design.md) | Pipeline v2 design — implemented (see the pipeline-v2 release). |
 | [`pipeline-v2.md`](pipeline-v2.md) | Pipeline v2 implementation notes — implemented. |
 | [`email-channel-plan.md`](email-channel-plan.md) | Email-channel implementation plan — implemented. |
+| [`gpg-signature-verification.md`](gpg-signature-verification.md) | Command-file signature verification (DES-034) — design ratified, `VerifySignature` implemented; wiring into the daemon's command-file loader deferred to beadle-9zh. |
 
 ## Archive
 

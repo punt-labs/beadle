@@ -2502,3 +2502,47 @@ SUBJECT. Scoped to the current repo, an agent in `beadle` sees its handful of
   labels vs Proton vs Fastmail), not portable, and invisible in a plain subject.
 - **Per-identity separation only (status quo).** Rejected — the identity is the
   mailbox; it gives no per-repo dimension within one shared mailbox.
+
+## DES-034: Command-file signature verification — canonical-subset signing, isolated verification against a known owner key
+
+**Decision:** `VerifySignature(cmd *Command, gpgBinary, ownerKeyID string)
+error` signs/verifies the canonical `yaml.Marshal` of `Command` with
+`Signature` cleared, in an isolated GNUPGHOME that imports only the owner's
+key (never the whole system keyring) and asserts exactly one key with that
+exact fingerprint landed there. `ownerKeyID` must be a full 40-hex OpenPGP
+fingerprint, validated at config-load time — not a short ID, long ID, or
+email address, all of which can make `gpg --export` emit more than one key.
+Expiry (`pgp.CheckKeyExpiry`, extended with a `Homedir` functional option) is
+checked against that same isolated keyring, never the ambient system
+keyring. Signature-outcome discrimination uses gpg's `--status-fd`
+machine-readable protocol with `LC_ALL=C` pinned, mapped through a
+closed-world switch to a `*SignatureError` distinguishing
+missing/invalid/wrong-key/expired-key, with no implicit fallthrough to a
+`nil` result.
+
+**Why:** The stub was a hard-coded `nil` — an always-authorize backdoor
+disguised as a working gate. Command-file authorization is a different
+trust question from `verify.go`'s inbound-email verification (a fixed,
+known owner key vs. an arbitrary sender's key), but the same isolation
+argument applies: verification must not depend on, or be able to
+contaminate, a real GPG keyring, and it must not depend on locale-sensitive
+string matching of gpg's human-readable output. Signing the canonical
+struct rather than raw file bytes makes the signature robust to
+comment/formatting edits in a hand-maintained YAML file while still
+covering every field that matters. Constraining the key identifier to a
+full fingerprint and asserting a single import result closes a wrong-key
+class of failure that an unconstrained identifier would silently reopen.
+
+**Rejected:** reusing the daemon's own outbound `GPGSigner` as the trusted
+key (collapses operator and owner into one identity, defeating the
+invariant); raw self-inclusive file-byte signing (circular, format-fragile);
+clearsigned command files (format change, no added benefit); a single
+generic verification error (blocks a future caller from distinguishing
+tampering from routine key hygiene); a fifth `ReasonRevoked` failure mode
+(same operator remediation as `ReasonInvalid`, no behavioral difference to
+justify the extra branch); checking key expiry against the ambient system
+keyring (split-brain against the isolated key material the signature is
+actually checked against).
+
+See `docs/gpg-signature-verification.md` for the full design and the
+migration plan for wiring this into the daemon startup loader (beadle-9zh).

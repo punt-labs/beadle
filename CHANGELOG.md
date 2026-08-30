@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **`internal/daemon.VerifySignature` now performs real GPG signature
+  verification** (DES-034), replacing a hard-coded `return nil` that made
+  the "zero agent authority" invariant unenforceable — anything trusting
+  the old stub's return value was trusting nothing at all. Verification
+  signs/checks the canonical YAML re-serialization of a command file
+  (`Signature` cleared), imports only the configured owner's key into an
+  isolated GNUPGHOME per check, asserts exactly one key with that exact
+  40-hex fingerprint landed there, checks its expiry against that same
+  isolated keyring, and classifies the outcome via GnuPG's `--status-fd`
+  machine-readable protocol rather than locale-dependent stderr matching.
+  `pgp.CheckKeyExpiry` gained a `Homedir` functional option so expiry is
+  checked against the same key material the signature is verified
+  against, never a stale ambient-keyring copy. This function has no
+  caller yet — wiring it into the daemon's command-file loader is
+  deferred to the headless GPG email agent epic (beadle-9zh); see
+  `docs/gpg-signature-verification.md` for the full design and migration
+  plan.
+
+### Fixed
+
+- **`pgp.CheckKeyExpiry` now rejects a key whose expiry date has actually
+  passed, not just a key with no expiry field set.** Previously it only
+  checked that a `pub`/`sub` record's expiry field was present and
+  non-zero — since gpg keeps that field's timestamp unchanged whether or
+  not the date has passed, a genuinely expired key was silently accepted
+  as valid. This is a real behavior change on the already-shipped
+  outbound email-signing path (`internal/pgp/sign.go`'s two existing
+  callers): an owner whose signing key has already expired will now
+  correctly fail to sign, where before this went undetected. It also
+  extends to any signing-capable subkey. `CheckKeyExpiry`'s own gpg
+  subprocess handling is now symmetric with the rest of the file's
+  exec-failure classification — a legitimate non-zero exit (e.g. the
+  keyID genuinely not found) is parsed as a domain outcome, and only a
+  true process-start failure surfaces as an unwrapped operational error.
+  Found and fixed during full-diff pre-PR review of the `VerifySignature`
+  work above, not part of its original scope.
+- **`internal/daemon.VerifySignature`'s status-line classification now
+  recognizes GnuPG's `EXPKEYSIG`/`EXPSIG` outcomes**, mapping an
+  expired-key signature to `ReasonKeyExpired` instead of the generic
+  "unrecognized gpg verification outcome" it previously fell into.
+
 ## [0.16.5] - 2026-08-29
 
 ### Fixed
