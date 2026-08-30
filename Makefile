@@ -17,7 +17,7 @@ GOVULNCHECK_VERSION := v1.7.0
 # standard forbids anyway.
 SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard '*.sh' 2>/dev/null)
 
-.PHONY: help lint lint-strict lint-shell vet staticcheck vulncheck docs test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor
+.PHONY: help lint lint-strict lint-shell vet staticcheck vulncheck docs test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -44,6 +44,38 @@ lint-shell: ## Lint every shell script in the repo (shellcheck)
 
 docs: ## Lint markdown
 	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"
+
+# LaTeX intermediate files to remove after compilation. prfaq.pdf itself is
+# tracked (README's Working Backwards badge links to it); everything else
+# here is a build artifact .gitignore already excludes.
+LATEX_ARTIFACTS = *.aux *.log *.out *.bbl *.bcf *.blg *.run.xml *.fls \
+                  *.fdb_latexmk *.synctex.gz *.toc \
+                  docs/*.aux docs/*.log docs/*.out docs/*.bbl docs/*.bcf docs/*.blg \
+                  docs/*.run.xml docs/*.fls docs/*.fdb_latexmk docs/*.synctex.gz \
+                  docs/*.toc
+
+TEX_FILES = prfaq.tex docs/architecture.tex docs/beadle-identity.tex docs/audit-beadle.tex docs/checklist.tex
+
+prfaq: ## Compile .tex files to .pdf and clean intermediate artifacts
+	@for f in $(TEX_FILES); do \
+	  echo "Compiling $$f ..."; \
+	  dir=$$(dirname "$$f"); base=$$(basename "$$f" .tex); \
+	  pdflatex -interaction=nonstopmode -output-directory="$$dir" "$$f" > /dev/null 2>&1; \
+	  if [ -f "$$dir/$$base.bib" ] && command -v biber > /dev/null 2>&1; then \
+	    (cd "$$dir" && biber "$$base") > /dev/null 2>&1 || true; \
+	    pdflatex -interaction=nonstopmode -output-directory="$$dir" "$$f" > /dev/null 2>&1; \
+	  fi; \
+	  pdflatex -interaction=nonstopmode -output-directory="$$dir" "$$f" > /dev/null 2>&1; \
+	  if [ -f "$$dir/$$base.pdf" ]; then \
+	    echo "  $$dir/$$base.pdf"; \
+	  else \
+	    echo "Error: $$f failed to compile" >&2; exit 1; \
+	  fi; \
+	done
+	@rm -f $(LATEX_ARTIFACTS)
+
+clean-tex: ## Remove LaTeX intermediate files
+	@rm -f $(LATEX_ARTIFACTS)
 
 test: ## Run tests with race detection
 	go test -race -count=1 ./...
