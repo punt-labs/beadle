@@ -126,7 +126,11 @@ var runCmd = &cobra.Command{
 		// Load command definitions.
 		cmdDir := filepath.Join(dataDir, "commands")
 		commands := loadDaemonCommands(cmdDir, gpgBinary, ownerKeyID, loadCommandsEnabled, logger)
-		logger.Info("commands loaded", "count", len(commands), "dir", cmdDir, "signature_enforcement", ownerKeyID != "")
+		if loadCommandsEnabled {
+			logger.Info("commands loaded", "count", len(commands), "dir", cmdDir, "signature_enforcement", true)
+		} else {
+			logger.Info("commands loaded", "count", len(commands), "dir", cmdDir, "command_loading", "disabled")
+		}
 
 		// Configure planner. Use RulePlanner with a "summarize" rule.
 		// Reply is auto-appended by the executor after the last stage.
