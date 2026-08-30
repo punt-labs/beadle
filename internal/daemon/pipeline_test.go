@@ -507,13 +507,13 @@ func TestStageContext(t *testing.T) {
 
 func TestStageContext_LongArgValueCapped(t *testing.T) {
 	long := ""
-	for i := 0; i < 600; i++ {
+	for i := 0; i < maxContractFieldRunes+100; i++ {
 		long += "a"
 	}
 	got := stageContext(map[string]any{"note": long}, "")
 
 	capped := ""
-	for i := 0; i < 500; i++ {
+	for i := 0; i < maxContractFieldRunes; i++ {
 		capped += "a"
 	}
 	assert.Equal(t, "stage args: note="+capped+truncationMarker+"\npipeline output: none", got)
