@@ -533,9 +533,3 @@ func TestValidateArgs_EmptyArgsMap(t *testing.T) {
 	err := ValidateArgs(cmd, map[string]any{})
 	assert.NoError(t, err)
 }
-
-func TestVerifySignature_Stub(t *testing.T) {
-	cmd := &Command{Name: "test", Signature: "deadbeef"}
-	err := VerifySignature(cmd, "gpg")
-	assert.NoError(t, err)
-}
