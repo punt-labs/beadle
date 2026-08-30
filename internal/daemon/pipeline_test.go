@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -656,7 +657,14 @@ func isolatedEthosEnv(t *testing.T) []string {
 		require.NoError(t, os.Symlink(filepath.Join(realRepoEthos, sub), filepath.Join(scratchRepoEthos, sub)))
 	}
 
-	return append(os.Environ(), "HOME="+scratchHome, "ETHOS_REPO_ROOT="+scratchRepo)
+	env := make([]string, 0, len(os.Environ())+2)
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "ETHOS_REPO_ROOT=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "HOME="+scratchHome, "ETHOS_REPO_ROOT="+scratchRepo)
 }
 
 // TestBuildStageContract_ValidatesAgainstRealEthosCLI invokes the real
