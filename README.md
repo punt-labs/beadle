@@ -5,6 +5,7 @@
 [![License](https://img.shields.io/github/license/punt-labs/beadle)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/beadle/test.yml?label=CI)](https://github.com/punt-labs/beadle/actions/workflows/test.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/punt-labs/beadle.svg)](https://pkg.go.dev/github.com/punt-labs/beadle)
+[![Working Backwards](https://img.shields.io/badge/Working_Backwards-hypothesis-lightgrey)](./prfaq.pdf)
 
 beadle-email is an MCP server that gives Claude Code, or any MCP client, a
 real email address --- for developers who want their AI coding assistant to
