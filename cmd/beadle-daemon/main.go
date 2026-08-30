@@ -60,18 +60,15 @@ var runCmd = &cobra.Command{
 			Dir:    filepath.Join(dataDir, "pipelines"),
 			Logger: logger,
 		}
-		stale, err := store.LoadRunning()
-		if err != nil {
-			logger.Warn("load stale pipelines", "error", err)
-		}
-		for _, p := range stale {
-			logger.Warn("pipeline was running when daemon stopped",
-				"pipeline", p.ID, "from", p.Email.From)
-			p.Status = "failed"
-			p.Error = "daemon stopped while pipeline was running"
-			if saveErr := store.Save(p); saveErr != nil {
-				logger.Error("mark stale pipeline failed", "pipeline", p.ID, "error", saveErr)
-			}
+		sweepStalePipelines(store, logger)
+
+		// Prune runs after the sweep above, not before: a pipeline this
+		// daemon just marked "failed" is only eligible for removal once
+		// it is no longer "running".
+		if removed, err := store.Prune(daemon.DefaultRetention); err != nil {
+			logger.Warn("prune pipeline records", "error", err)
+		} else if removed > 0 {
+			logger.Info("pruned aged pipeline records", "count", removed)
 		}
 
 		missionsTmpDir := filepath.Join(dataDir, "tmp", "missions")
@@ -152,7 +149,7 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0, planner, commands)
+		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0, planner, commands, store)
 		defer handler.Stop()
 
 		// The daemon acts on owner commands — untagged and repo-agnostic,
@@ -184,6 +181,28 @@ func init() {
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+// sweepStalePipelines marks every pipeline store.LoadRunning finds
+// "running" as failed, recording that the daemon stopped while it was in
+// flight. Per PipelineStore.LoadRunning's TRUST BOUNDARY contract, a
+// pipeline read back from disk is for inspection only -- this is the only
+// thing ever done with the loaded state: relabel it and save it back.
+// Execution is never resumed from it.
+func sweepStalePipelines(store *daemon.PipelineStore, logger *slog.Logger) {
+	stale, err := store.LoadRunning()
+	if err != nil {
+		logger.Warn("load stale pipelines", "error", err)
+	}
+	for _, p := range stale {
+		logger.Warn("pipeline was running when daemon stopped",
+			"pipeline", p.ID, "from", p.Email.From)
+		p.Status = "failed"
+		p.Error = "daemon stopped while pipeline was running"
+		if saveErr := store.Save(p); saveErr != nil {
+			logger.Error("mark stale pipeline failed", "pipeline", p.ID, "error", saveErr)
+		}
 	}
 }
 

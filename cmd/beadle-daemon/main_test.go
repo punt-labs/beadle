@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/punt-labs/beadle/internal/daemon"
 	"github.com/punt-labs/beadle/internal/identity"
 )
 
@@ -269,4 +271,78 @@ budget:
 
 	assert.Empty(t, commands, "an unconfigured daemon must never load commands, signed or not")
 	assert.False(t, h.hasLevel(slog.LevelWarn), "an absent daemon.json must not log at Warn either -- nothing was misconfigured")
+}
+
+// TestSweepStalePipelines_MarksRunningAsFailed exercises the startup
+// stale-pipeline sweep end to end: a "running" record left by a crashed
+// daemon is relabeled "failed" with the daemon-stopped reason and saved
+// back to disk. Before PipelineStore was wired into the Executor
+// (beadle-aw4), this sweep could never find anything, because nothing
+// ever wrote a record in production -- this test reads the file straight
+// off disk to prove the sweep's effect actually persisted, not just that
+// the in-memory Pipeline was mutated.
+func TestSweepStalePipelines_MarksRunningAsFailed(t *testing.T) {
+	dir := t.TempDir()
+	h := &capturingHandler{}
+	logger := slog.New(h)
+	store := &daemon.PipelineStore{Dir: dir, Logger: logger}
+
+	p := &daemon.Pipeline{
+		Version: 1,
+		ID:      "stale-1",
+		Email:   daemon.EmailMeta{From: "jim@test.com"},
+		Status:  "running",
+	}
+	require.NoError(t, store.Save(p))
+
+	sweepStalePipelines(store, logger)
+
+	data, err := os.ReadFile(filepath.Join(dir, "stale-1.json"))
+	require.NoError(t, err)
+	var got daemon.Pipeline
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	assert.Equal(t, "failed", got.Status)
+	assert.Equal(t, "daemon stopped while pipeline was running", got.Error)
+}
+
+// TestSweepStalePipelines_EmptyDirIsNoop covers the common case: a fresh
+// or fully-drained pipelines directory has nothing to mark, and the sweep
+// must not error or log at Error.
+func TestSweepStalePipelines_EmptyDirIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	h := &capturingHandler{}
+	logger := slog.New(h)
+	store := &daemon.PipelineStore{Dir: dir, Logger: logger}
+
+	sweepStalePipelines(store, logger)
+
+	assert.False(t, h.hasLevel(slog.LevelError))
+}
+
+// TestSweepStalePipelines_CompletedRecordUntouched proves the sweep only
+// acts on "running" records -- a completed pipeline's file is left
+// exactly as it was.
+func TestSweepStalePipelines_CompletedRecordUntouched(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(&capturingHandler{})
+	store := &daemon.PipelineStore{Dir: dir, Logger: logger}
+
+	p := &daemon.Pipeline{
+		Version: 1,
+		ID:      "done-1",
+		Email:   daemon.EmailMeta{From: "jim@test.com"},
+		Status:  "completed",
+	}
+	require.NoError(t, store.Save(p))
+
+	sweepStalePipelines(store, logger)
+
+	data, err := os.ReadFile(filepath.Join(dir, "done-1.json"))
+	require.NoError(t, err)
+	var got daemon.Pipeline
+	require.NoError(t, json.Unmarshal(data, &got))
+
+	assert.Equal(t, "completed", got.Status)
+	assert.Empty(t, got.Error)
 }

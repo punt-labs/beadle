@@ -35,6 +35,7 @@ type MailHandler struct {
 	templates *MissionTemplate
 	planner   Planner
 	commands  map[string]*Command
+	store     *PipelineStore
 	logger    *slog.Logger
 
 	ctx       context.Context
@@ -48,9 +49,12 @@ type MailHandler struct {
 // maxWorkers sets the concurrency limit for worker goroutines (default 2).
 // planner and commands configure the pipeline executor; if planner is nil,
 // a StubPlanner is used that returns a single generic CommandCall.
+// store persists each pipeline's state to disk as it runs, for crash
+// recovery; a nil store is valid and simply disables persistence (the
+// Executor's save is a no-op without one).
 // The returned context governs worker subprocess lifetimes — call Stop
 // to cancel running workers and wait for them to exit.
-func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner Spawner, templates *MissionTemplate, logger *slog.Logger, maxWorkers int, planner Planner, commands map[string]*Command) *MailHandler {
+func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner Spawner, templates *MissionTemplate, logger *slog.Logger, maxWorkers int, planner Planner, commands map[string]*Command, store *PipelineStore) *MailHandler {
 	if maxWorkers <= 0 {
 		maxWorkers = 2
 	}
@@ -69,6 +73,7 @@ func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer ema
 		templates: templates,
 		planner:   planner,
 		commands:  commands,
+		store:     store,
 		logger:    logger,
 		ctx:       ctx,
 		cancel:    cancel,
@@ -189,6 +194,7 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 							},
 							"cli": &CLIRunner{Whitelist: &BinaryWhitelist{Dirs: whitelistDirs}},
 						},
+						Store:  h.store,
 						Logger: h.logger,
 					}
 					p, err := executor.Run(h.ctx, meta, "")
