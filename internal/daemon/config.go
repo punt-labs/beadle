@@ -46,7 +46,6 @@ func LoadConfig(path string) (*Config, error) {
 // unexported fingerprintPattern, which only internal/daemon code can reach
 // — main.go must never need to touch that var itself.
 func (c *Config) ResolveOwnerKeyID(resolver *identity.Resolver) (string, error) {
-	var keyID string
 	switch {
 	case c.OwnerHandle != "" && c.OwnerGPGKeyID != "":
 		return "", fmt.Errorf("daemon.json: owner_handle and owner_gpg_key_id are both set — ambiguous, set exactly one")
@@ -58,21 +57,24 @@ func (c *Config) ResolveOwnerKeyID(resolver *identity.Resolver) (string, error) 
 		if id.GPGKeyID == "" {
 			return "", fmt.Errorf("owner identity %q has no gpg_key_id in its beadle extension", c.OwnerHandle)
 		}
-		keyID = id.GPGKeyID
+		// Same full-fingerprint pattern VerifySignature itself enforces
+		// (signature.go:46), checked here at config load so a malformed
+		// value fails with one clear error naming the resolved identity
+		// and its handle, never threaded through for VerifySignature to
+		// reject once per file.
+		if !fingerprintPattern.MatchString(id.GPGKeyID) {
+			return "", fmt.Errorf("owner identity %q's gpg_key_id %q is not a full 40-hex OpenPGP fingerprint", c.OwnerHandle, id.GPGKeyID)
+		}
+		return id.GPGKeyID, nil
 	case c.OwnerGPGKeyID != "":
-		keyID = c.OwnerGPGKeyID
+		// Same pattern check as the owner_handle branch above, named to
+		// the config field directly since there is no resolved identity
+		// to blame.
+		if !fingerprintPattern.MatchString(c.OwnerGPGKeyID) {
+			return "", fmt.Errorf("daemon owner_gpg_key_id %q is not a full 40-hex OpenPGP fingerprint", c.OwnerGPGKeyID)
+		}
+		return c.OwnerGPGKeyID, nil
 	default:
 		return "", fmt.Errorf("daemon.json: set owner_handle or owner_gpg_key_id — no default owner")
 	}
-
-	// Identical validation for both paths: whichever branch resolved a
-	// value, it must pass the same full-fingerprint pattern VerifySignature
-	// itself enforces (signature.go:46) before ResolveOwnerKeyID accepts
-	// it — a malformed, short, or email-form identifier fails here, at
-	// config load, with one clear error naming the misconfigured field,
-	// never threaded through for VerifySignature to reject once per file.
-	if !fingerprintPattern.MatchString(keyID) {
-		return "", fmt.Errorf("daemon owner key %q is not a full 40-hex OpenPGP fingerprint", keyID)
-	}
-	return keyID, nil
 }

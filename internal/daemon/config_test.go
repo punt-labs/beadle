@@ -71,7 +71,7 @@ func TestConfig_ResolveOwnerKeyID(t *testing.T) {
 			name:       "owner_gpg_key_id malformed",
 			cfg:        Config{OwnerGPGKeyID: "not-a-fingerprint"},
 			resolver:   setupResolver(t, "owner", validFpr),
-			wantErrSub: "not a full 40-hex OpenPGP fingerprint",
+			wantErrSub: `daemon owner_gpg_key_id "not-a-fingerprint" is not a full 40-hex OpenPGP fingerprint`,
 		},
 		{
 			name:      "owner_handle alone, resolves to well-formed fingerprint",
@@ -83,7 +83,7 @@ func TestConfig_ResolveOwnerKeyID(t *testing.T) {
 			name:       "owner_handle malformed fingerprint in extension",
 			cfg:        Config{OwnerHandle: "owner"},
 			resolver:   setupResolver(t, "owner", "short"),
-			wantErrSub: "not a full 40-hex OpenPGP fingerprint",
+			wantErrSub: `owner identity "owner"'s gpg_key_id "short" is not a full 40-hex OpenPGP fingerprint`,
 		},
 		{
 			name:       "owner_handle unresolvable",
