@@ -151,7 +151,7 @@ func (s *PipelineStore) Prune(maxAge time.Duration) (int, error) {
 		}
 
 		if err := os.Remove(path); err != nil {
-			s.Logger.Warn("remove aged pipeline file", "path", path, "error", err)
+			s.Logger.Warn("remove aged pipeline file failed", "path", path, "error", err)
 			continue
 		}
 		removed++
