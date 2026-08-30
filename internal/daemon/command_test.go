@@ -580,9 +580,10 @@ func (h *capturingHandler) find(level slog.Level, msg string) (attrs map[string]
 
 // installCapturingHandler swaps slog's package-level default for a
 // capturingHandler for the duration of t, restoring the previous default on
-// cleanup. LoadCommands logs via the package-level slog.Error/slog.Warn
-// functions, which write through slog.Default() -- this is the seam a test
-// has to intercept to observe them.
+// cleanup. LoadCommands takes an explicit *slog.Logger and falls back to
+// slog.Default() only when that argument is nil -- the case most subtests in
+// this file exercise -- so installCapturingHandler intercepts that fallback
+// path to observe the log lines.
 func installCapturingHandler(t *testing.T) *capturingHandler {
 	t.Helper()
 	h := &capturingHandler{}
