@@ -30,6 +30,24 @@ type ClaudeRunner struct {
 
 // Run creates a mission from the stage contract, spawns a Claude worker, and returns the output.
 func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string) (string, error) {
+	// Checked first, before any mission or config file is built: a
+	// permanent deployment misconfiguration (the var was never set in the
+	// unit/plist that starts beadle-daemon) fails identically on every
+	// run, so there is no reason to pay for mission creation and MCP
+	// config generation before finding out. Failing the stage here -- not
+	// logging and continuing -- is the fix for beadle-qtei's invisible
+	// context7 401: the caller (Executor.Run, pipeline.go) already marks
+	// the pipeline failed and replies to the sender via fireElse on any
+	// error this returns, so a missing key now actually reaches the
+	// sender instead of silently degrading to model recall.
+	envOverrides, missingEnv := resolveEnvVars(cmd.EnvVars)
+	if len(missingEnv) > 0 {
+		return "", fmt.Errorf("command %q declares env var(s) %v, absent from the "+
+			"daemon's environment -- set them in the unit/plist that starts "+
+			"beadle-daemon; running without them would silently degrade this "+
+			"command", cmd.Name, missingEnv)
+	}
+
 	contract := buildStageContract(p.Email, cmd, call, pipe)
 
 	missionID, err := createMissionFromContract(r.Templates.TmpDir, contract)
@@ -56,16 +74,6 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 		return "", fmt.Errorf("build system prompt: %w", err)
 	}
 	defer func() { _ = os.Remove(promptPath) }()
-
-	envOverrides, missingEnv := resolveEnvVars(cmd.EnvVars)
-	for _, name := range missingEnv {
-		// Permanent misconfiguration: a var declared in the command file and
-		// absent from the daemon's process environment stays absent on every
-		// run until the deployment (systemd unit, launchd plist, shell
-		// profile) is fixed -- retrying changes nothing.
-		e.Logger.Error("declared env var not set in daemon environment",
-			"pipeline", p.ID, "stage", idx, "command", cmd.Name, "var", name)
-	}
 
 	wr, err := r.Spawner.Run(ctx, missionID, mcpPath, promptPath, envOverrides)
 	if err != nil {
@@ -197,13 +205,18 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cm
 		args = append(args, pa.val)
 	}
 
+	env, err := envForCommand(cmd, r.Whitelist.Dirs)
+	if err != nil {
+		return "", err
+	}
+
 	timeout := parseTimeout(e, cmd)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	c := exec.CommandContext(ctx, resolvedPath, args...)
 	c.Stdin = strings.NewReader(pipe)
-	c.Env = envForCommand(e, cmd, r.Whitelist.Dirs)
+	c.Env = env
 
 	stderrBuf := &cappedWriter{max: 1 << 20}
 	c.Stderr = stderrBuf
@@ -285,18 +298,20 @@ func parseTimeout(e *Executor, cmd *Command) time.Duration {
 	return d
 }
 
-// envForCommand builds the subprocess environment for cmd and logs any
-// declared env var absent from the daemon's own environment.
-func envForCommand(e *Executor, cmd *Command, dirs []string) []string {
+// envForCommand builds the subprocess environment for cmd, failing closed
+// when a declared env var is absent from the daemon's own environment:
+// running the command without it would silently degrade behavior (see
+// ClaudeRunner.Run's identical check above), and a missing MCP auth key
+// that fails invisibly is exactly the failure mode that motivated it.
+func envForCommand(cmd *Command, dirs []string) ([]string, error) {
 	env, missing := minimalEnv(dirs, cmd.EnvVars)
-	for _, name := range missing {
-		// Permanent misconfiguration: a var declared in the command file and
-		// absent from the daemon's process environment stays absent on
-		// every run until the deployment is fixed -- retrying changes nothing.
-		e.Logger.Error("declared env var not set in daemon environment",
-			"command", cmd.Name, "var", name)
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("command %q declares env var(s) %v, absent from the "+
+			"daemon's environment -- set them in the unit/plist that starts "+
+			"beadle-daemon; running without them would silently degrade this "+
+			"command", cmd.Name, missing)
 	}
-	return env
+	return env, nil
 }
 
 // runCompound chains multiple binaries via io.Pipe, running all steps
@@ -326,7 +341,10 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 	}
 
 	// Build commands.
-	env := envForCommand(e, cmd, r.Whitelist.Dirs)
+	env, err := envForCommand(cmd, r.Whitelist.Dirs)
+	if err != nil {
+		return "", err
+	}
 
 	// Capture the last step's stdout in a capped buffer rather than via
 	// StdoutPipe. StdoutPipe's Wait closes the read end once the process

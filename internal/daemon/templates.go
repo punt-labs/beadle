@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -22,14 +23,50 @@ type MCPServerConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// DefaultMCPRegistry returns the built-in server registry. context7's
-// Headers value is a literal "${CONTEXT7_API_KEY}" placeholder, not the
-// key itself -- Claude Code expands ${VAR} references in mcp-config
-// against the worker subprocess's own environment at spawn time, and
-// ClaudeRunner.Run (runner.go) is what actually puts CONTEXT7_API_KEY into
-// that environment, by resolving it from cmd.EnvVars (the declared env-var
-// allowlist) via resolveEnvVars. No secret value is ever written into this
-// registry, a generated mcp-config file, or a log line.
+// Validate reports whether c names exactly one of a stdio server (Command,
+// optionally Args) or an HTTP server (Type "http" with a non-empty URL).
+// Any other shape -- neither set, or both -- would marshal to a config
+// Claude Code cannot use: an empty {} for a typo'd or half-filled-in
+// registry entry, or a {"type":"http"} with no URL that fails at connect
+// -- landing on the same invisible-failure path FIX 3 in
+// .tmp/FIXBRIEF-recipe-tooling.md describes for a missing declared env
+// var, just one step earlier.
+func (c MCPServerConfig) Validate() error {
+	stdio := c.Command != ""
+	httpShape := c.Type != "" || c.URL != "" || len(c.Headers) > 0
+	switch {
+	case stdio && httpShape:
+		return errors.New("sets both stdio fields (command/args) and http fields (type/url/headers)")
+	case stdio:
+		return nil
+	case httpShape:
+		if c.Type != "http" {
+			return fmt.Errorf("has an unrecognized type %q (want %q)", c.Type, "http")
+		}
+		if c.URL == "" {
+			return fmt.Errorf("has type %q but no url", c.Type)
+		}
+		return nil
+	default:
+		return errors.New("sets neither stdio fields (command) nor http fields (type/url)")
+	}
+}
+
+// DefaultMCPRegistry returns the built-in server registry. context7 wants
+// its key as a bearer token -- "Authorization: Bearer <key>" -- confirmed
+// against the working reference config on this host; a bare
+// "CONTEXT7_API_KEY" header (a prior version of this registry) 401s
+// silently on every worker session, since a mission that carries a
+// `claude` runner with no output_schema still exits 0 with fluent model
+// recall in place of a real lookup (see FIX 3,
+// .tmp/FIXBRIEF-recipe-tooling.md). The value is a literal
+// "${CONTEXT7_API_KEY}" placeholder, not the key itself -- Claude Code
+// expands ${VAR} references in mcp-config against the worker subprocess's
+// own environment at spawn time, and ClaudeRunner.Run (runner.go) is what
+// actually puts CONTEXT7_API_KEY into that environment, by resolving it
+// from cmd.EnvVars (the declared env-var allowlist) via resolveEnvVars. No
+// secret value is ever written into this registry, a generated
+// mcp-config file, or a log line.
 func DefaultMCPRegistry() map[string]MCPServerConfig {
 	return map[string]MCPServerConfig{
 		"ethos":        {Command: "ethos", Args: []string{"mcp"}},
@@ -39,7 +76,7 @@ func DefaultMCPRegistry() map[string]MCPServerConfig {
 			Type: "http",
 			URL:  "https://mcp.context7.com/mcp",
 			Headers: map[string]string{
-				"CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}",
+				"Authorization": "Bearer ${CONTEXT7_API_KEY}",
 			},
 		},
 	}
@@ -63,6 +100,9 @@ func (t *MissionTemplate) BuildMCPConfig(servers []string, registry map[string]M
 		cfg, ok := registry[name]
 		if !ok {
 			return "", fmt.Errorf("unknown MCP server %q", name)
+		}
+		if err := cfg.Validate(); err != nil {
+			return "", fmt.Errorf("mcp server %q: %w", name, err)
 		}
 		selected[name] = cfg
 	}

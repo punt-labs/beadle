@@ -448,15 +448,18 @@ func TestCLIRunner_CompoundInvalidTimeoutLogged(t *testing.T) {
 	assert.Contains(t, line, "test-compound-bad-timeout")
 }
 
-// TestCLIRunner_MissingDeclaredEnvVarLogged is the regression test for
-// beadle-k1g defect 3: a declared env_vars entry absent from the daemon's
-// own environment used to be skipped with no record anywhere. This is a
+// TestCLIRunner_MissingDeclaredEnvVarFailsStage is the regression test for
+// FIX 3 (.tmp/FIXBRIEF-recipe-tooling.md): a declared env_vars entry
+// absent from the daemon's own environment used to be logged at Error and
+// the command run anyway -- exactly how docs-ask.yaml's context7 lookup
+// could 401 silently and still return a fluent, wrong answer. This is a
 // permanent misconfiguration (the deployment, not the request, is missing
-// the var), so it must log at Error.
-func TestCLIRunner_MissingDeclaredEnvVarLogged(t *testing.T) {
+// the var), so it must fail the stage; Executor.Run (pipeline.go) turns
+// that into a failed pipeline and a reply to the sender via fireElse.
+func TestCLIRunner_MissingDeclaredEnvVarFailsStage(t *testing.T) {
 	_, wl := setupWhitelist(t, "env")
 	runner := &CLIRunner{Whitelist: wl}
-	logger, buf := testLoggerCapture()
+	logger, _ := testLoggerCapture()
 
 	cmd := &Command{
 		Name:         "test-missing-env",
@@ -471,19 +474,17 @@ func TestCLIRunner_MissingDeclaredEnvVarLogged(t *testing.T) {
 	p := testPipeline()
 
 	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
-	require.NoError(t, err)
-
-	line := logLineContaining(t, buf, "BEADLE_K1G_DEFINITELY_UNSET_VAR")
-	assert.Contains(t, line, "level=ERROR")
-	assert.Contains(t, line, "test-missing-env")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BEADLE_K1G_DEFINITELY_UNSET_VAR")
+	assert.Contains(t, err.Error(), "test-missing-env")
 }
 
-// TestCLIRunner_CompoundMissingDeclaredEnvVarLogged is
-// TestCLIRunner_MissingDeclaredEnvVarLogged for the compound path.
-func TestCLIRunner_CompoundMissingDeclaredEnvVarLogged(t *testing.T) {
+// TestCLIRunner_CompoundMissingDeclaredEnvVarFailsStage is
+// TestCLIRunner_MissingDeclaredEnvVarFailsStage for the compound path.
+func TestCLIRunner_CompoundMissingDeclaredEnvVarFailsStage(t *testing.T) {
 	_, wl := setupWhitelist(t, "env", "cat")
 	runner := &CLIRunner{Whitelist: wl}
-	logger, buf := testLoggerCapture()
+	logger, _ := testLoggerCapture()
 
 	cmd := &Command{
 		Name:    "test-compound-missing-env",
@@ -501,11 +502,33 @@ func TestCLIRunner_CompoundMissingDeclaredEnvVarLogged(t *testing.T) {
 	p := testPipeline()
 
 	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BEADLE_K1G_DEFINITELY_UNSET_VAR")
+	assert.Contains(t, err.Error(), "test-compound-missing-env")
+}
 
-	line := logLineContaining(t, buf, "BEADLE_K1G_DEFINITELY_UNSET_VAR")
-	assert.Contains(t, line, "level=ERROR")
-	assert.Contains(t, line, "test-compound-missing-env")
+// TestClaudeRunner_MissingDeclaredEnvVarFailsStage is
+// TestCLIRunner_MissingDeclaredEnvVarFailsStage for the claude runner --
+// the site FIX 3 actually names (runner.go's ClaudeRunner.Run), and the
+// one docs-ask.yaml's context7 lookup goes through. The check runs before
+// any mission or MCP config is built, so a zero-value ClaudeRunner (no
+// Templates, Missions, or Spawner configured) is enough to exercise it.
+func TestClaudeRunner_MissingDeclaredEnvVarFailsStage(t *testing.T) {
+	runner := &ClaudeRunner{}
+	logger, _ := testLoggerCapture()
+
+	cmd := &Command{
+		Name:    "docs-ask",
+		Runner:  "claude",
+		EnvVars: []string{"BEADLE_K1G_DEFINITELY_UNSET_VAR"},
+	}
+	call := CommandCall{Command: "docs-ask", Args: map[string]any{}}
+	p := testPipeline()
+
+	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BEADLE_K1G_DEFINITELY_UNSET_VAR")
+	assert.Contains(t, err.Error(), "docs-ask")
 }
 
 // TestCLIRunner_ArgsFromPipe_MalformedJSON is the regression test for

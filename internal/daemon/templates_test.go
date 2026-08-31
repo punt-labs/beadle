@@ -111,40 +111,137 @@ func TestBuildMCPConfigContent(t *testing.T) {
 	assert.Equal(t, []string{"serve"}, beadle.Args)
 }
 
+// TestDefaultMCPRegistry asserts every entry has a valid shape -- exactly
+// one of (Command, optionally Args) or (Type "http" with a URL) -- rather
+// than a bare entry count, which the next person to add a server would
+// update without thinking and learn nothing from. This is the same shape
+// MCPServerConfig.Validate enforces at BuildMCPConfig time; this test
+// exercises the registry itself, so a bad entry is caught here even if
+// nothing ever calls BuildMCPConfig with its name.
 func TestDefaultMCPRegistry(t *testing.T) {
 	reg := DefaultMCPRegistry()
-	assert.Len(t, reg, 4)
-	assert.Contains(t, reg, "ethos")
-	assert.Contains(t, reg, "beadle-email")
-	assert.Contains(t, reg, "biff")
-	assert.Contains(t, reg, "context7")
+	require.NotEmpty(t, reg)
+	for name, cfg := range reg {
+		t.Run(name, func(t *testing.T) {
+			assert.NoError(t, cfg.Validate(), "registry entry %q has an invalid shape", name)
+		})
+	}
 }
 
-// TestBuildMCPConfig_StdioEmissionByteIdentical proves that adding the
-// Type/URL/Headers fields to MCPServerConfig did not change one byte of
-// what a stdio server already emitted -- omitempty on the new fields (and
-// on Command/Args, unaffected here since both are always non-zero for a
-// stdio entry) means only "command" and "args" ever appear. Claude Code
-// parses this file to spawn workers; a shape change here breaks worker
-// spawning in a way that would not look like an MCP problem.
-func TestBuildMCPConfig_StdioEmissionByteIdentical(t *testing.T) {
+// TestMCPServerConfig_Validate covers the shape check directly, including
+// the failure modes DefaultMCPRegistry's own entries never exercise (a
+// typo'd entry with nothing set, an http entry missing its url, an entry
+// that sets fields from both shapes).
+func TestMCPServerConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     MCPServerConfig
+		wantErr string
+	}{
+		{
+			name: "stdio with args",
+			cfg:  MCPServerConfig{Command: "ethos", Args: []string{"mcp"}},
+		},
+		{
+			name: "stdio with no args",
+			cfg:  MCPServerConfig{Command: "ethos"},
+		},
+		{
+			name: "http with url",
+			cfg:  MCPServerConfig{Type: "http", URL: "https://example.com/mcp"},
+		},
+		{
+			name:    "neither shape set",
+			cfg:     MCPServerConfig{},
+			wantErr: "sets neither stdio fields",
+		},
+		{
+			name:    "both shapes set",
+			cfg:     MCPServerConfig{Command: "ethos", Type: "http", URL: "https://example.com/mcp"},
+			wantErr: "sets both stdio fields",
+		},
+		{
+			name:    "http type with no url",
+			cfg:     MCPServerConfig{Type: "http"},
+			wantErr: "no url",
+		},
+		{
+			name:    "http-shaped fields with wrong type",
+			cfg:     MCPServerConfig{Type: "grpc", URL: "https://example.com"},
+			wantErr: `unrecognized type "grpc"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+// TestBuildMCPConfig_UnknownShapeRefused proves BuildMCPConfig refuses an
+// invalid registry entry rather than emitting a config Claude Code cannot
+// use -- the call site for MCPServerConfig.Validate.
+func TestBuildMCPConfig_UnknownShapeRefused(t *testing.T) {
+	registry := map[string]MCPServerConfig{"broken": {}}
+	tmpDir := t.TempDir()
+	tmpl := &MissionTemplate{TmpDir: tmpDir}
+
+	_, err := tmpl.BuildMCPConfig([]string{"broken"}, registry)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `mcp server "broken"`)
+}
+
+// TestBuildMCPConfig_StdioEmission proves each stdio server's config
+// marshals to exactly {"command":..., "args":[...]} (or {"command":...}
+// when Args is empty) -- omitempty on the http-only fields means none of
+// them ever appear. Table-driven over every stdio entry in
+// DefaultMCPRegistry, deriving the expected JSON from the entry's own
+// fields rather than a hand-picked string, so coverage grows automatically
+// when an entry is added, and an entry with no Args (a shape this repo's
+// registry has never had, but MCPServerConfig allows) is asserted
+// correctly instead of assumed away. JSON-equivalence (assert.JSONEq), not
+// byte-identity, is the right bar: it fails on any change a JSON consumer
+// (Claude Code, parsing this file to spawn workers) would notice -- a key
+// added, removed, renamed, retyped -- and is silent only on member order
+// and whitespace, both insignificant per RFC 8259.
+func TestBuildMCPConfig_StdioEmission(t *testing.T) {
 	registry := DefaultMCPRegistry()
 	tmpDir := t.TempDir()
 	tmpl := &MissionTemplate{TmpDir: tmpDir}
 
-	path, err := tmpl.BuildMCPConfig([]string{"ethos"}, registry)
-	require.NoError(t, err)
-	defer os.Remove(path)
+	for name, cfg := range registry {
+		if cfg.Command == "" {
+			continue // http server, covered by TestBuildMCPConfig_HTTPServerEmission
+		}
+		t.Run(name, func(t *testing.T) {
+			path, err := tmpl.BuildMCPConfig([]string{name}, registry)
+			require.NoError(t, err)
+			defer os.Remove(path)
 
-	data, err := os.ReadFile(path)
-	require.NoError(t, err)
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
 
-	var doc struct {
-		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+			var doc struct {
+				MCPServers map[string]json.RawMessage `json:"mcpServers"`
+			}
+			require.NoError(t, json.Unmarshal(data, &doc))
+
+			want := map[string]any{"command": cfg.Command}
+			if len(cfg.Args) > 0 {
+				want["args"] = cfg.Args
+			}
+			wantJSON, err := json.Marshal(want)
+			require.NoError(t, err)
+			assert.JSONEq(t, string(wantJSON), string(doc.MCPServers[name]))
+		})
 	}
-	require.NoError(t, json.Unmarshal(data, &doc))
-
-	assert.JSONEq(t, `{"command":"ethos","args":["mcp"]}`, string(doc.MCPServers["ethos"]))
 }
 
 // TestBuildMCPConfig_HTTPServerEmission proves the http shape: only
@@ -167,7 +264,7 @@ func TestBuildMCPConfig_HTTPServerEmission(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &doc))
 
 	assert.JSONEq(t,
-		`{"type":"http","url":"https://mcp.context7.com/mcp","headers":{"CONTEXT7_API_KEY":"${CONTEXT7_API_KEY}"}}`,
+		`{"type":"http","url":"https://mcp.context7.com/mcp","headers":{"Authorization":"Bearer ${CONTEXT7_API_KEY}"}}`,
 		string(doc.MCPServers["context7"]))
 	assert.NotContains(t, string(doc.MCPServers["context7"]), `"command"`)
 	assert.NotContains(t, string(doc.MCPServers["context7"]), `"args"`)
