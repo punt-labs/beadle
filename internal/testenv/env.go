@@ -30,18 +30,25 @@ type Env struct {
 // It sets up ethos identity files, a beadle identity directory,
 // and a Resolver pointed at all of them.
 //
-// WARNING: Uses t.Setenv to override HOME and BEADLE_IMAP_PASSWORD.
-// This modifies process-global state and is incompatible with t.Parallel().
+// WARNING: Uses t.Setenv to override HOME, ETHOS_REPO_ROOT, and
+// BEADLE_IMAP_PASSWORD. This modifies process-global state and is
+// incompatible with t.Parallel().
 func New(t testing.TB, emailAddr string) *Env {
 	t.Helper()
 
-	// Create a fake HOME so paths.DataDir() and paths.EthosDir() resolve
-	// to our temp dirs (they use os.UserHomeDir → $HOME).
+	// IsolateEthos redirects $HOME (among other things) before any other
+	// code touches it, so it must run first: it captures the real, ambient
+	// $HOME to source its read-only symlinks from, and calling it after
+	// $HOME has already been redirected would symlink from the wrong tree.
+	// paths.DataDir() and paths.EthosDir() resolve through this same $HOME
+	// (they use os.UserHomeDir), so New builds its own scratch layout under
+	// the directory IsolateEthos returns rather than creating a second,
+	// unrelated fake HOME.
+	fakeHome := IsolateEthos(t)
+
 	// Set BEADLE_IMAP_PASSWORD so credential resolution works without
 	// keychain access. Needed by SMTPSend (which calls cfg.IMAPPassword()
 	// on the disk-loaded config, not through TestDialer).
-	fakeHome := t.TempDir()
-	t.Setenv("HOME", fakeHome)
 	t.Setenv("BEADLE_IMAP_PASSWORD", "testpass")
 	IsolateTempDir(t)
 
