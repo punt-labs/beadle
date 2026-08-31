@@ -82,8 +82,13 @@ including the real `ethos` CLI, runs for real inside a
   every test in this repo, not only `internal/daemon`.** A test that
   silently skips locally is the same failure as one that skips in CI —
   exactly how beadle-8gt's regression coverage went uncaught for as long
-  as it did. Every `gpg`- or `ethos`-dependent test under `internal/daemon`
-  now fails with the install remedy (`t.Fatalf`) rather than skipping.
+  as it did. `internal/daemon` has zero `t.Skip`/`t.Skipf` sites today:
+  every `gpg`- or `ethos`-dependent test fails with the install remedy
+  (`t.Fatalf`), and `runner_test.go`'s `setupWhitelist` fails the same way
+  for a missing base system utility (`echo`, `cat`, `false`, `sleep`,
+  `dd`, `env`, `tr` — all POSIX utilities guaranteed present on every
+  supported platform and this repo's own CI runner, not an optional tool
+  to install).
   **Outstanding gap, tracked as beadle-hi4n:** eleven further
   `t.Skip("gpg not installed")` sites remain in `internal/pgp` and
   `internal/email` (`verify_test.go`, `decrypt_test.go`, `encrypt_test.go`,
