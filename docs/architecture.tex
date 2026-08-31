@@ -7,6 +7,19 @@
 %
 % Type-check: fuzz -t architecture.tex
 %
+% Long schema predicates: break with `\\` + `\quad` at operator
+% boundaries (before \land, \implies, \iff, \lor), never a bare
+% newline in the source -- a newline alone is just whitespace to
+% LaTeX and produces no line break, which is how five schemas here
+% once overflowed the page (worst case 468pt, more than a full
+% text-width) while `fuzz -t` and `latexmk` both exited 0 -- neither
+% checks whether output fits the page. Do NOT reach for fuzz's own
+% `\t1` tab macro as the fix: something in this document's package
+% chain reloads the LaTeX kernel's `\t` tie-accent after fuzz.sty
+% loads, so `\t1` fails with a `\mathaccent`-in-math-mode error that
+% points nowhere near the real cause. `\quad`/`\qquad` work and are
+% what every schema below uses.
+%
 
 \documentclass[a4paper,10pt,fleqn]{article}
 \usepackage[margin=1in]{geometry}
