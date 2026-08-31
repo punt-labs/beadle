@@ -92,6 +92,36 @@ func TestKeychainGet_BothFail(t *testing.T) {
 	assert.Contains(t, err.Error(), "secret-tool")
 }
 
+// TestGet_ThreadsKeychainErrorIntoNotFoundWrap is the regression test for
+// the discarded-keychain-error defect in Get: when every backend comes up
+// empty, the final ErrNotFound message must say WHY the keychain step
+// failed, not just that nothing was found there. A keychain that is
+// genuinely locked (e.g. `pass` with gpg-agent not unlocked) looks
+// identical to "nothing stored there" without this — sending an operator
+// to re-insert a secret that was never actually missing. Lives in this
+// file, not secret_test.go, because it needs the passRunner/secretToolRunner
+// seam this file already owns, and that seam only exists on linux.
+func TestGet_ThreadsKeychainErrorIntoNotFoundWrap(t *testing.T) {
+	defer withRunners(t,
+		func(string) (string, error) {
+			return "", errors.New("pass: gpg: decryption failed: No secret key")
+		},
+		func(string) (string, error) {
+			return "", errors.New("secret-tool: Cannot autolaunch D-Bus without X11 $DISPLAY")
+		},
+	)()
+
+	dir := t.TempDir()
+	t.Setenv("HOME", dir) // no secret file present under this HOME, no env fallback set
+
+	_, err := Get("__test_keychain_error_threading__")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNotFound))
+	// keychainGet surfaces the last runner's error (secret-tool ran after
+	// pass, per its own priority order) — see TestKeychainGet_BothFail.
+	assert.Contains(t, err.Error(), "secret-tool: Cannot autolaunch D-Bus")
+}
+
 func TestKeychainGet_BothEmpty(t *testing.T) {
 	// Both runners return empty string with no error (e.g. because
 	// the binaries are not installed and their error paths returned

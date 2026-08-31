@@ -26,6 +26,13 @@ import (
 // ErrNotFound is returned when a credential is absent from all backends.
 var ErrNotFound = errors.New("credential not found")
 
+// CredGPGPassphrase is the secret.Get name for a GPG signing key's
+// passphrase. Named once here so every caller that resolves a signing
+// passphrase -- internal/email's SMTP/PGP signing path and
+// `beadle-daemon sign` alike -- uses the identical credential name
+// instead of each hand-maintaining its own copy of the string.
+const CredGPGPassphrase = "gpg-passphrase"
+
 // Get resolves a named credential through the priority chain.
 // Name must not contain path separators to prevent path traversal.
 func Get(name string) (string, error) {
@@ -33,8 +40,9 @@ func Get(name string) (string, error) {
 		return "", fmt.Errorf("credential name %q contains path separator", name)
 	}
 	// 1. OS keychain
-	if val, err := keychainGet(name); err == nil && val != "" {
-		return val, nil
+	keychainVal, keychainErr := keychainGet(name)
+	if keychainErr == nil && keychainVal != "" {
+		return keychainVal, nil
 	}
 
 	// 2. Secret file — propagate errors other than "not present"
@@ -53,6 +61,19 @@ func Get(name string) (string, error) {
 		return val, nil
 	}
 
+	// keychainErr is folded in here, not checked earlier, because every
+	// backend before this point is a normal "try the next one" outcome --
+	// only once all three have failed does the operator need to know WHY
+	// the keychain step in particular came back empty. Left out, the
+	// remedy this error names ("set it via the credential chain") can be
+	// actively wrong: a keychain backend that is genuinely locked (e.g.
+	// `pass` with gpg-agent not unlocked) reports ErrNotFound here even
+	// though the credential IS correctly stored, sending the operator to
+	// re-insert a secret that was never missing.
+	if keychainErr != nil {
+		return "", fmt.Errorf("credential %q not found (checked: keychain: %w; file; env %s): %w",
+			name, keychainErr, envKey, ErrNotFound)
+	}
 	return "", fmt.Errorf("credential %q not found (checked: keychain, file, env %s): %w",
 		name, envKey, ErrNotFound)
 }
