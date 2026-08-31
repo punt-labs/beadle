@@ -10,13 +10,21 @@ GOLANGCI_LINT_VERSION := v2.12.2
 GOVULNCHECK_VERSION := v1.7.0
 ETHOS_VERSION := v4.16.0
 
-# Every shell script in the repo, discovered rather than enumerated: a
-# hardcoded list means a new .sh ships unlinted while `make lint` and CI stay
-# green. `--cached` catches tracked scripts, `--others --exclude-standard`
-# catches a new one that is not `git add`ed yet, and gitignored paths (.tmp/,
-# node_modules/) stay out. Assumes no spaces in script paths, which the shell
-# standard forbids anyway.
-SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard '*.sh' 2>/dev/null)
+# Every shell script in the repo, discovered by shebang rather than by
+# extension or a hardcoded list: a script deployed under a literal binary
+# name (scripts/beadle-sysreport, resolved by beadle-daemon's cli-runner
+# whitelist against exactly that filename, no .sh suffix) still needs
+# shellcheck, and an extension-only glob silently skips it -- along with
+# any future extensionless script. `--cached` catches tracked scripts,
+# `--others --exclude-standard` catches a new one that is not `git add`ed
+# yet, and gitignored paths (.tmp/, node_modules/) stay out. Each
+# candidate's first line is read and matched against a shell shebang (sh,
+# bash, dash, zsh, ksh) via word boundaries, so `#!/usr/bin/env python3`
+# and the like are correctly excluded rather than matched on a stray "sh"
+# substring. Assumes no spaces in script paths, which the shell standard
+# forbids anyway.
+SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard -z 2>/dev/null | \
+	xargs -0 -I{} sh -c 'test -f "{}" && head -n1 "{}" 2>/dev/null | grep -aqE "^#!.*\b(sh|bash|dash|zsh|ksh)\b" && printf "%s\n" "{}"')
 
 .PHONY: help lint lint-strict lint-shell vet staticcheck vulncheck docs tools-ethos test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
 
