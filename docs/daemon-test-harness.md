@@ -1,8 +1,8 @@
 # Daemon Test Harness Design
 
-Status: proposed. Design mission `m-2026-08-30-053` (`beadle-axj`). Produces
-no code — this document is the contract for a follow-on implementation
-mission.
+Status: implemented. Design mission `m-2026-08-30-053` (`beadle-axj`)
+closed pass; implementation mission `m-2026-08-31-002` closed pass and
+shipped the harness, fixtures, and CI wiring in PR #261.
 
 ## Why this exists
 
@@ -729,7 +729,7 @@ provisioning step a developer must remember either: `test: tools-ethos`
 makes `make test`/`make check` self-provisioning, and CI's two new steps
 install the same pinned binary onto `$GITHUB_PATH` the same way.
 
-## Summary of files touched by the follow-on implementation mission
+## Summary of files touched by the implementation mission
 
 Named here so the implementation mission's write-set is a direct
 transcription of this design, not a new negotiation:
