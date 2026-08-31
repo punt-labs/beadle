@@ -2,6 +2,7 @@ package testenv
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,28 @@ import (
 
 	"github.com/punt-labs/beadle/internal/enable"
 )
+
+// EthosVersion is the pinned ethos CLI version this test tier requires --
+// kept in sync by hand with Makefile's ETHOS_VERSION (see
+// docs/daemon-test-harness.md's "Pinning ethos"). It appears only in
+// EthosOrFatal's human-facing failure message, never in an assertion.
+const EthosVersion = "v4.16.0"
+
+// EthosOrFatal returns the ethos binary's path, or fails t naming the
+// install remedy. Per this test tier's hard constraint, a missing
+// dependency is a test failure naming what to install, never a t.Skip --
+// exactly the failure mode that let beadle-8gt's regression coverage skip
+// silently in CI (docs/daemon-test-harness.md). `make test`/`make check`
+// provision ethos via the tools-ethos Makefile target, so this should only
+// ever fire on a developer machine that bypassed make.
+func EthosOrFatal(t testing.TB) string {
+	t.Helper()
+	path, err := exec.LookPath("ethos")
+	if err != nil {
+		t.Fatalf("ethos not found on PATH: install it via `go install github.com/punt-labs/ethos/v4/cmd/ethos@%s` (or run `make tools-ethos`): %v", EthosVersion, err)
+	}
+	return path
+}
 
 // IsolateEthos redirects $HOME and $ETHOS_REPO_ROOT to fresh scratch
 // directories for the remainder of t, then symlinks back only the subtrees

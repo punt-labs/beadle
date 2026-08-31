@@ -921,31 +921,6 @@ func TestBuildStageContract_PromptUncappedMetadataCapped(t *testing.T) {
 	assert.Equal(t, wantCapped, trigger["subject"], "subject must remain capped")
 }
 
-// ethosOrFatal returns the ethos binary's path, or fails the test with the
-// install remedy. Per this tier's hard constraint, a missing dependency is
-// a test failure naming what to install, never a t.Skip: a test that
-// silently skips locally is the same failure as one that skips in CI --
-// exactly how beadle-8gt's regression coverage went uncaught (see
-// docs/daemon-test-harness.md). make test/make check provision ethos via
-// the tools-ethos Makefile target, so this should only ever fire on a
-// developer machine that bypassed make.
-func ethosOrFatal(t *testing.T) string {
-	t.Helper()
-	ethosPath, err := exec.LookPath("ethos")
-	if err != nil {
-		t.Fatalf("ethos not found on PATH: install it via `go install github.com/punt-labs/ethos/v4/cmd/ethos@%s` (or run `make tools-ethos`): %v", ethosVersionForTests, err)
-	}
-	return ethosPath
-}
-
-// ethosVersionForTests documents the pinned version in ethosOrFatal's
-// failure message. It intentionally does not read the Makefile's
-// ETHOS_VERSION at runtime -- a Go test has no clean way to parse a
-// Makefile variable, and this string only ever appears in a human-facing
-// error message, not in any assertion -- so keep it in sync with
-// Makefile's ETHOS_VERSION by hand when that pin moves.
-const ethosVersionForTests = "v4.16.0"
-
 // TestBuildStageContract_ValidatesAgainstRealEthosCLI invokes the real
 // `ethos mission create --file <path>` binary (via os/exec, the same
 // mechanism createMissionFromContract in mission.go uses) against a
@@ -962,7 +937,7 @@ const ethosVersionForTests = "v4.16.0"
 // ethos's writes never touch the real ambient ~/.punt-labs/ethos or this
 // checkout's real mission history.
 func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
-	ethosPath := ethosOrFatal(t)
+	ethosPath := testenv.EthosOrFatal(t)
 	testenv.IsolateEthos(t)
 
 	meta := EmailMeta{MessageID: "regression-8gt", From: "jim@test.com", Subject: "beadle-8gt regression test"}
@@ -1017,16 +992,21 @@ func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
 // TestBuildStageContract_RealEthosCLIRejectsMalformedContract is gate 4's
 // negative control (docs/daemon-test-harness.md, "Gate 4's negative
 // control"). TestBuildStageContract_ValidatesAgainstRealEthosCLI above only
-// asserts success -- without a case that must be REJECTED, a systemic
-// harness bug (broken $HOME/$ETHOS_REPO_ROOT isolation, a PATH
-// misconfiguration that silently no-ops the CLI call, a Go-side error that
-// gets swallowed) could make every `ethos mission create` invocation
+// asserts success -- without a case that must be REJECTED, a PATH
+// misconfiguration that silently no-ops the CLI call, or a Go-side error
+// that gets swallowed, could make every `ethos mission create` invocation
 // spuriously report success regardless of input, and gate 4 would never
 // notice. This test deletes evaluator.handle from an otherwise-valid
 // generated contract and asserts the real CLI rejects it -- proving the
 // harness actually asks the real schema a question it can answer "no" to.
+//
+// This does NOT detect broken $HOME/$ETHOS_REPO_ROOT isolation: an
+// isolation failure makes the CLI validate against the wrong identity
+// data, not skip validation -- a required-field check like
+// evaluator.handle never consults the identity graph at all, so it cannot
+// distinguish right identity data from wrong identity data.
 func TestBuildStageContract_RealEthosCLIRejectsMalformedContract(t *testing.T) {
-	ethosPath := ethosOrFatal(t)
+	ethosPath := testenv.EthosOrFatal(t)
 	testenv.IsolateEthos(t)
 
 	meta := EmailMeta{MessageID: "regression-8gt-malformed", From: "jim@test.com", Subject: "gate 4 negative control"}

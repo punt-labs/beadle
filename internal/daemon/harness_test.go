@@ -46,7 +46,7 @@ import (
 func TestOnNewMail_EndToEnd(t *testing.T) {
 	// Fail fast, before any setup, if either external dependency is
 	// missing -- never t.Skip, per this tier's hard constraint.
-	daemontest.EthosOrFatal(t)
+	testenv.EthosOrFatal(t)
 	gpgBin, err := exec.LookPath("gpg")
 	if err != nil {
 		t.Fatalf("gpg not found on PATH: install it (apt install gnupg / brew install gnupg): %v", err)
@@ -88,7 +88,7 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 			env.AddContact("Jim", "jim@punt-labs.com", tt.contactPerm)
 
 			if tt.messageSigned {
-				raw, _ := daemontest.BuildPGPSignedMessage(t, gpgBin, "jim@punt-labs.com", "Run the test command", "body")
+				raw, _ := testenv.BuildPGPSignedMessage(t, gpgBin, "jim@punt-labs.com", "Run the test command", "body")
 				fix.AddRawMessage("INBOX", raw)
 			} else {
 				fix.AddMessage("INBOX", "jim@punt-labs.com", "Run the test command", "body")
@@ -103,7 +103,7 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 			// signature_test.go's TestVerifySignature.
 			ownerHome := testenv.ShortGPGHome(t)
 			const ownerEmail = "owner-e2e@example.com"
-			ownerFpr := daemontest.GenOwnerKey(t, gpgBin, ownerHome, ownerEmail, "1y")
+			ownerFpr := testenv.GenOwnerKey(t, gpgBin, ownerHome, ownerEmail, "1y")
 			t.Setenv("GNUPGHOME", ownerHome)
 
 			fixture := &daemon.Command{
