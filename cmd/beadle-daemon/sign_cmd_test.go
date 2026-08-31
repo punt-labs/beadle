@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -104,6 +105,81 @@ func TestRunSign_TamperedFileFailsVerification(t *testing.T) {
 	var sigErr *daemon.SignatureError
 	require.ErrorAs(t, err, &sigErr)
 	assert.Equal(t, daemon.ReasonInvalid, sigErr.Reason)
+}
+
+// fingerprintOf returns email's full 40-hex fingerprint from home's
+// keyring. testenv.GenOwnerKey does the same lookup internally but only
+// for keys it generated itself (always with an empty passphrase); this is
+// the passphrase-protected companion, needed after testenv.GenKeyWithPassphrase.
+func fingerprintOf(t *testing.T, gpgBin, home, email string) string {
+	t.Helper()
+	out, err := exec.Command(gpgBin, "--homedir", home, "--batch", "--no-tty",
+		"--list-keys", "--with-colons", "--", email).Output()
+	require.NoError(t, err)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) > 9 && fields[0] == "fpr" {
+			return fields[9]
+		}
+	}
+	t.Fatalf("no fingerprint found for %s", email)
+	return ""
+}
+
+// TestRunSign_PassphraseProtectedKeyWithoutPassphraseIsActionable is the
+// regression test for the "no passphrase given" defect: a real
+// passphrase-protected signing key, with no BEADLE_GPG_PASSPHRASE set and
+// nothing in the (real, unmocked) secret.Get chain on this test host, must
+// fail with a message that names the credential and every place it can
+// come from -- not gpg's bare "No passphrase given", which tells an
+// operator nothing about where to set one. The passphrase itself must
+// never appear in the error.
+func TestRunSign_PassphraseProtectedKeyWithoutPassphraseIsActionable(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := testenv.ShortGPGHome(t)
+	t.Setenv("GNUPGHOME", home)
+	const passphrase = "hunter2-do-not-log-me"
+	testenv.GenKeyWithPassphrase(t, gpgBin, home, "Passphrase Test", "passphrase-test@example.com", passphrase)
+	fpr := fingerprintOf(t, gpgBin, home, "passphrase-test@example.com")
+
+	path := filepath.Join(t.TempDir(), "sysreport.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(minimalCommandYAML), 0o600))
+
+	var out bytes.Buffer
+	err := runSign(&out, path, fpr, gpgBin)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no passphrase was resolved")
+	assert.Contains(t, err.Error(), "gpg-passphrase")
+	assert.Contains(t, err.Error(), "BEADLE_GPG_PASSPHRASE")
+	assert.NotContains(t, err.Error(), passphrase, "the passphrase itself must never appear in an error message")
+
+	// Nothing must have been written to path -- a failed sign leaves the
+	// original, unsigned file exactly as it was.
+	unchanged, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	assert.Equal(t, minimalCommandYAML, string(unchanged))
+}
+
+// TestRunSign_PassphraseProtectedKeyWithEnvPassphraseSucceeds is the
+// companion happy path: the same passphrase-protected key signs
+// successfully once BEADLE_GPG_PASSPHRASE resolves it, proving the
+// credential chain runSign documents in its error message actually works.
+func TestRunSign_PassphraseProtectedKeyWithEnvPassphraseSucceeds(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := testenv.ShortGPGHome(t)
+	t.Setenv("GNUPGHOME", home)
+	const passphrase = "hunter2-do-not-log-me"
+	testenv.GenKeyWithPassphrase(t, gpgBin, home, "Passphrase Test", "passphrase-env@example.com", passphrase)
+	fpr := fingerprintOf(t, gpgBin, home, "passphrase-env@example.com")
+	t.Setenv("BEADLE_GPG_PASSPHRASE", passphrase)
+
+	path := filepath.Join(t.TempDir(), "sysreport.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(minimalCommandYAML), 0o600))
+
+	var out bytes.Buffer
+	err := runSign(&out, path, fpr, gpgBin)
+	require.NoError(t, err)
+	assert.Contains(t, out.String(), "round-trip verified")
 }
 
 func TestRunSign_MissingFile(t *testing.T) {

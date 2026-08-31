@@ -31,6 +31,11 @@ var (
 // resolve or mismatch.
 var signFingerprintPattern = regexp.MustCompile(`^[0-9A-Fa-f]{40}$`)
 
+// signPassphraseCredential is the secret.Get name for the signing key's
+// passphrase -- named once so runSign's resolve call and its error message
+// (below) cannot drift apart on what the credential is actually called.
+const signPassphraseCredential = "gpg-passphrase"
+
 var signCmd = &cobra.Command{
 	Use:   "sign <command-file.yaml>",
 	Short: "Sign a command file so beadle-daemon will load it",
@@ -81,7 +86,7 @@ func runSign(w io.Writer, path, signer, gpgBinary string) error {
 		return fmt.Errorf("canonicalize %s: %w", path, err)
 	}
 
-	passphrase, err := secret.Get("gpg-passphrase")
+	passphrase, err := secret.Get(signPassphraseCredential)
 	if err != nil && !errors.Is(err, secret.ErrNotFound) {
 		return fmt.Errorf("resolve signing passphrase: %w", err)
 	}
@@ -90,7 +95,7 @@ func runSign(w io.Writer, path, signer, gpgBinary string) error {
 
 	sig, err := pgp.DetachSignBody(gpgBinary, signer, passphrase, canon)
 	if err != nil {
-		return fmt.Errorf("sign %s: %w", path, err)
+		return wrapSignError(path, passphrase, err)
 	}
 	command.Signature = string(sig)
 
@@ -112,4 +117,28 @@ func runSign(w io.Writer, path, signer, gpgBinary string) error {
 		return fmt.Errorf("write output: %w", err)
 	}
 	return nil
+}
+
+// wrapSignError wraps a pgp.DetachSignBody failure for path. When the
+// resolved passphrase was empty, gpg's own error text ("No passphrase
+// given") tells an operator nothing about where a passphrase would come
+// from -- so this names the credential chain and the fix instead of
+// leaving them to read source. Never includes passphrase itself, or even
+// its length: only the fact that resolution came back empty.
+func wrapSignError(path, passphrase string, cause error) error {
+	if passphrase != "" {
+		return fmt.Errorf("sign %s: %w", path, cause)
+	}
+	// The env var name below is internal/secret's "BEADLE_" + upper-snake
+	// mapping of signPassphraseCredential (its mapping function is
+	// unexported, and the credential name is fixed, so it is named here
+	// rather than derived).
+	return fmt.Errorf(
+		"sign %s: %w\n\n"+
+			"no passphrase was resolved for credential %q -- if this key needs one, "+
+			"set it via the credential chain (OS keychain, or "+
+			"~/.punt-labs/beadle/secrets/%s mode 600, or the BEADLE_GPG_PASSPHRASE "+
+			"environment variable); a key with no passphrase needs none of this",
+		path, cause, signPassphraseCredential, signPassphraseCredential,
+	)
 }
