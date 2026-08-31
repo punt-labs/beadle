@@ -32,11 +32,18 @@ func shortGPGHome(t *testing.T) string {
 	return home
 }
 
+// gpgBinary returns the gpg binary's path, or fails t naming the install
+// remedy. Per this tier's hard constraint, a missing dependency is a test
+// failure, never a t.Skip -- a test that silently skips locally is the
+// same failure as one that skips in CI, exactly how beadle-8gt's
+// regression coverage went uncaught (see docs/daemon-test-harness.md).
+// handler_test.go's TestOnNewMail/_PGPKeyMismatch/_PGPKeyMatch route
+// through this same helper rather than each carrying its own check.
 func gpgBinary(t *testing.T) string {
 	t.Helper()
 	bin, err := exec.LookPath("gpg")
 	if err != nil {
-		t.Skip("gpg not installed")
+		t.Fatalf("gpg not found on PATH: install it (apt install gnupg / brew install gnupg): %v", err)
 	}
 	return bin
 }

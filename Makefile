@@ -8,6 +8,7 @@ LDFLAGS := -X main.version=$(VERSION)
 STATICCHECK_VERSION := v0.8.1
 GOLANGCI_LINT_VERSION := v2.12.2
 GOVULNCHECK_VERSION := v1.7.0
+ETHOS_VERSION := v4.16.0
 
 # Every shell script in the repo, discovered rather than enumerated: a
 # hardcoded list means a new .sh ships unlinted while `make lint` and CI stay
@@ -17,7 +18,7 @@ GOVULNCHECK_VERSION := v1.7.0
 # standard forbids anyway.
 SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard '*.sh' 2>/dev/null)
 
-.PHONY: help lint lint-strict lint-shell vet staticcheck vulncheck docs test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
+.PHONY: help lint lint-strict lint-shell vet staticcheck vulncheck docs tools-ethos test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -80,8 +81,29 @@ prfaq: ## Compile .tex files to .pdf and clean intermediate artifacts
 clean-tex: ## Remove LaTeX intermediate files
 	@rm -f $(LATEX_ARTIFACTS)
 
-test: ## Run tests with race detection
-	go test -race -count=1 ./...
+tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4 tests)
+	go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
+
+# go install places a binary in $GOBIN if set, else $GOPATH/bin -- neither is
+# guaranteed to already be on PATH. Without this, `make test` provisions
+# ethos successfully but exec.LookPath("ethos") still fails: tools-ethos
+# ran, the binary exists, and the remedy message points right back at the
+# command that was just run. Computed once, at parse time, so every `test`
+# invocation prepends the same directory `go install` actually used.
+#
+# GOPATH may be a colon-separated list (":"-joined on every GOOS, including
+# darwin and linux -- Go never uses the OS path-list separator here). `go
+# install` with no GOBIN always writes to the FIRST entry's bin/, so take
+# only that entry -- appending /bin to the whole list would name a directory
+# nothing was ever installed to, and would also inject a second, wrong
+# directory onto PATH.
+GOINSTALL_BIN := $(shell go env GOBIN)
+ifeq ($(GOINSTALL_BIN),)
+GOINSTALL_BIN := $(shell go env GOPATH | cut -d: -f1)/bin
+endif
+
+test: tools-ethos ## Run tests with race detection
+	PATH="$(GOINSTALL_BIN):$$PATH" go test -race -count=1 ./...
 
 test-integration: ## Run integration tests (in-process IMAP/SMTP)
 	go test -race -count=1 -tags=integration ./...

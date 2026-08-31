@@ -2650,3 +2650,74 @@ The one property preserved on purpose: the absent case still logs nothing
 at Error — it remains the ordinary, expected "not configured yet" state,
 distinct from a misconfiguration, even though both now result in zero
 commands loading.
+
+## DES-036: Daemon mail-triggered pipeline gets a dev/CI-parity test tier
+
+**Date**: 2026-08-31
+**Status**: Accepted
+**Missions**: `m-2026-08-30-053` (design), `m-2026-08-31-002` (implementation), PR #261
+
+**Context**: The daemon path — email → trust classification → per-contact
+permission → planner → executor → `ethos mission create` → worker spawn — had
+never actually run until a manual live test, which surfaced four defects at
+once, including a mission-contract shape ethos's real schema rejects outright
+(`beadle-8gt`). A regression test for that exact defect already existed
+(`TestBuildStageContract_ValidatesAgainstRealEthosCLI`) but skipped in CI,
+because `.github/workflows/test.yml` never installed `ethos`. The one test that
+would have caught the shipped defect never ran where it mattered.
+
+**Decision**: Pin `ethos` via `Makefile`'s `ETHOS_VERSION` and a `tools-ethos`
+target (matching the existing `STATICCHECK_VERSION`/`GOLANGCI_LINT_VERSION`/
+`GOVULNCHECK_VERSION` pattern), install it in CI before the test step, and
+convert every `t.Skip` on a missing `ethos` or `gpg` binary in
+`internal/daemon` to a fail-fast `t.Fatalf` naming the install remedy. Add one
+combined end-to-end test (`TestOnNewMail_EndToEnd`) driving all four
+security-relevant gates — trust classification, per-contact `x` permission,
+command-file signature, real-ethos contract validity — through the actual
+`OnNewMail` entry point, bypassing `email.Poller` entirely, since its
+first-poll suppression and 1-minute minimum interval make it unusable for a
+pre-commit gate and it carries no security-relevant behavior of its own. Only
+`daemon.Spawner` is faked; everything upstream, including the real `ethos` CLI,
+runs for real inside a `testenv.IsolateEthos`-isolated `$HOME`/`$ETHOS_REPO_ROOT`.
+
+**Rejected alternatives**:
+
+- *Keep the `t.Skip` and rely on developers noticing.* This is the exact
+  failure mode that shipped `beadle-8gt`.
+- *A build tag gating these tests in a separate CI job.* Reintroduces the
+  dev/CI divergence the tier exists to close. The existing `integration`-tagged
+  tier already demonstrates the failure: a developer's `make check` silently
+  does not run it.
+- *Fake the `ethos` CLI with a stub returning success.* Precisely what let
+  `beadle-8gt` through — a test that checks only the generated Go string and
+  never the real schema cannot catch a schema mismatch.
+- *Drive the real `Poller` with a short interval.* Impossible without changing
+  production code: `validPollIntervals` bottoms out at `1m` and the first poll
+  of any `Poller`'s lifetime never fires the callback by design.
+
+**Outcome — the tier immediately caught two violations of its own premise**,
+which is the strongest available evidence for the decision and worth recording
+over the design-time argument alone:
+
+1. `IsolateEthos` symlinked the *developer's global* archetypes tree. It passed
+   locally and failed on the first clean CI runner (`unknown mission type
+   "implement"; available archetypes:` — empty). That is ambient developer
+   state, the dependency this design named as a hard constraint to eliminate.
+   Fixed by always materializing a minimal `implement.yaml` into the scratch
+   tree, with **no** "use global if present" fallback — that branch would let
+   dev and CI run against different data and make the failure locally
+   undetectable.
+2. `make test` installed `ethos` without putting `GOBIN`/`GOPATH/bin` on
+   `PATH`, so provisioning succeeded and tests then failed "ethos not found on
+   PATH" — with the remedy message naming the command the developer had just
+   run.
+
+Both were invisible from the authoring machine, which is exactly the
+environment in which neither can reproduce. Neither was found by local runs.
+
+**Standing obligation**: every gate's negative case must be verified to fail
+when the guard it tests is disabled. Three of the most valuable findings during
+this work were tests that were green and could not fail — a tautological
+assertion, a clock-injection test that rotted by calendar into passing under
+both clocks, and a CI check comparing a binary to itself. Passing is not
+evidence; failing on demand is.

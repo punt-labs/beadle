@@ -32,7 +32,13 @@ func setupWhitelist(t *testing.T, binaries ...string) (string, *BinaryWhitelist)
 			}
 		}
 		if src == "" {
-			t.Skipf("binary %q not found in /usr/bin or /bin", name)
+			// Every caller of setupWhitelist passes a base POSIX utility
+			// (echo, cat, false, sleep, dd, env, tr) guaranteed present on
+			// every supported platform (darwin/linux) and on this repo's
+			// own CI runner -- never an optional tool a developer installs.
+			// A missing one means a broken or non-standard system image,
+			// not a dependency this test should skip around.
+			t.Fatalf("binary %q not found in /usr/bin or /bin -- this is a base system utility expected on every supported platform", name)
 		}
 		dst := filepath.Join(dir, name)
 		require.NoError(t, os.Symlink(src, dst))
