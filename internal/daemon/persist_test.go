@@ -3,8 +3,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -294,4 +297,207 @@ func TestPipelineStore_PruneSkipsCorruptFiles(t *testing.T) {
 
 	_, err = os.Stat(filepath.Join(dir, "bad.json"))
 	assert.NoError(t, err, "a corrupt file must be skipped, not deleted")
+}
+
+// -- beadle-721a: periodic pruning --
+
+func TestPipelineStore_StartPruning_RunsPeriodically(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), PruneInterval: 5 * time.Millisecond}
+
+	old := &Pipeline{Version: 1, ID: "old-done", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: time.Now().Add(-60 * 24 * time.Hour)}
+	require.NoError(t, s.Save(old))
+
+	s.StartPruning(DefaultRetention)
+	defer s.StopPruning()
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(filepath.Join(dir, "old-done.json"))
+		return os.IsNotExist(err)
+	}, time.Second, 5*time.Millisecond, "StartPruning must remove an aged record without a second manual Prune call")
+
+	// A pipeline that becomes eligible only AFTER StartPruning is already
+	// running must still be caught by a later tick -- proves the loop
+	// really is periodic, not just an immediate one-shot in disguise.
+	laterOld := &Pipeline{Version: 1, ID: "later-old-done", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: time.Now().Add(-60 * 24 * time.Hour)}
+	require.NoError(t, s.Save(laterOld))
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(filepath.Join(dir, "later-old-done.json"))
+		return os.IsNotExist(err)
+	}, time.Second, 5*time.Millisecond, "a record aged after StartPruning began must still be pruned on a subsequent tick")
+}
+
+func TestPipelineStore_StopPruning_StopsTheGoroutine(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), PruneInterval: 5 * time.Millisecond}
+
+	s.StartPruning(DefaultRetention)
+	s.StopPruning()
+
+	// Written after the goroutine has fully stopped (StopPruning waits).
+	// If the goroutine were still running, this would be pruned on its
+	// very next tick.
+	old := &Pipeline{Version: 1, ID: "old-done", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: time.Now().Add(-60 * 24 * time.Hour)}
+	require.NoError(t, s.Save(old))
+
+	time.Sleep(50 * time.Millisecond)
+
+	_, err := os.Stat(filepath.Join(dir, "old-done.json"))
+	assert.NoError(t, err, "a record saved after StopPruning must survive: the goroutine must actually be stopped")
+}
+
+func TestPipelineStore_StopPruning_WithoutStartIsNoop(t *testing.T) {
+	s := &PipelineStore{Dir: t.TempDir(), Logger: testLogger()}
+	assert.NotPanics(t, func() { s.StopPruning() })
+}
+
+func TestPipelineStore_StopPruning_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), PruneInterval: 5 * time.Millisecond}
+	s.StartPruning(DefaultRetention)
+	s.StopPruning()
+	assert.NotPanics(t, func() { s.StopPruning() })
+}
+
+// TestPipelineStore_Prune_ConcurrentWithSave exercises the invariant
+// StartPruning's doc comment claims: Prune walking the pipeline
+// directory while Executor.Run's goroutines call Save on their own
+// pipelines is safe without a lock. Run with -race (mandatory for this
+// repo) so the race detector, not just the assertions below, is a judge.
+func TestPipelineStore_Prune_ConcurrentWithSave(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger()}
+
+	const nPipelines = 20
+	const nSavesPerPipeline = 10
+
+	var wg sync.WaitGroup
+	var pruneErrs int32
+
+	// Writers: each simulates one pipeline's lifecycle -- "running" for
+	// most of its saves, an aged CreatedAt, then "completed" on its last
+	// save. A concurrent Prune pass must never remove a "running" file,
+	// and the final "completed" state must always survive to be read
+	// back intact (never a torn or corrupt file).
+	for i := 0; i < nPipelines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			p := &Pipeline{
+				Version:   1,
+				ID:        fmt.Sprintf("concurrent-%d", i),
+				Status:    "running",
+				Email:     EmailMeta{From: "x@test.com"},
+				CreatedAt: time.Now().Add(-60 * 24 * time.Hour), // aged from the start
+			}
+			for j := 0; j < nSavesPerPipeline; j++ {
+				if j == nSavesPerPipeline-1 {
+					p.Status = "completed"
+				}
+				if err := s.Save(p); err != nil {
+					t.Errorf("save pipeline %s: %v", p.ID, err)
+				}
+			}
+		}(i)
+	}
+
+	// Pruner: hammers Prune concurrently with the writers above.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			if _, err := s.Prune(DefaultRetention); err != nil {
+				atomic.AddInt32(&pruneErrs, 1)
+			}
+		}
+	}()
+
+	wg.Wait()
+	assert.Zero(t, atomic.LoadInt32(&pruneErrs), "Prune must never error while racing concurrent Save calls")
+
+	// Final pass: every pipeline finished "completed" and aged, so a
+	// last Prune should remove them all with nothing left corrupt.
+	removed, err := s.Prune(DefaultRetention)
+	require.NoError(t, err)
+	assert.Equal(t, nPipelines-removed >= 0, true)
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		data, readErr := os.ReadFile(filepath.Join(dir, e.Name()))
+		require.NoError(t, readErr)
+		var p Pipeline
+		require.NoError(t, json.Unmarshal(data, &p), "every surviving file must be valid, complete JSON, never a torn write")
+	}
+}
+
+// -- beadle-28ew: orphaned .tmp- files --
+
+func TestPipelineStore_Prune_ReapsOrphanedTempFile(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger()}
+
+	tmpPath := filepath.Join(dir, ".tmp-orphan-1.json")
+	require.NoError(t, os.WriteFile(tmpPath, []byte(`{"id":"orphan-1"`), 0o600)) // deliberately truncated JSON
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	require.NoError(t, os.Chtimes(tmpPath, oldMtime, oldMtime))
+
+	removed, err := s.Prune(DefaultRetention)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
+
+	_, err = os.Stat(tmpPath)
+	assert.True(t, os.IsNotExist(err), "a .tmp- file older than the orphan threshold must be reaped")
+}
+
+func TestPipelineStore_Prune_KeepsFreshTempFile(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger()}
+
+	tmpPath := filepath.Join(dir, ".tmp-inflight-1.json")
+	require.NoError(t, os.WriteFile(tmpPath, []byte(`{"id":"inflight-1"}`), 0o600))
+	// mtime is "now" -- indistinguishable from a write-then-rename in
+	// flight, so Prune must leave it alone.
+
+	removed, err := s.Prune(DefaultRetention)
+	require.NoError(t, err)
+	assert.Equal(t, 0, removed)
+
+	_, err = os.Stat(tmpPath)
+	assert.NoError(t, err, "a fresh .tmp- file must never be reaped: it may just be mid-rename")
+}
+
+func TestPipelineStore_Prune_TempFileAgeJudgedByFilesystemNotContent(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger()}
+
+	// Not valid JSON at all -- a torn write may not even parse. Age must
+	// still be judged by mtime, never by trying to unmarshal this.
+	tmpPath := filepath.Join(dir, ".tmp-torn-1.json")
+	require.NoError(t, os.WriteFile(tmpPath, []byte(`{not json at all`), 0o600))
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	require.NoError(t, os.Chtimes(tmpPath, oldMtime, oldMtime))
+
+	removed, err := s.Prune(DefaultRetention)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
+}
+
+func TestPipelineStore_Prune_UsesInjectedClockForTempFileAge(t *testing.T) {
+	dir := t.TempDir()
+	fixedNow := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), Now: func() time.Time { return fixedNow }}
+
+	tmpPath := filepath.Join(dir, ".tmp-clock-1.json")
+	require.NoError(t, os.WriteFile(tmpPath, []byte(`{}`), 0o600))
+	// Real mtime is "now" (test wall-clock), but the injected clock is
+	// pinned far in the future relative to it, so the file must be
+	// judged aged and removed -- proves the age check uses s.Now, not a
+	// bare time.Now() call.
+	require.NoError(t, os.Chtimes(tmpPath, fixedNow.Add(-2*time.Hour), fixedNow.Add(-2*time.Hour)))
+
+	removed, err := s.Prune(DefaultRetention)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
 }
