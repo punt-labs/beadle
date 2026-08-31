@@ -6,18 +6,42 @@ import (
 	"os"
 )
 
-// MCPServerConfig defines how to invoke an MCP server.
+// MCPServerConfig defines how to invoke an MCP server -- either a local
+// stdio subprocess (Command/Args, the original and still the common shape)
+// or a remote HTTP server (Type/URL/Headers). omitempty on every field
+// after Command/Args means an existing stdio entry marshals exactly as it
+// always has: Command/Args were never empty for those entries, so their
+// presence in the output is unaffected, while Type/URL/Headers simply never
+// appear. An http entry is the mirror image: Command and Args stay their
+// zero values and are omitted, leaving only Type/URL/Headers.
 type MCPServerConfig struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Type    string            `json:"type,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// DefaultMCPRegistry returns the built-in server registry.
+// DefaultMCPRegistry returns the built-in server registry. context7's
+// Headers value is a literal "${CONTEXT7_API_KEY}" placeholder, not the
+// key itself -- Claude Code expands ${VAR} references in mcp-config
+// against the worker subprocess's own environment at spawn time, and
+// ClaudeRunner.Run (runner.go) is what actually puts CONTEXT7_API_KEY into
+// that environment, by resolving it from cmd.EnvVars (the declared env-var
+// allowlist) via resolveEnvVars. No secret value is ever written into this
+// registry, a generated mcp-config file, or a log line.
 func DefaultMCPRegistry() map[string]MCPServerConfig {
 	return map[string]MCPServerConfig{
 		"ethos":        {Command: "ethos", Args: []string{"mcp"}},
 		"beadle-email": {Command: "beadle-email", Args: []string{"serve"}},
 		"biff":         {Command: "biff", Args: []string{"mcp"}},
+		"context7": {
+			Type: "http",
+			URL:  "https://mcp.context7.com/mcp",
+			Headers: map[string]string{
+				"CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}",
+			},
+		},
 	}
 }
 

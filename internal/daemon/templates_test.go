@@ -113,10 +113,64 @@ func TestBuildMCPConfigContent(t *testing.T) {
 
 func TestDefaultMCPRegistry(t *testing.T) {
 	reg := DefaultMCPRegistry()
-	assert.Len(t, reg, 3)
+	assert.Len(t, reg, 4)
 	assert.Contains(t, reg, "ethos")
 	assert.Contains(t, reg, "beadle-email")
 	assert.Contains(t, reg, "biff")
+	assert.Contains(t, reg, "context7")
+}
+
+// TestBuildMCPConfig_StdioEmissionByteIdentical proves that adding the
+// Type/URL/Headers fields to MCPServerConfig did not change one byte of
+// what a stdio server already emitted -- omitempty on the new fields (and
+// on Command/Args, unaffected here since both are always non-zero for a
+// stdio entry) means only "command" and "args" ever appear. Claude Code
+// parses this file to spawn workers; a shape change here breaks worker
+// spawning in a way that would not look like an MCP problem.
+func TestBuildMCPConfig_StdioEmissionByteIdentical(t *testing.T) {
+	registry := DefaultMCPRegistry()
+	tmpDir := t.TempDir()
+	tmpl := &MissionTemplate{TmpDir: tmpDir}
+
+	path, err := tmpl.BuildMCPConfig([]string{"ethos"}, registry)
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var doc struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	require.NoError(t, json.Unmarshal(data, &doc))
+
+	assert.JSONEq(t, `{"command":"ethos","args":["mcp"]}`, string(doc.MCPServers["ethos"]))
+}
+
+// TestBuildMCPConfig_HTTPServerEmission proves the http shape: only
+// type/url/headers appear, never command/args.
+func TestBuildMCPConfig_HTTPServerEmission(t *testing.T) {
+	registry := DefaultMCPRegistry()
+	tmpDir := t.TempDir()
+	tmpl := &MissionTemplate{TmpDir: tmpDir}
+
+	path, err := tmpl.BuildMCPConfig([]string{"context7"}, registry)
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var doc struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	require.NoError(t, json.Unmarshal(data, &doc))
+
+	assert.JSONEq(t,
+		`{"type":"http","url":"https://mcp.context7.com/mcp","headers":{"CONTEXT7_API_KEY":"${CONTEXT7_API_KEY}"}}`,
+		string(doc.MCPServers["context7"]))
+	assert.NotContains(t, string(doc.MCPServers["context7"]), `"command"`)
+	assert.NotContains(t, string(doc.MCPServers["context7"]), `"args"`)
 }
 
 func TestBuildSystemPrompt(t *testing.T) {
