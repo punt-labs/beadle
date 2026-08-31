@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>beadle-daemon — intended design vs. what is real</title>
+<style>
+  :root {
+    --bg: #fbfaf8; --fg: #1c1a17; --muted: #6b655d; --rule: #e0dcd5;
+    --card: #ffffff; --real: #2f6f4f; --real-bg: #eaf3ee;
+    --partial: #8a6218; --partial-bg: #fbf2e0; --absent: #9b3a3a;
+    --absent-bg: #fbeded; --code-bg: #f4f2ee; --accent: #2c4a6e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16151300; --bg: #161513; --fg: #eae6df; --muted: #a09a90;
+      --rule: #2f2c28; --card: #1e1c19; --real: #7fc09b; --real-bg: #1b2a22;
+      --partial: #d9ad5a; --partial-bg: #2a2419; --absent: #e08a8a;
+      --absent-bg: #2b1c1c; --code-bg: #232019; --accent: #8fb4dd;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2.5rem 1.25rem 5rem; background: var(--bg); color: var(--fg);
+    font: 16px/1.65 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 60rem; margin: 0 auto; }
+  h1 { font-size: 1.75rem; line-height: 1.25; margin: 0 0 .4rem; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin: 0 0 .35rem; font-size: .95rem; }
+  .stamp { color: var(--muted); font-size: .8rem; margin: 0 0 2.5rem; font-variant-numeric: tabular-nums; }
+  h2 {
+    font-size: 1.15rem; margin: 3rem 0 .3rem; padding-bottom: .4rem;
+    border-bottom: 1px solid var(--rule); letter-spacing: -.005em;
+  }
+  h2 .n { color: var(--muted); font-weight: 400; margin-right: .5rem; font-variant-numeric: tabular-nums; }
+  .lede { color: var(--muted); margin: .6rem 0 1.5rem; font-size: .93rem; max-width: 52rem; }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .855em; background: var(--code-bg); padding: .1em .35em; border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg); padding: .85rem 1rem; border-radius: 6px; overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem;
+    line-height: 1.5; margin: .8rem 0; border: 1px solid var(--rule);
+  }
+  pre code { background: none; padding: 0; font-size: 1em; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 1.25rem; margin: 1.5rem 0 0; font-size: .85rem; }
+  .legend span { display: flex; align-items: center; gap: .4rem; color: var(--muted); }
+
+  .pill {
+    display: inline-block; font-size: .68rem; font-weight: 650; letter-spacing: .04em;
+    text-transform: uppercase; padding: .16rem .5rem; border-radius: 3px; white-space: nowrap;
+  }
+  .p-real { color: var(--real); background: var(--real-bg); }
+  .p-partial { color: var(--partial); background: var(--partial-bg); }
+  .p-absent { color: var(--absent); background: var(--absent-bg); }
+
+  .flow { margin: 1.5rem 0 0; }
+  .stage {
+    display: grid; grid-template-columns: 1.6rem 1fr auto; gap: .85rem;
+    align-items: start; padding: .85rem 0; border-bottom: 1px solid var(--rule);
+  }
+  .stage:last-child { border-bottom: 0; }
+  .step {
+    font-family: ui-monospace, monospace; font-size: .75rem; color: var(--muted);
+    padding-top: .15rem; font-variant-numeric: tabular-nums;
+  }
+  .what { min-width: 0; }
+  .what b { font-weight: 620; }
+  .what .where { color: var(--muted); font-size: .8rem; display: block; margin-top: .1rem; }
+  .what .note { font-size: .875rem; margin-top: .4rem; color: var(--fg); }
+  .what .note.warn { color: var(--partial); }
+  .what .note.bad { color: var(--absent); }
+
+  table { width: 100%; border-collapse: collapse; margin: 1.25rem 0; font-size: .9rem; }
+  th {
+    text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); font-weight: 650; padding: 0 .7rem .5rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  td { padding: .6rem .7rem .6rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td:last-child, th:last-child { padding-right: 0; }
+  tr:last-child td { border-bottom: 0; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--rule); border-radius: 8px;
+    padding: 1.1rem 1.25rem; margin: 1.25rem 0;
+  }
+  .card h3 { margin: 0 0 .5rem; font-size: .98rem; }
+  .card p { margin: .5rem 0 0; font-size: .9rem; }
+  .card.bad { border-left: 3px solid var(--absent); }
+  .card.warn { border-left: 3px solid var(--partial); }
+  .card.ok { border-left: 3px solid var(--real); }
+
+  ol.path { counter-reset: s; list-style: none; padding: 0; margin: 1.25rem 0 0; }
+  ol.path li {
+    counter-increment: s; position: relative; padding: 0 0 1.15rem 2.4rem;
+    border-left: 1px solid var(--rule); margin-left: .7rem;
+  }
+  ol.path li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  ol.path li::before {
+    content: counter(s); position: absolute; left: -.72rem; top: 0;
+    width: 1.45rem; height: 1.45rem; border-radius: 50%;
+    background: var(--accent); color: var(--bg);
+    font-size: .75rem; font-weight: 650; display: grid; place-items: center;
+  }
+  ol.path li b { display: block; font-weight: 620; margin-bottom: .15rem; }
+  ol.path li .why { font-size: .88rem; color: var(--muted); }
+
+  .foot {
+    margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--rule);
+    color: var(--muted); font-size: .83rem;
+  }
+  .foot p { margin: .4rem 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>beadle-daemon: intended design vs. what is real</h1>
+<p class="sub">What the docs promise, what the code actually does, and the shortest honest path between them.</p>
+<p class="stamp">Generated 2026-08-31 · main at <span class="mono">14aa9ba</span> · every claim below was checked against source, not recalled</p>
+
+<div class="legend">
+  <span><span class="pill p-real">real</span> works, and something proves it</span>
+  <span><span class="pill p-partial">partial</span> works with a stated gap</span>
+  <span><span class="pill p-absent">absent</span> promised somewhere, no implementation</span>
+</div>
+
+<h2><span class="n">01</span>The pipeline, stage by stage</h2>
+<p class="lede">
+  This is the path an inbound email takes. Until 2026-08-30 it had been run end to end
+  roughly three times, all by hand. The first automated run of it found four defects.
+</p>
+
+<div class="flow">
+
+  <div class="stage">
+    <div class="step">1</div>
+    <div class="what">
+      <b>Poll the mailbox</b>
+      <span class="where"><code>internal/email/poller.go</code></span>
+      <div class="note">First poll never fires the callback, by design, so a restart does not
+      reprocess the backlog. Minimum interval 1m.</div>
+    </div>
+    <span class="pill p-real">real</span>
+  </div>
+
+  <div class="stage">
+    <div class="step">2</div>
+    <div class="what">
+      <b>Classify transport trust</b>
+      <span class="where"><code>handler.go:160</code> · <code>verifyTrust</code></span>
+      <div class="note">Four levels. Only <code>Verified</code> (real GPG signature, isolated keyring)
+      and <code>Trusted</code> (Proton end-to-end) are accepted.</div>
+      <div class="note warn"><b>Gap:</b> <code>Trusted</code> rests entirely on two headers, safe only
+      because Proton Bridge sets them and Bridge is assumed to be on localhost. Nothing verifies that.
+      The code says so itself — <code>TODO(beadle-xxx): verify IMAP is localhost</code> — and that
+      placeholder ID was never filed. Now <b>beadle-hv7i</b>.</div>
+    </div>
+    <span class="pill p-partial">partial</span>
+  </div>
+
+  <div class="stage">
+    <div class="step">3</div>
+    <div class="what">
+      <b>Check per-contact <code>x</code> permission</b>
+      <span class="where"><code>handler.go:149</code> · <code>contacts.CheckPermission</code></span>
+      <div class="note">Independent of trust. A perfectly signed message from an ungranted sender
+      unlocks nothing. Today exactly one contact holds <code>x</code>.</div>
+    </div>
+    <span class="pill p-real">real</span>
+  </div>
+
+  <div class="stage">
+    <div class="step">4</div>
+    <div class="what">
+      <b>Turn the email into a plan</b>
+      <span class="where"><code>planner.go</code> · configured at <code>cmd/beadle-daemon/main.go:136</code></span>
+      <div class="note"><code>RulePlanner</code> matches a regex against subject and body and emits
+      a fixed command call. The mechanism is unit-tested.</div>
+      <div class="note warn"><b>Gap:</b> the <em>production</em> rule is a hardcoded literal —
+      <code>"(?i)summarize|summary"</code> — and appears in no test anywhere. The harness stubs the
+      planner, correctly, so the tier proves the gates given a plan and never that an email produces one.
+      Break that regex and every gate test still passes. <b>beadle-ivtd</b>.</div>
+      <div class="note bad"><b>Absent:</b> <code>LLMPlanner</code> is a stub. Trusted, permitted mail
+      cannot author a plan — it can only <em>select</em> from pre-signed recipes. <b>beadle-tl6</b>.</div>
+    </div>
+    <span class="pill p-partial">partial</span>
+  </div>
+
+  <div class="stage">
+    <div class="step">5</div>
+    <div class="what">
+      <b>Load and verify the recipe</b>
+      <span class="where"><code>command.go</code> · <code>signature.go</code></span>
+      <div class="note">Real GPG verification against the configured authorizer key, in an isolated
+      keyring. Unsigned, wrong-key, and expired-key files are rejected. An absent or ambiguous
+      <code>daemon.json</code> disables command loading entirely rather than falling back to unsigned.</div>
+      <div class="note warn"><b>Sharp edge:</b> that zero-commands default lives in
+      <code>main.go</code>, not in the library. <code>daemon.LoadCommands</code> with an empty
+      <code>ownerKeyID</code> loads <em>unsigned</em> — the invariant is enforced by the caller, so a
+      second caller would not inherit it.</div>
+    </div>
+    <span class="pill p-real">real</span>
+  </div>
+
+  <div class="stage">
+    <div class="step">6</div>
+    <div class="what">
+      <b>Build the mission contract and create the mission</b>
+      <span class="where"><code>pipeline.go</code> · <code>mission.go</code> · real <code>ethos</code> CLI</span>
+      <div class="note">Fixed 2026-08-30. It had emitted <code>inputs.args</code> and
+      <code>inputs.pipeline_output</code>, which ethos strict-rejects, so <em>every</em> daemon-triggered
+      mission failed here. Nobody had noticed because nothing had run it.</div>
+    </div>
+    <span class="pill p-real">real</span>
+  </div>
+
+  <div class="stage">
+    <div class="step">7</div>
+    <div class="what">
+      <b>Spawn the worker</b>
+      <span class="where"><code>spawner.go</code></span>
+      <div class="note">Real <code>claude</code> subprocess with an explicit env allowlist, capped turns
+      and budget, and a narrowed <code>PATH</code>.</div>
+      <div class="note warn"><b>Gap:</b> no OS-level sandbox.
+      <code>TODO: container isolation (network namespace, seccomp)</code> at <code>spawner.go:109</code>
+      is unfiled and unbeaded.</div>
+    </div>
+    <span class="pill p-partial">partial</span>
+  </div>
+
+  <div class="stage">
+    <div class="step">8</div>
+    <div class="what">
+      <b>Record the job, reply, clean up</b>
+      <span class="where"><code>persist.go</code> · <code>pipeline.go</code></span>
+      <div class="note">Jobs are written to disk with atomic rename; a crash-interrupted job is marked
+      failed on restart; records are pruned after 30 days by a ticker. All landed 2026-08-30/31 —
+      before that, <code>save()</code> was a no-op and the recovery scan always read an empty directory.</div>
+    </div>
+    <span class="pill p-real">real</span>
+  </div>
+
+</div>
+
+<h2><span class="n">02</span>The four documented invariants</h2>
+<p class="lede">
+  <code>docs/ARCHITECTURE.md</code> lists these as design invariants. Three hold. One is a claim with
+  no code behind it.
+</p>
+
+<table>
+  <thead><tr><th>Invariant</th><th>Status</th><th>Reality</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>Zero agent authority</b><br><span class="mono" style="font-size:.78rem;color:var(--muted)">every executed command is signed</span></td>
+      <td><span class="pill p-partial">partial</span></td>
+      <td>True for <em>execution</em>. But <code>OnNewMail</code> creates the mission record and starts
+      the pipeline goroutine on trust + permission alone, with no signed command in that decision. With
+      zero commands loaded nothing downstream runs, so it is currently harmless — the record is still
+      created unconditionally. Documented in ARCHITECTURE.md as a known gap.</td>
+    </tr>
+    <tr>
+      <td><b>Preflight before execute</b></td>
+      <td><span class="pill p-real">real</span></td>
+      <td>Args validated before any command runs; no partial execution.</td>
+    </tr>
+    <tr>
+      <td><b>Isolated verification</b></td>
+      <td><span class="pill p-real">real</span></td>
+      <td>Inbound and recipe signature checks each run in their own temporary GNUPGHOME. An untrusted
+      key never touches the system keyring.</td>
+    </tr>
+    <tr>
+      <td><b>Expired / non-expiring keys rejected</b></td>
+      <td><span class="pill p-real">real</span></td>
+      <td>Enforced on the primary key and any signing-capable subkey.</td>
+    </tr>
+    <tr>
+      <td><b>Audit log is tamperproof</b><br><span class="mono" style="font-size:.78rem;color:var(--muted)">append-only, GPG-signed</span></td>
+      <td><span class="pill p-absent">absent</span></td>
+      <td>There is no audit log. Grep for it in <code>internal/daemon</code> returns four comments
+      mentioning the word and zero implementation. The pipeline records added this week are operational
+      state, not a signed audit trail — they are mutable and unsigned. <b>beadle-623</b>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="card bad">
+  <h3>The one to be honest about</h3>
+  <p>
+    A document promising a <em>tamperproof, GPG-signed, append-only</em> audit log, with nothing behind
+    it, is worse than silence: it invites someone to rely on a control that does not exist. Either build
+    it or move the claim out of the invariants list and into a roadmap. Both are fine; leaving it as an
+    invariant is not.
+  </p>
+</div>
+
+<h2><span class="n">03</span>Can a new operator actually use this?</h2>
+<p class="lede">No. This is the largest practical gap and it is not a code defect.</p>
+
+<div class="card warn">
+  <h3>A fresh install runs zero commands, by design, with no way out</h3>
+  <p>
+    The daemon refuses to load recipes unless <code>~/.punt-labs/beadle/daemon.json</code> names an
+    authorizer key <em>and</em> each recipe carries that key's signature. That default is correct —
+    it is the zero-agent-authority posture.
+  </p>
+  <p>
+    But <b>no tooling exists to reach the configured state.</b> There is no <code>beadle init</code>
+    and no <code>beadle sign</code> in either binary — verified. An operator must hand-write
+    <code>daemon.json</code>, then hand-craft a canonical-subset signature over each recipe by
+    replicating what <code>internal/daemon</code> does internally. In practice that means the daemon
+    is operable by someone who reads the source. Tracked as <b>beadle-7gm</b>.
+  </p>
+</div>
+
+<h2><span class="n">04</span>What the new test tier does and does not prove</h2>
+<p class="lede">
+  Merged 2026-08-31 in PR #261. It runs identically under <code>make check</code> and in CI, with no
+  <code>t.Skip</code> anywhere in <code>internal/daemon</code>.
+</p>
+
+<table>
+  <thead><tr><th>Claim</th><th>Status</th><th>Evidence</th></tr></thead>
+  <tbody>
+    <tr><td>Trust classification admits only Verified/Trusted</td><td><span class="pill p-real">real</span></td>
+      <td>Negative case fails when the guard is disabled — verified by patching <code>handler.go:162</code> to <code>if false</code>: <span class="mono">"should have 0 item(s), but has 1"</span></td></tr>
+    <tr><td>Ungranted sender unlocks nothing</td><td><span class="pill p-real">real</span></td>
+      <td>Fails when <code>perm.Execute</code> is disabled</td></tr>
+    <tr><td>Unsigned / wrong-key / expired recipes rejected</td><td><span class="pill p-real">real</span></td>
+      <td>Fails when the <code>NO_PUBKEY</code> case is broken</td></tr>
+    <tr><td>Contract accepted by the <em>real</em> ethos CLI</td><td><span class="pill p-real">real</span></td>
+      <td>Plus a negative control that fails when the malformed contract is made valid</td></tr>
+    <tr><td>A real email produces a plan</td><td><span class="pill p-absent">absent</span></td>
+      <td>Planner is stubbed; the production regex is untested. <b>beadle-ivtd</b></td></tr>
+    <tr><td>The <code>Store</code> wiring writes a record</td><td><span class="pill p-absent">absent</span></td>
+      <td>The harness passes <code>nil</code> for the store, so the line executes unasserted. <b>beadle-fbhp</b></td></tr>
+    <tr><td>No test mutates real ethos state</td><td><span class="pill p-real">real</span></td>
+      <td>Tree hash byte-identical across a full <code>-race</code> run</td></tr>
+  </tbody>
+</table>
+
+<div class="card ok">
+  <h3>The tier's best evidence is that it caught its own bugs</h3>
+  <p>
+    Within minutes of first running in CI it found three violations of its own premise: a symlink to the
+    developer's global archetypes tree, <code>make test</code> not putting the installed binary on
+    <code>PATH</code>, and a <code>GOPATH</code> expression that breaks on multi-entry values.
+  </p>
+  <p>
+    None were findable from the authoring machine, because that is precisely the environment in which
+    none of them reproduce. For a change whose whole premise is dev/CI parity, local validation was the
+    weakest available signal. Recorded as DES-036.
+  </p>
+</div>
+
+<h2><span class="n">05</span>The path to real</h2>
+<p class="lede">
+  Ordered by what unblocks the most, not by size. The first two are the difference between "a developer
+  can demo this" and "an operator can run it."
+</p>
+
+<ol class="path">
+  <li>
+    <b>Make the trust story honest — beadle-hv7i (P2)</b>
+    <span class="why">Verify IMAP is loopback before honoring Proton-origin headers, or refuse to
+    classify as <code>Trusted</code>. Right now one of the two accepted trust levels rests on an
+    unverified environmental assumption that the code itself flags. Cheapest security fix on the list,
+    and the test tier makes the negative case easy.</span>
+  </li>
+  <li>
+    <b>Give an operator a way in — beadle-7gm (P3, misprioritized)</b>
+    <span class="why"><code>beadle init</code> and <code>beadle sign</code>. Without these the daemon is
+    unusable by anyone who has not read <code>internal/daemon</code>. This is P3 and should not be;
+    it gates every other daemon capability from a user's perspective.</span>
+  </li>
+  <li>
+    <b>Close the trigger gap — beadle-ivtd (P3)</b>
+    <span class="why">Assert that the daemon's real wiring produces a plan for a representative email.
+    Keep the harness's stub planner — that separation is correct. This is separate coverage, not a
+    change to the tier.</span>
+  </li>
+  <li>
+    <b>Resolve the audit-log claim — beadle-623 (P3)</b>
+    <span class="why">Build it or demote it out of the invariants list. An unimplemented invariant is a
+    liability in a document people are told to trust.</span>
+  </li>
+  <li>
+    <b>Cover the persistence wiring — beadle-fbhp (P2)</b>
+    <span class="why">Now cheap: the fixtures exist. Pass a real store into the harness and assert a
+    record reaches disk. Then remove the wiring line and confirm the test fails.</span>
+  </li>
+  <li>
+    <b>Decide on worker sandboxing — unfiled</b>
+    <span class="why"><code>spawner.go:109</code>'s container-isolation TODO has no bead. The worker runs
+    with a narrowed env and PATH but no namespace or seccomp confinement. Either file it with a decision
+    or record why the current confinement is sufficient.</span>
+  </li>
+  <li>
+    <b>Then, and only then, LLMPlanner — beadle-tl6 (P3)</b>
+    <span class="why">Letting trusted mail author a plan removes the "it can only pick from pre-signed
+    recipes" safety property. It needs its own authorization story, and it should land after the trust
+    and audit gaps above are closed rather than before.</span>
+  </li>
+</ol>
+
+<div class="card">
+  <h3>One thing this artifact is not</h3>
+  <p>
+    A verdict on <code>beadle-email</code>. That path — an agent with a mailbox, reading and replying
+    under <code>r</code>/<code>w</code> grants — has real usage behind it and works. Everything above is
+    about <code>beadle-daemon</code>, the <code>x</code>-gated recipe runner, which had been exercised
+    about three times before this week. The two share a trust model and almost nothing else.
+  </p>
+</div>
+
+<div class="foot">
+  <p><b>How to check this document rather than trust it.</b> Every status above was read from source at
+  <span class="mono">14aa9ba</span>. The bead IDs are live: <code>bd show &lt;id&gt;</code>. The
+  invariants list is <code>docs/ARCHITECTURE.md</code>. The tier is
+  <code>internal/daemon/harness_test.go</code>.</p>
+  <p>Deliberately contains no counts of files, tests, or defect sites. An earlier document in this repo
+  carried a count that was wrong by more than three times, survived two review rounds, and was copied
+  twice before anyone ran the command that would have checked it.</p>
+</div>
+
+</div>
+</body>
+</html>
