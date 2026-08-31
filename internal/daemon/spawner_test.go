@@ -64,16 +64,28 @@ func TestParseWorkerOutput_EmptyOutput(t *testing.T) {
 	assert.True(t, result.IsError)
 }
 
-// writeFakeClaudeBinary writes a shell script named "claude" that emits a
-// well-formed workerJSON payload to stdout and exits 0, and returns the
-// directory it lives in. WorkerSpawner.Run finds it via exec.LookPath,
-// which resolves against the process's own PATH -- so the caller must also
-// t.Setenv("PATH", dir) (or prepend dir to the real PATH) for it to be
-// found.
-func writeFakeClaudeBinary(t *testing.T) (dir string) {
+// writeEnvEchoingClaudeBinary writes a shell script named "claude" that
+// reads envVar from its own process environment and embeds its LENGTH
+// (never the value itself) in the workerJSON "result" field it emits to
+// stdout, and returns the directory it lives in. WorkerSpawner.Run finds
+// it via exec.LookPath, which resolves against the process's own PATH --
+// so the caller must also t.Setenv("PATH", dir) (or prepend dir to the
+// real PATH) for it to be found.
+//
+// Length, not the value, is deliberate: WorkerSpawner.Run itself logs the
+// worker's raw stdout for diagnostics (spawner.go), so a stub that echoed
+// the secret verbatim would make it appear in the captured log through
+// that entirely separate, legitimate logging path -- proving delivery by
+// defeating the non-logging assertion it needs to coexist with. A
+// non-empty length that matches the input can only be produced if the
+// value genuinely reached the subprocess's environment; an unset or
+// empty-string var yields length 0, still distinguishable from a real
+// secret's length.
+func writeEnvEchoingClaudeBinary(t *testing.T, envVar string) (dir string) {
 	t.Helper()
 	dir = t.TempDir()
-	script := "#!/bin/sh\n" + `echo '{"result":"ok","session_id":"s1","is_error":false}'` + "\n"
+	script := "#!/bin/sh\n" +
+		`printf '{"result":"env-len:%s","session_id":"s1","is_error":false}\n' "${#` + envVar + `}"` + "\n"
 	path := filepath.Join(dir, "claude")
 	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
 	return dir
@@ -99,17 +111,29 @@ func (h *capturingHandler) recordsText() string {
 	return sb.String()
 }
 
-// TestWorkerSpawner_Run_EnvOverrideValueNeverLogged is the regression test
-// for the mission's hard constraint on context7's CONTEXT7_API_KEY: any
-// envOverrides value passed to Run -- the same mechanism ClaudeRunner uses
-// to thread a declared env_vars entry into the worker subprocess -- must
-// reach that subprocess's environment without ever being written to a log
-// line, in this file or any other call site Run reaches. Run's own log
-// calls list only envOverrides' *keys* ("envKeys"); this test proves the
-// *value* genuinely never appears anywhere in the captured output, not
-// just at the one call site a human reading the code happened to check.
-func TestWorkerSpawner_Run_EnvOverrideValueNeverLogged(t *testing.T) {
-	dir := writeFakeClaudeBinary(t)
+// TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged is the
+// regression test for the mission's hard constraint on context7's
+// CONTEXT7_API_KEY: any envOverrides value passed to Run -- the same
+// mechanism ClaudeRunner uses to thread a declared env_vars entry into the
+// worker subprocess -- must both (a) actually reach that subprocess's
+// environment and (b) never be written to a log line, in this file or any
+// other call site Run reaches.
+//
+// Both assertions are required together. Delivery alone (a fixed-payload
+// stub that merely exits 0) cannot distinguish "the value reached the
+// subprocess" from "envOverrides was silently dropped and the stub
+// succeeded anyway" -- exactly the shape of bug FIX 3
+// (.tmp/FIXBRIEF-recipe-tooling.md) found in the context7 MCP header,
+// which a test asserting only non-logging would never have caught, since
+// the value not appearing in a log is equally true whether or not it ever
+// reached the subprocess. Non-logging alone says nothing about delivery
+// either. writeEnvEchoingClaudeBinary's stub reads the env var back and
+// embeds its length in its own JSON output, so WorkerResult.Output is the
+// proof of delivery, and the captured log is still the proof of
+// non-logging -- of the value; the env var NAME (fine to log) is expected
+// in both.
+func TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged(t *testing.T) {
+	dir := writeEnvEchoingClaudeBinary(t, "CONTEXT7_API_KEY")
 	t.Setenv("PATH", dir)
 
 	h := &capturingHandler{}
@@ -128,6 +152,8 @@ func TestWorkerSpawner_Run_EnvOverrideValueNeverLogged(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, result.IsError)
 
+	assert.Contains(t, result.Output, fmt.Sprintf("env-len:%d", len(secretValue)),
+		"the env var must actually reach the worker subprocess's environment, at its real length")
 	assert.NotContains(t, h.recordsText(), secretValue,
 		"an envOverrides value must never appear in a log line")
 	assert.Contains(t, h.recordsText(), "CONTEXT7_API_KEY",
