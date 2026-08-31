@@ -110,7 +110,7 @@ the suite and are excluded from the table below, which covers the
 remaining production packages.
 
 \begin{center}
-\begin{tabular}{@{}ll@{}}
+\begin{tabular}{@{}lp{10.5cm}@{}}
 \toprule
 \textbf{Package} & \textbf{Responsibility} \\
 \midrule
@@ -167,7 +167,8 @@ shared lower layer (imported by both trees above):
 %%----------------------------------------------------------------------
 
 \begin{zed}
-  [MSGID, ADDRESS, BODY, HEADER, RAWBYTES, KEYID, SIGNER, CREDNAME, FOLDERNAME]
+  [MSGID, ADDRESS, BODY, HEADER, RAWBYTES, KEYID, \\
+  \quad SIGNER, CREDNAME, FOLDERNAME]
 \end{zed}
 
 $MSGID$ is an IMAP UID (numeric string).  $ADDRESS$ is an RFC~5322
@@ -250,20 +251,20 @@ is \texttt{multipart/signed} or raw bytes contain
   TrustInput \\
   level! : TrustLevel
   \where
-  (hasProtonE2E = ztrue \land hasProtonInternal = ztrue
-    \implies level! = trusted) \\
+  (hasProtonE2E = ztrue \land hasProtonInternal = ztrue \\
+  \quad \implies level! = trusted) \\
   \land \\
-  (hasPGPSignature = ztrue \land pgpVerified = ztrue
-    \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
-    \implies level! = verified) \\
+  (hasPGPSignature = ztrue \land pgpVerified = ztrue \\
+  \quad \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue) \\
+  \quad \implies level! = verified) \\
   \land \\
-  (hasPGPSignature = ztrue \land pgpVerified = zfalse
-    \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
-    \implies level! = untrusted) \\
+  (hasPGPSignature = ztrue \land pgpVerified = zfalse \\
+  \quad \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue) \\
+  \quad \implies level! = untrusted) \\
   \land \\
-  (hasPGPSignature = zfalse
-    \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
-    \implies level! = unverified)
+  (hasPGPSignature = zfalse \\
+  \quad \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue) \\
+  \quad \implies level! = unverified)
 \end{schema}
 
 The classification is total: every combination of inputs maps to
@@ -367,17 +368,17 @@ Environment variables follow the pattern \texttt{BEADLE\_<NAME>}.
   name? : CREDNAME \\
   value! : BODY
   \where
-  (keychainAvail = ztrue \land name? \in \dom keychainValues
-    \implies value! = keychainValues(name?)) \\
+  (keychainAvail = ztrue \land name? \in \dom keychainValues \\
+  \quad \implies value! = keychainValues(name?)) \\
   \land \\
-  ((\lnot (keychainAvail = ztrue \land name? \in \dom keychainValues))
-    \land name? \in \dom fileValues
-    \implies value! = fileValues(name?)) \\
+  ((\lnot (keychainAvail = ztrue \land name? \in \dom keychainValues)) \\
+  \quad \land name? \in \dom fileValues \\
+  \quad \implies value! = fileValues(name?)) \\
   \land \\
-  ((\lnot (keychainAvail = ztrue \land name? \in \dom keychainValues))
-    \land name? \notin \dom fileValues
-    \land name? \in \dom envValues
-    \implies value! = envValues(name?))
+  ((\lnot (keychainAvail = ztrue \land name? \in \dom keychainValues)) \\
+  \quad \land name? \notin \dom fileValues \\
+  \quad \land name? \in \dom envValues \\
+  \quad \implies value! = envValues(name?))
 \end{schema}
 
 The resolution is a priority chain: keychain beats file, file beats
@@ -989,40 +990,56 @@ below.
   CommandSigInput \\
   outcome! : CommandSigOutcome
   \where
-  (fingerprintValid = zfalse \implies outcome! = csInvalid) \\
+  (fingerprintValid = zfalse \\
+  \quad \implies outcome! = csInvalid) \\
   \land \\
-  (fingerprintValid = ztrue \land hasSignature = zfalse
-    \implies outcome! = csMissing) \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = zfalse \\
+  \quad \implies outcome! = csMissing) \\
   \land \\
-  (fingerprintValid = ztrue \land hasSignature = ztrue
-    \land importedKeyCount \neq 1
-    \implies outcome! = csInvalid) \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount \neq 1 \\
+  \quad \implies outcome! = csInvalid) \\
   \land \\
-  (fingerprintValid = ztrue \land hasSignature = ztrue
-    \land importedKeyCount = 1 \land keyExpired = ztrue
-    \implies outcome! = csExpired) \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount = 1 \\
+  \quad \land keyExpired = ztrue \\
+  \quad \implies outcome! = csExpired) \\
   \land \\
-  (fingerprintValid = ztrue \land hasSignature = ztrue
-    \land importedKeyCount = 1 \land keyExpired = zfalse
-    \land sawNoPubkey = ztrue
-    \implies outcome! = csWrongKey) \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount = 1 \\
+  \quad \land keyExpired = zfalse \\
+  \quad \land sawNoPubkey = ztrue \\
+  \quad \implies outcome! = csWrongKey) \\
   \land \\
-  (fingerprintValid = ztrue \land hasSignature = ztrue
-    \land importedKeyCount = 1 \land keyExpired = zfalse
-    \land sawNoPubkey = zfalse \land sawGoodSig = ztrue
-    \implies outcome! = csGood) \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount = 1 \\
+  \quad \land keyExpired = zfalse \\
+  \quad \land sawNoPubkey = zfalse \\
+  \quad \land sawGoodSig = ztrue \\
+  \quad \implies outcome! = csGood) \\
   \land \\
-  (fingerprintValid = ztrue \land hasSignature = ztrue
-    \land importedKeyCount = 1 \land keyExpired = zfalse
-    \land sawNoPubkey = zfalse \land sawGoodSig = zfalse
-    \land sawExpKeySig = ztrue
-    \implies outcome! = csExpired) \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount = 1 \\
+  \quad \land keyExpired = zfalse \\
+  \quad \land sawNoPubkey = zfalse \\
+  \quad \land sawGoodSig = zfalse \\
+  \quad \land sawExpKeySig = ztrue \\
+  \quad \implies outcome! = csExpired) \\
   \land \\
-  (fingerprintValid = ztrue \land hasSignature = ztrue
-    \land importedKeyCount = 1 \land keyExpired = zfalse
-    \land sawNoPubkey = zfalse \land sawGoodSig = zfalse
-    \land sawExpKeySig = zfalse
-    \implies outcome! = csInvalid)
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount = 1 \\
+  \quad \land keyExpired = zfalse \\
+  \quad \land sawNoPubkey = zfalse \\
+  \quad \land sawGoodSig = zfalse \\
+  \quad \land sawExpKeySig = zfalse \\
+  \quad \implies outcome! = csInvalid)
 \end{schema}
 
 The eight cases are exhaustive and mutually exclusive by the same
@@ -1071,9 +1088,10 @@ does.
   cmd? : CMDID \\
   admit! : ZBOOL
   \where
-  admit! = ztrue \iff
-    ((trust = trusted) \lor (trust = verified \land keyBound = ztrue))
-    \land execute = ztrue \land cmd? \in commands
+  admit! = ztrue \iff \\
+  \quad ((trust = trusted) \lor (trust = verified \land keyBound = ztrue)) \\
+  \quad \land execute = ztrue \\
+  \quad \land cmd? \in commands
 \end{schema}
 
 \texttt{DaemonGate} is where the trust model (\S~Trust Model),
@@ -1148,9 +1166,11 @@ list, run by one of two runners:
   \item \textbf{cli} --- runs a whitelisted binary directly, or a
     compound sequence of binaries declared as \texttt{steps}, chained
     together via \texttt{io.Pipe} goroutines.  A binary's resolved,
-    symlink-followed path (\texttt{filepath.EvalSymlinks}) must still
-    land inside a whitelisted directory.  Output is capped at 1~MB
-    (\texttt{io.LimitReader}); anything beyond the cap is discarded
+    symlink-followed path (\texttt{filepath.\allowbreak EvalSymlinks})
+    must still land inside a whitelisted directory.  Output is capped
+    at 1~MB
+    (\texttt{io.\allowbreak LimitReader}); anything beyond the cap is
+    discarded
     and the result is marked truncated, not silently grown.
 \end{itemize}
 
