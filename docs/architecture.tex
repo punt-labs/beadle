@@ -167,14 +167,19 @@ shared lower layer (imported by both trees above):
 %%----------------------------------------------------------------------
 
 \begin{zed}
-  [MSGID, ADDRESS, BODY, HEADER, RAWBYTES, KEYID, SIGNER, CREDNAME]
+  [MSGID, ADDRESS, BODY, HEADER, RAWBYTES, KEYID, SIGNER, CREDNAME, FOLDERNAME]
 \end{zed}
 
 $MSGID$ is an IMAP UID (numeric string).  $ADDRESS$ is an RFC~5322
 email address.  $BODY$ is the plain-text message body.  $HEADER$ is
-a header name-value pair.  $RAWBYTES$ is the raw RFC~822 message.
-$KEYID$ is a GPG key fingerprint.  $SIGNER$ is a GPG user identity.
-$CREDNAME$ is a named credential (e.g.\ \texttt{imap-password}).
+a header field name (e.g.\ \texttt{X-Pm-Origin}).  $RAWBYTES$ is the
+raw RFC~822 message.  $KEYID$ is a GPG key fingerprint.  $SIGNER$ is
+a GPG user identity.  $CREDNAME$ is a named credential (e.g.\
+\texttt{imap-password}).  $FOLDERNAME$ is an IMAP folder name ---
+distinct from $CREDNAME$: a folder is not a credential, and the two
+must never be interchangeable in the type system (see
+\texttt{SelectFolder} below, which previously typed \texttt{folder?}
+as $CREDNAME$ in error).
 
 %%----------------------------------------------------------------------
 \section{Free Types}
@@ -199,15 +204,15 @@ Four trust levels classify inbound messages:
 \end{itemize}
 
 \begin{zed}
-  SendMethod ::= smProtonSMTP | smResend
+  SendMethod ::= smSMTP | smResend | smFailed
 \end{zed}
 
-Outbound messages use Proton Bridge SMTP as the primary transport,
-falling back to Resend API when Bridge is unavailable.
-
-\begin{zed}
-  CredBackend ::= cbKeychain | cbFile | cbEnvVar
-\end{zed}
+Outbound messages use the configured SMTP transport as the primary
+route (Proton Bridge in the default configuration; a MIME-preserving
+host such as Fastmail when PGP signing is configured, since Bridge
+strips \texttt{multipart/signed}), falling back to Resend API when
+that transport is unavailable, or failing outright when signing is
+required and no fallback can carry it.
 
 Credentials are resolved through a priority chain of three backends.
 
@@ -265,6 +270,58 @@ The classification is total: every combination of inputs maps to
 exactly one trust level.  Proton E2E takes priority over PGP
 signatures (a Proton-internal message with a PGP signature is
 still $trusted$, not $verified$).
+
+\subsection{External Origin: An Assumption, Not a Theorem}
+
+\texttt{ClassifyTrust} proves that every combination of its four
+$ZBOOL$ inputs is mapped to exactly one $TrustLevel$ (a routine case
+split on $hasProtonE2E$, $hasProtonInternal$, $hasPGPSignature$, and
+$pgpVerified$, each of which has only two values).  It does \emph{not}
+prove the stronger property this repository actually depends on: that
+no externally-originated message is ever classified $trusted$.  It
+cannot, because nothing in $TrustInput$ says where a message came
+from --- $hasProtonE2E$ and $hasProtonInternal$ are bare booleans, and
+the schema has no way to ask whether they are telling the truth.
+
+\begin{zed}
+  Origin ::= originInternal | originExternal
+\end{zed}
+
+\begin{schema}{ChannelAssumption}
+  origin : Origin \\
+  hasProtonE2E : ZBOOL \\
+  hasProtonInternal : ZBOOL
+  \where
+  origin = originExternal \implies
+    \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
+\end{schema}
+
+$origin$ is ground truth: where the message actually came from, not
+what its headers claim.  \texttt{ChannelAssumption} is not derived
+from anything else in this document --- it is posited, and its truth
+depends entirely on Proton Bridge behaving as documented (setting
+\texttt{X-Pm-Content-Encryption}/\texttt{X-Pm-Origin} only for
+messages it has itself routed end-to-end between two Proton
+mailboxes, and stripping or refusing to forward those headers on
+anything externally injected).  \texttt{internal/daemon/handler.go}
+records the same assumption in a code comment rather than an
+enforced check: \textit{``External SMTP injection of these headers is
+blocked by Bridge''} --- exactly the kind of claim a Z schema cannot
+verify and should not pretend to.
+
+Given \texttt{ChannelAssumption}, the property this repository relies
+on follows as a theorem, not as decoration: by \texttt{ClassifyTrust},
+$hasProtonE2E = ztrue \land hasProtonInternal = ztrue$ is the only
+condition that entails $level! = trusted$, and by the totality proved
+above no other input combination also entails it; by
+\texttt{ChannelAssumption}'s contrapositive, that same condition
+entails $origin = originInternal$.  So $level! = trusted \implies
+origin = originInternal$ --- \emph{no external sender is ever
+trusted} --- but only for as long as \texttt{ChannelAssumption} holds.
+If Bridge is ever misconfigured, or a future defect lets an external
+SMTP client set these two headers, this specification gives no
+warning: the assumption, not a theorem about message content, is
+where that guarantee actually lives.
 
 \subsection{Two-Phase Trust Resolution}
 
@@ -347,6 +404,14 @@ I/O error) is a hard error --- resolution does not fall through to the
 environment variable in that case, only when the file is genuinely
 absent.
 
+This section formalises credential-\emph{value} resolution
+(\texttt{internal/secret}) only. Credential-\emph{path} resolution ---
+the identity-scoped \texttt{email.json} versus the legacy root
+fallback, and the daemon-scoped \texttt{daemon.json} that names the
+recipe-signing key independently of any identity's email or PGP
+config --- is specified in \texttt{docs/ARCHITECTURE.md}'s
+``Credentials'' section.
+
 %%----------------------------------------------------------------------
 \section{Message Receive Path}
 %%----------------------------------------------------------------------
@@ -374,11 +439,26 @@ extends the same skip to any host (Design Invariant~10).
 
 \begin{schema}{SelectFolder}
   \Delta IMAPConnection \\
-  folder? : CREDNAME
+  folder? : FOLDERNAME
   \where
   state = imapConnected \lor state = imapSelected \\
   state' = imapSelected
 \end{schema}
+
+\begin{schema}{Message}
+  id : MSGID \\
+  headers : HEADER \pfun BODY \\
+  raw : RAWBYTES \\
+  level : TrustLevel
+\end{schema}
+
+\texttt{Message} names the shape the fetch/parse pipeline below
+produces: headers map by field name to a single value (multi-valued
+headers, e.g.\ repeated \texttt{Received} lines, are folded before
+this point and are out of scope for this schema), $raw$ is the
+untouched RFC~822 bytes used for PGP verification, and $level$ is
+the classification \texttt{ClassifyTrust} assigns once phase~2 (PGP
+verification, when applicable) has run.
 
 \subsection{Fetch and Parse}
 
@@ -421,15 +501,28 @@ RFC~822 bytes are parsed through a pipeline:
 
 \begin{schema}{SendState}
   smtpAvailable : ZBOOL \\
+  signingRequired : ZBOOL \\
   method! : SendMethod
   \where
-  smtpAvailable = ztrue \implies method! = smProtonSMTP \\
-  smtpAvailable = zfalse \implies method! = smResend
+  (smtpAvailable = ztrue \implies method! = smSMTP) \\
+  \land \\
+  (smtpAvailable = zfalse \land signingRequired = zfalse
+    \implies method! = smResend) \\
+  \land \\
+  (smtpAvailable = zfalse \land signingRequired = ztrue
+    \implies method! = smFailed)
 \end{schema}
 
-The send path attempts Proton Bridge SMTP first.  If the Bridge is
-unreachable (a TCP dial to the SMTP port times out in 2~seconds),
-the Resend API is used as fallback.
+The send path attempts the configured SMTP transport first.  If that
+transport is unreachable (a TCP dial to the SMTP port times out in
+2~seconds), the Resend API is used as fallback --- unless the
+outbound message must be PGP-signed or encrypted, in which case
+there is no fallback at all: Resend has no raw-MIME API and cannot
+preserve a \texttt{multipart/signed} or \texttt{multipart/encrypted}
+envelope, so the send fails outright ($method! = smFailed$).
+\texttt{SendState} models which \emph{route} is chosen, not whether
+the chosen route actually preserved the envelope it composed --- see
+\S~PGP Signing for the transport-validation gap that leaves.
 
 \subsection{Proton Bridge SMTP}
 
@@ -477,7 +570,7 @@ the system \texttt{gpg} binary.  It never uses a Go PGP library ---
 \texttt{gpg} handles keyring management, trust models, and
 signature formats.
 
-\begin{schema}{GPGEnvironment}
+\begin{schema}{VerifyEnvironment}
   systemKeys : \power KEYID \\
   importedKeys : \power KEYID \\
   isolated : ZBOOL
@@ -485,6 +578,17 @@ signature formats.
   isolated = ztrue \\
   importedKeys \subseteq systemKeys
 \end{schema}
+
+\texttt{VerifyEnvironment} models \emph{inbound signature
+verification only}.  The $isolated = ztrue$ invariant does not hold
+for the PGP subsystem as a whole: the Sign Flow below, and
+decryption, deliberately use the caller's own system keyring
+(\texttt{internal/pgp/sign.go}, \texttt{decrypt.go}) because that is
+where the owner's private key already lives, and no isolated homedir
+could sign or decrypt with it.  Do not read this schema, or Key
+Property~3 below, as a claim about signing or decryption --- both
+are the one part of the PGP subsystem that is intentionally not
+isolated, by the same Design Invariant~3 that states it in prose.
 
 Every verification runs in an isolated GNUPGHOME under
 \texttt{/tmp/bg-*}.  The short path prefix avoids the 108-byte
@@ -508,6 +612,21 @@ Unix socket path limit for \texttt{gpg-agent}.
     and key ID.
   \item Remove the temporary directory.
 \end{enumerate}
+
+\begin{schema}{VerifyInboundResult}
+  VerifyEnvironment \\
+  valid! : ZBOOL \\
+  keyID! : KEYID \\
+  signer! : SIGNER
+\end{schema}
+
+\texttt{VerifyInboundResult} is the shape the \texttt{verify\_signature}
+MCP tool actually returns (trust level, validity, key ID, signer ---
+see \S~MCP Tool Surface); the seven-step Verify Flow above computes
+it, but is not itself formalised step by step, in keeping with this
+document's level of abstraction: the schemas here fix the
+\emph{decision logic} (what a given verification outcome means), not
+the byte-level GPG plumbing that produces it.
 
 \subsection{Sign Flow}
 
@@ -735,6 +854,258 @@ all operations:
 \end{itemize}
 
 %%----------------------------------------------------------------------
+\section{Daemon Formalisation}
+%%----------------------------------------------------------------------
+
+The sections above cover \texttt{beadle-email}.  \texttt{beadle-daemon}
+is a second binary with its own state and its own trust boundary;
+this section formalises the three pieces of daemon-only state a
+defect audit found completely unmodeled: pipeline lifecycle,
+per-contact permission, and command-file signature verification ---
+plus the gate that composes all three, together with the email
+channel's own trust model, into one admission decision.  Nothing
+here models \emph{inter-stage file-flow} --- attachments or generated
+artifacts passed between pipeline stages as file references, rather
+than only through the \texttt{pipe} value (\S~Pipeline Orchestrator).
+That is designed (DES-032) but not implemented: \texttt{Command} has
+no file-flow fields today, and a schema for it here would
+misrepresent designed-only behaviour as shipped.  This is distinct
+from --- and does not touch --- the pipeline-\emph{record} persistence
+and retention sweep \S~Pipeline Persistence describes, which is real,
+shipped code.
+
+\begin{zed}
+  [CMDID]
+\end{zed}
+
+$CMDID$ identifies one command file by its declared name (the map
+key in \texttt{internal/daemon.Command}'s registry), not by its
+file path or its content hash.
+
+\subsection{Pipeline Lifecycle}
+
+\begin{zed}
+  PipelineStatus ::= psRunning | psFailed | psCompleted
+\end{zed}
+
+Three states, matching \texttt{internal/daemon/pipeline.go}'s
+\texttt{Status} field exactly: $psRunning$ while a pipeline's stages
+are still executing, $psFailed$ on any stage error or on daemon
+restart with the pipeline still in flight (Crash Recovery, Key
+Property~9 below), $psCompleted$ once every stage --- including the
+auto-appended reply --- has finished.  A completed pipeline may
+still carry a non-fatal auto-reply error (\texttt{Pipeline.Error});
+\texttt{PipelineStatus} says nothing about that field, by design ---
+test $status$ for success, not $Error$, exactly as the Go comment on
+\texttt{Pipeline.Error} instructs.
+
+\begin{schema}{Pipeline}
+  status : PipelineStatus
+\end{schema}
+
+\begin{schema}{PipelineTransition}
+  \Delta Pipeline
+  \where
+  (status \neq psRunning \implies status' = status) \\
+  \land \\
+  (status' = psRunning \implies status = psRunning)
+\end{schema}
+
+\texttt{PipelineTransition} states the property this section exists
+to capture: a pipeline that leaves $psRunning$ never returns to it,
+and in fact never changes state again at all --- $psFailed$ and
+$psCompleted$ are absorbing.  The first conjunct pins a
+non-running pipeline's status; the second forbids any transition
+\emph{into} $psRunning$ except from $psRunning$ itself.  Together
+they leave exactly one live transition family: $psRunning \to
+psRunning$, $psRunning \to psFailed$, and $psRunning \to
+psCompleted$ are all permitted; nothing else is.
+
+\subsection{Per-Contact Permission}
+
+\begin{schema}{Permission}
+  read : ZBOOL \\
+  write : ZBOOL \\
+  execute : ZBOOL
+\end{schema}
+
+The three bits are independent --- \texttt{Permission} carries no
+predicate part because nothing in \texttt{internal/contacts}
+couples them.  A contact can hold $execute = ztrue \land read =
+zfalse$ (execute-only) exactly as validly as any other combination;
+this schema does not narrow that.
+
+\subsection{Command-File Signature Verification: Decision Logic}
+
+This formalises the outcome of the procedure \S~PGP
+Subsystem's own \S~Command-File Signature Verification already
+describes step by step; it does not repeat those steps.
+
+\begin{zed}
+  CommandSigOutcome ::= csGood | csMissing | csWrongKey
+                       | csExpired | csInvalid
+\end{zed}
+
+The five outcomes correspond exactly to
+\texttt{internal/daemon/signature.go}'s \texttt{SignatureReason}
+constants ($csMissing$, $csInvalid$, $csWrongKey$, $csExpired$) plus
+$csGood$, its unstated fifth case: a $nil$ \texttt{error} from
+\texttt{VerifySignature}.  $csInvalid$ covers everything the Go
+comment calls \emph{``do not trust this signature''} ---
+\texttt{BADSIG}, \texttt{ERRSIG}, \texttt{REVKEYSIG},
+\texttt{EXPSIG}, a malformed owner fingerprint, and any unrecognised
+\texttt{gpg --status-fd} line, none of which get their own outcome
+because none of them get their own \texttt{SignatureReason} in the
+Go code either.
+
+\begin{schema}{CommandSigInput}
+  fingerprintValid : ZBOOL \\
+  hasSignature : ZBOOL \\
+  importedKeyCount : \nat \\
+  keyExpired : ZBOOL \\
+  sawGoodSig : ZBOOL \\
+  sawExpKeySig : ZBOOL \\
+  sawNoPubkey : ZBOOL \\
+  sawBadOrErrSig : ZBOOL
+\end{schema}
+
+$fingerprintValid$ is whether the configured owner key ID matches a
+40-hex OpenPGP fingerprint.  $importedKeyCount$ is the number of
+keys with exactly that fingerprint found in the isolated keyring
+after import --- this is what makes command-file verification
+\emph{stricter} than inbound message verification:
+\texttt{VerifyEnvironment} (above) imports every system key, or
+whatever key the message itself attached, with no uniqueness
+requirement; \texttt{CommandSigInput} imports \emph{one named key}
+and treats anything other than exactly one match as a hard failure,
+never a ``pick one.''  The four $saw$-prefixed fields mirror
+\texttt{classifyStatusLines}'s four collected \texttt{[GNUPG:]}
+status lines; $sawBadOrErrSig$ covers
+\texttt{BADSIG}/\texttt{ERRSIG}/\texttt{REVKEYSIG}/\texttt{EXPSIG}
+together, since all four collapse to the same $csInvalid$ outcome
+below.
+
+\begin{schema}{VerifyCommandSignature}
+  CommandSigInput \\
+  outcome! : CommandSigOutcome
+  \where
+  (fingerprintValid = zfalse \implies outcome! = csInvalid) \\
+  \land \\
+  (fingerprintValid = ztrue \land hasSignature = zfalse
+    \implies outcome! = csMissing) \\
+  \land \\
+  (fingerprintValid = ztrue \land hasSignature = ztrue
+    \land importedKeyCount \neq 1
+    \implies outcome! = csInvalid) \\
+  \land \\
+  (fingerprintValid = ztrue \land hasSignature = ztrue
+    \land importedKeyCount = 1 \land keyExpired = ztrue
+    \implies outcome! = csExpired) \\
+  \land \\
+  (fingerprintValid = ztrue \land hasSignature = ztrue
+    \land importedKeyCount = 1 \land keyExpired = zfalse
+    \land sawNoPubkey = ztrue
+    \implies outcome! = csWrongKey) \\
+  \land \\
+  (fingerprintValid = ztrue \land hasSignature = ztrue
+    \land importedKeyCount = 1 \land keyExpired = zfalse
+    \land sawNoPubkey = zfalse \land sawGoodSig = ztrue
+    \implies outcome! = csGood) \\
+  \land \\
+  (fingerprintValid = ztrue \land hasSignature = ztrue
+    \land importedKeyCount = 1 \land keyExpired = zfalse
+    \land sawNoPubkey = zfalse \land sawGoodSig = zfalse
+    \land sawExpKeySig = ztrue
+    \implies outcome! = csExpired) \\
+  \land \\
+  (fingerprintValid = ztrue \land hasSignature = ztrue
+    \land importedKeyCount = 1 \land keyExpired = zfalse
+    \land sawNoPubkey = zfalse \land sawGoodSig = zfalse
+    \land sawExpKeySig = zfalse
+    \implies outcome! = csInvalid)
+\end{schema}
+
+The eight cases are exhaustive and mutually exclusive by the same
+construction as \texttt{ClassifyTrust}: each guard rules out every
+earlier one, so exactly one implication's antecedent holds for any
+assignment to the eight inputs, and $outcome!$ is forced accordingly.
+Only one branch reaches $csGood$ --- everything else, including an
+unrecognised status line that matches none of the four $saw$ flags,
+is an error.  That is \texttt{classifyStatusLines}'s own invariant,
+stated in its comment as ``there is no implicit fallthrough to
+nil''; this schema is that invariant, checked.
+
+The canonical payload that gets signed is \texttt{cmd} with its
+\texttt{Signature} field cleared to the empty string
+(\texttt{CanonicalCommandBytes}) --- not modeled as a separate
+schema here, in keeping with this document's practice of leaving
+byte-level serialisation to prose (the same choice already made for
+\texttt{ComposeRaw} and \texttt{ParseMIME}).  The property that
+matters formally is that signing and verifying agree on what
+``canonical'' means because both call the same function; nothing in
+\texttt{CommandSigInput} depends on \texttt{Signature}'s own bytes.
+
+\begin{schema}{LoadedCommands}
+  commands : \power CMDID \\
+  sigOutcome : CMDID \pfun CommandSigOutcome
+  \where
+  commands = \{ c : \dom sigOutcome | sigOutcome(c) = csGood \}
+\end{schema}
+
+Command-file signature verification does not happen per email: it
+happens once, when \texttt{LoadCommands} reads the command directory
+at daemon startup (\texttt{internal/daemon/command.go}).  A command
+that fails verification is simply absent from $commands$ --- it can
+never be selected by the planner for any message, however trusted.
+\texttt{LoadedCommands} is the daemon's runnable command set; it
+does not vary per inbound message the way \texttt{DaemonGate} below
+does.
+
+\subsection{The Execution Gate}
+
+\begin{schema}{DaemonGate}
+  Permission \\
+  LoadedCommands \\
+  trust : TrustLevel \\
+  keyBound : ZBOOL \\
+  cmd? : CMDID \\
+  admit! : ZBOOL
+  \where
+  admit! = ztrue \iff
+    ((trust = trusted) \lor (trust = verified \land keyBound = ztrue))
+    \land execute = ztrue \land cmd? \in commands
+\end{schema}
+
+\texttt{DaemonGate} is where the trust model (\S~Trust Model),
+per-contact permission, and command-file signature verification
+meet.  Execution requires all three, independently: transport trust
+at $trusted$ or $verified$ \emph{and} the sender's $execute$ bit
+\emph{and} a command that survived \texttt{VerifyCommandSignature}
+at load time.
+
+$keyBound$ makes explicit an asymmetry the code has but the trust
+model above does not state: for daemon execution, $verified$ is not
+enough on its own.  \texttt{internal/daemon/handler.go}'s
+\texttt{verifyTrust} additionally requires that, when a contact has
+a registered \texttt{GPGKeyID}, the signing key on the message
+actually matches it --- a mismatch is treated as $untrusted$, not as
+``verified but unbound.''  $keyBound$ is $ztrue$ exactly when the
+contact has no registered key, or the signer's key matches the one
+it has.  The Go implementation folds this directly into the
+\texttt{TrustLevel} it returns (a key mismatch computes as
+$untrusted$ before \texttt{DaemonGate} ever sees it); this schema
+pulls the two conditions apart because that is what makes the
+asymmetry with \texttt{beadle-email}'s own, unbound notion of
+$verified$ visible at all.  Read literally, \texttt{DaemonGate}'s
+$trust = verified \land keyBound = ztrue$ disjunct is therefore
+never the operative check in the running system ---
+\texttt{verifyTrust} has already collapsed it into $trust$ itself by
+the time this schema's predicate runs --- but the two formulations
+denote the same function, and only the decomposed one documents why
+``verified'' means something stronger here than it does for
+\texttt{beadle-email}'s own tools.
+
+%%----------------------------------------------------------------------
 \section{Daemon Architecture}
 %%----------------------------------------------------------------------
 
@@ -880,7 +1251,7 @@ inspection and testing:
     \texttt{ResolveCredential} schema enforces this ordering.
 
   \item \textbf{GPG isolation (verification only)}: the $isolated =
-    ztrue$ invariant in \texttt{GPGEnvironment} ensures no PGP
+    ztrue$ invariant in \texttt{VerifyEnvironment} ensures no PGP
     \emph{verification} operation writes to the user's system
     keyring.  Signing and decryption are a deliberate exception ---
     they use the owner's own key from the system keyring, since that
@@ -898,7 +1269,10 @@ inspection and testing:
   \item \textbf{Trust gate before creation}: only messages with
     transport trust $\geq verified$ (PGP) or $= trusted$ (Proton E2E)
     AND contact \texttt{x}-bit reach mission or pipeline creation
-    (\S~Detection and Trust Gate).
+    (\S~Detection and Trust Gate) --- formalised as
+    \texttt{DaemonGate} in \S~Daemon Formalisation, which also states
+    the command-signature and key-binding conditions this one-line
+    summary elides.
 
   \item \textbf{Auto-reply}: every pipeline terminates with a reply
     to the originator.  Success sends the final output.  Failure
@@ -912,6 +1286,31 @@ inspection and testing:
   \item \textbf{Crash recovery}: pipeline state is persisted at each
     transition.  On restart, in-flight pipelines are marked failed
     and originators are notified.
+
+  \item \textbf{Command-signature strictness}:
+    \texttt{VerifyCommandSignature} accepts a command file only when
+    exactly one key with the configured owner fingerprint is
+    present in the isolated keyring and \texttt{gpg --status-fd}
+    reports $GOODSIG$; every other combination --- zero or multiple
+    matching keys, a missing signature, an expired key, or any
+    non-$GOODSIG$ status line --- is $csInvalid$, $csMissing$,
+    $csExpired$, or $csWrongKey$, never a silent pass.
+
+  \item \textbf{Pipeline absorption}: \texttt{PipelineTransition}
+    proves $psFailed$ and $psCompleted$ are absorbing states --- a
+    pipeline that leaves $psRunning$ never returns to it, and never
+    moves between the two terminal states either.
+
+  \item \textbf{Daemon execution composition}: \texttt{DaemonGate}
+    requires transport trust at $trusted$ or $verified$, the
+    sender's $execute$ bit, \emph{and} a command that passed
+    \texttt{VerifyCommandSignature} at load time --- three
+    independently-sourced checks, none of which substitutes for
+    another.  For daemon execution specifically, $verified$ carries
+    an additional obligation --- the signing key must match the
+    contact's registered key when one is registered --- that
+    \texttt{beadle-email}'s own tools do not require of a merely
+    $verified$ message.
 \end{enumerate}
 
 \end{document}
