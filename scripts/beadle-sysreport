@@ -22,5 +22,22 @@ else
   read -r load_1m load_5m load_15m <<<"$loads"
 fi
 
+# set -e only catches df/uptime/awk/sed FAILING -- it says nothing about
+# whether their output actually parsed. A field this script can't extract
+# (an empty df column, an unrecognized uptime wording the sed above
+# misses) leaves the corresponding variable empty or non-numeric, and an
+# unvalidated printf would still exit 0 with invalid JSON on stdout --
+# malformed output the daemon's output_schema gate on THIS recipe catches,
+# but nothing stops the same script from being reused under a recipe with
+# output_schema: text, where nothing downstream would ever notice.
+# Validate before emitting rather than depending on the caller to.
+for field in disk_free_kb load_1m load_5m load_15m; do
+  value=${!field}
+  if ! [[ $value =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    echo "beadle-sysreport: $field did not parse as a number (got: '$value')" >&2
+    exit 1
+  fi
+done
+
 printf '{"disk_free_kb": %s, "load_1m": %s, "load_5m": %s, "load_15m": %s}\n' \
   "$disk_free_kb" "$load_1m" "$load_5m" "$load_15m"

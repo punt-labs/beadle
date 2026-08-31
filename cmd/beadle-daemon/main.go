@@ -26,6 +26,12 @@ var version = "dev"
 var rootCmd = &cobra.Command{
 	Use:   "beadle-daemon",
 	Short: "beadle-daemon: background daemon for Beadle",
+	// Without this, every `verify` verdict is buried under a help dump
+	// whose --signer line alone wraps and dominates the screen -- the
+	// operator reads "I used the command wrong" when the command actually
+	// worked and returned a verdict. cmd/beadle-email/main.go already sets
+	// this; beadle-daemon had drifted from its own sibling's pattern.
+	SilenceUsage: true,
 }
 
 var runCmd = &cobra.Command{
