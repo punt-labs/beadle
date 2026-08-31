@@ -74,10 +74,27 @@ Deploy signed recipes to `~/.punt-labs/beadle/commands/` (the directory
 `beadle-daemon run` loads from); re-sign a file whenever its content
 changes -- the signature covers the whole command definition.
 
+## Checking a signature later
+
+`sign` already proves the round trip verifies at sign time. `verify` answers
+the question that comes up afterward -- "why isn't my recipe loading?" --
+without starting the daemon and reading logs:
+
+```bash
+beadle-daemon verify ~/.punt-labs/beadle/commands/sysreport.yaml
+```
+
+With no `--signer`, `verify` resolves the authorizer key from `daemon.json`
+-- the exact key `beadle-daemon` itself trusts -- so it answers "would the
+daemon load this file," not just "did signing succeed." Pass `--signer` to
+check against a different key instead. It reports one of `good`,
+`missing`, `wrong-key`, `key-expired`, or `invalid`, and exits non-zero on
+anything but `good`.
+
 ## A known gap
 
 `beadle-daemon` is not currently shipped in release binaries (`beadle-5ma`).
 An operator running only the released `beadle-email` plugin cannot reach
-`init`, `sign`, or `run` at all. Building these two tools was what proved
-that gap actually blocks every recipe, not just these two -- see the mission
-result for `beadle-7gm`.
+`init`, `sign`, `verify`, or `run` at all. Building these tools was what
+proved that gap actually blocks every recipe, not just these two -- see the
+mission result for `beadle-7gm`.
