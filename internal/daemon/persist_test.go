@@ -3,8 +3,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -294,4 +297,446 @@ func TestPipelineStore_PruneSkipsCorruptFiles(t *testing.T) {
 
 	_, err = os.Stat(filepath.Join(dir, "bad.json"))
 	assert.NoError(t, err, "a corrupt file must be skipped, not deleted")
+}
+
+// -- beadle-721a: periodic pruning --
+
+// TestPipelineStore_PruneTick_LogsCountsSeparately proves pruneTick never
+// tells the operator it "removed aged pipeline records" when all it did
+// was reap an orphaned .tmp- file, or the reverse. A single combined
+// count logged under one message overstates whichever half of the work
+// didn't happen.
+func TestPipelineStore_PruneTick_LogsCountsSeparately(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func(t *testing.T, s *PipelineStore, dir string)
+		wantAged bool
+		wantTemp bool
+	}{
+		{
+			name: "only an orphaned temp file",
+			setup: func(t *testing.T, _ *PipelineStore, dir string) {
+				t.Helper()
+				tmpPath := filepath.Join(dir, ".tmp-orphan-1.json")
+				require.NoError(t, os.WriteFile(tmpPath, []byte(`{}`), 0o600))
+				old := time.Now().Add(-1 * time.Hour)
+				require.NoError(t, os.Chtimes(tmpPath, old, old))
+			},
+			wantAged: false,
+			wantTemp: true,
+		},
+		{
+			name: "only an aged pipeline record",
+			setup: func(t *testing.T, s *PipelineStore, _ string) {
+				t.Helper()
+				p := &Pipeline{Version: 1, ID: "old-done", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: time.Now().Add(-60 * 24 * time.Hour)}
+				require.NoError(t, s.Save(p))
+			},
+			wantAged: true,
+			wantTemp: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			logger, buf := testLoggerCapture()
+			s := &PipelineStore{Dir: dir, Logger: logger}
+			tt.setup(t, s, dir)
+
+			s.pruneTick(DefaultRetention)
+
+			if tt.wantAged {
+				assert.Contains(t, buf.String(), "removed aged pipeline records")
+			} else {
+				assert.NotContains(t, buf.String(), "removed aged pipeline records")
+			}
+			if tt.wantTemp {
+				assert.Contains(t, buf.String(), "reaped orphaned temp files")
+			} else {
+				assert.NotContains(t, buf.String(), "reaped orphaned temp files")
+			}
+		})
+	}
+}
+
+func TestPipelineStore_StartPruning_RunsPeriodically(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), PruneInterval: 5 * time.Millisecond}
+
+	old := &Pipeline{Version: 1, ID: "old-done", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: time.Now().Add(-60 * 24 * time.Hour)}
+	require.NoError(t, s.Save(old))
+
+	s.StartPruning(DefaultRetention)
+	defer s.StopPruning()
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(filepath.Join(dir, "old-done.json"))
+		return os.IsNotExist(err)
+	}, time.Second, 5*time.Millisecond, "StartPruning must remove an aged record without a second manual Prune call")
+
+	// A pipeline that becomes eligible only AFTER StartPruning is already
+	// running must still be caught by a later tick -- proves the loop
+	// really is periodic, not just an immediate one-shot in disguise.
+	laterOld := &Pipeline{Version: 1, ID: "later-old-done", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: time.Now().Add(-60 * 24 * time.Hour)}
+	require.NoError(t, s.Save(laterOld))
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(filepath.Join(dir, "later-old-done.json"))
+		return os.IsNotExist(err)
+	}, time.Second, 5*time.Millisecond, "a record aged after StartPruning began must still be pruned on a subsequent tick")
+}
+
+func TestPipelineStore_StopPruning_StopsTheGoroutine(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), PruneInterval: 5 * time.Millisecond}
+
+	s.StartPruning(DefaultRetention)
+	s.StopPruning()
+
+	// Written after the goroutine has fully stopped (StopPruning waits).
+	// If the goroutine were still running, this would be pruned on its
+	// very next tick.
+	old := &Pipeline{Version: 1, ID: "old-done", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: time.Now().Add(-60 * 24 * time.Hour)}
+	require.NoError(t, s.Save(old))
+
+	time.Sleep(50 * time.Millisecond)
+
+	_, err := os.Stat(filepath.Join(dir, "old-done.json"))
+	assert.NoError(t, err, "a record saved after StopPruning must survive: the goroutine must actually be stopped")
+}
+
+func TestPipelineStore_StopPruning_WithoutStartIsNoop(t *testing.T) {
+	s := &PipelineStore{Dir: t.TempDir(), Logger: testLogger()}
+	assert.NotPanics(t, func() { s.StopPruning() })
+}
+
+func TestPipelineStore_StopPruning_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), PruneInterval: 5 * time.Millisecond}
+	s.StartPruning(DefaultRetention)
+	s.StopPruning()
+	assert.NotPanics(t, func() { s.StopPruning() })
+}
+
+// TestPipelineStore_StartPruning_SecondCallIsNoop proves a second
+// StartPruning call while the first goroutine is still running does not
+// orphan it. Before this was fixed, the second call unconditionally
+// overwrote s.pruneStop, so StopPruning closed only the second (newer)
+// channel: the first goroutine, still selecting on the original channel
+// nobody held a reference to anymore, never returned, and pruneWG.Wait()
+// blocked forever. Run under a timeout so a regression fails the test
+// instead of hanging the whole suite.
+func TestPipelineStore_StartPruning_SecondCallIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), PruneInterval: 5 * time.Millisecond}
+
+	s.StartPruning(DefaultRetention)
+	s.StartPruning(DefaultRetention) // must be a no-op, not a second goroutine
+
+	done := make(chan struct{})
+	go func() {
+		s.StopPruning()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("StopPruning did not return: a second StartPruning call orphaned the first goroutine")
+	}
+}
+
+// TestPipelineStore_StartStopPruning_ConcurrentIsWellDefined hammers
+// StartPruning and StopPruning from many goroutines at once. Before
+// StopPruning held pruneMu across its Wait, it cleared pruneStop and
+// released the lock before waiting: a concurrent StartPruning could see
+// pruneStop == nil in that window and call pruneWG.Add(1) while the
+// outgoing goroutine's count was still live, which sync.WaitGroup either
+// panics on ("WaitGroup misuse: Add called concurrently with Wait") or
+// resolves by hanging Wait on a goroutine nobody told to stop. Both
+// failure shapes are caught here: a panic is recovered and reported, a
+// hang trips the timeout.
+func TestPipelineStore_StartStopPruning_ConcurrentIsWellDefined(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), PruneInterval: time.Millisecond}
+
+	const n = 100
+	var wg sync.WaitGroup
+	panics := make(chan any, n*2)
+
+	safeCall := func(f func()) {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				panics <- r
+			}
+		}()
+		f()
+	}
+
+	for i := 0; i < n; i++ {
+		wg.Add(2)
+		go safeCall(func() { s.StartPruning(DefaultRetention) })
+		go safeCall(func() { s.StopPruning() })
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("concurrent StartPruning/StopPruning hung: the pruneWG contract was violated")
+	}
+
+	select {
+	case r := <-panics:
+		t.Fatalf("concurrent StartPruning/StopPruning panicked: %v", r)
+	default:
+	}
+
+	s.StopPruning() // leave nothing running behind
+}
+
+// TestPipelineStore_Prune_ConcurrentWithSave exercises the invariant
+// StartPruning's doc comment claims: Prune walking the pipeline
+// directory while Executor.Run's goroutines call Save on their own
+// pipelines is safe without a lock. Run with -race (mandatory for this
+// repo) so the race detector, not just the assertions below, is a judge.
+func TestPipelineStore_Prune_ConcurrentWithSave(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger()}
+
+	const nPipelines = 20
+	const nSavesPerPipeline = 10
+
+	var wg sync.WaitGroup
+	var pruneErrs int32
+
+	// Writers: each simulates one pipeline's lifecycle -- "running" for
+	// most of its saves, an aged CreatedAt, then "completed" on its last
+	// save. A concurrent Prune pass must never remove a "running" file,
+	// and the final "completed" state must always survive to be read
+	// back intact (never a torn or corrupt file).
+	for i := 0; i < nPipelines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			p := &Pipeline{
+				Version:   1,
+				ID:        fmt.Sprintf("concurrent-%d", i),
+				Status:    "running",
+				Email:     EmailMeta{From: "x@test.com"},
+				CreatedAt: time.Now().Add(-60 * 24 * time.Hour), // aged from the start
+			}
+			for j := 0; j < nSavesPerPipeline; j++ {
+				if j == nSavesPerPipeline-1 {
+					p.Status = "completed"
+				}
+				if err := s.Save(p); err != nil {
+					t.Errorf("save pipeline %s: %v", p.ID, err)
+				}
+			}
+		}(i)
+	}
+
+	// Pruner: hammers Prune concurrently with the writers above.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			if _, err := s.Prune(DefaultRetention); err != nil {
+				atomic.AddInt32(&pruneErrs, 1)
+			}
+		}
+	}()
+
+	wg.Wait()
+	assert.Zero(t, atomic.LoadInt32(&pruneErrs), "Prune must never error while racing concurrent Save calls")
+
+	// wg.Wait() above only returns once every writer goroutine AND the
+	// pruner goroutine have both returned, so no Save or Prune call is
+	// still in flight below. Every pipeline's last write set its status
+	// to "completed" and its CreatedAt was aged from the moment it was
+	// first created, so by this point every record on disk -- whatever
+	// the concurrent race above already removed or left behind -- is
+	// completed and old enough to prune. One more Prune call, now fully
+	// sequential, must therefore remove everything that is left: the
+	// directory ends up completely empty, which is the real claim this
+	// test makes about "no lock needed" -- not merely that removed does
+	// not exceed nPipelines, which held trivially either way.
+	removed, err := s.Prune(DefaultRetention)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, removed, nPipelines, "Prune cannot remove more files than were ever written")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		data, readErr := os.ReadFile(filepath.Join(dir, e.Name()))
+		require.NoError(t, readErr)
+		var p Pipeline
+		require.NoError(t, json.Unmarshal(data, &p), "every surviving file must be valid, complete JSON, never a torn write")
+	}
+	assert.Empty(t, entries, "every pipeline finished completed and aged with no writer or pruner still running; the final sequential Prune call must remove all of them")
+}
+
+// -- beadle-28ew: orphaned .tmp- files --
+
+func TestPipelineStore_Prune_ReapsOrphanedTempFile(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger()}
+
+	tmpPath := filepath.Join(dir, ".tmp-orphan-1.json")
+	require.NoError(t, os.WriteFile(tmpPath, []byte(`{"id":"orphan-1"`), 0o600)) // deliberately truncated JSON
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	require.NoError(t, os.Chtimes(tmpPath, oldMtime, oldMtime))
+
+	removed, err := s.Prune(DefaultRetention)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
+
+	_, err = os.Stat(tmpPath)
+	assert.True(t, os.IsNotExist(err), "a .tmp- file older than the orphan threshold must be reaped")
+}
+
+func TestPipelineStore_Prune_KeepsFreshTempFile(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger()}
+
+	tmpPath := filepath.Join(dir, ".tmp-inflight-1.json")
+	require.NoError(t, os.WriteFile(tmpPath, []byte(`{"id":"inflight-1"}`), 0o600))
+	// mtime is "now" -- indistinguishable from a write-then-rename in
+	// flight, so Prune must leave it alone.
+
+	removed, err := s.Prune(DefaultRetention)
+	require.NoError(t, err)
+	assert.Equal(t, 0, removed)
+
+	_, err = os.Stat(tmpPath)
+	assert.NoError(t, err, "a fresh .tmp- file must never be reaped: it may just be mid-rename")
+}
+
+func TestPipelineStore_Prune_TempFileAgeJudgedByFilesystemNotContent(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger()}
+
+	// Not valid JSON at all -- a torn write may not even parse. Age must
+	// still be judged by mtime, never by trying to unmarshal this.
+	tmpPath := filepath.Join(dir, ".tmp-torn-1.json")
+	require.NoError(t, os.WriteFile(tmpPath, []byte(`{not json at all`), 0o600))
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	require.NoError(t, os.Chtimes(tmpPath, oldMtime, oldMtime))
+
+	removed, err := s.Prune(DefaultRetention)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
+}
+
+// TestPipelineStore_Prune_TempFileVanishedBeforeStatIsSilent proves a
+// .tmp- file that a concurrent Save already renamed into place by the
+// time pruneOrphanedTemp gets to it is a silent skip, not a warning: the
+// rename working as intended is not a fault. The file is removed here
+// (rather than actually raced with a concurrent Save) so the ENOENT is
+// deterministic instead of depending on goroutine scheduling.
+func TestPipelineStore_Prune_TempFileVanishedBeforeStatIsSilent(t *testing.T) {
+	dir := t.TempDir()
+	logger, buf := testLoggerCapture()
+	s := &PipelineStore{Dir: dir, Logger: logger}
+
+	path := filepath.Join(dir, ".tmp-vanished-1.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{}`), 0o600))
+	require.NoError(t, os.Remove(path))
+
+	removed := s.pruneOrphanedTemp(path, s.now())
+	assert.False(t, removed, "a file that already vanished cannot itself be removed by this call")
+	assert.NotContains(t, buf.String(), "unstatable temp file",
+		"a benign ENOENT from a concurrent Save's rename must not be logged as a warning")
+}
+
+// TestPipelineStore_Prune_AgedFileVanishedBeforeReadIsSilent is
+// pruneOrphanedTemp's counterpart for a regular (non-.tmp-) pipeline
+// record: a file another concurrent Prune call already removed between
+// ReadDir and this read is gone, not broken.
+func TestPipelineStore_Prune_AgedFileVanishedBeforeReadIsSilent(t *testing.T) {
+	dir := t.TempDir()
+	logger, buf := testLoggerCapture()
+	s := &PipelineStore{Dir: dir, Logger: logger}
+
+	path := filepath.Join(dir, "vanished-1.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"id":"vanished-1"}`), 0o600))
+	require.NoError(t, os.Remove(path))
+
+	removed := s.pruneAgedFile(path, s.now())
+	assert.False(t, removed, "a file that already vanished cannot itself be removed by this call")
+	assert.NotContains(t, buf.String(), "unreadable pipeline file",
+		"a benign ENOENT from a concurrent Prune's remove must not be logged as a warning")
+}
+
+// TestPipelineStore_Prune_ConcurrentPruneCallsDoNotWarnOnVanishedFile
+// exercises the same race through the public Prune entry point: two
+// goroutines racing to prune the same directory of aged, non-running
+// records will, for at least one of the many files, have one goroutine
+// remove a file the other has already listed via ReadDir but not yet
+// read -- and that read must not log a warning.
+func TestPipelineStore_Prune_ConcurrentPruneCallsDoNotWarnOnVanishedFile(t *testing.T) {
+	dir := t.TempDir()
+	logger, buf := testLoggerCapture()
+	s := &PipelineStore{Dir: dir, Logger: logger}
+
+	const nFiles = 200
+	old := time.Now().Add(-60 * 24 * time.Hour)
+	for i := 0; i < nFiles; i++ {
+		p := &Pipeline{Version: 1, ID: fmt.Sprintf("race-%d", i), Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: old}
+		require.NoError(t, s.Save(p))
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = s.Prune(DefaultRetention)
+		}()
+	}
+	wg.Wait()
+
+	assert.NotContains(t, buf.String(), "skip unreadable pipeline file during prune",
+		"two Prune calls racing to remove the same aged files must not log a benign ENOENT as a warning")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "both Prune calls together must have removed every aged record")
+}
+
+// TestPipelineStore_Prune_UsesInjectedClockForTempFileAge must depend on
+// "injected clock vs. wall clock", never on where wall clock happens to
+// sit relative to a hardcoded calendar date. An earlier version pinned
+// fixedNow to a literal date and moved the file's mtime to a point
+// relative to that literal; once wall clock passed the literal, the
+// mtime landed in the real past too, so a regression to a bare
+// time.Now() call would still judge the file aged and the test would
+// still pass -- it had stopped testing what its name claims. Pinning
+// fixedNow ahead of time.Now(), and leaving the file's mtime at its
+// real creation time, keeps the two clocks in a fixed relative order no
+// matter when the test runs: fresh by wall clock, aged by the injected
+// one.
+func TestPipelineStore_Prune_UsesInjectedClockForTempFileAge(t *testing.T) {
+	dir := t.TempDir()
+	fixedNow := time.Now().Add(2 * time.Hour)
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), Now: func() time.Time { return fixedNow }}
+
+	tmpPath := filepath.Join(dir, ".tmp-clock-1.json")
+	require.NoError(t, os.WriteFile(tmpPath, []byte(`{}`), 0o600))
+	// mtime is real wall-clock "now" -- fresh by real time (age ~0, well
+	// under tmpFileMaxAge), but 2 hours old by the injected clock (well
+	// over it). A correct age check (s.Now) removes it; a regression to
+	// time.Now() would not.
+
+	removed, err := s.Prune(DefaultRetention)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed, "age must be judged by the injected clock, not wall-clock time.Now()")
 }

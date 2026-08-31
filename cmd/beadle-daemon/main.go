@@ -62,14 +62,14 @@ var runCmd = &cobra.Command{
 		}
 		sweepStalePipelines(store, logger)
 
-		// Prune runs after the sweep above, not before: a pipeline this
-		// daemon just marked "failed" is only eligible for removal once
-		// it is no longer "running".
-		if removed, err := store.Prune(daemon.DefaultRetention); err != nil {
-			logger.Warn("prune pipeline records", "error", err)
-		} else if removed > 0 {
-			logger.Info("pruned aged pipeline records", "count", removed)
-		}
+		// StartPruning runs Prune once immediately -- after the sweep
+		// above, so a pipeline this daemon just marked "failed" is
+		// eligible for removal on that first pass -- and then on
+		// DefaultPruneInterval for as long as the daemon runs. A daemon
+		// that stays up for months must keep enforcing retention, not
+		// just once at startup.
+		store.StartPruning(daemon.DefaultRetention)
+		defer store.StopPruning()
 
 		missionsTmpDir := filepath.Join(dataDir, "tmp", "missions")
 		if err := os.MkdirAll(missionsTmpDir, 0o750); err != nil {

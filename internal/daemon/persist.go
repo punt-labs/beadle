@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,19 @@ type PipelineStore struct {
 	// Now returns the current time. Nil means time.Now; tests override it
 	// to pin Prune's cutoff for exact boundary checks.
 	Now func() time.Time
+
+	// PruneInterval is how often StartPruning's goroutine calls Prune.
+	// Zero means DefaultPruneInterval; tests set it short to observe the
+	// loop tick without waiting a day.
+	PruneInterval time.Duration
+
+	// pruneMu guards pruneStop. StartPruning and StopPruning may be called
+	// from different goroutines -- nothing in the type's contract limits a
+	// caller to one goroutine, even though cmd/beadle-daemon's main.go
+	// happens to call both from the same one today.
+	pruneMu   sync.Mutex
+	pruneStop chan struct{}
+	pruneWG   sync.WaitGroup
 }
 
 // logger returns s.Logger, or slog.Default if unset. A store built without
@@ -27,6 +41,17 @@ func (s *PipelineStore) logger() *slog.Logger {
 		return s.Logger
 	}
 	return slog.Default()
+}
+
+// now returns s.Now(), or time.Now if s.Now is unset. Every age
+// calculation in this file -- Prune's cutoff and the orphaned-temp-file
+// check -- goes through this so a test can pin the clock once and get
+// deterministic boundaries everywhere.
+func (s *PipelineStore) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 // DefaultRetention is how long a pipeline record is kept on disk before
@@ -111,59 +136,240 @@ func (s *PipelineStore) LoadRunning() ([]*Pipeline, error) {
 	return running, nil
 }
 
-// Prune deletes pipeline records older than maxAge, judged by CreatedAt.
-// A record still "running" is left alone regardless of age: Prune must
-// never destroy the only record of a pipeline that might still be
-// executing. Call the startup stale-pipeline sweep (LoadRunning, mark
-// failed, Save) before Prune runs, so a pipeline orphaned by a daemon
-// crash is marked failed -- and therefore eligible for removal -- first.
-// Unreadable or corrupt files are logged and skipped, same as LoadRunning.
-// It returns the number of files removed.
+// tmpFileMaxAge is how long a .tmp-<id>.json file may exist before Prune
+// treats it as orphaned. Save writes this file and renames it into place
+// within milliseconds; a temp file that outlives tmpFileMaxAge means the
+// process died between the write and the rename, and nothing else will
+// ever clean it up -- LoadRunning and Prune's main loop both skip
+// ".tmp-" files by name because they cannot tell "mid-write" from
+// "abandoned" from the name alone. Minutes, not DefaultRetention's 30
+// days: a legitimate write-then-rename completes far faster than that.
+const tmpFileMaxAge = 5 * time.Minute
+
+// Prune deletes pipeline records older than maxAge, judged by CreatedAt,
+// and reaps orphaned .tmp- files (see tmpFileMaxAge). A record still
+// "running" is left alone regardless of age: Prune must never destroy
+// the only record of a pipeline that might still be executing. Call the
+// startup stale-pipeline sweep (LoadRunning, mark failed, Save) before
+// Prune runs, so a pipeline orphaned by a daemon crash is marked failed
+// -- and therefore eligible for removal -- first. Unreadable or corrupt
+// files are logged and skipped, same as LoadRunning. It returns the
+// number of files removed.
+//
+// Safe to call concurrently with Save (StartPruning does exactly that):
+// Save writes to a temp file and renames it into place, so a reader here
+// sees the old content or the new content, never a torn write, and every
+// pipeline has a distinct UUID filename, so Prune and Save never touch
+// the same bytes at the same instant.
 func (s *PipelineStore) Prune(maxAge time.Duration) (int, error) {
+	agedRemoved, tempRemoved, err := s.pruneCounts(maxAge)
+	return agedRemoved + tempRemoved, err
+}
+
+// pruneCounts is Prune's implementation, split into its two constituent
+// counts -- aged pipeline records and reaped orphaned .tmp- files -- so
+// pruneTick can log what actually happened instead of one combined
+// number that a temp-file-only run would misreport as "removed aged
+// pipeline records".
+func (s *PipelineStore) pruneCounts(maxAge time.Duration) (agedRemoved, tempRemoved int, err error) {
 	entries, err := os.ReadDir(s.Dir)
 	if os.IsNotExist(err) {
-		return 0, nil
+		return 0, 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("read pipeline dir %s: %w", s.Dir, err)
+		return 0, 0, fmt.Errorf("read pipeline dir %s: %w", s.Dir, err)
 	}
 
-	now := s.Now
-	if now == nil {
-		now = time.Now
-	}
-	cutoff := now().Add(-maxAge)
-	removed := 0
+	now := s.now()
+	cutoff := now.Add(-maxAge)
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		if strings.HasPrefix(e.Name(), ".tmp-") {
-			continue
-		}
 
 		path := filepath.Join(s.Dir, e.Name())
-		data, err := os.ReadFile(filepath.Clean(path))
-		if err != nil {
-			s.logger().Warn("skip unreadable pipeline file during prune", "path", path, "error", err)
+
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			if s.pruneOrphanedTemp(path, now) {
+				tempRemoved++
+			}
 			continue
 		}
 
-		var p Pipeline
-		if err := json.Unmarshal(data, &p); err != nil {
-			s.logger().Warn("skip corrupt pipeline file during prune", "path", path, "error", err)
-			continue
+		if s.pruneAgedFile(path, cutoff) {
+			agedRemoved++
 		}
-
-		if p.Status == "running" || !p.CreatedAt.Before(cutoff) {
-			continue
-		}
-
-		if err := os.Remove(path); err != nil {
-			s.logger().Warn("remove aged pipeline file failed", "path", path, "error", err)
-			continue
-		}
-		removed++
 	}
-	return removed, nil
+	return agedRemoved, tempRemoved, nil
+}
+
+// pruneAgedFile removes the pipeline record at path if it is not
+// "running" and its CreatedAt is before cutoff. It returns whether the
+// file was removed.
+//
+// A concurrent Prune call (StartPruning guarantees at most one runs at a
+// time, but nothing stops a caller from invoking Prune directly from two
+// goroutines) can remove path between this Prune's ReadDir and this
+// ReadFile, or between this ReadFile and this Remove: either ENOENT
+// means the file is already gone, not that something is wrong, so both
+// are a silent skip rather than a warning.
+func (s *PipelineStore) pruneAgedFile(path string, cutoff time.Time) bool {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+		s.logger().Warn("skip unreadable pipeline file during prune", "path", path, "error", err)
+		return false
+	}
+
+	var p Pipeline
+	if err := json.Unmarshal(data, &p); err != nil {
+		s.logger().Warn("skip corrupt pipeline file during prune", "path", path, "error", err)
+		return false
+	}
+
+	if p.Status == "running" || !p.CreatedAt.Before(cutoff) {
+		return false
+	}
+
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+		s.logger().Warn("remove aged pipeline file failed", "path", path, "error", err)
+		return false
+	}
+	return true
+}
+
+// pruneOrphanedTemp removes the .tmp- file at path if it is older than
+// tmpFileMaxAge as of now. Age is judged by a fresh os.Stat of the file
+// on disk, not by unmarshaling its content: a torn write may not even
+// parse as JSON. It returns whether the file was removed.
+//
+// A concurrent Save can rename path into its final name between this
+// Prune's ReadDir and this Stat, or a concurrent Prune call can remove it
+// between this Stat and this Remove -- the write-then-rename, or the
+// other removal, working exactly as intended, not a fault -- so either
+// ENOENT is a silent skip rather than a warning.
+func (s *PipelineStore) pruneOrphanedTemp(path string, now time.Time) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+		s.logger().Warn("skip unstatable temp file during prune", "path", path, "error", err)
+		return false
+	}
+	if now.Sub(info.ModTime()) < tmpFileMaxAge {
+		return false
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+		s.logger().Warn("remove orphaned temp file failed", "path", path, "error", err)
+		return false
+	}
+	return true
+}
+
+// DefaultPruneInterval is how often StartPruning's goroutine calls
+// Prune. Retention itself (DefaultRetention) is 30 days; a daily sweep
+// is frequent enough to bound disk growth without walking the pipeline
+// directory more than necessary.
+const DefaultPruneInterval = 24 * time.Hour
+
+// StartPruning launches a goroutine that calls Prune(maxAge) once
+// immediately and then every s.PruneInterval (DefaultPruneInterval if
+// unset) until StopPruning is called. This replaces the daemon's old
+// startup-only pruning: a daemon that stays up for months -- the case
+// its own premise of acting on email unattended makes the common one --
+// must keep enforcing retention, not just once at process start.
+//
+// A second call while a pruning goroutine is already running is a no-op:
+// it neither starts a second goroutine nor replaces the first one's stop
+// channel. Without this, a second call would orphan the first goroutine
+// -- StopPruning would then close only the second channel and block
+// forever in pruneWG.Wait(), since the first goroutine holds a WaitGroup
+// count against a stop channel nothing can reach anymore.
+//
+// Call StartPruning after the startup stale-pipeline sweep, so a
+// pipeline the daemon just marked "failed" is eligible for removal on
+// this goroutine's very first pass. See Prune's doc comment for why the
+// resulting concurrency with Executor.Run's Save calls needs no lock.
+func (s *PipelineStore) StartPruning(maxAge time.Duration) {
+	s.pruneMu.Lock()
+	defer s.pruneMu.Unlock()
+
+	if s.pruneStop != nil {
+		return
+	}
+
+	interval := s.PruneInterval
+	if interval <= 0 {
+		interval = DefaultPruneInterval
+	}
+
+	stop := make(chan struct{})
+	s.pruneStop = stop
+	s.pruneWG.Add(1)
+	go func() {
+		defer s.pruneWG.Done()
+		s.pruneTick(maxAge)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				s.pruneTick(maxAge)
+			}
+		}
+	}()
+}
+
+// StopPruning stops the goroutine started by StartPruning and waits for
+// it to exit. Safe to call even if StartPruning was never called, or was
+// already stopped.
+//
+// Holds pruneMu for the whole call, including the Wait: releasing it
+// beforehand let a concurrent StartPruning see pruneStop == nil and start
+// a second goroutine while pruneWG's count still belonged to the one
+// being stopped, so Add(1) could race Wait() -- a WaitGroup misuse the
+// runtime is entitled to panic on, or a Wait that hangs waiting on a
+// goroutine StopPruning never intended to wait for. Blocking a
+// concurrent StartPruning until this Wait returns is exactly the
+// ordering StopPruning is supposed to guarantee.
+func (s *PipelineStore) StopPruning() {
+	s.pruneMu.Lock()
+	defer s.pruneMu.Unlock()
+
+	if s.pruneStop == nil {
+		return
+	}
+	close(s.pruneStop)
+	s.pruneStop = nil
+	s.pruneWG.Wait()
+}
+
+// pruneTick runs one Prune pass and logs the outcome. Errors are logged,
+// not returned: StartPruning's goroutine has no caller to report them to.
+// The two counts are logged separately -- a run that only reaped
+// orphaned temp files removed zero "aged pipeline records", and saying
+// otherwise would mislead an operator reading these logs.
+func (s *PipelineStore) pruneTick(maxAge time.Duration) {
+	agedRemoved, tempRemoved, err := s.pruneCounts(maxAge)
+	if err != nil {
+		s.logger().Warn("periodic prune failed", "error", err)
+		return
+	}
+	if agedRemoved > 0 {
+		s.logger().Info("periodic prune removed aged pipeline records", "count", agedRemoved)
+	}
+	if tempRemoved > 0 {
+		s.logger().Info("periodic prune reaped orphaned temp files", "count", tempRemoved)
+	}
 }
