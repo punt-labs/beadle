@@ -162,17 +162,26 @@ const tmpFileMaxAge = 5 * time.Minute
 // pipeline has a distinct UUID filename, so Prune and Save never touch
 // the same bytes at the same instant.
 func (s *PipelineStore) Prune(maxAge time.Duration) (int, error) {
+	agedRemoved, tempRemoved, err := s.pruneCounts(maxAge)
+	return agedRemoved + tempRemoved, err
+}
+
+// pruneCounts is Prune's implementation, split into its two constituent
+// counts -- aged pipeline records and reaped orphaned .tmp- files -- so
+// pruneTick can log what actually happened instead of one combined
+// number that a temp-file-only run would misreport as "removed aged
+// pipeline records".
+func (s *PipelineStore) pruneCounts(maxAge time.Duration) (agedRemoved, tempRemoved int, err error) {
 	entries, err := os.ReadDir(s.Dir)
 	if os.IsNotExist(err) {
-		return 0, nil
+		return 0, 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("read pipeline dir %s: %w", s.Dir, err)
+		return 0, 0, fmt.Errorf("read pipeline dir %s: %w", s.Dir, err)
 	}
 
 	now := s.now()
 	cutoff := now.Add(-maxAge)
-	removed := 0
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -182,16 +191,16 @@ func (s *PipelineStore) Prune(maxAge time.Duration) (int, error) {
 
 		if strings.HasPrefix(e.Name(), ".tmp-") {
 			if s.pruneOrphanedTemp(path, now) {
-				removed++
+				tempRemoved++
 			}
 			continue
 		}
 
 		if s.pruneAgedFile(path, cutoff) {
-			removed++
+			agedRemoved++
 		}
 	}
-	return removed, nil
+	return agedRemoved, tempRemoved, nil
 }
 
 // pruneAgedFile removes the pipeline record at path if it is not
@@ -325,28 +334,42 @@ func (s *PipelineStore) StartPruning(maxAge time.Duration) {
 // StopPruning stops the goroutine started by StartPruning and waits for
 // it to exit. Safe to call even if StartPruning was never called, or was
 // already stopped.
+//
+// Holds pruneMu for the whole call, including the Wait: releasing it
+// beforehand let a concurrent StartPruning see pruneStop == nil and start
+// a second goroutine while pruneWG's count still belonged to the one
+// being stopped, so Add(1) could race Wait() -- a WaitGroup misuse the
+// runtime is entitled to panic on, or a Wait that hangs waiting on a
+// goroutine StopPruning never intended to wait for. Blocking a
+// concurrent StartPruning until this Wait returns is exactly the
+// ordering StopPruning is supposed to guarantee.
 func (s *PipelineStore) StopPruning() {
 	s.pruneMu.Lock()
-	stop := s.pruneStop
-	s.pruneStop = nil
-	s.pruneMu.Unlock()
+	defer s.pruneMu.Unlock()
 
-	if stop == nil {
+	if s.pruneStop == nil {
 		return
 	}
-	close(stop)
+	close(s.pruneStop)
+	s.pruneStop = nil
 	s.pruneWG.Wait()
 }
 
 // pruneTick runs one Prune pass and logs the outcome. Errors are logged,
 // not returned: StartPruning's goroutine has no caller to report them to.
+// The two counts are logged separately -- a run that only reaped
+// orphaned temp files removed zero "aged pipeline records", and saying
+// otherwise would mislead an operator reading these logs.
 func (s *PipelineStore) pruneTick(maxAge time.Duration) {
-	removed, err := s.Prune(maxAge)
+	agedRemoved, tempRemoved, err := s.pruneCounts(maxAge)
 	if err != nil {
 		s.logger().Warn("periodic prune failed", "error", err)
 		return
 	}
-	if removed > 0 {
-		s.logger().Info("periodic prune removed aged pipeline records", "count", removed)
+	if agedRemoved > 0 {
+		s.logger().Info("periodic prune removed aged pipeline records", "count", agedRemoved)
+	}
+	if tempRemoved > 0 {
+		s.logger().Info("periodic prune reaped orphaned temp files", "count", tempRemoved)
 	}
 }

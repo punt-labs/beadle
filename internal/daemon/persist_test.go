@@ -301,6 +301,65 @@ func TestPipelineStore_PruneSkipsCorruptFiles(t *testing.T) {
 
 // -- beadle-721a: periodic pruning --
 
+// TestPipelineStore_PruneTick_LogsCountsSeparately proves pruneTick never
+// tells the operator it "removed aged pipeline records" when all it did
+// was reap an orphaned .tmp- file, or the reverse. A single combined
+// count logged under one message overstates whichever half of the work
+// didn't happen.
+func TestPipelineStore_PruneTick_LogsCountsSeparately(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func(t *testing.T, s *PipelineStore, dir string)
+		wantAged bool
+		wantTemp bool
+	}{
+		{
+			name: "only an orphaned temp file",
+			setup: func(t *testing.T, _ *PipelineStore, dir string) {
+				t.Helper()
+				tmpPath := filepath.Join(dir, ".tmp-orphan-1.json")
+				require.NoError(t, os.WriteFile(tmpPath, []byte(`{}`), 0o600))
+				old := time.Now().Add(-1 * time.Hour)
+				require.NoError(t, os.Chtimes(tmpPath, old, old))
+			},
+			wantAged: false,
+			wantTemp: true,
+		},
+		{
+			name: "only an aged pipeline record",
+			setup: func(t *testing.T, s *PipelineStore, _ string) {
+				t.Helper()
+				p := &Pipeline{Version: 1, ID: "old-done", Status: "completed", Email: EmailMeta{From: "x@test.com"}, CreatedAt: time.Now().Add(-60 * 24 * time.Hour)}
+				require.NoError(t, s.Save(p))
+			},
+			wantAged: true,
+			wantTemp: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			logger, buf := testLoggerCapture()
+			s := &PipelineStore{Dir: dir, Logger: logger}
+			tt.setup(t, s, dir)
+
+			s.pruneTick(DefaultRetention)
+
+			if tt.wantAged {
+				assert.Contains(t, buf.String(), "removed aged pipeline records")
+			} else {
+				assert.NotContains(t, buf.String(), "removed aged pipeline records")
+			}
+			if tt.wantTemp {
+				assert.Contains(t, buf.String(), "reaped orphaned temp files")
+			} else {
+				assert.NotContains(t, buf.String(), "reaped orphaned temp files")
+			}
+		})
+	}
+}
+
 func TestPipelineStore_StartPruning_RunsPeriodically(t *testing.T) {
 	dir := t.TempDir()
 	s := &PipelineStore{Dir: dir, Logger: testLogger(), PruneInterval: 5 * time.Millisecond}
@@ -386,6 +445,61 @@ func TestPipelineStore_StartPruning_SecondCallIsNoop(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("StopPruning did not return: a second StartPruning call orphaned the first goroutine")
 	}
+}
+
+// TestPipelineStore_StartStopPruning_ConcurrentIsWellDefined hammers
+// StartPruning and StopPruning from many goroutines at once. Before
+// StopPruning held pruneMu across its Wait, it cleared pruneStop and
+// released the lock before waiting: a concurrent StartPruning could see
+// pruneStop == nil in that window and call pruneWG.Add(1) while the
+// outgoing goroutine's count was still live, which sync.WaitGroup either
+// panics on ("WaitGroup misuse: Add called concurrently with Wait") or
+// resolves by hanging Wait on a goroutine nobody told to stop. Both
+// failure shapes are caught here: a panic is recovered and reported, a
+// hang trips the timeout.
+func TestPipelineStore_StartStopPruning_ConcurrentIsWellDefined(t *testing.T) {
+	dir := t.TempDir()
+	s := &PipelineStore{Dir: dir, Logger: testLogger(), PruneInterval: time.Millisecond}
+
+	const n = 100
+	var wg sync.WaitGroup
+	panics := make(chan any, n*2)
+
+	safeCall := func(f func()) {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				panics <- r
+			}
+		}()
+		f()
+	}
+
+	for i := 0; i < n; i++ {
+		wg.Add(2)
+		go safeCall(func() { s.StartPruning(DefaultRetention) })
+		go safeCall(func() { s.StopPruning() })
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("concurrent StartPruning/StopPruning hung: the pruneWG contract was violated")
+	}
+
+	select {
+	case r := <-panics:
+		t.Fatalf("concurrent StartPruning/StopPruning panicked: %v", r)
+	default:
+	}
+
+	s.StopPruning() // leave nothing running behind
 }
 
 // TestPipelineStore_Prune_ConcurrentWithSave exercises the invariant
@@ -598,20 +712,31 @@ func TestPipelineStore_Prune_ConcurrentPruneCallsDoNotWarnOnVanishedFile(t *test
 	assert.Empty(t, entries, "both Prune calls together must have removed every aged record")
 }
 
+// TestPipelineStore_Prune_UsesInjectedClockForTempFileAge must depend on
+// "injected clock vs. wall clock", never on where wall clock happens to
+// sit relative to a hardcoded calendar date. An earlier version pinned
+// fixedNow to a literal date and moved the file's mtime to a point
+// relative to that literal; once wall clock passed the literal, the
+// mtime landed in the real past too, so a regression to a bare
+// time.Now() call would still judge the file aged and the test would
+// still pass -- it had stopped testing what its name claims. Pinning
+// fixedNow ahead of time.Now(), and leaving the file's mtime at its
+// real creation time, keeps the two clocks in a fixed relative order no
+// matter when the test runs: fresh by wall clock, aged by the injected
+// one.
 func TestPipelineStore_Prune_UsesInjectedClockForTempFileAge(t *testing.T) {
 	dir := t.TempDir()
-	fixedNow := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	fixedNow := time.Now().Add(2 * time.Hour)
 	s := &PipelineStore{Dir: dir, Logger: testLogger(), Now: func() time.Time { return fixedNow }}
 
 	tmpPath := filepath.Join(dir, ".tmp-clock-1.json")
 	require.NoError(t, os.WriteFile(tmpPath, []byte(`{}`), 0o600))
-	// Real mtime is "now" (test wall-clock), but the injected clock is
-	// pinned far in the future relative to it, so the file must be
-	// judged aged and removed -- proves the age check uses s.Now, not a
-	// bare time.Now() call.
-	require.NoError(t, os.Chtimes(tmpPath, fixedNow.Add(-2*time.Hour), fixedNow.Add(-2*time.Hour)))
+	// mtime is real wall-clock "now" -- fresh by real time (age ~0, well
+	// under tmpFileMaxAge), but 2 hours old by the injected clock (well
+	// over it). A correct age check (s.Now) removes it; a regression to
+	// time.Now() would not.
 
 	removed, err := s.Prune(DefaultRetention)
 	require.NoError(t, err)
-	assert.Equal(t, 1, removed)
+	assert.Equal(t, 1, removed, "age must be judged by the injected clock, not wall-clock time.Now()")
 }
