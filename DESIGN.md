@@ -1261,8 +1261,8 @@ certificates on localhost.
 ## DES-024: Inbound PGP decryption uses system keyring
 
 **Status:** SETTLED (beadle-ksk, PR #134, 2026-04-11). Implemented in
-`internal/pgp/decrypt.go`. Pending security
-review discussion — deferred by CEO.
+`internal/pgp/decrypt.go`. Security review discussion deferred by the CEO;
+the decision itself is settled.
 
 **Decision:** `pgp.Decrypt()` runs `gpg --decrypt` using the default
 GNUPGHOME (system keyring), not an isolated temporary keyring. This is a
