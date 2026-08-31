@@ -39,9 +39,13 @@ behavior of its own):
    contract is accepted by the real `ethos mission create` binary; a
    contract missing a required field (e.g. `evaluator.handle`) is rejected.
    The rejection case is a deliberate negative control: without it, a
-   broken harness (bad `$HOME`/`$ETHOS_REPO_ROOT` isolation, a `PATH`
-   misconfiguration) could make every `ethos mission create` call
-   spuriously succeed and this gate would never notice.
+   `PATH` misconfiguration that silently no-ops the CLI call, or a Go-side
+   error that gets swallowed, could make every `ethos mission create` call
+   spuriously succeed and this gate would never notice. It does **not**
+   detect broken `$HOME`/`$ETHOS_REPO_ROOT` isolation — an isolation
+   failure makes the CLI validate against the *wrong* identity data, a
+   different failure mode a required-field check never touches (it doesn't
+   consult the identity graph at all).
 
 `internal/daemon/harness_test.go`'s `TestOnNewMail_EndToEnd` exercises gates
 1 and 2 (positive and negative) together with gates 3 and 4's positive
@@ -74,11 +78,19 @@ including the real `ethos` CLI, runs for real inside a
 - GPG operations in tests use a temporary GNUPGHOME (ephemeral keyring per test).
 - GPG test home directories must use short paths (`/tmp/bg-*`) to avoid the 108-byte Unix socket path limit.
 - `-race` is mandatory for all test runs.
-- **No `t.Skip` on a missing external dependency, ever.** A test that
-  silently skips locally is the same failure as one that skips in CI — that
-  is exactly how beadle-8gt's regression coverage went uncaught for as long
-  as it did. A missing `gpg` or `ethos` binary is a test *failure* naming
-  the install remedy (`t.Fatalf`), not a skip.
+- **No `t.Skip` on a missing external dependency, ever — the standard for
+  every test in this repo, not only `internal/daemon`.** A test that
+  silently skips locally is the same failure as one that skips in CI —
+  exactly how beadle-8gt's regression coverage went uncaught for as long
+  as it did. Every `gpg`- or `ethos`-dependent test under `internal/daemon`
+  now fails with the install remedy (`t.Fatalf`) rather than skipping.
+  **Outstanding gap, tracked as beadle-hi4n:** eleven further
+  `t.Skip("gpg not installed")` sites remain in `internal/pgp` and
+  `internal/email` (`verify_test.go`, `decrypt_test.go`, `encrypt_test.go`,
+  `expiry_test.go`, `probe_test.go`, `sign_test.go`, `send_test.go`,
+  `reply_test.go`) — load-bearing for the *existing* PGP integration tier
+  this table already lists as `< 5s, tag: none`, i.e. already claimed to
+  run unconditionally, just not yet enforced there.
 - **One entry point.** The daemon pipeline tier runs under the plain `test`
   target — no build tag, no `-tags=integration`, no CI-only invocation. A
   developer's `make test`/`make check` and CI's `go test -race -count=1
