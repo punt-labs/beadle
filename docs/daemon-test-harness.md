@@ -169,10 +169,12 @@ simply never been caught because GitHub's `ubuntu-latest` runner image ships
 `gnupg` preinstalled, so the skip path has (almost certainly) never actually
 fired in CI, only ever on a fresh local machine. §"gpg: the same defect,
 smaller blast radius" below scopes a fix for the two `internal/daemon` sites;
-the eleven further sites across `internal/pgp` and `internal/email` are named
-but left to a follow-up bead, since fixing them touches files entirely
-outside this mission's write set and outside the four gates this design
-owns.
+the further sites across `internal/pgp` and `internal/email` are named but
+left to a follow-up bead, since fixing them touches files entirely outside
+this mission's write set and outside the four gates this design owns. Their
+count is deliberately not stated here — see that section for why a bare
+count in this kind of document is itself a liability, and for the command
+that reproduces it.
 
 ### `.github/workflows/test.yml` — today's CI invocation
 
@@ -674,17 +676,29 @@ gnupg` / `brew install gnupg` as the remedy), since they sit squarely inside
 the four gates this design owns (gates 1 and 3 both depend on real `gpg`).
 GitHub's `ubuntu-latest` runner image ships `gnupg` preinstalled, so this
 conversion should be a no-op in CI and only ever fire on a genuinely
-misconfigured developer machine — which is the intended behavior. The
-eleven further `t.Skip("gpg not installed")` sites in `internal/pgp` and
-`internal/email` (`internal/pgp/verify_test.go`, `decrypt_test.go`,
-`encrypt_test.go`, `expiry_test.go`, `probe_test.go`, `sign_test.go`;
-`internal/email/send_test.go`, `reply_test.go`) are the same defect but
-outside this mission's write set (`docs/daemon-test-harness.md` only) and
-outside the four named gates. **Recommendation, not part of this mission:**
-file a follow-up bead to convert those eleven sites the same way, since they
-are load-bearing for the *existing* PGP integration tier `docs/TESTING.md`
+misconfigured developer machine — which is the intended behavior. Further
+`t.Skip("gpg not installed")` sites remain in `internal/pgp` (`verify_test.go`,
+`decrypt_test.go`, `encrypt_test.go`, `expiry_test.go`, `probe_test.go`,
+`sign_test.go`) and `internal/email` (`send_test.go`, `reply_test.go`) — the
+same defect but outside this mission's write set (`docs/daemon-test-harness.md`
+only) and outside the four named gates. **Recommendation, not part of this
+mission:** file a follow-up bead to convert those sites the same way, since
+they are load-bearing for the *existing* PGP integration tier `docs/TESTING.md`
 already lists as `< 5s, tag: none` — i.e., already claimed to run
 unconditionally, just not actually enforced.
+
+This document originally put a number on those sites ("eleven"). That number
+was wrong — the real count is more than 3x higher — and it survived two
+evaluator rounds here, was copied verbatim into a follow-up bead, and was
+then transcribed again into `docs/TESTING.md`, all without anyone actually
+running the count. That chain is the exact failure mode this whole design
+exists to close, reproduced in miniature inside the design document itself.
+The fix is not a corrected number — a corrected number rots the same way the
+wrong one did, the moment a test is added or removed. Reproduce it instead:
+
+```bash
+grep -rn 'gpg not installed' internal/ --include='*_test.go' | grep -v internal/daemon | wc -l
+```
 
 ## Dev/CI invocation
 

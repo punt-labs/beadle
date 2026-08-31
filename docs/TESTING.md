@@ -89,13 +89,18 @@ including the real `ethos` CLI, runs for real inside a
   `dd`, `env`, `tr` — all POSIX utilities guaranteed present on every
   supported platform and this repo's own CI runner, not an optional tool
   to install).
-  **Outstanding gap, tracked as beadle-hi4n:** eleven further
-  `t.Skip("gpg not installed")` sites remain in `internal/pgp` and
-  `internal/email` (`verify_test.go`, `decrypt_test.go`, `encrypt_test.go`,
-  `expiry_test.go`, `probe_test.go`, `sign_test.go`, `send_test.go`,
+  **Outstanding gap, tracked as beadle-hi4n:** further
+  `t.Skip("gpg not installed")` sites remain in `internal/pgp`
+  (`verify_test.go`, `decrypt_test.go`, `encrypt_test.go`, `expiry_test.go`,
+  `probe_test.go`, `sign_test.go`) and `internal/email` (`send_test.go`,
   `reply_test.go`) — load-bearing for the *existing* PGP integration tier
   this table already lists as `< 5s, tag: none`, i.e. already claimed to
-  run unconditionally, just not yet enforced there.
+  run unconditionally, just not yet enforced there. Their count is not
+  stated here on purpose: an earlier draft of this bullet said "eleven,"
+  which was wrong by more than 3x and had already been copied verbatim
+  into two other places before anyone ran the count. Reproduce it instead
+  of trusting a number:
+  `grep -rn 'gpg not installed' internal/ --include='*_test.go' | grep -v internal/daemon | wc -l`.
 - **One entry point.** The daemon pipeline tier runs under the plain `test`
   target — no build tag, no `-tags=integration`, no CI-only invocation. A
   developer's `make test`/`make check` and CI's `go test -race -count=1
