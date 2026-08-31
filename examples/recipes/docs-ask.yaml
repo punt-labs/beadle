@@ -1,0 +1,33 @@
+# docs-ask is a claude-runner recipe: it spawns a Claude Code worker with
+# the context7 MCP server available, so the worker can look up current
+# library/framework documentation instead of guessing from training data.
+#
+# This file is UNSIGNED. Sign it with your own authorizer key before
+# beadle-daemon will load it -- see examples/recipes/README.md.
+name: docs-ask
+description: >-
+  Answer a software documentation question using context7 to fetch
+  current library/framework/API documentation.
+runner: claude
+mcp_servers:
+  - context7
+env_vars:
+  - CONTEXT7_API_KEY
+args:
+  - name: question
+    type: string
+    required: true
+    max_length: 2000
+prompt: >-
+  Answer the software documentation question given as the "question" stage
+  arg in this mission's context. Use the context7 MCP server to resolve the
+  relevant library and fetch its current documentation before answering --
+  prefer context7's result over training-data recall, since the docs it
+  returns may be more current. Give a concise, accurate answer grounded in
+  what context7 returns, and say plainly if the documentation does not
+  cover the question. Submit the answer as the mission result.
+budget:
+  rounds: 3
+  reflection_after_each: true
+output_schema: text
+timeout: 5m

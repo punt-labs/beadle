@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# beadle-sysreport prints free disk space and CPU load average as JSON, for
+# the sysreport daemon recipe (examples/recipes/sysreport.yaml). It has no
+# dependency beyond POSIX df and the platform's load-average source.
+#
+# Deployment: the daemon's cli runner only resolves binaries from
+# $HOME/.local/bin or its own install directory (internal/daemon/handler.go's
+# BinaryWhitelist) -- copy this script there and mark it executable:
+#   cp scripts/beadle-sysreport ~/.local/bin/beadle-sysreport
+#   chmod +x ~/.local/bin/beadle-sysreport
+set -euo pipefail
+
+disk_free_kb=$(df -Pk / | awk 'NR==2 { print $4 }')
+
+if [[ -r /proc/loadavg ]]; then
+  # Linux: "1.23 1.45 1.67 2/456 78901"
+  read -r load_1m load_5m load_15m _rest </proc/loadavg
+else
+  # macOS/BSD: `uptime` prints "... load averages: 1.23 1.45 1.67" (macOS)
+  # or "... load average: 1.23, 1.45, 1.67" (some BSDs).
+  loads=$(uptime | sed -E 's/.*load averages?: *//' | tr -d ',')
+  read -r load_1m load_5m load_15m <<<"$loads"
+fi
+
+printf '{"disk_free_kb": %s, "load_1m": %s, "load_5m": %s, "load_15m": %s}\n' \
+  "$disk_free_kb" "$load_1m" "$load_5m" "$load_15m"
