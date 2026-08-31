@@ -216,15 +216,27 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cm
 		return "", fmt.Errorf("start %s: %w", cmd.Binary, err)
 	}
 
-	output, extra, readErr := readCapped(stdoutPipe, 1<<20)
+	return runOutput(stdoutPipe, c.Wait, stderrBuf, e, cmd)
+}
 
-	if err := c.Wait(); err != nil {
-		if stderrBuf.buf.Len() > 0 {
-			e.Logger.Info("cli command stderr", "command", cmd.Name, "stderr", stderrBuf.buf.String())
-		}
-		return "", fmt.Errorf("cli %s: %w", cmd.Binary, err)
+// runOutput reads stdout (capped) and waits for the owning process to
+// exit, logging any captured stderr exactly once regardless of outcome --
+// stderr is often the most diagnostic thing available when the stdout read
+// or the process itself fails, so it must not be skipped on an early
+// return. wait must not be called until the stdout read completes: Wait
+// closes the pipe once the process exits, and reading concurrently with or
+// after that races (see exec.Cmd.StdoutPipe's doc comment).
+func runOutput(stdoutPipe io.Reader, wait func() error, stderrBuf *cappedWriter, e *Executor, cmd *Command) (string, error) {
+	output, extra, readErr := readCapped(stdoutPipe, 1<<20)
+	waitErr := wait()
+
+	if stderrBuf.buf.Len() > 0 {
+		e.Logger.Info("cli command stderr", "command", cmd.Name, "stderr", stderrBuf.buf.String())
 	}
 
+	if waitErr != nil {
+		return "", fmt.Errorf("cli %s: %w", cmd.Binary, waitErr)
+	}
 	if readErr != nil {
 		return "", fmt.Errorf("read stdout for %s: %w", cmd.Binary, readErr)
 	}
@@ -233,10 +245,6 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cm
 		e.Logger.Warn("cli command stdout truncated at cap",
 			"command", cmd.Name, "captured_bytes", len(output), "discarded_bytes", extra)
 		output = append(output, []byte(truncationMarker)...)
-	}
-
-	if stderrBuf.buf.Len() > 0 {
-		e.Logger.Info("cli command stderr", "command", cmd.Name, "stderr", stderrBuf.buf.String())
 	}
 
 	return string(output), nil
@@ -430,27 +438,32 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 // (exec needs Write to never return a short count, or it treats the short
 // write as a fatal copy error and fails commands whose output merely
 // exceeded the cap). total tracks every byte offered, so dropped can report
-// exactly how much was cut instead of just that some was.
+// exactly how much was cut instead of just that some was. Both are int64:
+// total's whole job is detecting truncation, so it must not itself be able
+// to wrap silently on a 32-bit int -- unreachable on the shipped platforms
+// (darwin/linux, arm64/amd64, all 64-bit), but the cost of getting it right
+// is nothing.
 type cappedWriter struct {
 	buf   bytes.Buffer
-	max   int
-	total int
+	max   int64
+	total int64
 }
 
 func (w *cappedWriter) Write(p []byte) (int, error) {
-	w.total += len(p)
-	remaining := w.max - w.buf.Len()
+	w.total += int64(len(p))
+	remaining := w.max - int64(w.buf.Len())
 	if remaining > 0 {
-		if len(p) < remaining {
-			remaining = len(p)
+		n := int64(len(p))
+		if n > remaining {
+			n = remaining
 		}
-		w.buf.Write(p[:remaining])
+		w.buf.Write(p[:n])
 	}
 	return len(p), nil
 }
 
 // dropped returns how many bytes were offered beyond the cap.
-func (w *cappedWriter) dropped() int {
+func (w *cappedWriter) dropped() int64 {
 	if w.total > w.max {
 		return w.total - w.max
 	}

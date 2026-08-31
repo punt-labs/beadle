@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,6 +316,50 @@ func TestReadCapped_PropagatesReadError(t *testing.T) {
 	assert.Zero(t, extra)
 }
 
+// TestRunOutput_LogsStderrOnReadError is the regression test for the
+// Copilot finding on beadle-k1g's PR #260: the read-error early return
+// added by that fix skipped the stderr logging below it, dropping the most
+// diagnostic thing available at the moment stdout capture fails. stderr
+// must be logged exactly once, on every path, before any return.
+func TestRunOutput_LogsStderrOnReadError(t *testing.T) {
+	logger, buf := testLoggerCapture()
+	stderrBuf := &cappedWriter{max: 1 << 20}
+	_, writeErr := stderrBuf.Write([]byte("boom: disk full"))
+	require.NoError(t, writeErr)
+
+	e := &Executor{Logger: logger}
+	cmd := &Command{Name: "test-stderr-on-read-error", Binary: "false"}
+	r := &errAfter{err: errors.New("pipe read boom")}
+
+	_, err := runOutput(r, func() error { return nil }, stderrBuf, e, cmd)
+	require.Error(t, err)
+
+	line := logLineContaining(t, buf, "boom: disk full")
+	assert.Contains(t, line, "test-stderr-on-read-error")
+}
+
+// TestRunOutput_LogsStderrOnWaitError is TestRunOutput_LogsStderrOnReadError
+// for the sibling early return: c.Wait() failing. This path already logged
+// stderr before the fix, but the two branches duplicated the same log call
+// -- now unified into runOutput's single log site -- so this guards against
+// a future edit reintroducing the split and dropping one copy.
+func TestRunOutput_LogsStderrOnWaitError(t *testing.T) {
+	logger, buf := testLoggerCapture()
+	stderrBuf := &cappedWriter{max: 1 << 20}
+	_, writeErr := stderrBuf.Write([]byte("exit status 1"))
+	require.NoError(t, writeErr)
+
+	e := &Executor{Logger: logger}
+	cmd := &Command{Name: "test-stderr-on-wait-error", Binary: "false"}
+	r := strings.NewReader("")
+
+	_, err := runOutput(r, func() error { return errors.New("wait boom") }, stderrBuf, e, cmd)
+	require.Error(t, err)
+
+	line := logLineContaining(t, buf, "exit status 1")
+	assert.Contains(t, line, "test-stderr-on-wait-error")
+}
+
 // TestReadCapped_ReportsExtraOnlyWhenTruncated confirms extra is 0 (no
 // truncation) when the reader has less data than the cap, and > 0 (real
 // truncation) when it has more -- the distinction TestCLIRunner_OutputCap
@@ -492,6 +537,24 @@ func TestCLIRunner_ArgsFromPipe_MalformedJSON(t *testing.T) {
 	line := logLineContaining(t, buf, "pipe value looked like JSON but failed to parse")
 	assert.Contains(t, line, "level=WARN")
 	assert.Contains(t, line, "test-malformed-json")
+}
+
+// TestCappedWriter_Dropped_Beyond32BitRange is the regression test for the
+// Copilot finding on beadle-k1g's PR #260: total (and max) must be int64,
+// not int, because total's entire job is detecting truncation -- on a
+// 32-bit build an int-typed total could wrap past math.MaxInt32 and
+// dropped() would return 0 or negative, silently suppressing exactly the
+// truncation warning and marker it exists to trigger. The shipped
+// platforms (darwin/linux, arm64/amd64) are all 64-bit, where Go's int
+// already matches int64, so this scenario cannot actually occur in
+// production today and this test cannot fail on this host either way --
+// it documents and locks in the wider type rather than reproducing a
+// live bug.
+func TestCappedWriter_Dropped_Beyond32BitRange(t *testing.T) {
+	w := &cappedWriter{max: 1 << 20}
+	w.total = int64(math.MaxInt32) + 1<<20 + 100
+
+	assert.Equal(t, int64(math.MaxInt32)+100, w.dropped())
 }
 
 func TestCLIRunner_CompoundOutputCap(t *testing.T) {
