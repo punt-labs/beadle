@@ -125,7 +125,18 @@ func IsolateEthos(t testing.TB) string {
 	require.NoError(t, os.MkdirAll(scratchRepoEthos, 0o700))
 	realRepoEthos := filepath.Join(realRepoRoot, ".punt-labs", "ethos")
 	for _, sub := range []string{"identities", "personalities", "roles", "teams", "talents", "writing-styles"} {
-		require.NoError(t, os.Symlink(filepath.Join(realRepoEthos, sub), filepath.Join(scratchRepoEthos, sub)))
+		target := filepath.Join(realRepoEthos, sub)
+		// os.Symlink succeeds even when target doesn't exist -- a dangling
+		// symlink here would surface as a confusing failure deep inside
+		// ethos's own identity resolution rather than a clear one at setup.
+		// Unlike the global archetypes tree these are committed repo
+		// content (this exact checkout, in dev and CI alike), so a missing
+		// one means the subtree was renamed or removed, not that a
+		// developer's machine differs from CI.
+		if _, statErr := os.Stat(target); statErr != nil {
+			t.Fatalf("testenv.IsolateEthos: repo-local ethos subtree %s: %v", target, statErr)
+		}
+		require.NoError(t, os.Symlink(target, filepath.Join(scratchRepoEthos, sub)))
 	}
 	t.Setenv("ETHOS_REPO_ROOT", scratchRepo)
 

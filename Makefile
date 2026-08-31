@@ -84,8 +84,19 @@ clean-tex: ## Remove LaTeX intermediate files
 tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4 tests)
 	go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
 
+# go install places a binary in $GOBIN if set, else $GOPATH/bin -- neither is
+# guaranteed to already be on PATH. Without this, `make test` provisions
+# ethos successfully but exec.LookPath("ethos") still fails: tools-ethos
+# ran, the binary exists, and the remedy message points right back at the
+# command that was just run. Computed once, at parse time, so every `test`
+# invocation prepends the same directory `go install` actually used.
+GOINSTALL_BIN := $(shell go env GOBIN)
+ifeq ($(GOINSTALL_BIN),)
+GOINSTALL_BIN := $(shell go env GOPATH)/bin
+endif
+
 test: tools-ethos ## Run tests with race detection
-	go test -race -count=1 ./...
+	PATH="$(GOINSTALL_BIN):$$PATH" go test -race -count=1 ./...
 
 test-integration: ## Run integration tests (in-process IMAP/SMTP)
 	go test -race -count=1 -tags=integration ./...
