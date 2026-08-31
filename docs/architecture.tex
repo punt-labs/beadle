@@ -32,7 +32,7 @@
 
 \title{Beadle: Architecture \& Z Specification}
 \author{Punt Labs}
-\date{March 2026}
+\date{2026-08-31}
 \hypersetup{
   pdftitle={Beadle: Architecture and Z Specification},
   pdfauthor={Punt Labs},
@@ -84,9 +84,11 @@ Neither imports the other at the command layer (\S~Dependency Graph).
 \texttt{serve --transport ws} instead starts a WebSocket listener
 (\S~Security Boundaries).  It connects to Proton Bridge via IMAP on
 localhost by default --- a config default, not an enforced boundary
-(\S~Security Boundaries) --- sends mail via Proton Bridge SMTP
-(primary) or Resend API (fallback), and verifies PGP signatures using
-an isolated GPG keyring.
+(\S~Security Boundaries) --- sends mail via the configured SMTP
+transport (Proton Bridge by default), falling back to the Resend API
+when that transport is unreachable and no signing is required
+(\S~Message Send Path), and verifies PGP signatures using an isolated
+GPG keyring.
 
 The binary groups its subcommands by concern: server administration
 (\texttt{serve}, \texttt{doctor}, \texttt{status}, \texttt{version},
@@ -180,20 +182,31 @@ shared lower layer (imported by both trees above):
 %%----------------------------------------------------------------------
 
 \begin{zed}
-  [MSGID, ADDRESS, BODY, HEADER, RAWBYTES, KEYID, \\
-  \quad SIGNER, CREDNAME, FOLDERNAME]
+  [MSGID, ADDRESS, BODY, HEADER, HEADERVALUE, RAWBYTES, KEYID, \\
+  \quad SIGNER, CREDNAME, CREDVALUE, FOLDERNAME]
 \end{zed}
 
 $MSGID$ is an IMAP UID (numeric string).  $ADDRESS$ is an RFC~5322
-email address.  $BODY$ is the plain-text message body.  $HEADER$ is
-a header field name (e.g.\ \texttt{X-Pm-Origin}).  $RAWBYTES$ is the
-raw RFC~822 message.  $KEYID$ is a GPG key fingerprint.  $SIGNER$ is
-a GPG user identity.  $CREDNAME$ is a named credential (e.g.\
-\texttt{imap-password}).  $FOLDERNAME$ is an IMAP folder name ---
-distinct from $CREDNAME$: a folder is not a credential, and the two
-must never be interchangeable in the type system (see
-\texttt{SelectFolder} below, which previously typed \texttt{folder?}
-as $CREDNAME$ in error).
+email address.  $BODY$ is the plain-text message body --- and only
+the message body.  $HEADER$ is a header field name (e.g.\
+\texttt{X-Pm-Origin}); $HEADERVALUE$ is that field's value.
+$RAWBYTES$ is the raw RFC~822 message.  $KEYID$ is a GPG key
+fingerprint.  $SIGNER$ is a GPG user identity.  $CREDNAME$ is a named
+credential (e.g.\ \texttt{imap-password}); $CREDVALUE$ is that
+credential's resolved value (a secret).  $FOLDERNAME$ is an IMAP
+folder name --- distinct from $CREDNAME$: a folder is not a
+credential, and the two must never be interchangeable in the type
+system (see \texttt{SelectFolder} below, which previously typed
+\texttt{folder?} as $CREDNAME$ in error).
+
+$HEADERVALUE$ and $CREDVALUE$ exist for the same reason $FOLDERNAME$
+does: an earlier draft of this document typed a header's value and a
+resolved credential's value as $BODY$, purely because both happened
+to be opaque strings.  That type-checked --- $BODY$, $HEADERVALUE$,
+and $CREDVALUE$ share a carrier --- which is exactly why sharing one
+declared type could not catch the confusion.  A credential's secret
+value is not an email body, and a header field's value is not one
+either; nothing below now lets them be typed as if they were.
 
 %%----------------------------------------------------------------------
 \section{Free Types}
@@ -358,9 +371,9 @@ requires fetching the raw message bytes and running \texttt{gpg}:
 
 \begin{schema}{CredentialStore}
   keychainAvail : ZBOOL \\
-  keychainValues : CREDNAME \pfun BODY \\
-  fileValues : CREDNAME \pfun BODY \\
-  envValues : CREDNAME \pfun BODY
+  keychainValues : CREDNAME \pfun CREDVALUE \\
+  fileValues : CREDNAME \pfun CREDVALUE \\
+  envValues : CREDNAME \pfun CREDVALUE
 \end{schema}
 
 Credentials are resolved by name.  The keychain backend maps to
@@ -379,7 +392,7 @@ Environment variables follow the pattern \texttt{BEADLE\_<NAME>}.
 \begin{schema}{ResolveCredential}
   \Xi CredentialStore \\
   name? : CREDNAME \\
-  value! : BODY
+  value! : CREDVALUE
   \where
   (keychainAvail = ztrue \land name? \in \dom keychainValues \\
   \quad \implies value! = keychainValues(name?)) \\
@@ -461,7 +474,8 @@ extends the same skip to any host (Design Invariant~10).
 
 \begin{schema}{Message}
   id : MSGID \\
-  headers : HEADER \pfun BODY \\
+  headers : HEADER \pfun HEADERVALUE \\
+  body : BODY \\
   raw : RAWBYTES \\
   level : TrustLevel
 \end{schema}
@@ -469,10 +483,13 @@ extends the same skip to any host (Design Invariant~10).
 \texttt{Message} names the shape the fetch/parse pipeline below
 produces: headers map by field name to a single value (multi-valued
 headers, e.g.\ repeated \texttt{Received} lines, are folded before
-this point and are out of scope for this schema), $raw$ is the
+this point and are out of scope for this schema), $body$ is the
+plain-text body the MIME-parse step below extracts, $raw$ is the
 untouched RFC~822 bytes used for PGP verification, and $level$ is
 the classification \texttt{ClassifyTrust} assigns once phase~2 (PGP
-verification, when applicable) has run.
+verification, when applicable) has run.  $BODY$ now has a genuine use
+here --- until this fix it was declared in \S~Basic Types and never
+once instantiated by any schema in this document.
 
 \subsection{Fetch and Parse}
 
@@ -597,7 +614,8 @@ signature formats.
 verification only}.  The $isolated = ztrue$ invariant does not hold
 for the PGP subsystem as a whole: the Sign Flow below, and
 decryption, deliberately use the caller's own system keyring
-(\texttt{internal/pgp/sign.go}, \texttt{decrypt.go}) because that is
+(\texttt{internal/pgp/sign.go}, \texttt{internal/pgp/decrypt.go})
+because that is
 where the owner's private key already lives, and no isolated homedir
 could sign or decrypt with it.  Do not read this schema, or Key
 Property~3 below, as a claim about signing or decryption --- both
@@ -721,7 +739,7 @@ code is the source.
 \texttt{search\_messages}     & ---                            & Search a folder by sender, subject, date, or free text; at least one filter required. Renders the same table as \texttt{list\_messages}. \\
 \texttt{read\_message}        & \texttt{message\_id}           & Read a single message by UID: body, headers, attachment summary, trust level. \\
 \texttt{list\_folders}        & ---                            & List all IMAP mailbox folders. \\
-\texttt{send\_email}          & \texttt{to}, \texttt{subject}, \texttt{body} & Send via SMTP (primary) or Resend (fallback). Recipients may be contact names or aliases. \\
+\texttt{send\_email}          & \texttt{to}, \texttt{subject}, \texttt{body} & Send via the configured SMTP transport (primary) or Resend (fallback, blocked when signing is required). Recipients may be contact names or aliases. \\
 \texttt{reply\_message}       & \texttt{message\_id}, \texttt{body} & Reply to a message by UID, threaded (In-Reply-To/References), quoting the original. \\
 \texttt{verify\_signature}    & \texttt{message\_id}           & Explicit PGP verification. Returns trust level, validity, key ID, signer. \\
 \texttt{show\_mime}           & \texttt{message\_id}           & Show the MIME structure of a message. \\
