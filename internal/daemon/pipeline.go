@@ -302,22 +302,24 @@ func writeSetYAML(ws []string) string {
 	return s
 }
 
-// resolveEnvVars converts a list of "KEY" names to a map of KEY=value
-// from the current process environment. Missing vars are silently skipped.
-func resolveEnvVars(names []string) map[string]string {
-	if len(names) == 0 {
-		return nil
-	}
-	m := make(map[string]string, len(names))
+// resolveEnvVars converts a list of "KEY" names to a map of KEY=value from
+// the current process environment, and reports which declared names had no
+// value to resolve. The caller logs missing names with whatever pipeline
+// and stage context it has -- resolveEnvVars stays a pure function so the
+// "no vars declared" and "all declared vars absent" cases stay
+// distinguishable to its caller instead of both collapsing to a nil map.
+func resolveEnvVars(names []string) (env map[string]string, missing []string) {
 	for _, name := range names {
 		if v, ok := os.LookupEnv(name); ok {
-			m[name] = v
+			if env == nil {
+				env = make(map[string]string, len(names))
+			}
+			env[name] = v
+		} else {
+			missing = append(missing, name)
 		}
 	}
-	if len(m) == 0 {
-		return nil
-	}
-	return m
+	return env, missing
 }
 
 // unionWriteSets collects unique write_set entries across all commands.

@@ -773,6 +773,39 @@ func TestCapRunes(t *testing.T) {
 	}
 }
 
+// TestResolveEnvVars is the regression test for beadle-k1g defect 3:
+// resolveEnvVars used to return a bare nil map for both "no vars declared"
+// and "every declared var is absent", so a caller had no way to log which
+// names were missing -- and nothing did. It must now report missing names
+// distinctly from the resolved map.
+func TestResolveEnvVars(t *testing.T) {
+	t.Setenv("BEADLE_K1G_RESOLVE_PRESENT", "yes")
+
+	t.Run("no vars declared", func(t *testing.T) {
+		env, missing := resolveEnvVars(nil)
+		assert.Nil(t, env)
+		assert.Nil(t, missing)
+	})
+
+	t.Run("all declared vars present", func(t *testing.T) {
+		env, missing := resolveEnvVars([]string{"BEADLE_K1G_RESOLVE_PRESENT"})
+		assert.Equal(t, map[string]string{"BEADLE_K1G_RESOLVE_PRESENT": "yes"}, env)
+		assert.Nil(t, missing)
+	})
+
+	t.Run("all declared vars absent", func(t *testing.T) {
+		env, missing := resolveEnvVars([]string{"BEADLE_K1G_RESOLVE_ABSENT"})
+		assert.Nil(t, env)
+		assert.Equal(t, []string{"BEADLE_K1G_RESOLVE_ABSENT"}, missing)
+	})
+
+	t.Run("mixed present and absent", func(t *testing.T) {
+		env, missing := resolveEnvVars([]string{"BEADLE_K1G_RESOLVE_PRESENT", "BEADLE_K1G_RESOLVE_ABSENT"})
+		assert.Equal(t, map[string]string{"BEADLE_K1G_RESOLVE_PRESENT": "yes"}, env)
+		assert.Equal(t, []string{"BEADLE_K1G_RESOLVE_ABSENT"}, missing)
+	})
+}
+
 // TestBuildStageContract asserts the generated contract no longer emits
 // inputs.args or inputs.pipeline_output -- both are unknown fields that
 // ethos's strict-decode mission-contract schema rejects (only inputs.trigger,

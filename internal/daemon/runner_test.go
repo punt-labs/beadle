@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -225,7 +227,10 @@ func TestCLIRunner_Timeout(t *testing.T) {
 }
 
 func TestCLIRunner_OutputCap(t *testing.T) {
-	// Use dd to produce >1MB of output and verify truncation.
+	// Use dd to produce >1MB of output and verify truncation is capped and
+	// marked -- a downstream reader (including an LLM worker reading the
+	// mission contract's context field) must be able to tell the value was
+	// cut rather than silently trusting a partial value as complete.
 	_, wl := setupWhitelist(t, "dd")
 	runner := &CLIRunner{Whitelist: wl}
 
@@ -243,15 +248,261 @@ func TestCLIRunner_OutputCap(t *testing.T) {
 
 	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
 	require.NoError(t, err)
-	assert.Equal(t, 1<<20, len(result))
+	assert.Equal(t, 1<<20+len(truncationMarker), len(result))
+	assert.True(t, strings.HasSuffix(result, truncationMarker))
+}
+
+// TestCLIRunner_OutputCap_LogsTruncation is the regression test for
+// beadle-k1g defect 1: truncating the 1MB stdout cap used to be completely
+// silent, with the io.ReadAll error discarded too. It must now log the
+// command name and the number of bytes actually dropped.
+func TestCLIRunner_OutputCap_LogsTruncation(t *testing.T) {
+	_, wl := setupWhitelist(t, "dd")
+	runner := &CLIRunner{Whitelist: wl}
+	logger, buf := testLoggerCapture()
+
+	cmd := &Command{
+		Name:         "test-cap-logged",
+		Runner:       "cli",
+		Mode:         "process",
+		Binary:       "dd",
+		FixedArgs:    []string{"if=/dev/zero", "bs=1048577", "count=1"},
+		OutputSchema: "text",
+		Timeout:      "5s",
+	}
+	call := CommandCall{Command: "test-cap-logged", Args: map[string]any{}}
+	p := testPipeline()
+
+	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	require.NoError(t, err)
+
+	line := logLineContaining(t, buf, "cli command stdout truncated")
+	assert.Contains(t, line, "level=WARN")
+	assert.Contains(t, line, "test-cap-logged")
+	assert.Contains(t, line, "discarded_bytes=1")
+}
+
+// errAfter is an io.Reader that yields data once, then always fails with
+// err. It stands in for a stdout pipe whose underlying read fails partway
+// through -- something the real dd/cat/echo binaries used elsewhere in this
+// file cannot be made to trigger deterministically.
+type errAfter struct {
+	data []byte
+	err  error
+}
+
+func (r *errAfter) Read(p []byte) (int, error) {
+	if len(r.data) > 0 {
+		n := copy(p, r.data)
+		r.data = r.data[n:]
+		return n, nil
+	}
+	return 0, r.err
+}
+
+// TestReadCapped_PropagatesReadError is the regression test for beadle-k1g
+// defect 1's second half: prior to the fix, CLIRunner.Run discarded the
+// io.ReadAll error outright (`output, _ := io.ReadAll(...)`), returning
+// whatever partial data had been read as if the command had succeeded.
+func TestReadCapped_PropagatesReadError(t *testing.T) {
+	wantErr := errors.New("pipe read boom")
+	r := &errAfter{data: []byte("partial output"), err: wantErr}
+
+	data, extra, err := readCapped(r, 1<<20)
+
+	require.ErrorIs(t, err, wantErr)
+	assert.Equal(t, "partial output", string(data))
+	assert.Zero(t, extra)
+}
+
+// TestReadCapped_ReportsExtraOnlyWhenTruncated confirms extra is 0 (no
+// truncation) when the reader has less data than the cap, and > 0 (real
+// truncation) when it has more -- the distinction TestCLIRunner_OutputCap
+// depends on to decide whether to append truncationMarker.
+func TestReadCapped_ReportsExtraOnlyWhenTruncated(t *testing.T) {
+	t.Run("under cap", func(t *testing.T) {
+		data, extra, err := readCapped(strings.NewReader("short"), 1<<20)
+		require.NoError(t, err)
+		assert.Equal(t, "short", string(data))
+		assert.Zero(t, extra)
+	})
+
+	t.Run("over cap", func(t *testing.T) {
+		data, extra, err := readCapped(strings.NewReader("abcdef"), 4)
+		require.NoError(t, err)
+		assert.Equal(t, "abcd", string(data))
+		assert.Equal(t, int64(2), extra)
+	})
+}
+
+// TestCLIRunner_InvalidTimeoutLogged is the regression test for beadle-k1g
+// defect 5: an unparsable cmd.Timeout ("5min" is not a valid Go duration --
+// "5m" is) used to fall back to the 30s default with no record of why. This
+// is a permanent misconfiguration in the command file, so it must log at
+// Error: retrying the same signed command file will fail identically forever.
+func TestCLIRunner_InvalidTimeoutLogged(t *testing.T) {
+	_, wl := setupWhitelist(t, "echo")
+	runner := &CLIRunner{Whitelist: wl}
+	logger, buf := testLoggerCapture()
+
+	cmd := &Command{
+		Name:         "test-bad-timeout",
+		Runner:       "cli",
+		Mode:         "process",
+		Binary:       "echo",
+		FixedArgs:    []string{"hi"},
+		OutputSchema: "text",
+		Timeout:      "5min", // invalid: Go wants "5m"
+	}
+	call := CommandCall{Command: "test-bad-timeout", Args: map[string]any{}}
+	p := testPipeline()
+
+	result, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	require.NoError(t, err)
+	assert.Equal(t, "hi\n", result)
+
+	line := logLineContaining(t, buf, "invalid timeout in command definition")
+	assert.Contains(t, line, "level=ERROR")
+	assert.Contains(t, line, "test-bad-timeout")
+	assert.Contains(t, line, "5min")
+}
+
+// TestCLIRunner_CompoundInvalidTimeoutLogged is TestCLIRunner_InvalidTimeoutLogged
+// for the compound (multi-step) path, which parses cmd.Timeout independently.
+func TestCLIRunner_CompoundInvalidTimeoutLogged(t *testing.T) {
+	_, wl := setupWhitelist(t, "echo", "cat")
+	runner := &CLIRunner{Whitelist: wl}
+	logger, buf := testLoggerCapture()
+
+	cmd := &Command{
+		Name:   "test-compound-bad-timeout",
+		Runner: "cli",
+		Mode:   "process",
+		Steps: []Step{
+			{Binary: "echo", FixedArgs: []string{"-n", "hello"}, Stdin: "pipe"},
+			{Binary: "cat", Stdin: "stdout"},
+		},
+		OutputSchema: "text",
+		Timeout:      "5min",
+	}
+	call := CommandCall{Command: "test-compound-bad-timeout", Args: map[string]any{}}
+	p := testPipeline()
+
+	result, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	require.NoError(t, err)
+	assert.Equal(t, "hello", result)
+
+	line := logLineContaining(t, buf, "invalid timeout in command definition")
+	assert.Contains(t, line, "level=ERROR")
+	assert.Contains(t, line, "test-compound-bad-timeout")
+}
+
+// TestCLIRunner_MissingDeclaredEnvVarLogged is the regression test for
+// beadle-k1g defect 3: a declared env_vars entry absent from the daemon's
+// own environment used to be skipped with no record anywhere. This is a
+// permanent misconfiguration (the deployment, not the request, is missing
+// the var), so it must log at Error.
+func TestCLIRunner_MissingDeclaredEnvVarLogged(t *testing.T) {
+	_, wl := setupWhitelist(t, "env")
+	runner := &CLIRunner{Whitelist: wl}
+	logger, buf := testLoggerCapture()
+
+	cmd := &Command{
+		Name:         "test-missing-env",
+		Runner:       "cli",
+		Mode:         "process",
+		Binary:       "env",
+		EnvVars:      []string{"BEADLE_K1G_DEFINITELY_UNSET_VAR"},
+		OutputSchema: "text",
+		Timeout:      "5s",
+	}
+	call := CommandCall{Command: "test-missing-env", Args: map[string]any{}}
+	p := testPipeline()
+
+	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	require.NoError(t, err)
+
+	line := logLineContaining(t, buf, "BEADLE_K1G_DEFINITELY_UNSET_VAR")
+	assert.Contains(t, line, "level=ERROR")
+	assert.Contains(t, line, "test-missing-env")
+}
+
+// TestCLIRunner_CompoundMissingDeclaredEnvVarLogged is
+// TestCLIRunner_MissingDeclaredEnvVarLogged for the compound path.
+func TestCLIRunner_CompoundMissingDeclaredEnvVarLogged(t *testing.T) {
+	_, wl := setupWhitelist(t, "env", "cat")
+	runner := &CLIRunner{Whitelist: wl}
+	logger, buf := testLoggerCapture()
+
+	cmd := &Command{
+		Name:    "test-compound-missing-env",
+		Runner:  "cli",
+		Mode:    "process",
+		EnvVars: []string{"BEADLE_K1G_DEFINITELY_UNSET_VAR"},
+		Steps: []Step{
+			{Binary: "env", Stdin: "pipe"},
+			{Binary: "cat", Stdin: "stdout"},
+		},
+		OutputSchema: "text",
+		Timeout:      "5s",
+	}
+	call := CommandCall{Command: "test-compound-missing-env", Args: map[string]any{}}
+	p := testPipeline()
+
+	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	require.NoError(t, err)
+
+	line := logLineContaining(t, buf, "BEADLE_K1G_DEFINITELY_UNSET_VAR")
+	assert.Contains(t, line, "level=ERROR")
+	assert.Contains(t, line, "test-compound-missing-env")
+}
+
+// TestCLIRunner_ArgsFromPipe_MalformedJSON is the regression test for
+// beadle-k1g defect 4: a pipe value that looks like JSON (starts with '{')
+// but fails to parse -- e.g. truncated by defect 1's 1MB cap -- used to be
+// swallowed by `_ = json.Unmarshal(...)`, silently omitting every arg that
+// should have been filled from the pipe with no record of why.
+func TestCLIRunner_ArgsFromPipe_MalformedJSON(t *testing.T) {
+	_, wl := setupWhitelist(t, "echo")
+	runner := &CLIRunner{Whitelist: wl}
+	logger, buf := testLoggerCapture()
+
+	cmd := &Command{
+		Name:      "test-malformed-json",
+		Runner:    "cli",
+		Mode:      "process",
+		Binary:    "echo",
+		FixedArgs: []string{"-n"},
+		Args: []CommandArg{
+			{Name: "title", Type: "string"},
+		},
+		OutputSchema: "text",
+		Timeout:      "5s",
+	}
+	call := CommandCall{Command: "test-malformed-json", Args: map[string]any{}}
+	p := testPipeline()
+
+	// Starts with '{' so the pipe-as-JSON path is taken, but the JSON is
+	// truncated mid-value and fails to parse.
+	pipe := `{"title": "Fix auth`
+	result, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, pipe)
+	require.NoError(t, err)
+	assert.Empty(t, result) // no args filled: title was never resolved
+
+	line := logLineContaining(t, buf, "pipe value looked like JSON but failed to parse")
+	assert.Contains(t, line, "level=WARN")
+	assert.Contains(t, line, "test-malformed-json")
 }
 
 func TestCLIRunner_CompoundOutputCap(t *testing.T) {
 	// The last step emits >1MiB. The compound path captures it in a
 	// cappedWriter, so the result truncates at 1MiB without hanging —
-	// equivalent to the single-process LimitReader cap.
+	// equivalent to the single-process LimitReader cap. It must also carry
+	// a visible truncation marker (beadle-k1g defect 2): cappedWriter used
+	// to drop the excess with no trace, in the result or in a log line.
 	_, wl := setupWhitelist(t, "echo", "dd")
 	runner := &CLIRunner{Whitelist: wl}
+	logger, buf := testLoggerCapture()
 
 	cmd := &Command{
 		Name:   "test-compound-cap",
@@ -267,9 +518,15 @@ func TestCLIRunner_CompoundOutputCap(t *testing.T) {
 	call := CommandCall{Command: "test-compound-cap", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "input data")
+	result, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "input data")
 	require.NoError(t, err)
-	assert.Equal(t, 1<<20, len(result))
+	assert.Equal(t, 1<<20+len(truncationMarker), len(result))
+	assert.True(t, strings.HasSuffix(result, truncationMarker))
+
+	line := logLineContaining(t, buf, "compound command stdout truncated")
+	assert.Contains(t, line, "level=WARN")
+	assert.Contains(t, line, "test-compound-cap")
+	assert.Contains(t, line, "discarded_bytes=1")
 }
 
 func TestCLIRunner_CompoundTwoSteps(t *testing.T) {
