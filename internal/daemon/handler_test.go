@@ -32,10 +32,7 @@ func (m *mockMissionCreator) Create(meta EmailMeta) (string, error) {
 }
 
 func TestOnNewMail(t *testing.T) {
-	gpgBin, err := exec.LookPath("gpg")
-	if err != nil {
-		t.Skip("gpg not installed")
-	}
+	gpgBin := gpgBinary(t)
 
 	tests := []struct {
 		name         string
@@ -169,10 +166,7 @@ func TestOnNewMail(t *testing.T) {
 // contact with a registered GPGKeyID is rejected when the signing key
 // doesn't match. Finding 2: key-to-sender binding.
 func TestOnNewMail_PGPKeyMismatch(t *testing.T) {
-	gpgBin, err := exec.LookPath("gpg")
-	if err != nil {
-		t.Skip("gpg not installed")
-	}
+	gpgBin := gpgBinary(t)
 
 	env := testenv.New(t, "test@test.com")
 	fix := testserver.NewFixture(t)
@@ -198,10 +192,7 @@ func TestOnNewMail_PGPKeyMismatch(t *testing.T) {
 // TestOnNewMail_PGPKeyMatch verifies that a PGP-signed message from a
 // contact with a matching GPGKeyID is accepted. Finding 2.
 func TestOnNewMail_PGPKeyMatch(t *testing.T) {
-	gpgBin, err := exec.LookPath("gpg")
-	if err != nil {
-		t.Skip("gpg not installed")
-	}
+	gpgBin := gpgBinary(t)
 
 	env := testenv.New(t, "test@test.com")
 	fix := testserver.NewFixture(t)
