@@ -1,9 +1,9 @@
 %
 % architecture.tex
 %
-% Beadle Email Channel: Architecture & Z Specification
+% Beadle: Architecture & Z Specification
 % Package structure, trust model, credential resolution, message lifecycle,
-% and security boundaries for beadle-email v0.1.x.
+% and security boundaries for beadle-email and beadle-daemon.
 %
 % Type-check: fuzz -t architecture.tex
 %
@@ -17,11 +17,11 @@
 
 \begin{document}
 
-\title{Beadle Email Channel: Architecture \& Z Specification}
+\title{Beadle: Architecture \& Z Specification}
 \author{Punt Labs}
 \date{March 2026}
 \hypersetup{
-  pdftitle={Beadle Email Channel: Architecture and Z Specification},
+  pdftitle={Beadle: Architecture and Z Specification},
   pdfauthor={Punt Labs},
   pdfsubject={Architecture Document},
   pdfcreator={fuzz}
@@ -36,77 +36,131 @@
 %%----------------------------------------------------------------------
 
 Beadle is an autonomous agent daemon with cryptographic owner control.
-Every action requires a GPG-signed instruction from the owner; the
-daemon has no independent decision-making authority.
+Command \emph{execution} requires a GPG-signed command file authorized
+by the owner (\S~Command-File Signature Verification); the daemon has
+no independent decision-making about \emph{what to run}. The earlier
+steps that decide whether to create a pipeline at all --- sender
+permission and transport-trust checks --- carry no such signature (\S~Daemon
+Architecture, Design Invariant~1). ``Owner'' here names the single GPG
+key \texttt{daemon.json} designates as the recipe authorizer (via
+\texttt{owner\_handle} or \texttt{owner\_gpg\_key\_id}), not a general
+position of authority over the system; a rename to ``authorizer'' is
+proposed under bead beadle-4ul but not yet done.
 
-The first shipping component is \texttt{beadle-email} --- an MCP server
-that provides email communication via Proton Bridge with a four-level
-PGP trust model.  This document describes the architecture of
-\texttt{beadle-email} v0.1.x: its package structure, data flows,
-security boundaries, and key state machines formalised in Z.
+\texttt{beadle-email} shipped first: an MCP server and CLI that provide
+email communication via Proton Bridge with a four-level PGP trust
+model. \texttt{beadle-daemon} is a second binary, sharing
+\texttt{beadle-email}'s lower package layers, that acts on that mail
+unattended (\S~System Overview, \S~Daemon Architecture). This document
+describes both binaries: their package structure, data flows, security
+boundaries, and key state machines formalised in Z.
 
 %%----------------------------------------------------------------------
 \section{System Overview}
 %%----------------------------------------------------------------------
 
-\texttt{beadle-email} runs as a stdio-transport MCP server.  It
-connects to Proton Bridge via IMAP/STARTTLS on localhost, sends mail
-via Proton Bridge SMTP (primary) or Resend API (fallback), and
-verifies PGP signatures using an isolated GPG keyring.
+Beadle ships as two independent binaries sharing package layers.
+\texttt{beadle-email} exposes an MCP server and CLI for message
+send/receive/triage; \texttt{beadle-daemon} watches a mailbox
+unattended and turns authorized instructions into mission pipelines.
+Neither imports the other at the command layer (\S~Dependency Graph).
 
-The binary exposes four subcommands:
+\subsection{beadle-email}
 
-\begin{itemize}
-  \item \texttt{serve} --- start the MCP server (default when no
-    subcommand is given).
-  \item \texttt{version} --- print the version string.
-  \item \texttt{doctor} --- check installation health (config,
-    credentials, GPG, SMTP reachability).
-  \item \texttt{status} --- print current configuration as JSON.
-\end{itemize}
+\texttt{beadle-email} runs as an MCP server, by default over stdio;
+\texttt{serve --transport ws} instead starts a WebSocket listener
+(\S~Security Boundaries).  It connects to Proton Bridge via IMAP on
+localhost by default --- a config default, not an enforced boundary
+(\S~Security Boundaries) --- sends mail via Proton Bridge SMTP
+(primary) or Resend API (fallback), and verifies PGP signatures using
+an isolated GPG keyring.
+
+The binary groups its subcommands by concern: server administration
+(\texttt{serve}, \texttt{doctor}, \texttt{status}, \texttt{version},
+\texttt{health}), message operations (\texttt{list}, \texttt{search},
+\texttt{read}, \texttt{send}, \texttt{reply}, \texttt{move},
+\texttt{mark}, \texttt{folders}), contact management
+(\texttt{contact list|add|remove|find}), identity
+(\texttt{identity show|set}), and enablement (\texttt{enable}/
+\texttt{disable}, \texttt{install}/\texttt{uninstall}).  Run
+\texttt{beadle-email --help} for the current, authoritative list ---
+it changes independently of this document.
+
+\subsection{beadle-daemon}
+
+\texttt{beadle-daemon} has no MCP surface at all --- it does not
+import \texttt{internal/mcp} (\S~Dependency Graph).  Its single
+subcommand, \texttt{run}, polls the mailbox, checks sender permission
+and transport trust (\S~Daemon Architecture), and on a pass executes a
+signed-command pipeline.  It is implemented but not released:
+\texttt{make build-daemon} builds it locally, but no CI workflow and
+no \texttt{make dist} target produces a distributable binary (bead
+beadle-5ma).
 
 %%----------------------------------------------------------------------
 \section{Package Map}
 %%----------------------------------------------------------------------
 
-All packages live under \texttt{internal/} --- nothing is exported
-outside the module.
+Beadle's code lives under \texttt{cmd/} (binary entry points) and
+\texttt{internal/} (everything else --- nothing under
+\texttt{internal/} is exported outside the module). Three further
+\texttt{internal/} directories --- \texttt{daemontest},
+\texttt{testenv}, \texttt{testserver} --- are test-only fixtures for
+the suite and are excluded from the table below, which covers the
+remaining production packages.
 
 \begin{center}
 \begin{tabular}{@{}ll@{}}
 \toprule
 \textbf{Package} & \textbf{Responsibility} \\
 \midrule
-\texttt{cmd/beadle-email/} & CLI entry point: subcommand dispatch \\
-\texttt{internal/channel/}  & Channel interface: \texttt{Message}, \texttt{TrustLevel}, shared types \\
-\texttt{internal/email/}    & IMAP client, MIME parser, trust classifier, SMTP/Resend senders \\
-\texttt{internal/pgp/}      & GPG signature verification (isolated GNUPGHOME) and signing (system keyring) \\
-\texttt{internal/mcp/}      & MCP tool definitions and handlers (21 always-on tools; 2 poll tools gated on config) \\
-\texttt{internal/secret/}   & Credential resolution: OS keychain $\to$ file $\to$ env var \\
+\texttt{cmd/beadle-daemon/}  & Daemon entry point: the mail-triggered mission pipeline runner (\texttt{run}) \\
+\texttt{cmd/beadle-email/}   & CLI/MCP entry point: subcommand dispatch (\S~System Overview) \\
+\texttt{internal/channel/}   & Channel interface: \texttt{Message}, \texttt{TrustLevel}, shared types \\
+\texttt{internal/claudemd/}  & Adds/removes beadle's \texttt{@}-import line in a repo's \texttt{CLAUDE.md} \\
+\texttt{internal/contacts/}  & Address book storage and lookup \\
+\texttt{internal/daemon/}    & Mail-triggered mission pipeline: planner, executor, runners, command model, persistence \\
+\texttt{internal/email/}     & IMAP client, MIME parser, trust classifier, SMTP/Resend senders \\
+\texttt{internal/enable/}    & Turns beadle's \texttt{CLAUDE.md} guidance composition on/off in a repo \\
+\texttt{internal/identity/}  & Resolves which identity beadle operates as \\
+\texttt{internal/mcp/}       & MCP tool definitions and handlers (\S~MCP Tool Surface); stdio and WebSocket transports \\
+\texttt{internal/paths/}     & Single root directory for all beadle data \\
+\texttt{internal/pgp/}       & GPG signature verification (isolated GNUPGHOME) and signing (system keyring) \\
+\texttt{internal/secret/}    & Credential resolution: OS keychain $\to$ file $\to$ env var \\
+\texttt{internal/session/}   & Reads the ethos session roster to enumerate participants \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \subsection{Dependency Graph}
 
-Dependencies flow strictly downward.  No package imports a package
-above it in this ordering.
+Dependencies flow strictly downward within each binary; the edges
+below are the internal import edges reported by \texttt{go list}, not
+a hand-traced approximation.  \texttt{internal/mcp} and
+\texttt{internal/daemon} do not import each other --- the two binaries
+share a lower layer (\texttt{channel}, \texttt{contacts},
+\texttt{email}, \texttt{identity}, \texttt{paths}, \texttt{pgp},
+\texttt{secret}) and are independent at the command layer, matching
+the split in \S~System Overview.
 
 \begin{verbatim}
-    cmd/beadle-email
-          |
-      internal/mcp
-       /    |    \
-  email    pgp   channel
-    |
-  secret
-\end{verbatim}
+beadle-email command layer:
+  cmd/beadle-email -> mcp, contacts, email, enable, identity,
+                       paths, pgp, secret
+  mcp              -> channel, contacts, email, enable, identity,
+                       paths, pgp, session
+  enable           -> claudemd
 
-\texttt{internal/channel} is a leaf package with no internal
-dependencies.  \texttt{internal/pgp} depends only on the standard
-library.  \texttt{internal/email} depends on \texttt{channel} and
-\texttt{secret}.  \texttt{internal/mcp} depends on \texttt{email},
-\texttt{pgp}, and \texttt{channel}.
+beadle-daemon command layer:
+  cmd/beadle-daemon -> daemon, email, identity, paths, secret
+  daemon            -> channel, contacts, email, identity, paths, pgp
+
+shared lower layer (imported by both trees above):
+  email    -> channel, contacts, identity, paths, pgp, secret
+  contacts -> paths
+  secret   -> paths
+  channel, claudemd, identity, paths, pgp, session -> (no internal deps)
+\end{verbatim}
 
 %%----------------------------------------------------------------------
 \section{Basic Types}
@@ -273,7 +327,7 @@ The resolution is a priority chain: keychain beats file, file beats
 environment variable.  File credentials are rejected if group or
 world readable (permissions check enforces mode 600).
 
-The three named credentials used by \texttt{beadle-email}:
+The credentials used by \texttt{beadle-email}, resolved by name:
 
 \begin{center}
 \begin{tabular}{@{}lll@{}}
@@ -281,11 +335,17 @@ The three named credentials used by \texttt{beadle-email}:
 \textbf{Name} & \textbf{Env Var} & \textbf{Purpose} \\
 \midrule
 \texttt{imap-password}   & \texttt{BEADLE\_IMAP\_PASSWORD}   & Proton Bridge login \\
+\texttt{smtp-password}   & \texttt{BEADLE\_SMTP\_PASSWORD}   & SMTP login; falls back to \texttt{imap-password} when unset \\
 \texttt{resend-api-key}  & \texttt{BEADLE\_RESEND\_API\_KEY}  & Resend API authentication \\
 \texttt{gpg-passphrase}  & \texttt{BEADLE\_GPG\_PASSPHRASE}  & PGP signing key passphrase \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+A secret file that exists but is unreadable or malformed (permissions,
+I/O error) is a hard error --- resolution does not fall through to the
+environment variable in that case, only when the file is genuinely
+absent.
 
 %%----------------------------------------------------------------------
 \section{Message Receive Path}
@@ -307,9 +367,10 @@ response.
   state' = imapConnected
 \end{schema}
 
-Connection uses STARTTLS.  The TLS certificate check is skipped for
-loopback addresses only (Proton Bridge uses self-signed certificates
-on localhost).
+Connection uses STARTTLS.  The TLS certificate check is skipped
+automatically for loopback addresses (Proton Bridge uses self-signed
+certificates on localhost); \texttt{tls\_skip\_verify} in config
+extends the same skip to any host (Design Invariant~10).
 
 \begin{schema}{SelectFolder}
   \Delta IMAPConnection \\
@@ -325,15 +386,30 @@ Once a folder is selected, messages are fetched by UID.  The raw
 RFC~822 bytes are parsed through a pipeline:
 
 \begin{enumerate}
+  \item \textbf{PGP decrypt} (conditional) --- if the message is
+    PGP-encrypted, inbound decryption (DES-024, SETTLED) runs
+    \emph{before} MIME parsing, using the system keyring (a
+    deliberate departure from the isolated-keyring rule for
+    verification, since decryption needs the owner's own private
+    key --- Design Invariant~3).  This changes which bytes MIME
+    parse sees.
   \item \textbf{MIME parse} --- \texttt{ParseMIME} extracts the
     plain-text body, attachments, and selected headers.  Multipart
-    messages are walked using the \texttt{go-message} library.
-    PGP signature and key parts are skipped (handled separately).
+    messages are walked using the \texttt{go-message} library, and
+    \texttt{walkParts} recurses into a nested \texttt{multipart} part
+    before reading its body (DES-025, SETTLED) --- GPG Mail nests
+    \texttt{multipart/signed} $\to$ \texttt{multipart/mixed} $\to$
+    \texttt{text/plain}, and a flat, non-recursive walk returned
+    ``(no text body)'' for exactly that shape.  PGP signature and key
+    parts are skipped (handled separately).
   \item \textbf{Header trust} --- \texttt{ClassifyTrust} runs on
     headers to determine the initial trust level.
   \item \textbf{PGP verify} (conditional) --- if the message has a
     PGP signature ($hasPGPSignature = ztrue$), raw bytes are
-    passed to \texttt{pgp.Verify} for full verification.
+    passed to \texttt{pgp.Verify} for full verification; the
+    verify-and-promote step that turns this into a final trust level
+    lives in the MCP handlers, not in \texttt{internal/email} --- see
+    \S~Two-Phase Trust Resolution.
   \item \textbf{Response assembly} --- the parsed message, trust
     level, and attachments are serialised as JSON in the MCP tool
     response.
@@ -357,11 +433,15 @@ the Resend API is used as fallback.
 
 \subsection{Proton Bridge SMTP}
 
-SMTP uses STARTTLS with the same self-signed certificate exception
-as IMAP (loopback only).  Authentication uses \texttt{PLAIN} with
-the same credentials as IMAP.  The raw RFC~822 message is composed
-by \texttt{ComposeRaw}, which validates header fields against CR/LF
-injection.
+SMTP uses implicit TLS on port 465, or STARTTLS otherwise, with the
+same self-signed certificate exception as IMAP for loopback addresses
+--- extended to any host when \texttt{tls\_skip\_verify} is set
+(Design Invariant~10).  Port 465 implicit TLS is also the branch the
+Fastmail signing transport uses (\S~PGP Signing).  Authentication uses
+\texttt{PLAIN} with \texttt{smtp-password} if configured, else the
+same credentials as IMAP (\S~Credential Resolution).  The raw RFC~822
+message is composed by \texttt{ComposeRaw}, which validates header
+fields against CR/LF injection.
 
 \subsection{Resend API}
 
@@ -369,12 +449,24 @@ The Resend fallback sends via HTTPS POST to
 \texttt{api.resend.com/emails}.  It supports both plain text and
 HTML bodies.  The API key is resolved via the credential store.
 
-\subsection{PGP Signing (Future)}
+\subsection{PGP Signing}
 
-PGP signing of outbound mail requires a transport that preserves raw
-MIME (\texttt{multipart/signed} envelopes).  Neither Proton Bridge
-(strips MIME) nor Resend (no raw MIME API) supports this.  Amazon
-SES will be added as the PGP-signing transport in a future release.
+PGP signing of outbound mail (DES-022, SETTLED) requires a transport
+that preserves raw MIME (\texttt{multipart/signed} envelopes).
+Neither Proton Bridge (strips MIME) nor Resend (no raw MIME API;
+Resend's own backend is Amazon SES, which strips it the same way)
+supports this.  The signing transport that does is \textbf{Fastmail
+SMTP} on port 465 (implicit TLS, \S~Proton Bridge SMTP) --- selected
+by pointing \texttt{smtp\_host}/\texttt{smtp\_port} at Fastmail (see
+\texttt{docs/TESTING.md}'s Fastmail Test Config).
+
+\texttt{TrySendChain} does not itself validate that the transport it
+used preserved the signed MIME envelope --- it reports success on any
+clean SMTP transaction.  A signed message sent over the default
+(Proton Bridge) configuration reports ``sent'' while carrying a
+signature Bridge has already stripped; only a transport actually known
+to preserve \texttt{multipart/signed}, such as Fastmail, makes the
+signature meaningful on arrival.
 
 %%----------------------------------------------------------------------
 \section{PGP Subsystem}
@@ -420,6 +512,10 @@ Unix socket path limit for \texttt{gpg-agent}.
 \subsection{Sign Flow}
 
 \begin{enumerate}
+  \item Check the signer key's expiry (\texttt{checkSignerKeyExpiry})
+    before any other work --- keys with no expiration date, or an
+    expiration date already passed, are rejected before boundary
+    generation or body composition even begins.
   \item Compose the body as a MIME part with CRLF line endings
     (mandatory per RFC~3156).
   \item Write the GPG passphrase to a temporary file (mode 600) to
@@ -432,28 +528,92 @@ Unix socket path limit for \texttt{gpg-agent}.
   \item Generate the MIME boundary using \texttt{crypto/rand}.
 \end{enumerate}
 
+\subsection{Command-File Signature Verification}
+
+Command-file verification (\texttt{internal/daemon/signature.go}'s
+\texttt{VerifySignature}, DES-034/DES-035, both SETTLED) is a
+structurally distinct, stricter path from \texttt{pgp.Verify} above:
+it authorizes a \emph{command definition}, not an inbound message.
+
+\begin{enumerate}
+  \item Reconstruct the canonical bytes that were signed --- the
+    command with its \texttt{Signature} field cleared, marshaled
+    deterministically (\texttt{CanonicalCommandBytes}).
+  \item Create an isolated GNUPGHOME, as with inbound verification.
+  \item Import \emph{only} the authorizer's key (identified by a full
+    40-hex fingerprint\footnote{\texttt{daemon.json}'s
+    \texttt{owner\_handle}/\texttt{owner\_gpg\_key\_id} name this key
+    as ``owner'' in code and config today; a rename to
+    ``authorizer'' is proposed under bead beadle-4ul but not yet
+    done.  This document uses ``authorizer'' for the concept and the
+    current field names for the literal config keys.}) from the
+    ambient keyring into the isolated one, and assert exactly one key
+    with that exact fingerprint landed there --- never a silent
+    ``verify against whatever's there.''
+  \item Check that key's expiry against the isolated homedir (Design
+    Invariant~4).
+  \item Run \texttt{gpg --verify --status-fd} and parse the
+    machine-readable \texttt{[GNUPG:]} status lines: every outcome
+    except \texttt{GOODSIG} is an error, classified by reason
+    (missing, invalid, wrong-key, key-expired).  This is a stricter
+    parse than \texttt{pgp.Verify}'s, which reads a stderr substring.
+\end{enumerate}
+
+A nil error means the authorizer, and only the authorizer, signed this
+exact command definition with a key that has not expired.
+\texttt{LoadCommands}/\texttt{loadCommand} call \texttt{VerifySignature}
+on every command file at daemon startup; when \texttt{daemon.json} is
+absent, unresolvable, or names both or neither owner field, command
+loading is disabled entirely --- the daemon starts with zero commands
+rather than falling back to unsigned execution.
+
 %%----------------------------------------------------------------------
 \section{MCP Tool Surface}
 %%----------------------------------------------------------------------
 
-\texttt{beadle-email} registers 8 MCP tools:
+The tools below are registered by \texttt{internal/mcp/tools.go}'s
+\texttt{RegisterTools} (message, contact, and identity tools; the last
+21 rows unconditionally) plus \texttt{internal/mcp/poll\_tools.go}
+(the final two rows, gated on a background poller being configured).
+Re-run that lookup rather than trusting a stale copy of this table if
+the tool surface has since changed --- the table is a snapshot, the
+code is the source.
 
 \begin{center}
-\begin{longtable}{@{}llp{6.5cm}@{}}
+\begin{longtable}{@{}llp{6cm}@{}}
 \toprule
 \textbf{Tool} & \textbf{Required Params} & \textbf{Description} \\
 \midrule
-\texttt{list\_messages}     & ---               & List messages from a folder (id, from, date, subject, trust). Inline PGP verification for signed messages. \\
-\texttt{read\_message}      & \texttt{message\_id} & Read a single message by UID. Auto-verifies PGP if Content-Type indicates \texttt{multipart/signed}. \\
-\texttt{list\_folders}      & ---               & List all IMAP mailbox folders. \\
-\texttt{send\_email}        & \texttt{to}, \texttt{subject}, \texttt{body} & Send via SMTP (primary) or Resend (fallback). \\
-\texttt{verify\_signature}  & \texttt{message\_id} & Explicit PGP verification. Returns trust level, validity, key ID, signer. \\
-\texttt{show\_mime}         & \texttt{message\_id} & Show MIME structure of a message. \\
-\texttt{check\_trust}       & \texttt{message\_id} & Classify trust level with detailed explanation. \\
-\texttt{move\_message}      & \texttt{message\_id} & Move a message to another folder (default: Archive). \\
+\texttt{list\_messages}       & ---                            & List messages from a folder (id, from, date, subject, trust). Repo-scoped by default; \texttt{all\_repos} widens. \\
+\texttt{search\_messages}     & ---                            & Search a folder by sender, subject, date, or free text; at least one filter required. Renders the same table as \texttt{list\_messages}. \\
+\texttt{read\_message}        & \texttt{message\_id}           & Read a single message by UID: body, headers, attachment summary, trust level. \\
+\texttt{list\_folders}        & ---                            & List all IMAP mailbox folders. \\
+\texttt{send\_email}          & \texttt{to}, \texttt{subject}, \texttt{body} & Send via SMTP (primary) or Resend (fallback). Recipients may be contact names or aliases. \\
+\texttt{reply\_message}       & \texttt{message\_id}, \texttt{body} & Reply to a message by UID, threaded (In-Reply-To/References), quoting the original. \\
+\texttt{verify\_signature}    & \texttt{message\_id}           & Explicit PGP verification. Returns trust level, validity, key ID, signer. \\
+\texttt{show\_mime}           & \texttt{message\_id}           & Show the MIME structure of a message. \\
+\texttt{check\_trust}         & \texttt{message\_id}           & Classify trust level with a detailed explanation. \\
+\texttt{move\_message}        & \texttt{message\_id}           & Move a message to another folder (default: Archive). \\
+\texttt{batch\_move\_messages} & \texttt{message\_ids}          & Move multiple messages to another folder in one call. \\
+\texttt{mark\_message}        & \texttt{message\_id}           & Set or clear the \textbackslash{}Seen flag; reading never changes read state. \\
+\texttt{batch\_mark\_messages} & \texttt{message\_ids}          & Mark multiple messages read/unread in one call. \\
+\texttt{download\_attachment} & \texttt{message\_id}, \texttt{part\_index} & Extract an attachment by MIME part index (from \texttt{show\_mime}). \\
+\texttt{list\_contacts}       & ---                            & List all contacts in the address book. \\
+\texttt{find\_contact}        & \texttt{query}                 & Look up a contact by name, email, or alias. \\
+\texttt{add\_contact}         & \texttt{name}, \texttt{email}  & Add a contact; email may be a glob pattern, restricted to read-only or blocked permissions. \\
+\texttt{remove\_contact}      & \texttt{name}                  & Remove a contact by name. \\
+\texttt{whoami}               & ---                            & Show the active identity: email, handle, source, session participants. \\
+\texttt{switch\_identity}     & ---                            & Switch the active identity for this session, or reset to default. \\
+\texttt{enable}               & \texttt{action}                & Enable or disable beadle guidance (\texttt{CLAUDE.md} import, marker) in the current repo. \\
+\texttt{set\_poll\_interval} (gated) & \texttt{interval}         & Set the background inbox polling interval. \\
+\texttt{get\_poll\_status} (gated)   & ---                       & Show poller state: interval, active, last check time, unread count. \\
 \bottomrule
 \end{longtable}
 \end{center}
+
+Both gated rows are registered only when a background poller is
+configured (\texttt{h.poller != nil}); the remaining rows above are
+unconditional.
 
 All tool handlers use a \texttt{withClient} pattern: a fresh IMAP
 connection is established per request and closed when the handler
@@ -468,9 +628,17 @@ These invariants are enforced by the architecture and hold across
 all operations:
 
 \begin{enumerate}
-  \item \textbf{Zero agent authority.}  Every action requires a
-    GPG-signed instruction from the owner.  The daemon has no
-    independent decision-making.
+  \item \textbf{Zero agent authority (command execution only).}
+    Every command the daemon executes requires a GPG-signed command
+    file authorized by the owner (\S~Command-File Signature
+    Verification) --- the daemon has no independent decision-making
+    about \emph{what to run}.  This does not cover every action taken
+    on inbound mail: \texttt{OnNewMail} creates a pipeline or a bare
+    mission record from sender permission and transport trust alone,
+    with no signed command anywhere in that earlier decision
+    (\S~Daemon Architecture, Detection and Trust Gate).  With zero
+    commands loaded, nothing downstream runs, but the mission/pipeline
+    record itself is still created.
 
   \item \textbf{Preflight before execute.}  All permissions are
     validated before any command runs.  No partial execution.
@@ -481,11 +649,18 @@ all operations:
     own key from the system keyring, since that is where it already
     lives.
 
-  \item \textbf{Non-expiring keys rejected.}  All command-signing
-    keys must have an expiration date.
+  \item \textbf{Expired and non-expiring keys rejected.}  All
+    command-signing keys must carry an expiration date that has not
+    yet passed --- enforced on the primary key and, when the key has
+    signing-capable subkeys, requiring at least one such subkey with a
+    current, non-expired expiry (\texttt{internal/pgp/expiry.go}).
 
-  \item \textbf{Audit log is tamperproof.}  Append-only,
-    GPG-signed entries.  Only the owner can clear the log.
+  \item \textbf{Audit log is tamperproof (designed, not
+    implemented).}  Append-only, GPG-signed entries; only the owner
+    can clear the log.  No code implements this today ---
+    \texttt{internal/daemon} has no audit-log type, writer, or clear
+    operation (bead beadle-623).  This invariant is retained as the
+    design target, not a description of current behavior.
 
   \item \textbf{No secrets in logs.}  GPG key material, passwords,
     API keys, and raw email content are never logged.
@@ -499,9 +674,14 @@ all operations:
   \item \textbf{File permission enforcement.}  Secret files must
     not be group or world readable (mode 600).
 
-  \item \textbf{Loopback-only TLS exception.}  Self-signed
-    certificate verification is skipped only for loopback
-    addresses (Proton Bridge on localhost).
+  \item \textbf{TLS verification skip is configurable, not
+    loopback-only.}  Certificate verification is skipped
+    automatically for loopback addresses (Proton Bridge's self-signed
+    cert on localhost), but \texttt{tls\_skip\_verify} in config also
+    disables it for \emph{any} host --- added for Docker host
+    networking, where the bridge is not reachable via loopback.  The
+    exception is a configuration choice, not a boundary enforced
+    regardless of configuration.
 \end{enumerate}
 
 %%----------------------------------------------------------------------
@@ -511,11 +691,23 @@ all operations:
 \subsection{Network Boundary}
 
 \begin{itemize}
-  \item \textbf{IMAP/SMTP}: localhost only (Proton Bridge).
-    STARTTLS with self-signed cert exception for loopback.
+  \item \textbf{IMAP/SMTP}: \texttt{127.0.0.1} is the default host,
+    not an enforced boundary --- \texttt{imap\_host}/\texttt{smtp\_host}
+    are plain config fields, and \texttt{docs/TESTING.md}'s own
+    Fastmail signing procedure switches \texttt{smtp\_host} to a
+    non-loopback host.  STARTTLS (or implicit TLS on port 465,
+    \S~Proton Bridge SMTP) with a self-signed-cert exception for
+    loopback addresses; \texttt{tls\_skip\_verify} extends that
+    exception to any host (Design Invariant~10).
   \item \textbf{Resend API}: outbound HTTPS to
     \texttt{api.resend.com}.  Bearer token authentication.
-  \item \textbf{MCP}: stdio transport.  No network listener.
+  \item \textbf{MCP}: stdio by default.  \texttt{serve --transport ws}
+    instead binds \texttt{0.0.0.0} (all interfaces, not loopback) on
+    port 8420 by default, with \texttt{CheckOrigin} accepting every
+    origin unconditionally --- the only access control referenced
+    anywhere in the codebase is an external \texttt{mcp-proxy}'s
+    \texttt{MCP\_PROXY\_TOKEN}, named in a code comment, not enforced
+    by this binary itself (bead beadle-nimy).
 \end{itemize}
 
 \subsection{Process Boundary}
@@ -543,7 +735,7 @@ all operations:
 \end{itemize}
 
 %%----------------------------------------------------------------------
-\section{Daemon Architecture (DES-027/028/029)}
+\section{Daemon Architecture}
 %%----------------------------------------------------------------------
 
 \texttt{beadle-daemon} is a standalone Go process that monitors email
@@ -554,7 +746,7 @@ contacts send instructions.
 
 The daemon reuses the same \texttt{Poller} as \texttt{beadle-email},
 decoupled via a \texttt{NewMailFunc} callback.  When new mail is
-detected, the handler:
+detected, the handler (\texttt{OnNewMail}, DES-027, SETTLED):
 
 \begin{enumerate}
   \item Fetches recent unread messages via IMAP.
@@ -562,27 +754,66 @@ detected, the handler:
   \item Checks the \texttt{x} (execute) permission bit.
   \item Verifies transport trust --- Proton E2E (trusted) or PGP
     signature with key bound to contact (verified).  Unverified
-    messages from \texttt{rwx} contacts are rejected.
-  \item On pass: creates a pipeline.
+    messages from \texttt{rwx} contacts are rejected.  Trust in the
+    Proton-E2E branch rests on IMAP actually being Proton Bridge on
+    localhost, which nothing here confirms yet (bead beadle-hv7i).
+  \item On pass: creates a pipeline when a spawner and command
+    templates are configured; otherwise falls back to a bare mission
+    record (\texttt{h.missions.Create}) with no pipeline or signed
+    command involved at all (Design Invariant~1).
 \end{enumerate}
 
 \subsection{Pipeline Orchestrator}
 
 A pipeline decomposes an email instruction into a sequence of typed
-commands.  Each command is a GPG-signed YAML definition with a typed
-argument schema, write-set, budget, timeout, and tool list.
+commands (DES-030, DES-031, both SETTLED).  Each command is a
+GPG-signed YAML definition (\S~Command-File Signature Verification)
+with a typed argument schema, write-set, budget, timeout, and tool
+list, run by one of two runners:
+
+\begin{itemize}
+  \item \textbf{claude} --- spawns an ephemeral \texttt{claude -p
+    --bare} session per stage (\S~Worker Isolation).
+  \item \textbf{cli} --- runs a whitelisted binary directly, or a
+    compound sequence of binaries declared as \texttt{steps}, chained
+    together via \texttt{io.Pipe} goroutines.  A binary's resolved,
+    symlink-followed path (\texttt{filepath.EvalSymlinks}) must still
+    land inside a whitelisted directory.  Output is capped at 1~MB
+    (\texttt{io.LimitReader}); anything beyond the cap is discarded
+    and the result is marked truncated, not silently grown.
+\end{itemize}
+
+A stage's data flows to the next through a top-level \texttt{pipe}
+value, shaped by each command's declared \texttt{mode}:
+
+\begin{itemize}
+  \item \texttt{process} --- the stage's output replaces \texttt{pipe}
+    for the next stage, after validation against the command's
+    \texttt{output\_schema} (\texttt{"text"} or a JSON Schema object).
+  \item \texttt{passthrough} --- \texttt{pipe} is unchanged; the
+    stage's own result is still recorded like any other stage.
+\end{itemize}
+
+Stage args and the prior stage's pipeline output are carried to the
+worker as free text in the mission contract's top-level
+\texttt{context} field --- ethos's \texttt{inputs} schema recognizes
+only \texttt{trigger}, \texttt{files}, \texttt{ticket}, and
+\texttt{references}; there is no \texttt{inputs.args} or
+\texttt{inputs.previous\_output} field under any name.  Assuming
+otherwise is exactly what shipped broken as beadle-8gt.
 
 \begin{verbatim}
   Email instruction
     -> Planner (LLM or rule-based)
-    -> [cmd1 | cmd2 | ... | auto-reply]
-    -> Sequential mission execution
+    -> [cmd1 (process/passthrough) | cmd2 | ... | auto-reply]
+    -> Sequential mission execution; context field carries stage
+       args + prior pipe value
 \end{verbatim}
 
-Each stage spawns an ephemeral \texttt{claude -p --bare} session with
-per-command MCP configuration and a minimal environment.  Output flows
-between stages via \texttt{inputs.previous\_output} in the ethos
-mission contract.
+File-flow support --- attachments and generated artifacts moving
+between stages as file references, rather than only through
+\texttt{pipe} --- is designed (DES-032) but not implemented:
+\texttt{Command} has no file-flow fields today.
 
 \subsection{Auto-Reply (DES-029)}
 
@@ -597,14 +828,20 @@ originator never receives silence.
 
 \subsection{Worker Isolation}
 
-Workers run with:
+Isolation here is process-level only, not container-level: workers
+share the daemon host's kernel, network namespace, and filesystem
+outside their restricted \texttt{PATH}.  Container isolation (network
+namespace, seccomp) is an unfiled TODO in \texttt{spawner.go}, not yet
+implemented.  Within that scope, workers run with:
 
 \begin{itemize}
   \item \texttt{--bare} mode (no hooks, plugins, CLAUDE.md).
-  \item Restricted PATH (claude binary dir + \texttt{/usr/bin}).
+  \item Restricted PATH: the resolved \texttt{claude} binary's own
+    directory, plus \texttt{/usr/bin} and \texttt{/usr/local/bin}.
   \item Per-command MCP servers from a registry.
   \item Adversarial robustness instructions in the system prompt.
-  \item 30-minute timeout, \$5 budget cap, 50-turn limit.
+  \item 30-minute timeout, \$5 budget cap, 50-turn limit --- each
+    overridable; these are the defaults.
   \item Protected env vars (HOME, PATH, ANTHROPIC\_API\_KEY) forced
     after command overrides.
 \end{itemize}
@@ -613,8 +850,17 @@ Workers run with:
 
 Pipeline state is written to
 \texttt{\~{}/.punt-labs/beadle/pipelines/<id>.json} via atomic rename
-at each state transition.  On daemon startup, in-flight pipelines
-are marked failed and the originator is notified.
+(write to \texttt{.tmp-<id>.json}, then \texttt{os.Rename}) at each
+state transition, under 0700/0600 permissions, with a path-traversal
+guard on the pipeline ID.  On daemon startup, in-flight
+(\texttt{"running"}) pipelines are marked failed and the originator is
+notified.  A 30-day retention sweep runs on a recurring ticker
+(\texttt{DefaultRetention}); orphaned \texttt{.tmp-*.json} files left
+by a process that died between write and rename are reaped separately,
+after 5 minutes, since a torn write may not even parse as a pipeline
+record.  \texttt{cmd/beadle-daemon}'s \texttt{main} wires this store
+into both the startup sweep and the \texttt{Executor} that runs live
+pipelines, so both see the same records.
 
 %%----------------------------------------------------------------------
 \section{Key Properties}
@@ -633,9 +879,13 @@ inspection and testing:
     priority over file, file over environment variable.  The
     \texttt{ResolveCredential} schema enforces this ordering.
 
-  \item \textbf{GPG isolation}: the $isolated = ztrue$ invariant
-    in \texttt{GPGEnvironment} ensures no PGP operation writes to
-    the user's system keyring.
+  \item \textbf{GPG isolation (verification only)}: the $isolated =
+    ztrue$ invariant in \texttt{GPGEnvironment} ensures no PGP
+    \emph{verification} operation writes to the user's system
+    keyring.  Signing and decryption are a deliberate exception ---
+    they use the owner's own key from the system keyring, since that
+    is where it already lives (Design Invariant~3, \S~PGP Signing,
+    DES-024).
 
   \item \textbf{Send fallback}: if SMTP is available, it is
     always preferred.  Resend is used only when SMTP is
@@ -645,9 +895,10 @@ inspection and testing:
     creates and destroys its own IMAP connection, preventing
     stale state across calls.
 
-  \item \textbf{Trust gate for execution}: only messages with
+  \item \textbf{Trust gate before creation}: only messages with
     transport trust $\geq verified$ (PGP) or $= trusted$ (Proton E2E)
-    AND contact \texttt{x}-bit can trigger daemon pipelines.
+    AND contact \texttt{x}-bit reach mission or pipeline creation
+    (\S~Detection and Trust Gate).
 
   \item \textbf{Auto-reply}: every pipeline terminates with a reply
     to the originator.  Success sends the final output.  Failure
