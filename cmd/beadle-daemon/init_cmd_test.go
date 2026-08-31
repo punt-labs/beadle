@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/punt-labs/beadle/internal/identity"
+	"github.com/punt-labs/beadle/internal/testenv"
 )
 
 // writeTestIdentity writes a minimal ethos identity + beadle extension
@@ -30,18 +31,29 @@ func writeTestIdentity(t *testing.T, ethosDir, handle, gpgKeyID string) {
 	}
 }
 
+// testFingerprint names a key in no keyring -- valid 40-hex shape, never
+// imported anywhere. Tests that need runInit to succeed WITHOUT a real,
+// usable key pass --no-verify-key explicitly; tests that need to prove
+// init's own key-usability probe use a real generated key instead (see
+// TestRunInit_HandleHappyPath, TestRunInit_FingerprintHappyPath,
+// TestRunInit_RejectsKeyAbsentFromKeyring).
 const testFingerprint = "0123456789ABCDEF0123456789ABCDEF01234567"
 
 func TestRunInit_HandleHappyPath(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := testenv.ShortGPGHome(t)
+	t.Setenv("GNUPGHOME", home)
+	fpr := testenv.GenOwnerKey(t, gpgBin, home, "init-handle@example.com", "1y")
+
 	dataDir := t.TempDir()
 	ethosDir := t.TempDir()
-	writeTestIdentity(t, ethosDir, "operator", testFingerprint)
+	writeTestIdentity(t, ethosDir, "operator", fpr)
 	resolver := identity.NewResolver(ethosDir, dataDir, "")
 
 	var out bytes.Buffer
-	err := runInit(&out, dataDir, resolver, "operator", "", false)
+	err := runInit(&out, dataDir, resolver, "operator", "", gpgBin, false, false)
 	require.NoError(t, err)
-	assert.Contains(t, out.String(), testFingerprint)
+	assert.Contains(t, out.String(), fpr)
 
 	data, err := os.ReadFile(filepath.Join(dataDir, "daemon.json"))
 	require.NoError(t, err)
@@ -53,13 +65,18 @@ func TestRunInit_HandleHappyPath(t *testing.T) {
 }
 
 func TestRunInit_FingerprintHappyPath(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := testenv.ShortGPGHome(t)
+	t.Setenv("GNUPGHOME", home)
+	fpr := testenv.GenOwnerKey(t, gpgBin, home, "init-fingerprint@example.com", "1y")
+
 	dataDir := t.TempDir()
 	resolver := identity.NewResolver(t.TempDir(), dataDir, "")
 
 	var out bytes.Buffer
-	err := runInit(&out, dataDir, resolver, "", testFingerprint, false)
+	err := runInit(&out, dataDir, resolver, "", fpr, gpgBin, false, false)
 	require.NoError(t, err)
-	assert.Contains(t, out.String(), testFingerprint)
+	assert.Contains(t, out.String(), fpr)
 
 	data, err := os.ReadFile(filepath.Join(dataDir, "daemon.json"))
 	require.NoError(t, err)
@@ -67,7 +84,65 @@ func TestRunInit_FingerprintHappyPath(t *testing.T) {
 		OwnerGPGKeyID string `json:"owner_gpg_key_id"`
 	}
 	require.NoError(t, json.Unmarshal(data, &cfg))
-	assert.Equal(t, testFingerprint, cfg.OwnerGPGKeyID)
+	assert.Equal(t, fpr, cfg.OwnerGPGKeyID)
+}
+
+// TestRunInit_RejectsKeyAbsentFromKeyring is the regression test for the
+// key-usability probe itself: a syntactically valid fingerprint that is
+// not in any keyring must be rejected, not written -- catching a mistyped
+// fingerprint at init time is exactly the gap this fix closes, since
+// every recipe signed against it would otherwise fail wrong-key at daemon
+// startup, days later, far from the typo.
+func TestRunInit_RejectsKeyAbsentFromKeyring(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := testenv.ShortGPGHome(t)
+	t.Setenv("GNUPGHOME", home) // empty keyring -- testFingerprint is in no keyring here
+
+	dataDir := t.TempDir()
+	resolver := identity.NewResolver(t.TempDir(), dataDir, "")
+
+	var out bytes.Buffer
+	err := runInit(&out, dataDir, resolver, "", testFingerprint, gpgBin, false, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not usable for signing")
+	assert.Contains(t, err.Error(), "--no-verify-key")
+
+	_, statErr := os.Stat(filepath.Join(dataDir, "daemon.json"))
+	assert.True(t, os.IsNotExist(statErr), "an unusable authorizer key must never be written")
+}
+
+// TestRunInit_RejectsNonExpiringKey proves the probe brings the
+// non-expiring-key rejection (internal/pgp.CheckKeyExpiry) forward to init
+// time, rather than surfacing it only the first time a recipe is signed.
+func TestRunInit_RejectsNonExpiringKey(t *testing.T) {
+	gpgBin := gpgBinary(t)
+	home := testenv.ShortGPGHome(t)
+	t.Setenv("GNUPGHOME", home)
+	fpr := testenv.GenOwnerKey(t, gpgBin, home, "non-expiring@example.com", "0") // "0" = never expires
+
+	dataDir := t.TempDir()
+	resolver := identity.NewResolver(t.TempDir(), dataDir, "")
+
+	var out bytes.Buffer
+	err := runInit(&out, dataDir, resolver, "", fpr, gpgBin, false, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not usable for signing")
+
+	_, statErr := os.Stat(filepath.Join(dataDir, "daemon.json"))
+	assert.True(t, os.IsNotExist(statErr), "a non-expiring key must never be written as the authorizer")
+}
+
+// TestRunInit_NoVerifyKeyBypassesProbe proves the explicit escape: an
+// operator configuring the key before it has been imported on this
+// machine can still write daemon.json.
+func TestRunInit_NoVerifyKeyBypassesProbe(t *testing.T) {
+	dataDir := t.TempDir()
+	resolver := identity.NewResolver(t.TempDir(), dataDir, "")
+
+	var out bytes.Buffer
+	err := runInit(&out, dataDir, resolver, "", testFingerprint, "gpg", false, true)
+	require.NoError(t, err)
+	assert.Contains(t, out.String(), testFingerprint)
 }
 
 func TestRunInit_RefusesToClobberWithoutForce(t *testing.T) {
@@ -75,10 +150,10 @@ func TestRunInit_RefusesToClobberWithoutForce(t *testing.T) {
 	resolver := identity.NewResolver(t.TempDir(), dataDir, "")
 
 	var out bytes.Buffer
-	require.NoError(t, runInit(&out, dataDir, resolver, "", testFingerprint, false))
+	require.NoError(t, runInit(&out, dataDir, resolver, "", testFingerprint, "gpg", false, true))
 
 	const otherFingerprint = "FEDCBA9876543210FEDCBA9876543210FEDCBA98"
-	err := runInit(&out, dataDir, resolver, "", otherFingerprint, false)
+	err := runInit(&out, dataDir, resolver, "", otherFingerprint, "gpg", false, true)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
 
@@ -94,10 +169,10 @@ func TestRunInit_ForceOverwrites(t *testing.T) {
 	resolver := identity.NewResolver(t.TempDir(), dataDir, "")
 
 	var out bytes.Buffer
-	require.NoError(t, runInit(&out, dataDir, resolver, "", testFingerprint, false))
+	require.NoError(t, runInit(&out, dataDir, resolver, "", testFingerprint, "gpg", false, true))
 
 	const otherFingerprint = "FEDCBA9876543210FEDCBA9876543210FEDCBA98"
-	require.NoError(t, runInit(&out, dataDir, resolver, "", otherFingerprint, true))
+	require.NoError(t, runInit(&out, dataDir, resolver, "", otherFingerprint, "gpg", true, true))
 
 	data, err := os.ReadFile(filepath.Join(dataDir, "daemon.json"))
 	require.NoError(t, err)
@@ -109,11 +184,11 @@ func TestRunInit_RequiresExactlyOneSource(t *testing.T) {
 	resolver := identity.NewResolver(t.TempDir(), dataDir, "")
 	var out bytes.Buffer
 
-	err := runInit(&out, dataDir, resolver, "", "", false)
+	err := runInit(&out, dataDir, resolver, "", "", "gpg", false, true)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exactly one")
 
-	err = runInit(&out, dataDir, resolver, "operator", testFingerprint, false)
+	err = runInit(&out, dataDir, resolver, "operator", testFingerprint, "gpg", false, true)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exactly one")
 
@@ -128,7 +203,7 @@ func TestRunInit_UnresolvableHandleWritesNothing(t *testing.T) {
 	resolver := identity.NewResolver(ethosDir, dataDir, "")
 	var out bytes.Buffer
 
-	err := runInit(&out, dataDir, resolver, "operator", "", false)
+	err := runInit(&out, dataDir, resolver, "operator", "", "gpg", false, true)
 	require.Error(t, err)
 
 	_, statErr := os.Stat(filepath.Join(dataDir, "daemon.json"))

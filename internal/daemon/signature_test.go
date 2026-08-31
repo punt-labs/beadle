@@ -442,19 +442,15 @@ budget:
 	assert.Equal(t, bytesA, bytesB)
 }
 
-// erroringMarshaler implements yaml.Marshaler and always fails. yaml.v3
-// panics on a genuinely unmarshalable Go value (e.g. a chan), so the only
-// realistic, non-panicking way to reach CanonicalCommandBytes' own error
-// branch is a value whose MarshalYAML method itself returns an error --
-// exactly the case this fixture exists to exercise.
-type erroringMarshaler struct{}
-
-func (erroringMarshaler) MarshalYAML() (any, error) {
-	return nil, errors.New("boom")
-}
-
+// TestCanonicalCommandBytes_MarshalError reaches CanonicalCommandBytes' own
+// error branch with a channel value in OutputSchema (typed any, so it can
+// hold anything a decoded YAML mapping could never actually produce).
+// encoding/json does not panic on an unsupported type the way yaml.v3
+// panics on some unmarshalable values -- it returns a plain
+// *json.UnsupportedTypeError -- so no custom fixture type is needed to
+// reach this branch without crashing the test.
 func TestCanonicalCommandBytes_MarshalError(t *testing.T) {
-	cmd := &Command{Name: "x", Prompt: "p", OutputSchema: erroringMarshaler{}}
+	cmd := &Command{Name: "x", Prompt: "p", OutputSchema: make(chan int)}
 
 	_, err := CanonicalCommandBytes(cmd)
 	require.Error(t, err)
@@ -469,7 +465,7 @@ func TestCanonicalCommandBytes_MarshalError(t *testing.T) {
 // *SignatureError.
 func TestVerifySignature_CanonicalizeError(t *testing.T) {
 	cmd := newFixtureCommand()
-	cmd.OutputSchema = erroringMarshaler{}
+	cmd.OutputSchema = make(chan int)
 	cmd.Signature = "present"
 
 	err := VerifySignature(cmd, "gpg", strings.Repeat("D", 40))

@@ -53,6 +53,11 @@ steps, once per machine:
 ```bash
 # 1. Name the key that authorizes command files. Either an ethos handle
 #    (its beadle extension's gpg_key_id is used) or a literal fingerprint.
+#    init probes the key with gpg before writing -- it must be present in
+#    your keyring and carry a real (non-expiring keys are rejected)
+#    expiration date, since that is exactly what `sign` and the daemon's
+#    own loader will require of it later. Pass --no-verify-key to
+#    configure the key before it has been imported on this machine.
 beadle-daemon init --handle claude
 # or:
 beadle-daemon init --fingerprint 0123456789ABCDEF0123456789ABCDEF01234567
@@ -60,6 +65,8 @@ beadle-daemon init --fingerprint 0123456789ABCDEF0123456789ABCDEF01234567
 # 2. Sign a recipe with that same key. This canonicalizes the file the
 #    same way beadle-daemon verifies it, signs it with your system GPG
 #    keyring, and proves the round trip verifies before writing anything.
+#    sign refuses a --signer that does not match daemon.json's authorizer
+#    key unless --force is passed.
 beadle-daemon sign ~/.punt-labs/beadle/commands/sysreport.yaml \
   --signer 0123456789ABCDEF0123456789ABCDEF01234567
 ```

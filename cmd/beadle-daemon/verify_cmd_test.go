@@ -23,7 +23,8 @@ func TestRunVerify_GoodSignatureWithExplicitSigner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sysreport.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(minimalCommandYAML), 0o600))
 	var signOut bytes.Buffer
-	require.NoError(t, runSign(&signOut, path, fpr, gpgBin))
+	dataDir, resolver := unconfiguredDaemon(t)
+	require.NoError(t, runSign(&signOut, dataDir, resolver, path, fpr, gpgBin, false))
 
 	var out bytes.Buffer
 	err := runVerify(&out, path, fpr, gpgBin)
@@ -42,7 +43,8 @@ func TestRunVerify_WrongKeyIsReported(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sysreport.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(minimalCommandYAML), 0o600))
 	var signOut bytes.Buffer
-	require.NoError(t, runSign(&signOut, path, signerFpr, gpgBin))
+	dataDir, resolver := unconfiguredDaemon(t)
+	require.NoError(t, runSign(&signOut, dataDir, resolver, path, signerFpr, gpgBin, false))
 
 	var out bytes.Buffer
 	err := runVerify(&out, path, otherFpr, gpgBin)
@@ -73,7 +75,8 @@ func TestRunVerify_TamperedFileIsReportedInvalid(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sysreport.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(minimalCommandYAML), 0o600))
 	var signOut bytes.Buffer
-	require.NoError(t, runSign(&signOut, path, fpr, gpgBin))
+	dataDir, resolver := unconfiguredDaemon(t)
+	require.NoError(t, runSign(&signOut, dataDir, resolver, path, fpr, gpgBin, false))
 
 	signed, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -120,7 +123,7 @@ func TestResolveVerifySigner_ResolvesFromDaemonJSON(t *testing.T) {
 	resolver := identity.NewResolver(t.TempDir(), dataDir, "")
 
 	var initOut bytes.Buffer
-	require.NoError(t, runInit(&initOut, dataDir, resolver, "", testFingerprint, false))
+	require.NoError(t, runInit(&initOut, dataDir, resolver, "", testFingerprint, "gpg", false, true))
 
 	fpr, err := resolveVerifySigner(dataDir, resolver)
 	require.NoError(t, err)

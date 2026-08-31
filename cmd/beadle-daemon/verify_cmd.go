@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -9,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 
 	"github.com/punt-labs/beadle/internal/daemon"
 	"github.com/punt-labs/beadle/internal/identity"
@@ -68,19 +66,12 @@ func runVerify(w io.Writer, path, signer, gpgBinary string) error {
 		}
 	}
 
-	data, err := os.ReadFile(filepath.Clean(path))
+	command, err := daemon.DecodeCommandFile(path)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
+		return err
 	}
 
-	var command daemon.Command
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&command); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
-	}
-
-	verErr := daemon.VerifySignature(&command, gpgBinary, signer)
+	verErr := daemon.VerifySignature(command, gpgBinary, signer)
 	if verErr == nil {
 		if _, err := fmt.Fprintf(w, "%s: good (key %s)\n", path, signer); err != nil {
 			return fmt.Errorf("write output: %w", err)
@@ -90,7 +81,11 @@ func runVerify(w io.Writer, path, signer, gpgBinary string) error {
 
 	var sigErr *daemon.SignatureError
 	if errors.As(verErr, &sigErr) {
-		return fmt.Errorf("%s: %s -- %s", path, sigErr.Reason, sigErr.Detail)
+		// %w, not %s, so a caller of runVerify can recover the
+		// *SignatureError via errors.As from the returned error -- the
+		// two lines below this used to format sigErr into plain text and
+		// discard the chain, leaving errors.As unable to recover it.
+		return fmt.Errorf("%s: %w", path, sigErr)
 	}
 	// An operational failure (gpg couldn't run, homedir couldn't be
 	// created) is not a signature verdict at all -- say so distinctly

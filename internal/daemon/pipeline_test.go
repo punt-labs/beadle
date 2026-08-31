@@ -87,8 +87,8 @@ func testCommands() map[string]*Command {
 			Prompt:       "Greet the user",
 			OutputSchema: "text",
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 			WriteSet:   []string{"output/greet.txt"},
 			MCPServers: []string{"ethos"},
@@ -106,8 +106,8 @@ func testCommands() map[string]*Command {
 				},
 			},
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 			WriteSet:   []string{"output/summary.txt"},
 			MCPServers: []string{"ethos", "beadle-email"},
@@ -122,8 +122,8 @@ func testCommands() map[string]*Command {
 				{Name: "env", Type: "enum", Values: []string{"prod", "staging"}, Required: true},
 			},
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 			WriteSet:   []string{"deploy/manifest.yaml"},
 			MCPServers: []string{"ethos"},
@@ -138,8 +138,8 @@ func testCommands() map[string]*Command {
 				{Name: "to", Type: "string", Required: true},
 			},
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 			WriteSet:   []string{"daemon output"},
 			MCPServers: []string{"ethos", "beadle-email"},
@@ -817,8 +817,8 @@ func TestBuildStageContract(t *testing.T) {
 		Prompt:   "Deploy to production",
 		WriteSet: []string{"deploy/manifest.yaml"},
 		Budget: struct {
-			Rounds              int  `yaml:"rounds"`
-			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+			Rounds              int  `yaml:"rounds" json:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 		}{Rounds: 2, ReflectionAfterEach: true},
 	}
 	call := CommandCall{Command: "deploy", Args: map[string]any{"env": "prod"}}
@@ -864,8 +864,8 @@ func TestBuildStageContract_NoArgsNoPipe(t *testing.T) {
 		Prompt:   "Greet the user",
 		WriteSet: []string{"output/greet.txt"},
 		Budget: struct {
-			Rounds              int  `yaml:"rounds"`
-			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+			Rounds              int  `yaml:"rounds" json:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 		}{Rounds: 1},
 	}
 	call := CommandCall{Command: "greet", Args: map[string]any{}}
@@ -894,8 +894,8 @@ func TestBuildStageContract_PromptUncappedMetadataCapped(t *testing.T) {
 		Prompt:   longPrompt,
 		WriteSet: []string{"output/greet.txt"},
 		Budget: struct {
-			Rounds              int  `yaml:"rounds"`
-			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+			Rounds              int  `yaml:"rounds" json:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 		}{Rounds: 1},
 	}
 	call := CommandCall{Command: "greet", Args: map[string]any{}}
@@ -950,8 +950,8 @@ func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
 		Prompt:   "Deploy to production",
 		WriteSet: []string{writeSetPath},
 		Budget: struct {
-			Rounds              int  `yaml:"rounds"`
-			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+			Rounds              int  `yaml:"rounds" json:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 		}{Rounds: 1, ReflectionAfterEach: false},
 	}
 	call := CommandCall{Command: "deploy", Args: map[string]any{"env": "prod"}}
@@ -1015,8 +1015,8 @@ func TestBuildStageContract_RealEthosCLIRejectsMalformedContract(t *testing.T) {
 		Prompt:   "Deploy to production",
 		WriteSet: []string{writeSetPath},
 		Budget: struct {
-			Rounds              int  `yaml:"rounds"`
-			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+			Rounds              int  `yaml:"rounds" json:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 		}{Rounds: 1, ReflectionAfterEach: false},
 	}
 	call := CommandCall{Command: "deploy", Args: map[string]any{"env": "prod"}}

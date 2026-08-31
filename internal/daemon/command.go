@@ -13,45 +13,66 @@ import (
 )
 
 // CommandArg describes a single typed argument in a command definition.
+// Values carries json:",omitempty" for the same nil-vs-empty-slice reason
+// Command's own slice fields do -- see Command's doc comment.
 type CommandArg struct {
-	Name      string   `yaml:"name"`
-	Type      string   `yaml:"type"`       // string, enum, int, bool
-	Values    []string `yaml:"values"`     // for enum type
-	MaxLength int      `yaml:"max_length"` // for string type
-	Required  bool     `yaml:"required"`
-	Default   string   `yaml:"default"`
-	Position  int      `yaml:"position"` // positional index for CLI arg assembly; 0 = named flag
+	Name      string   `yaml:"name" json:"name"`
+	Type      string   `yaml:"type" json:"type"`               // string, enum, int, bool
+	Values    []string `yaml:"values" json:"values,omitempty"` // for enum type
+	MaxLength int      `yaml:"max_length" json:"max_length"`   // for string type
+	Required  bool     `yaml:"required" json:"required"`
+	Default   string   `yaml:"default" json:"default"`
+	Position  int      `yaml:"position" json:"position"` // positional index for CLI arg assembly; 0 = named flag
 }
 
-// Step is one binary in a compound CLI command chain.
+// Step is one binary in a compound CLI command chain. FixedArgs carries
+// json:",omitempty" for the same reason as Command's own slice fields --
+// see Command's doc comment.
 type Step struct {
-	Binary    string   `yaml:"binary"`
-	FixedArgs []string `yaml:"fixed_args"`
-	Stdin     string   `yaml:"stdin"` // "pipe" or "stdout"
+	Binary    string   `yaml:"binary" json:"binary"`
+	FixedArgs []string `yaml:"fixed_args" json:"fixed_args,omitempty"`
+	Stdin     string   `yaml:"stdin" json:"stdin"` // "pipe" or "stdout"
 }
 
-// Command is a GPG-signed YAML command definition for the pipeline orchestrator.
+// Command is a GPG-signed YAML command definition for the pipeline
+// orchestrator. The json tags exist for exactly one purpose --
+// CanonicalCommandBytes' signed payload (signature.go) -- and are not a
+// second on-disk format: every command file on disk is still YAML, read
+// and written exclusively through DecodeCommandFile below.
+//
+// Every slice-typed field carries json:",omitempty". Unlike yaml.v3, which
+// marshals a nil slice and a non-nil empty slice identically (both "[]"),
+// encoding/json marshals them as "null" and "[]" respectively -- two
+// different byte sequences for a distinction the rest of this codebase
+// never treats as meaningful (ValidateArgs, the runners, and every YAML
+// fixture in this repo all read "not present" and "present but empty" the
+// same way). Without omitempty, a Command built as a Go literal with a
+// nil slice and the same Command after a YAML marshal/unmarshal round
+// trip (which turns that nil into a non-nil empty slice) canonicalize to
+// different bytes and a genuinely unmodified command would fail its own
+// signature. omitempty makes both cases marshal identically by omitting
+// the field entirely either way.
 type Command struct {
-	Name         string       `yaml:"name"`
-	Description  string       `yaml:"description"`
-	Signature    string       `yaml:"signature"`
-	Runner       string       `yaml:"runner"` // claude | cli
-	Mode         string       `yaml:"mode"`   // process | passthrough
-	Args         []CommandArg `yaml:"args"`
-	OutputSchema any          `yaml:"output_schema"` // "text" or map[string]any
-	Binary       string       `yaml:"binary"`        // cli runner: single-binary
-	FixedArgs    []string     `yaml:"fixed_args"`    // cli runner: single-binary args
-	Steps        []Step       `yaml:"steps"`         // cli runner: compound steps
-	WriteSet     []string     `yaml:"write_set"`
+	Name         string       `yaml:"name" json:"name"`
+	Description  string       `yaml:"description" json:"description"`
+	Signature    string       `yaml:"signature" json:"signature"`
+	Runner       string       `yaml:"runner" json:"runner"` // claude | cli
+	Mode         string       `yaml:"mode" json:"mode"`     // process | passthrough
+	Args         []CommandArg `yaml:"args" json:"args,omitempty"`
+	OutputSchema any          `yaml:"output_schema" json:"output_schema"` // "text" or map[string]any
+	Binary       string       `yaml:"binary" json:"binary"`               // cli runner: single-binary
+	FixedArgs    []string     `yaml:"fixed_args" json:"fixed_args,omitempty"`
+	Steps        []Step       `yaml:"steps" json:"steps,omitempty"` // cli runner: compound steps
+	WriteSet     []string     `yaml:"write_set" json:"write_set,omitempty"`
 	Budget       struct {
-		Rounds              int  `yaml:"rounds"`
-		ReflectionAfterEach bool `yaml:"reflection_after_each"`
-	} `yaml:"budget"`
-	Timeout    string   `yaml:"timeout"` // duration string (2m, 30m, etc.)
-	Prompt     string   `yaml:"prompt"`
-	Tools      []string `yaml:"tools"`
-	MCPServers []string `yaml:"mcp_servers"`
-	EnvVars    []string `yaml:"env_vars"`
+		Rounds              int  `yaml:"rounds" json:"rounds"`
+		ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
+	} `yaml:"budget" json:"budget"`
+	Timeout    string   `yaml:"timeout" json:"timeout"` // duration string (2m, 30m, etc.)
+	Prompt     string   `yaml:"prompt" json:"prompt"`
+	Tools      []string `yaml:"tools" json:"tools,omitempty"`
+	MCPServers []string `yaml:"mcp_servers" json:"mcp_servers,omitempty"`
+	EnvVars    []string `yaml:"env_vars" json:"env_vars,omitempty"`
 }
 
 var validArgTypes = map[string]bool{
@@ -126,7 +147,13 @@ func LoadCommands(dir, gpgBinary, ownerKeyID string, logger *slog.Logger) (map[s
 	return cmds, nil
 }
 
-func loadCommand(path, gpgBinary, ownerKeyID string) (*Command, error) {
+// DecodeCommandFile reads path and decodes it as a Command. loadCommand,
+// `beadle-daemon sign`, and `beadle-daemon verify` all call this single
+// function so their notion of "what a command file is" cannot drift --
+// three independent hand-maintained copies of this decode existed before
+// this function did, and verify's entire value ("would the daemon load
+// this file") depends on every reader agreeing.
+func DecodeCommandFile(path string) (*Command, error) {
 	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
@@ -138,9 +165,17 @@ func loadCommand(path, gpgBinary, ownerKeyID string) (*Command, error) {
 	if err := dec.Decode(&cmd); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	return &cmd, nil
+}
+
+func loadCommand(path, gpgBinary, ownerKeyID string) (*Command, error) {
+	cmd, err := DecodeCommandFile(path)
+	if err != nil {
+		return nil, err
+	}
 
 	if ownerKeyID != "" {
-		if err := VerifySignature(&cmd, gpgBinary, ownerKeyID); err != nil {
+		if err := VerifySignature(cmd, gpgBinary, ownerKeyID); err != nil {
 			var sigErr *SignatureError
 			if errors.As(err, &sigErr) {
 				return nil, fmt.Errorf("verify signature %s: %w", path, sigErr)
@@ -152,13 +187,21 @@ func loadCommand(path, gpgBinary, ownerKeyID string) (*Command, error) {
 	// VerifySignature is never called, and loadCommand behaves exactly as
 	// it does today.
 
-	if err := validateCommand(&cmd); err != nil {
+	if err := ValidateCommand(cmd); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
-	return &cmd, nil
+	return cmd, nil
 }
 
-func validateCommand(cmd *Command) error {
+// ValidateCommand checks cmd's shape against the command-file schema,
+// writing scalar defaults (Runner, Mode) into cmd along the way. Exported
+// so `beadle-daemon sign` can run the identical check before signing -- an
+// invalid recipe must never sign green and fail only later, at daemon
+// startup, far from the mistake that caused it. Because it writes
+// defaults, a caller that still needs cmd's pre-default canonical bytes
+// (sign does, to compute what actually gets signed) must validate a COPY,
+// never cmd itself.
+func ValidateCommand(cmd *Command) error {
 	if cmd.Name == "" {
 		return fmt.Errorf("missing required field: name")
 	}

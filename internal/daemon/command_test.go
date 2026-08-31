@@ -60,6 +60,46 @@ func writeYAML(t *testing.T, dir, name, content string) {
 	require.NoError(t, err)
 }
 
+// TestDecodeCommandFile covers the shared decode function directly --
+// loadCommand, `beadle-daemon sign`, and `beadle-daemon verify` all call
+// it, so its own read/parse/unknown-field behavior is exercised once here
+// rather than three times indirectly through each caller.
+func TestDecodeCommandFile(t *testing.T) {
+	t.Run("valid file decodes", func(t *testing.T) {
+		dir := t.TempDir()
+		writeYAML(t, dir, "wall.yaml", validCommandYAML)
+
+		cmd, err := DecodeCommandFile(filepath.Join(dir, "wall.yaml"))
+		require.NoError(t, err)
+		assert.Equal(t, "wall", cmd.Name)
+		assert.Equal(t, "claude", cmd.Runner)
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		_, err := DecodeCommandFile(filepath.Join(t.TempDir(), "nope.yaml"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read")
+	})
+
+	t.Run("malformed YAML", func(t *testing.T) {
+		dir := t.TempDir()
+		writeYAML(t, dir, "bad.yaml", "name: [unterminated")
+
+		_, err := DecodeCommandFile(filepath.Join(dir, "bad.yaml"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parse")
+	})
+
+	t.Run("unknown field is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		writeYAML(t, dir, "unknown.yaml", "name: x\nnot_a_real_field: true\n")
+
+		_, err := DecodeCommandFile(filepath.Join(dir, "unknown.yaml"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not_a_real_field")
+	})
+}
+
 func TestLoadCommands(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,8 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/punt-labs/beadle/internal/pgp"
 )
@@ -97,18 +96,22 @@ func isOperationalExecFailure(err error) bool {
 	return !pgp.RanToCompletion(err)
 }
 
-// CanonicalCommandBytes returns the deterministic YAML encoding of cmd used
+// CanonicalCommandBytes returns the deterministic JSON encoding of cmd used
 // as the signed payload for command-file signatures: a copy of cmd with
-// Signature cleared to "". A future signing tool and VerifySignature both
+// Signature cleared to "". `beadle-daemon sign` and VerifySignature both
 // call this function, so they can never independently drift on what
-// "canonical" means. yaml.v3 marshals struct fields in declaration order
-// and sorts map keys, so the result is stable regardless of how the
-// source file was formatted, commented, ordered, or how OutputSchema's
-// map keys happened to iterate.
+// "canonical" means. encoding/json marshals struct fields in declaration
+// order and sorts map keys, so two calls on an equal *Command value always
+// produce identical bytes -- a property of THIS function alone. It says
+// nothing about a source file: canonicalization runs on an already-decoded
+// struct, never on file bytes directly, and `beadle-daemon sign` never
+// re-marshals a recipe's on-disk YAML back to itself for exactly this
+// reason (see its splice approach in cmd/beadle-daemon/sign_cmd.go, which
+// edits only the signature field of the original bytes).
 func CanonicalCommandBytes(cmd *Command) ([]byte, error) {
 	canon := *cmd
 	canon.Signature = ""
-	data, err := yaml.Marshal(&canon)
+	data, err := json.Marshal(&canon)
 	if err != nil {
 		return nil, fmt.Errorf("marshal canonical command: %w", err)
 	}
