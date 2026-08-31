@@ -57,7 +57,15 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	}
 	defer func() { _ = os.Remove(promptPath) }()
 
-	envOverrides := resolveEnvVars(cmd.EnvVars)
+	envOverrides, missingEnv := resolveEnvVars(cmd.EnvVars)
+	for _, name := range missingEnv {
+		// Permanent misconfiguration: a var declared in the command file and
+		// absent from the daemon's process environment stays absent on every
+		// run until the deployment (systemd unit, launchd plist, shell
+		// profile) is fixed -- retrying changes nothing.
+		e.Logger.Error("declared env var not set in daemon environment",
+			"pipeline", p.ID, "stage", idx, "command", cmd.Name, "var", name)
+	}
 
 	wr, err := r.Spawner.Run(ctx, missionID, mcpPath, promptPath, envOverrides)
 	if err != nil {
@@ -140,7 +148,16 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cm
 	// to fields from the previous stage's output.
 	var pipeFields map[string]any
 	if trimmed := strings.TrimSpace(pipe); len(trimmed) > 0 && trimmed[0] == '{' {
-		_ = json.Unmarshal([]byte(pipe), &pipeFields)
+		if err := json.Unmarshal([]byte(pipe), &pipeFields); err != nil {
+			// Transient: this pipe value came from the prior stage's output
+			// (possibly itself truncated), not from fixed configuration, so
+			// the same command can succeed on the next run. pipeFields stays
+			// nil, so every arg meant to be filled from the pipe is omitted
+			// below rather than filled with a stale or partial value.
+			e.Logger.Warn("pipe value looked like JSON but failed to parse, args will not be filled from it",
+				"command", cmd.Name, "error", err)
+			pipeFields = nil
+		}
 	}
 
 	args := make([]string, len(cmd.FixedArgs))
@@ -180,18 +197,13 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cm
 		args = append(args, pa.val)
 	}
 
-	timeout := 30 * time.Second
-	if cmd.Timeout != "" {
-		if d, err := time.ParseDuration(cmd.Timeout); err == nil {
-			timeout = d
-		}
-	}
+	timeout := parseTimeout(e, cmd)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	c := exec.CommandContext(ctx, resolvedPath, args...)
 	c.Stdin = strings.NewReader(pipe)
-	c.Env = minimalEnv(r.Whitelist.Dirs, cmd.EnvVars)
+	c.Env = envForCommand(e, cmd, r.Whitelist.Dirs)
 
 	stderrBuf := &cappedWriter{max: 1 << 20}
 	c.Stderr = stderrBuf
@@ -204,32 +216,93 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cm
 		return "", fmt.Errorf("start %s: %w", cmd.Binary, err)
 	}
 
-	output, _ := io.ReadAll(io.LimitReader(stdoutPipe, 1<<20))
-	_, _ = io.Copy(io.Discard, stdoutPipe) // drain remainder so Wait() won't hang
+	return runOutput(stdoutPipe, c.Wait, stderrBuf, e, cmd)
+}
 
-	if err := c.Wait(); err != nil {
-		if stderrBuf.buf.Len() > 0 {
-			e.Logger.Info("cli command stderr", "command", cmd.Name, "stderr", stderrBuf.buf.String())
-		}
-		return "", fmt.Errorf("cli %s: %w", cmd.Binary, err)
-	}
+// runOutput reads stdout (capped) and waits for the owning process to
+// exit, logging any captured stderr exactly once regardless of outcome --
+// stderr is often the most diagnostic thing available when the stdout read
+// or the process itself fails, so it must not be skipped on an early
+// return. wait must not be called until the stdout read completes: Wait
+// closes the pipe once the process exits, and reading concurrently with or
+// after that races (see exec.Cmd.StdoutPipe's doc comment).
+func runOutput(stdoutPipe io.Reader, wait func() error, stderrBuf *cappedWriter, e *Executor, cmd *Command) (string, error) {
+	output, extra, readErr := readCapped(stdoutPipe, 1<<20)
+	waitErr := wait()
 
 	if stderrBuf.buf.Len() > 0 {
 		e.Logger.Info("cli command stderr", "command", cmd.Name, "stderr", stderrBuf.buf.String())
 	}
 
+	if waitErr != nil {
+		return "", fmt.Errorf("cli %s: %w", cmd.Binary, waitErr)
+	}
+	if readErr != nil {
+		return "", fmt.Errorf("read stdout for %s: %w", cmd.Binary, readErr)
+	}
+
+	if extra > 0 {
+		e.Logger.Warn("cli command stdout truncated at cap",
+			"command", cmd.Name, "captured_bytes", len(output), "discarded_bytes", extra)
+		output = append(output, []byte(truncationMarker)...)
+	}
+
 	return string(output), nil
+}
+
+// readCapped reads at most n bytes from r into data, then drains and
+// discards whatever remains so a subsequent Wait on the owning exec.Cmd
+// does not block waiting for r to close. extra reports how many bytes were
+// discarded during the drain, so the caller can tell a real truncation
+// (extra > 0) from a reader that simply had less than n bytes to give.
+// A read error during the capped read is returned as err; the drain's own
+// error, if any, is not -- best-effort cleanup, not the operation's result.
+func readCapped(r io.Reader, n int) (data []byte, extra int64, err error) {
+	data, err = io.ReadAll(io.LimitReader(r, int64(n)))
+	if err != nil {
+		_, _ = io.Copy(io.Discard, r)
+		return data, 0, err
+	}
+	extra, _ = io.Copy(io.Discard, r)
+	return data, extra, nil
+}
+
+// parseTimeout returns cmd's configured timeout, or 30s if none is set.
+// An unparsable Timeout string is a permanent misconfiguration -- it will
+// fail to parse identically on every run until the command file is
+// corrected -- so it is logged at Error and the 30s default is used.
+func parseTimeout(e *Executor, cmd *Command) time.Duration {
+	const def = 30 * time.Second
+	if cmd.Timeout == "" {
+		return def
+	}
+	d, err := time.ParseDuration(cmd.Timeout)
+	if err != nil {
+		e.Logger.Error("invalid timeout in command definition, using default",
+			"command", cmd.Name, "timeout", cmd.Timeout, "default", def, "error", err)
+		return def
+	}
+	return d
+}
+
+// envForCommand builds the subprocess environment for cmd and logs any
+// declared env var absent from the daemon's own environment.
+func envForCommand(e *Executor, cmd *Command, dirs []string) []string {
+	env, missing := minimalEnv(dirs, cmd.EnvVars)
+	for _, name := range missing {
+		// Permanent misconfiguration: a var declared in the command file and
+		// absent from the daemon's process environment stays absent on
+		// every run until the deployment is fixed -- retrying changes nothing.
+		e.Logger.Error("declared env var not set in daemon environment",
+			"command", cmd.Name, "var", name)
+	}
+	return env
 }
 
 // runCompound chains multiple binaries via io.Pipe, running all steps
 // concurrently under a shared context timeout.
 func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, pipe string) (string, error) {
-	timeout := 30 * time.Second
-	if cmd.Timeout != "" {
-		if d, err := time.ParseDuration(cmd.Timeout); err == nil {
-			timeout = d
-		}
-	}
+	timeout := parseTimeout(e, cmd)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -253,7 +326,7 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 	}
 
 	// Build commands.
-	env := minimalEnv(r.Whitelist.Dirs, cmd.EnvVars)
+	env := envForCommand(e, cmd, r.Whitelist.Dirs)
 
 	// Capture the last step's stdout in a capped buffer rather than via
 	// StdoutPipe. StdoutPipe's Wait closes the read end once the process
@@ -331,8 +404,13 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 
 	wg.Wait()
 
-	// Log per-step stderr.
+	// Log per-step stderr, warning separately if the cap dropped any of it.
 	for i, buf := range stderrBufs {
+		if dropped := buf.dropped(); dropped > 0 {
+			e.Logger.Warn("compound step stderr truncated at cap",
+				"command", cmd.Name, "step", i, "binary", cmd.Steps[i].Binary,
+				"captured_bytes", buf.buf.Len(), "discarded_bytes", dropped)
+		}
 		if buf.buf.Len() > 0 {
 			e.Logger.Info("compound step stderr",
 				"command", cmd.Name,
@@ -345,32 +423,59 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 	if firstErr != nil {
 		return "", firstErr
 	}
-	return lastStdout.buf.String(), nil
+
+	result := lastStdout.buf.String()
+	if dropped := lastStdout.dropped(); dropped > 0 {
+		e.Logger.Warn("compound command stdout truncated at cap",
+			"command", cmd.Name, "captured_bytes", len(result), "discarded_bytes", dropped)
+		result += truncationMarker
+	}
+	return result, nil
 }
 
-// cappedWriter is a bytes.Buffer that silently stops accepting data
-// after max bytes have been written.
+// cappedWriter is a bytes.Buffer that stops storing data after max bytes
+// have been written, while still reporting the full length to its caller
+// (exec needs Write to never return a short count, or it treats the short
+// write as a fatal copy error and fails commands whose output merely
+// exceeded the cap). total tracks every byte offered, so dropped can report
+// exactly how much was cut instead of just that some was. Both are int64:
+// total's whole job is detecting truncation, so it must not itself be able
+// to wrap silently on a 32-bit int -- unreachable on the shipped platforms
+// (darwin/linux, arm64/amd64, all 64-bit), but the cost of getting it right
+// is nothing.
 type cappedWriter struct {
-	buf bytes.Buffer
-	max int
+	buf   bytes.Buffer
+	max   int64
+	total int64
 }
 
 func (w *cappedWriter) Write(p []byte) (int, error) {
-	remaining := w.max - w.buf.Len()
+	w.total += int64(len(p))
+	remaining := w.max - int64(w.buf.Len())
 	if remaining > 0 {
-		if len(p) < remaining {
-			remaining = len(p)
+		n := int64(len(p))
+		if n > remaining {
+			n = remaining
 		}
-		w.buf.Write(p[:remaining])
+		w.buf.Write(p[:n])
 	}
 	return len(p), nil
 }
 
-// minimalEnv builds an explicit environment for subprocess execution.
-// It includes PATH (from whitelist dirs), HOME, USER, and any declared
-// env vars the command definition allows.
-func minimalEnv(dirs []string, declaredVars []string) []string {
-	env := []string{
+// dropped returns how many bytes were offered beyond the cap.
+func (w *cappedWriter) dropped() int64 {
+	if w.total > w.max {
+		return w.total - w.max
+	}
+	return 0
+}
+
+// minimalEnv builds an explicit environment for subprocess execution and
+// reports which declared env vars had no value to resolve. It includes
+// PATH (from whitelist dirs), HOME, USER, and any declared env vars the
+// command definition allows and the daemon's environment actually has.
+func minimalEnv(dirs []string, declaredVars []string) (env []string, missing []string) {
+	env = []string{
 		"PATH=" + strings.Join(dirs, ":"),
 		"HOME=" + os.Getenv("HOME"),
 		"USER=" + os.Getenv("USER"),
@@ -378,7 +483,9 @@ func minimalEnv(dirs []string, declaredVars []string) []string {
 	for _, name := range declaredVars {
 		if v, ok := os.LookupEnv(name); ok {
 			env = append(env, name+"="+v)
+		} else {
+			missing = append(missing, name)
 		}
 	}
-	return env
+	return env, missing
 }
