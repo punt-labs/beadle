@@ -90,9 +90,16 @@ tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4
 # ran, the binary exists, and the remedy message points right back at the
 # command that was just run. Computed once, at parse time, so every `test`
 # invocation prepends the same directory `go install` actually used.
+#
+# GOPATH may be a colon-separated list (":"-joined on every GOOS, including
+# darwin and linux -- Go never uses the OS path-list separator here). `go
+# install` with no GOBIN always writes to the FIRST entry's bin/, so take
+# only that entry -- appending /bin to the whole list would name a directory
+# nothing was ever installed to, and would also inject a second, wrong
+# directory onto PATH.
 GOINSTALL_BIN := $(shell go env GOBIN)
 ifeq ($(GOINSTALL_BIN),)
-GOINSTALL_BIN := $(shell go env GOPATH)/bin
+GOINSTALL_BIN := $(shell go env GOPATH | cut -d: -f1)/bin
 endif
 
 test: tools-ethos ## Run tests with race detection

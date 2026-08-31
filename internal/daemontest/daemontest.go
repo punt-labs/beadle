@@ -88,7 +88,7 @@ func (s *FakeSpawner) Run(_ context.Context, missionID, mcpConfigPath, systemPro
 		MissionID:        missionID,
 		MCPConfigPath:    mcpConfigPath,
 		SystemPromptPath: systemPromptPath,
-		EnvOverrides:     envOverrides,
+		EnvOverrides:     cloneEnvOverrides(envOverrides),
 	})
 	if s.Err != nil {
 		return daemon.WorkerResult{}, s.Err
@@ -104,4 +104,19 @@ func (s *FakeSpawner) Calls() []FakeSpawnerCall {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]FakeSpawnerCall(nil), s.calls...)
+}
+
+// cloneEnvOverrides returns a copy of m, so a recorded FakeSpawnerCall
+// cannot change after Run returns because a caller mutated (or reused) the
+// map it passed in. Preserves the nil/non-nil distinction: a nil m yields a
+// nil clone.
+func cloneEnvOverrides(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	clone := make(map[string]string, len(m))
+	for k, v := range m {
+		clone[k] = v
+	}
+	return clone
 }
