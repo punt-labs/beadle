@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
-	"github.com/punt-labs/beadle/internal/enable"
+	"github.com/punt-labs/beadle/internal/testenv"
 )
 
 // mockClaudeRunner implements Runner for pipeline tests.
@@ -922,65 +921,30 @@ func TestBuildStageContract_PromptUncappedMetadataCapped(t *testing.T) {
 	assert.Equal(t, wantCapped, trigger["subject"], "subject must remain capped")
 }
 
-// isolatedEthosEnv builds a process environment for exec'ing the real ethos
-// CLI that reads the real, current identity/archetype data but writes
-// nothing to it. ethos derives its global root (session bindings, mission
-// ID counters, delegations, locks) from os.UserHomeDir(), and its repo root
-// (mission storage, identity/personality/role/team resolution) from cwd or
-// the ETHOS_REPO_ROOT override -- so both must be redirected together, or
-// half the state (e.g. the global session binding) still lands on the real
-// ambient trees. Every ETHOS_* variable is stripped, not just
-// ETHOS_REPO_ROOT: the calling agent's own session sets ETHOS_SESSION, and
-// leaving it in place would let the exec'd CLI resolve a real session
-// identifier while its backing storage is redirected to the scratch
-// roots -- the same half-redirect this comment warns against for HOME and
-// ETHOS_REPO_ROOT, just for a different variable.
-//
-// This repo runs in a shared, multi-agent environment: without this,
-// `ethos mission create`/`ethos mission abandon` corrupt whatever mission a
-// real concurrent session has bound (bindDispatchedMission,
-// clearClosedSessionBindings), and burn real per-date mission-ID counter
-// slots.
-//
-// Every subtree ethos might WRITE to (global sessions/missions/delegations/
-// locks/counters; repo missions/sessions) is left absent, so ethos creates
-// a fresh, empty one under the scratch roots. Every subtree ethos only
-// READS (global archetypes; repo identities/personalities/roles/teams/
-// talents/writing-styles) is symlinked to the real, current data so
-// contract validation exercises the genuine schema and identity graph.
-func isolatedEthosEnv(t *testing.T) []string {
+// ethosOrFatal returns the ethos binary's path, or fails the test with the
+// install remedy. Per this tier's hard constraint, a missing dependency is
+// a test failure naming what to install, never a t.Skip: a test that
+// silently skips locally is the same failure as one that skips in CI --
+// exactly how beadle-8gt's regression coverage went uncaught (see
+// docs/daemon-test-harness.md). make test/make check provision ethos via
+// the tools-ethos Makefile target, so this should only ever fire on a
+// developer machine that bypassed make.
+func ethosOrFatal(t *testing.T) string {
 	t.Helper()
-
-	realHome, err := os.UserHomeDir()
-	require.NoError(t, err)
-	realRepoRoot, err := enable.RepoRoot()
-	require.NoError(t, err)
-
-	scratchHome := t.TempDir()
-	scratchGlobalEthos := filepath.Join(scratchHome, ".punt-labs", "ethos")
-	require.NoError(t, os.MkdirAll(scratchGlobalEthos, 0o700))
-	require.NoError(t, os.Symlink(
-		filepath.Join(realHome, ".punt-labs", "ethos", "archetypes"),
-		filepath.Join(scratchGlobalEthos, "archetypes"),
-	))
-
-	scratchRepo := t.TempDir()
-	scratchRepoEthos := filepath.Join(scratchRepo, ".punt-labs", "ethos")
-	require.NoError(t, os.MkdirAll(scratchRepoEthos, 0o700))
-	realRepoEthos := filepath.Join(realRepoRoot, ".punt-labs", "ethos")
-	for _, sub := range []string{"identities", "personalities", "roles", "teams", "talents", "writing-styles"} {
-		require.NoError(t, os.Symlink(filepath.Join(realRepoEthos, sub), filepath.Join(scratchRepoEthos, sub)))
+	ethosPath, err := exec.LookPath("ethos")
+	if err != nil {
+		t.Fatalf("ethos not found on PATH: install it via `go install github.com/punt-labs/ethos/v4/cmd/ethos@%s` (or run `make tools-ethos`): %v", ethosVersionForTests, err)
 	}
-
-	env := make([]string, 0, len(os.Environ())+2)
-	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "ETHOS_") {
-			continue
-		}
-		env = append(env, kv)
-	}
-	return append(env, "HOME="+scratchHome, "ETHOS_REPO_ROOT="+scratchRepo)
+	return ethosPath
 }
+
+// ethosVersionForTests documents the pinned version in ethosOrFatal's
+// failure message. It intentionally does not read the Makefile's
+// ETHOS_VERSION at runtime -- a Go test has no clean way to parse a
+// Makefile variable, and this string only ever appears in a human-facing
+// error message, not in any assertion -- so keep it in sync with
+// Makefile's ETHOS_VERSION by hand when that pin moves.
+const ethosVersionForTests = "v4.16.0"
 
 // TestBuildStageContract_ValidatesAgainstRealEthosCLI invokes the real
 // `ethos mission create --file <path>` binary (via os/exec, the same
@@ -992,16 +956,14 @@ func isolatedEthosEnv(t *testing.T) []string {
 // checks the Go string, without handing it to the real ethos binary, would
 // not have caught it and must not be trusted to catch a recurrence.
 //
-// Both exec.Command calls run with isolatedEthosEnv so ethos's writes never
-// touch the real ambient ~/.punt-labs/ethos or this checkout's real mission
-// history -- see isolatedEthosEnv's doc comment.
+// testenv.IsolateEthos redirects $HOME/$ETHOS_REPO_ROOT (via t.Setenv, so
+// every exec.Command that inherits os.Environ() is protected, not just
+// this test's own two calls) before either exec.Command below runs, so
+// ethos's writes never touch the real ambient ~/.punt-labs/ethos or this
+// checkout's real mission history.
 func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
-	ethosPath, err := exec.LookPath("ethos")
-	if err != nil {
-		t.Skip("ethos not on PATH; skipping real-CLI mission-contract validation")
-	}
-
-	isolatedEnv := isolatedEthosEnv(t)
+	ethosPath := ethosOrFatal(t)
+	testenv.IsolateEthos(t)
 
 	meta := EmailMeta{MessageID: "regression-8gt", From: "jim@test.com", Subject: "beadle-8gt regression test"}
 	// A unique write_set path per run: ethos refuses to create a mission
@@ -1028,7 +990,6 @@ func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
 	require.NoError(t, f.Close())
 
 	createCmd := exec.Command(ethosPath, "mission", "create", "--file", f.Name())
-	createCmd.Env = isolatedEnv
 	out, err := createCmd.CombinedOutput()
 	require.NoError(t, err, "ethos mission create rejected the generated contract: %s", string(out))
 	rawOut := string(out)
@@ -1044,7 +1005,6 @@ func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
 			return
 		}
 		abandonCmd := exec.Command(ethosPath, "mission", "abandon", missionID, "--reason", "test cleanup")
-		abandonCmd.Env = isolatedEnv
 		if abandonOut, abandonErr := abandonCmd.CombinedOutput(); abandonErr != nil {
 			t.Errorf("cleanup: ethos mission abandon %s failed, mission is leaked and must be abandoned by hand: %v (output: %s)", missionID, abandonErr, string(abandonOut))
 		}
@@ -1052,4 +1012,58 @@ func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
 
 	_, parseErr := parseMissionID(rawOut)
 	require.NoError(t, parseErr, "output: %s", rawOut)
+}
+
+// TestBuildStageContract_RealEthosCLIRejectsMalformedContract is gate 4's
+// negative control (docs/daemon-test-harness.md, "Gate 4's negative
+// control"). TestBuildStageContract_ValidatesAgainstRealEthosCLI above only
+// asserts success -- without a case that must be REJECTED, a systemic
+// harness bug (broken $HOME/$ETHOS_REPO_ROOT isolation, a PATH
+// misconfiguration that silently no-ops the CLI call, a Go-side error that
+// gets swallowed) could make every `ethos mission create` invocation
+// spuriously report success regardless of input, and gate 4 would never
+// notice. This test deletes evaluator.handle from an otherwise-valid
+// generated contract and asserts the real CLI rejects it -- proving the
+// harness actually asks the real schema a question it can answer "no" to.
+func TestBuildStageContract_RealEthosCLIRejectsMalformedContract(t *testing.T) {
+	ethosPath := ethosOrFatal(t)
+	testenv.IsolateEthos(t)
+
+	meta := EmailMeta{MessageID: "regression-8gt-malformed", From: "jim@test.com", Subject: "gate 4 negative control"}
+	writeSetPath := fmt.Sprintf("internal/daemon/testdata/mission-regression-fixture-8gt-malformed-%s.txt", uuid.New().String())
+	cmd := &Command{
+		Prompt:   "Deploy to production",
+		WriteSet: []string{writeSetPath},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each"`
+		}{Rounds: 1, ReflectionAfterEach: false},
+	}
+	call := CommandCall{Command: "deploy", Args: map[string]any{"env": "prod"}}
+
+	contract := buildStageContract(meta, cmd, call, `{"prior":"output"}`)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(contract), &doc))
+	evaluator, ok := doc["evaluator"].(map[string]any)
+	require.True(t, ok, "generated contract must have an evaluator map to corrupt")
+	delete(evaluator, "handle")
+
+	malformed, err := yaml.Marshal(doc)
+	require.NoError(t, err)
+
+	f, err := os.CreateTemp(t.TempDir(), "malformed-contract-*.yaml")
+	require.NoError(t, err)
+	_, err = f.Write(malformed)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	createCmd := exec.Command(ethosPath, "mission", "create", "--file", f.Name())
+	out, err := createCmd.CombinedOutput()
+	require.Error(t, err, "ethos mission create must reject a contract with no evaluator.handle, got: %s", string(out))
+	assert.Contains(t, strings.ToLower(string(out)), "evaluator",
+		"rejection output should name the missing field: %s", string(out))
+
+	// No t.Cleanup/ethos mission abandon here: creation failed, so there is
+	// no mission ID to abandon.
 }
