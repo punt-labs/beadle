@@ -1,11 +1,24 @@
 %
 % architecture.tex
 %
-% Beadle Email Channel: Architecture & Z Specification
+% Beadle: Architecture & Z Specification
 % Package structure, trust model, credential resolution, message lifecycle,
-% and security boundaries for beadle-email v0.1.x.
+% and security boundaries for beadle-email and beadle-daemon.
 %
 % Type-check: fuzz -t architecture.tex
+%
+% Long schema predicates: break with `\\` + `\quad` at operator
+% boundaries (before \land, \implies, \iff, \lor), never a bare
+% newline in the source -- a newline alone is just whitespace to
+% LaTeX and produces no line break, which is how five schemas here
+% once overflowed the page (worst case 468pt, more than a full
+% text-width) while `fuzz -t` and `latexmk` both exited 0 -- neither
+% checks whether output fits the page. Do NOT reach for fuzz's own
+% `\t1` tab macro as the fix: something in this document's package
+% chain reloads the LaTeX kernel's `\t` tie-accent after fuzz.sty
+% loads, so `\t1` fails with a `\mathaccent`-in-math-mode error that
+% points nowhere near the real cause. `\quad`/`\qquad` work and are
+% what every schema below uses.
 %
 
 \documentclass[a4paper,10pt,fleqn]{article}
@@ -17,11 +30,11 @@
 
 \begin{document}
 
-\title{Beadle Email Channel: Architecture \& Z Specification}
+\title{Beadle: Architecture \& Z Specification}
 \author{Punt Labs}
-\date{March 2026}
+\date{2026-08-31}
 \hypersetup{
-  pdftitle={Beadle Email Channel: Architecture and Z Specification},
+  pdftitle={Beadle: Architecture and Z Specification},
   pdfauthor={Punt Labs},
   pdfsubject={Architecture Document},
   pdfcreator={fuzz}
@@ -36,91 +49,164 @@
 %%----------------------------------------------------------------------
 
 Beadle is an autonomous agent daemon with cryptographic owner control.
-Every action requires a GPG-signed instruction from the owner; the
-daemon has no independent decision-making authority.
+Command \emph{execution} requires a GPG-signed command file authorized
+by the owner (\S~Command-File Signature Verification); the daemon has
+no independent decision-making about \emph{what to run}. The earlier
+steps that decide whether to create a pipeline at all --- sender
+permission and transport-trust checks --- carry no such signature (\S~Daemon
+Architecture, Design Invariant~1). ``Owner'' here names the single GPG
+key \texttt{daemon.json} designates as the recipe authorizer (via
+\texttt{owner\_handle} or \texttt{owner\_gpg\_key\_id}), not a general
+position of authority over the system; a rename to ``authorizer'' is
+proposed under bead beadle-4ul but not yet done.
 
-The first shipping component is \texttt{beadle-email} --- an MCP server
-that provides email communication via Proton Bridge with a four-level
-PGP trust model.  This document describes the architecture of
-\texttt{beadle-email} v0.1.x: its package structure, data flows,
-security boundaries, and key state machines formalised in Z.
+\texttt{beadle-email} shipped first: an MCP server and CLI that provide
+email communication via Proton Bridge with a four-level PGP trust
+model. \texttt{beadle-daemon} is a second binary, sharing
+\texttt{beadle-email}'s lower package layers, that acts on that mail
+unattended (\S~System Overview, \S~Daemon Architecture). This document
+describes both binaries: their package structure, data flows, security
+boundaries, and key state machines formalised in Z.
 
 %%----------------------------------------------------------------------
 \section{System Overview}
 %%----------------------------------------------------------------------
 
-\texttt{beadle-email} runs as a stdio-transport MCP server.  It
-connects to Proton Bridge via IMAP/STARTTLS on localhost, sends mail
-via Proton Bridge SMTP (primary) or Resend API (fallback), and
-verifies PGP signatures using an isolated GPG keyring.
+Beadle ships as two independent binaries sharing package layers.
+\texttt{beadle-email} exposes an MCP server and CLI for message
+send/receive/triage; \texttt{beadle-daemon} watches a mailbox
+unattended and turns authorized instructions into mission pipelines.
+Neither imports the other at the command layer (\S~Dependency Graph).
 
-The binary exposes four subcommands:
+\subsection{beadle-email}
 
-\begin{itemize}
-  \item \texttt{serve} --- start the MCP server (default when no
-    subcommand is given).
-  \item \texttt{version} --- print the version string.
-  \item \texttt{doctor} --- check installation health (config,
-    credentials, GPG, SMTP reachability).
-  \item \texttt{status} --- print current configuration as JSON.
-\end{itemize}
+\texttt{beadle-email} runs as an MCP server, by default over stdio;
+\texttt{serve --transport ws} instead starts a WebSocket listener
+(\S~Security Boundaries).  It connects to Proton Bridge via IMAP on
+localhost by default --- a config default, not an enforced boundary
+(\S~Security Boundaries) --- sends mail via the configured SMTP
+transport (Proton Bridge by default), falling back to the Resend API
+when that transport is unreachable and no signing is required
+(\S~Message Send Path), and verifies PGP signatures using an isolated
+GPG keyring.
+
+The binary groups its subcommands by concern: server administration
+(\texttt{serve}, \texttt{doctor}, \texttt{status}, \texttt{version},
+\texttt{health}), message operations (\texttt{list}, \texttt{search},
+\texttt{read}, \texttt{send}, \texttt{reply}, \texttt{move},
+\texttt{mark}, \texttt{folders}), contact management
+(\texttt{contact list|add|remove|find}), identity
+(\texttt{identity show|set}), and enablement (\texttt{enable}/
+\texttt{disable}, \texttt{install}/\texttt{uninstall}).  Run
+\texttt{beadle-email --help} for the current, authoritative list ---
+it changes independently of this document.
+
+\subsection{beadle-daemon}
+
+\texttt{beadle-daemon} has no MCP surface at all --- it does not
+import \texttt{internal/mcp} (\S~Dependency Graph).  Its single
+subcommand, \texttt{run}, polls the mailbox, checks sender permission
+and transport trust (\S~Daemon Architecture), and on a pass executes a
+signed-command pipeline.  It is implemented but not released:
+\texttt{make build-daemon} builds it locally, but no CI workflow and
+no \texttt{make dist} target produces a distributable binary (bead
+beadle-5ma).
 
 %%----------------------------------------------------------------------
 \section{Package Map}
 %%----------------------------------------------------------------------
 
-All packages live under \texttt{internal/} --- nothing is exported
-outside the module.
+Beadle's code lives under \texttt{cmd/} (binary entry points) and
+\texttt{internal/} (everything else --- nothing under
+\texttt{internal/} is exported outside the module). Three further
+\texttt{internal/} directories --- \texttt{daemontest},
+\texttt{testenv}, \texttt{testserver} --- are test-only fixtures for
+the suite and are excluded from the table below, which covers the
+remaining production packages.
 
 \begin{center}
-\begin{tabular}{@{}ll@{}}
+\begin{tabular}{@{}lp{10.5cm}@{}}
 \toprule
 \textbf{Package} & \textbf{Responsibility} \\
 \midrule
-\texttt{cmd/beadle-email/} & CLI entry point: subcommand dispatch \\
-\texttt{internal/channel/}  & Channel interface: \texttt{Message}, \texttt{TrustLevel}, shared types \\
-\texttt{internal/email/}    & IMAP client, MIME parser, trust classifier, SMTP/Resend senders \\
-\texttt{internal/pgp/}      & GPG signature verification (isolated GNUPGHOME) and signing (system keyring) \\
-\texttt{internal/mcp/}      & MCP tool definitions and handlers (21 always-on tools; 2 poll tools gated on config) \\
-\texttt{internal/secret/}   & Credential resolution: OS keychain $\to$ file $\to$ env var \\
+\texttt{cmd/beadle-daemon/}  & Daemon entry point: the mail-triggered mission pipeline runner (\texttt{run}) \\
+\texttt{cmd/beadle-email/}   & CLI/MCP entry point: subcommand dispatch (\S~System Overview) \\
+\texttt{internal/channel/}   & Channel interface: \texttt{Message}, \texttt{TrustLevel}, shared types \\
+\texttt{internal/claudemd/}  & Adds/removes beadle's \texttt{@}-import line in a repo's \texttt{CLAUDE.md} \\
+\texttt{internal/contacts/}  & Address book storage and lookup \\
+\texttt{internal/daemon/}    & Mail-triggered mission pipeline: planner, executor, runners, command model, persistence \\
+\texttt{internal/email/}     & IMAP client, MIME parser, trust classifier, SMTP/Resend senders \\
+\texttt{internal/enable/}    & Turns beadle's \texttt{CLAUDE.md} guidance composition on/off in a repo \\
+\texttt{internal/identity/}  & Resolves which identity beadle operates as \\
+\texttt{internal/mcp/}       & MCP tool definitions and handlers (\S~MCP Tool Surface); stdio and WebSocket transports \\
+\texttt{internal/paths/}     & Single root directory for all beadle data \\
+\texttt{internal/pgp/}       & GPG signature verification (isolated GNUPGHOME) and signing (system keyring) \\
+\texttt{internal/secret/}    & Credential resolution: OS keychain $\to$ file $\to$ env var \\
+\texttt{internal/session/}   & Reads the ethos session roster to enumerate participants \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \subsection{Dependency Graph}
 
-Dependencies flow strictly downward.  No package imports a package
-above it in this ordering.
+Dependencies flow strictly downward within each binary; the edges
+below are the internal import edges reported by \texttt{go list}, not
+a hand-traced approximation.  \texttt{internal/mcp} and
+\texttt{internal/daemon} do not import each other --- the two binaries
+share a lower layer (\texttt{channel}, \texttt{contacts},
+\texttt{email}, \texttt{identity}, \texttt{paths}, \texttt{pgp},
+\texttt{secret}) and are independent at the command layer, matching
+the split in \S~System Overview.
 
 \begin{verbatim}
-    cmd/beadle-email
-          |
-      internal/mcp
-       /    |    \
-  email    pgp   channel
-    |
-  secret
-\end{verbatim}
+beadle-email command layer:
+  cmd/beadle-email -> mcp, contacts, email, enable, identity,
+                       paths, pgp, secret
+  mcp              -> channel, contacts, email, enable, identity,
+                       paths, pgp, session
+  enable           -> claudemd
 
-\texttt{internal/channel} is a leaf package with no internal
-dependencies.  \texttt{internal/pgp} depends only on the standard
-library.  \texttt{internal/email} depends on \texttt{channel} and
-\texttt{secret}.  \texttt{internal/mcp} depends on \texttt{email},
-\texttt{pgp}, and \texttt{channel}.
+beadle-daemon command layer:
+  cmd/beadle-daemon -> daemon, email, identity, paths, secret
+  daemon            -> channel, contacts, email, identity, paths, pgp
+
+shared lower layer (imported by both trees above):
+  email    -> channel, contacts, identity, paths, pgp, secret
+  contacts -> paths
+  secret   -> paths
+  channel, claudemd, identity, paths, pgp, session -> (no internal deps)
+\end{verbatim}
 
 %%----------------------------------------------------------------------
 \section{Basic Types}
 %%----------------------------------------------------------------------
 
 \begin{zed}
-  [MSGID, ADDRESS, BODY, HEADER, RAWBYTES, KEYID, SIGNER, CREDNAME]
+  [MSGID, ADDRESS, BODY, HEADER, HEADERVALUE, RAWBYTES, KEYID, \\
+  \quad SIGNER, CREDNAME, CREDVALUE, FOLDERNAME]
 \end{zed}
 
 $MSGID$ is an IMAP UID (numeric string).  $ADDRESS$ is an RFC~5322
-email address.  $BODY$ is the plain-text message body.  $HEADER$ is
-a header name-value pair.  $RAWBYTES$ is the raw RFC~822 message.
-$KEYID$ is a GPG key fingerprint.  $SIGNER$ is a GPG user identity.
-$CREDNAME$ is a named credential (e.g.\ \texttt{imap-password}).
+email address.  $BODY$ is the plain-text message body --- and only
+the message body.  $HEADER$ is a header field name (e.g.\
+\texttt{X-Pm-Origin}); $HEADERVALUE$ is that field's value.
+$RAWBYTES$ is the raw RFC~822 message.  $KEYID$ is a GPG key
+fingerprint.  $SIGNER$ is a GPG user identity.  $CREDNAME$ is a named
+credential (e.g.\ \texttt{imap-password}); $CREDVALUE$ is that
+credential's resolved value (a secret).  $FOLDERNAME$ is an IMAP
+folder name --- distinct from $CREDNAME$: a folder is not a
+credential, and the two must never be interchangeable in the type
+system (see \texttt{SelectFolder} below, which previously typed
+\texttt{folder?} as $CREDNAME$ in error).
+
+$HEADERVALUE$ and $CREDVALUE$ exist for the same reason $FOLDERNAME$
+does: an earlier draft of this document typed a header's value and a
+resolved credential's value as $BODY$, purely because both happened
+to be opaque strings.  That type-checked --- $BODY$, $HEADERVALUE$,
+and $CREDVALUE$ share a carrier --- which is exactly why sharing one
+declared type could not catch the confusion.  A credential's secret
+value is not an email body, and a header field's value is not one
+either; nothing below now lets them be typed as if they were.
 
 %%----------------------------------------------------------------------
 \section{Free Types}
@@ -145,15 +231,15 @@ Four trust levels classify inbound messages:
 \end{itemize}
 
 \begin{zed}
-  SendMethod ::= smProtonSMTP | smResend
+  SendMethod ::= smSMTP | smResend | smFailed
 \end{zed}
 
-Outbound messages use Proton Bridge SMTP as the primary transport,
-falling back to Resend API when Bridge is unavailable.
-
-\begin{zed}
-  CredBackend ::= cbKeychain | cbFile | cbEnvVar
-\end{zed}
+Outbound messages use the configured SMTP transport as the primary
+route (Proton Bridge in the default configuration; a MIME-preserving
+host such as Fastmail when PGP signing is configured, since Bridge
+strips \texttt{multipart/signed}), falling back to Resend API when
+that transport is unavailable, or failing outright when signing is
+required and no fallback can carry it.
 
 Credentials are resolved through a priority chain of three backends.
 
@@ -191,26 +277,78 @@ is \texttt{multipart/signed} or raw bytes contain
   TrustInput \\
   level! : TrustLevel
   \where
-  (hasProtonE2E = ztrue \land hasProtonInternal = ztrue
-    \implies level! = trusted) \\
+  (hasProtonE2E = ztrue \land hasProtonInternal = ztrue \\
+  \quad \implies level! = trusted) \\
   \land \\
-  (hasPGPSignature = ztrue \land pgpVerified = ztrue
-    \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
-    \implies level! = verified) \\
+  (hasPGPSignature = ztrue \land pgpVerified = ztrue \\
+  \quad \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue) \\
+  \quad \implies level! = verified) \\
   \land \\
-  (hasPGPSignature = ztrue \land pgpVerified = zfalse
-    \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
-    \implies level! = untrusted) \\
+  (hasPGPSignature = ztrue \land pgpVerified = zfalse \\
+  \quad \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue) \\
+  \quad \implies level! = untrusted) \\
   \land \\
-  (hasPGPSignature = zfalse
-    \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
-    \implies level! = unverified)
+  (hasPGPSignature = zfalse \\
+  \quad \land \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue) \\
+  \quad \implies level! = unverified)
 \end{schema}
 
 The classification is total: every combination of inputs maps to
 exactly one trust level.  Proton E2E takes priority over PGP
 signatures (a Proton-internal message with a PGP signature is
 still $trusted$, not $verified$).
+
+\subsection{External Origin: An Assumption, Not a Theorem}
+
+\texttt{ClassifyTrust} proves that every combination of its four
+$ZBOOL$ inputs is mapped to exactly one $TrustLevel$ (a routine case
+split on $hasProtonE2E$, $hasProtonInternal$, $hasPGPSignature$, and
+$pgpVerified$, each of which has only two values).  It does \emph{not}
+prove the stronger property this repository actually depends on: that
+no externally-originated message is ever classified $trusted$.  It
+cannot, because nothing in $TrustInput$ says where a message came
+from --- $hasProtonE2E$ and $hasProtonInternal$ are bare booleans, and
+the schema has no way to ask whether they are telling the truth.
+
+\begin{zed}
+  Origin ::= originInternal | originExternal
+\end{zed}
+
+\begin{schema}{ChannelAssumption}
+  origin : Origin \\
+  hasProtonE2E : ZBOOL \\
+  hasProtonInternal : ZBOOL
+  \where
+  origin = originExternal \implies
+    \lnot (hasProtonE2E = ztrue \land hasProtonInternal = ztrue)
+\end{schema}
+
+$origin$ is ground truth: where the message actually came from, not
+what its headers claim.  \texttt{ChannelAssumption} is not derived
+from anything else in this document --- it is posited, and its truth
+depends entirely on Proton Bridge behaving as documented (setting
+\texttt{X-Pm-Content-Encryption}/\texttt{X-Pm-Origin} only for
+messages it has itself routed end-to-end between two Proton
+mailboxes, and stripping or refusing to forward those headers on
+anything externally injected).  \texttt{internal/daemon/handler.go}
+records the same assumption in a code comment rather than an
+enforced check: \textit{``External SMTP injection of these headers is
+blocked by Bridge''} --- exactly the kind of claim a Z schema cannot
+verify and should not pretend to.
+
+Given \texttt{ChannelAssumption}, the property this repository relies
+on follows as a theorem, not as decoration: by \texttt{ClassifyTrust},
+$hasProtonE2E = ztrue \land hasProtonInternal = ztrue$ is the only
+condition that entails $level! = trusted$, and by the totality proved
+above no other input combination also entails it; by
+\texttt{ChannelAssumption}'s contrapositive, that same condition
+entails $origin = originInternal$.  So $level! = trusted \implies
+origin = originInternal$ --- \emph{no external sender is ever
+trusted} --- but only for as long as \texttt{ChannelAssumption} holds.
+If Bridge is ever misconfigured, or a future defect lets an external
+SMTP client set these two headers, this specification gives no
+warning: the assumption, not a theorem about message content, is
+where that guarantee actually lives.
 
 \subsection{Two-Phase Trust Resolution}
 
@@ -233,9 +371,9 @@ requires fetching the raw message bytes and running \texttt{gpg}:
 
 \begin{schema}{CredentialStore}
   keychainAvail : ZBOOL \\
-  keychainValues : CREDNAME \pfun BODY \\
-  fileValues : CREDNAME \pfun BODY \\
-  envValues : CREDNAME \pfun BODY
+  keychainValues : CREDNAME \pfun CREDVALUE \\
+  fileValues : CREDNAME \pfun CREDVALUE \\
+  envValues : CREDNAME \pfun CREDVALUE
 \end{schema}
 
 Credentials are resolved by name.  The keychain backend maps to
@@ -254,26 +392,26 @@ Environment variables follow the pattern \texttt{BEADLE\_<NAME>}.
 \begin{schema}{ResolveCredential}
   \Xi CredentialStore \\
   name? : CREDNAME \\
-  value! : BODY
+  value! : CREDVALUE
   \where
-  (keychainAvail = ztrue \land name? \in \dom keychainValues
-    \implies value! = keychainValues(name?)) \\
+  (keychainAvail = ztrue \land name? \in \dom keychainValues \\
+  \quad \implies value! = keychainValues(name?)) \\
   \land \\
-  ((\lnot (keychainAvail = ztrue \land name? \in \dom keychainValues))
-    \land name? \in \dom fileValues
-    \implies value! = fileValues(name?)) \\
+  ((\lnot (keychainAvail = ztrue \land name? \in \dom keychainValues)) \\
+  \quad \land name? \in \dom fileValues \\
+  \quad \implies value! = fileValues(name?)) \\
   \land \\
-  ((\lnot (keychainAvail = ztrue \land name? \in \dom keychainValues))
-    \land name? \notin \dom fileValues
-    \land name? \in \dom envValues
-    \implies value! = envValues(name?))
+  ((\lnot (keychainAvail = ztrue \land name? \in \dom keychainValues)) \\
+  \quad \land name? \notin \dom fileValues \\
+  \quad \land name? \in \dom envValues \\
+  \quad \implies value! = envValues(name?))
 \end{schema}
 
 The resolution is a priority chain: keychain beats file, file beats
 environment variable.  File credentials are rejected if group or
 world readable (permissions check enforces mode 600).
 
-The three named credentials used by \texttt{beadle-email}:
+The credentials used by \texttt{beadle-email}, resolved by name:
 
 \begin{center}
 \begin{tabular}{@{}lll@{}}
@@ -281,11 +419,25 @@ The three named credentials used by \texttt{beadle-email}:
 \textbf{Name} & \textbf{Env Var} & \textbf{Purpose} \\
 \midrule
 \texttt{imap-password}   & \texttt{BEADLE\_IMAP\_PASSWORD}   & Proton Bridge login \\
+\texttt{smtp-password}   & \texttt{BEADLE\_SMTP\_PASSWORD}   & SMTP login; falls back to \texttt{imap-password} when unset \\
 \texttt{resend-api-key}  & \texttt{BEADLE\_RESEND\_API\_KEY}  & Resend API authentication \\
 \texttt{gpg-passphrase}  & \texttt{BEADLE\_GPG\_PASSPHRASE}  & PGP signing key passphrase \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+A secret file that exists but is unreadable or malformed (permissions,
+I/O error) is a hard error --- resolution does not fall through to the
+environment variable in that case, only when the file is genuinely
+absent.
+
+This section formalises credential-\emph{value} resolution
+(\texttt{internal/secret}) only. Credential-\emph{path} resolution ---
+the identity-scoped \texttt{email.json} versus the legacy root
+fallback, and the daemon-scoped \texttt{daemon.json} that names the
+recipe-signing key independently of any identity's email or PGP
+config --- is specified in \texttt{docs/ARCHITECTURE.md}'s
+``Credentials'' section.
 
 %%----------------------------------------------------------------------
 \section{Message Receive Path}
@@ -307,17 +459,37 @@ response.
   state' = imapConnected
 \end{schema}
 
-Connection uses STARTTLS.  The TLS certificate check is skipped for
-loopback addresses only (Proton Bridge uses self-signed certificates
-on localhost).
+Connection uses STARTTLS.  The TLS certificate check is skipped
+automatically for loopback addresses (Proton Bridge uses self-signed
+certificates on localhost); \texttt{tls\_skip\_verify} in config
+extends the same skip to any host (Design Invariant~10).
 
 \begin{schema}{SelectFolder}
   \Delta IMAPConnection \\
-  folder? : CREDNAME
+  folder? : FOLDERNAME
   \where
   state = imapConnected \lor state = imapSelected \\
   state' = imapSelected
 \end{schema}
+
+\begin{schema}{Message}
+  id : MSGID \\
+  headers : HEADER \pfun HEADERVALUE \\
+  body : BODY \\
+  raw : RAWBYTES \\
+  level : TrustLevel
+\end{schema}
+
+\texttt{Message} names the shape the fetch/parse pipeline below
+produces: headers map by field name to a single value (multi-valued
+headers, e.g.\ repeated \texttt{Received} lines, are folded before
+this point and are out of scope for this schema), $body$ is the
+plain-text body the MIME-parse step below extracts, $raw$ is the
+untouched RFC~822 bytes used for PGP verification, and $level$ is
+the classification \texttt{ClassifyTrust} assigns once phase~2 (PGP
+verification, when applicable) has run.  $BODY$ now has a genuine use
+here --- until this fix it was declared in \S~Basic Types and never
+once instantiated by any schema in this document.
 
 \subsection{Fetch and Parse}
 
@@ -325,15 +497,30 @@ Once a folder is selected, messages are fetched by UID.  The raw
 RFC~822 bytes are parsed through a pipeline:
 
 \begin{enumerate}
+  \item \textbf{PGP decrypt} (conditional) --- if the message is
+    PGP-encrypted, inbound decryption (DES-024, SETTLED) runs
+    \emph{before} MIME parsing, using the system keyring (a
+    deliberate departure from the isolated-keyring rule for
+    verification, since decryption needs the owner's own private
+    key --- Design Invariant~3).  This changes which bytes MIME
+    parse sees.
   \item \textbf{MIME parse} --- \texttt{ParseMIME} extracts the
     plain-text body, attachments, and selected headers.  Multipart
-    messages are walked using the \texttt{go-message} library.
-    PGP signature and key parts are skipped (handled separately).
+    messages are walked using the \texttt{go-message} library, and
+    \texttt{walkParts} recurses into a nested \texttt{multipart} part
+    before reading its body (DES-025, SETTLED) --- GPG Mail nests
+    \texttt{multipart/signed} $\to$ \texttt{multipart/mixed} $\to$
+    \texttt{text/plain}, and a flat, non-recursive walk returned
+    ``(no text body)'' for exactly that shape.  PGP signature and key
+    parts are skipped (handled separately).
   \item \textbf{Header trust} --- \texttt{ClassifyTrust} runs on
     headers to determine the initial trust level.
   \item \textbf{PGP verify} (conditional) --- if the message has a
     PGP signature ($hasPGPSignature = ztrue$), raw bytes are
-    passed to \texttt{pgp.Verify} for full verification.
+    passed to \texttt{pgp.Verify} for full verification; the
+    verify-and-promote step that turns this into a final trust level
+    lives in the MCP handlers, not in \texttt{internal/email} --- see
+    \S~Two-Phase Trust Resolution.
   \item \textbf{Response assembly} --- the parsed message, trust
     level, and attachments are serialised as JSON in the MCP tool
     response.
@@ -345,23 +532,40 @@ RFC~822 bytes are parsed through a pipeline:
 
 \begin{schema}{SendState}
   smtpAvailable : ZBOOL \\
+  signingRequired : ZBOOL \\
   method! : SendMethod
   \where
-  smtpAvailable = ztrue \implies method! = smProtonSMTP \\
-  smtpAvailable = zfalse \implies method! = smResend
+  (smtpAvailable = ztrue \implies method! = smSMTP) \\
+  \land \\
+  (smtpAvailable = zfalse \land signingRequired = zfalse
+    \implies method! = smResend) \\
+  \land \\
+  (smtpAvailable = zfalse \land signingRequired = ztrue
+    \implies method! = smFailed)
 \end{schema}
 
-The send path attempts Proton Bridge SMTP first.  If the Bridge is
-unreachable (a TCP dial to the SMTP port times out in 2~seconds),
-the Resend API is used as fallback.
+The send path attempts the configured SMTP transport first.  If that
+transport is unreachable (a TCP dial to the SMTP port times out in
+2~seconds), the Resend API is used as fallback --- unless the
+outbound message must be PGP-signed or encrypted, in which case
+there is no fallback at all: Resend has no raw-MIME API and cannot
+preserve a \texttt{multipart/signed} or \texttt{multipart/encrypted}
+envelope, so the send fails outright ($method! = smFailed$).
+\texttt{SendState} models which \emph{route} is chosen, not whether
+the chosen route actually preserved the envelope it composed --- see
+\S~PGP Signing for the transport-validation gap that leaves.
 
 \subsection{Proton Bridge SMTP}
 
-SMTP uses STARTTLS with the same self-signed certificate exception
-as IMAP (loopback only).  Authentication uses \texttt{PLAIN} with
-the same credentials as IMAP.  The raw RFC~822 message is composed
-by \texttt{ComposeRaw}, which validates header fields against CR/LF
-injection.
+SMTP uses implicit TLS on port 465, or STARTTLS otherwise, with the
+same self-signed certificate exception as IMAP for loopback addresses
+--- extended to any host when \texttt{tls\_skip\_verify} is set
+(Design Invariant~10).  Port 465 implicit TLS is also the branch the
+Fastmail signing transport uses (\S~PGP Signing).  Authentication uses
+\texttt{PLAIN} with \texttt{smtp-password} if configured, else the
+same credentials as IMAP (\S~Credential Resolution).  The raw RFC~822
+message is composed by \texttt{ComposeRaw}, which validates header
+fields against CR/LF injection.
 
 \subsection{Resend API}
 
@@ -369,12 +573,24 @@ The Resend fallback sends via HTTPS POST to
 \texttt{api.resend.com/emails}.  It supports both plain text and
 HTML bodies.  The API key is resolved via the credential store.
 
-\subsection{PGP Signing (Future)}
+\subsection{PGP Signing}
 
-PGP signing of outbound mail requires a transport that preserves raw
-MIME (\texttt{multipart/signed} envelopes).  Neither Proton Bridge
-(strips MIME) nor Resend (no raw MIME API) supports this.  Amazon
-SES will be added as the PGP-signing transport in a future release.
+PGP signing of outbound mail (DES-022, SETTLED) requires a transport
+that preserves raw MIME (\texttt{multipart/signed} envelopes).
+Neither Proton Bridge (strips MIME) nor Resend (no raw MIME API;
+Resend's own backend is Amazon SES, which strips it the same way)
+supports this.  The signing transport that does is \textbf{Fastmail
+SMTP} on port 465 (implicit TLS, \S~Proton Bridge SMTP) --- selected
+by pointing \texttt{smtp\_host}/\texttt{smtp\_port} at Fastmail (see
+\texttt{docs/TESTING.md}'s Fastmail Test Config).
+
+\texttt{TrySendChain} does not itself validate that the transport it
+used preserved the signed MIME envelope --- it reports success on any
+clean SMTP transaction.  A signed message sent over the default
+(Proton Bridge) configuration reports ``sent'' while carrying a
+signature Bridge has already stripped; only a transport actually known
+to preserve \texttt{multipart/signed}, such as Fastmail, makes the
+signature meaningful on arrival.
 
 %%----------------------------------------------------------------------
 \section{PGP Subsystem}
@@ -385,7 +601,7 @@ the system \texttt{gpg} binary.  It never uses a Go PGP library ---
 \texttt{gpg} handles keyring management, trust models, and
 signature formats.
 
-\begin{schema}{GPGEnvironment}
+\begin{schema}{VerifyEnvironment}
   systemKeys : \power KEYID \\
   importedKeys : \power KEYID \\
   isolated : ZBOOL
@@ -393,6 +609,18 @@ signature formats.
   isolated = ztrue \\
   importedKeys \subseteq systemKeys
 \end{schema}
+
+\texttt{VerifyEnvironment} models \emph{inbound signature
+verification only}.  The $isolated = ztrue$ invariant does not hold
+for the PGP subsystem as a whole: the Sign Flow below, and
+decryption, deliberately use the caller's own system keyring
+(\texttt{internal/pgp/sign.go}, \texttt{internal/pgp/decrypt.go})
+because that is
+where the owner's private key already lives, and no isolated homedir
+could sign or decrypt with it.  Do not read this schema, or Key
+Property~3 below, as a claim about signing or decryption --- both
+are the one part of the PGP subsystem that is intentionally not
+isolated, by the same Design Invariant~3 that states it in prose.
 
 Every verification runs in an isolated GNUPGHOME under
 \texttt{/tmp/bg-*}.  The short path prefix avoids the 108-byte
@@ -417,9 +645,28 @@ Unix socket path limit for \texttt{gpg-agent}.
   \item Remove the temporary directory.
 \end{enumerate}
 
+\begin{schema}{VerifyInboundResult}
+  VerifyEnvironment \\
+  valid! : ZBOOL \\
+  keyID! : KEYID \\
+  signer! : SIGNER
+\end{schema}
+
+\texttt{VerifyInboundResult} is the shape the \texttt{verify\_signature}
+MCP tool actually returns (trust level, validity, key ID, signer ---
+see \S~MCP Tool Surface); the seven-step Verify Flow above computes
+it, but is not itself formalised step by step, in keeping with this
+document's level of abstraction: the schemas here fix the
+\emph{decision logic} (what a given verification outcome means), not
+the byte-level GPG plumbing that produces it.
+
 \subsection{Sign Flow}
 
 \begin{enumerate}
+  \item Check the signer key's expiry (\texttt{checkSignerKeyExpiry})
+    before any other work --- keys with no expiration date, or an
+    expiration date already passed, are rejected before boundary
+    generation or body composition even begins.
   \item Compose the body as a MIME part with CRLF line endings
     (mandatory per RFC~3156).
   \item Write the GPG passphrase to a temporary file (mode 600) to
@@ -432,28 +679,92 @@ Unix socket path limit for \texttt{gpg-agent}.
   \item Generate the MIME boundary using \texttt{crypto/rand}.
 \end{enumerate}
 
+\subsection{Command-File Signature Verification}
+
+Command-file verification (\texttt{internal/daemon/signature.go}'s
+\texttt{VerifySignature}, DES-034/DES-035, both SETTLED) is a
+structurally distinct, stricter path from \texttt{pgp.Verify} above:
+it authorizes a \emph{command definition}, not an inbound message.
+
+\begin{enumerate}
+  \item Reconstruct the canonical bytes that were signed --- the
+    command with its \texttt{Signature} field cleared, marshaled
+    deterministically (\texttt{CanonicalCommandBytes}).
+  \item Create an isolated GNUPGHOME, as with inbound verification.
+  \item Import \emph{only} the authorizer's key (identified by a full
+    40-hex fingerprint\footnote{\texttt{daemon.json}'s
+    \texttt{owner\_handle}/\texttt{owner\_gpg\_key\_id} name this key
+    as ``owner'' in code and config today; a rename to
+    ``authorizer'' is proposed under bead beadle-4ul but not yet
+    done.  This document uses ``authorizer'' for the concept and the
+    current field names for the literal config keys.}) from the
+    ambient keyring into the isolated one, and assert exactly one key
+    with that exact fingerprint landed there --- never a silent
+    ``verify against whatever's there.''
+  \item Check that key's expiry against the isolated homedir (Design
+    Invariant~4).
+  \item Run \texttt{gpg --verify --status-fd} and parse the
+    machine-readable \texttt{[GNUPG:]} status lines: every outcome
+    except \texttt{GOODSIG} is an error, classified by reason
+    (missing, invalid, wrong-key, key-expired).  This is a stricter
+    parse than \texttt{pgp.Verify}'s, which reads a stderr substring.
+\end{enumerate}
+
+A nil error means the authorizer, and only the authorizer, signed this
+exact command definition with a key that has not expired.
+\texttt{LoadCommands}/\texttt{loadCommand} call \texttt{VerifySignature}
+on every command file at daemon startup; when \texttt{daemon.json} is
+absent, unresolvable, or names both or neither owner field, command
+loading is disabled entirely --- the daemon starts with zero commands
+rather than falling back to unsigned execution.
+
 %%----------------------------------------------------------------------
 \section{MCP Tool Surface}
 %%----------------------------------------------------------------------
 
-\texttt{beadle-email} registers 8 MCP tools:
+The tools below are registered by \texttt{internal/mcp/tools.go}'s
+\texttt{RegisterTools} (message, contact, and identity tools; the last
+21 rows unconditionally) plus \texttt{internal/mcp/poll\_tools.go}
+(the final two rows, gated on a background poller being configured).
+Re-run that lookup rather than trusting a stale copy of this table if
+the tool surface has since changed --- the table is a snapshot, the
+code is the source.
 
 \begin{center}
-\begin{longtable}{@{}llp{6.5cm}@{}}
+\begin{longtable}{@{}llp{6cm}@{}}
 \toprule
 \textbf{Tool} & \textbf{Required Params} & \textbf{Description} \\
 \midrule
-\texttt{list\_messages}     & ---               & List messages from a folder (id, from, date, subject, trust). Inline PGP verification for signed messages. \\
-\texttt{read\_message}      & \texttt{message\_id} & Read a single message by UID. Auto-verifies PGP if Content-Type indicates \texttt{multipart/signed}. \\
-\texttt{list\_folders}      & ---               & List all IMAP mailbox folders. \\
-\texttt{send\_email}        & \texttt{to}, \texttt{subject}, \texttt{body} & Send via SMTP (primary) or Resend (fallback). \\
-\texttt{verify\_signature}  & \texttt{message\_id} & Explicit PGP verification. Returns trust level, validity, key ID, signer. \\
-\texttt{show\_mime}         & \texttt{message\_id} & Show MIME structure of a message. \\
-\texttt{check\_trust}       & \texttt{message\_id} & Classify trust level with detailed explanation. \\
-\texttt{move\_message}      & \texttt{message\_id} & Move a message to another folder (default: Archive). \\
+\texttt{list\_messages}       & ---                            & List messages from a folder (id, from, date, subject, trust). Repo-scoped by default; \texttt{all\_repos} widens. \\
+\texttt{search\_messages}     & ---                            & Search a folder by sender, subject, date, or free text; at least one filter required. Renders the same table as \texttt{list\_messages}. \\
+\texttt{read\_message}        & \texttt{message\_id}           & Read a single message by UID: body, headers, attachment summary, trust level. \\
+\texttt{list\_folders}        & ---                            & List all IMAP mailbox folders. \\
+\texttt{send\_email}          & \texttt{to}, \texttt{subject}, \texttt{body} & Send via the configured SMTP transport (primary) or Resend (fallback, blocked when signing is required). Recipients may be contact names or aliases. \\
+\texttt{reply\_message}       & \texttt{message\_id}, \texttt{body} & Reply to a message by UID, threaded (In-Reply-To/References), quoting the original. \\
+\texttt{verify\_signature}    & \texttt{message\_id}           & Explicit PGP verification. Returns trust level, validity, key ID, signer. \\
+\texttt{show\_mime}           & \texttt{message\_id}           & Show the MIME structure of a message. \\
+\texttt{check\_trust}         & \texttt{message\_id}           & Classify trust level with a detailed explanation. \\
+\texttt{move\_message}        & \texttt{message\_id}           & Move a message to another folder (default: Archive). \\
+\texttt{batch\_move\_messages} & \texttt{message\_ids}          & Move multiple messages to another folder in one call. \\
+\texttt{mark\_message}        & \texttt{message\_id}           & Set or clear the \textbackslash{}Seen flag; reading never changes read state. \\
+\texttt{batch\_mark\_messages} & \texttt{message\_ids}          & Mark multiple messages read/unread in one call. \\
+\texttt{download\_attachment} & \texttt{message\_id}, \texttt{part\_index} & Extract an attachment by MIME part index (from \texttt{show\_mime}). \\
+\texttt{list\_contacts}       & ---                            & List all contacts in the address book. \\
+\texttt{find\_contact}        & \texttt{query}                 & Look up a contact by name, email, or alias. \\
+\texttt{add\_contact}         & \texttt{name}, \texttt{email}  & Add a contact; email may be a glob pattern, restricted to read-only or blocked permissions. \\
+\texttt{remove\_contact}      & \texttt{name}                  & Remove a contact by name. \\
+\texttt{whoami}               & ---                            & Show the active identity: email, handle, source, session participants. \\
+\texttt{switch\_identity}     & ---                            & Switch the active identity for this session, or reset to default. \\
+\texttt{enable}               & \texttt{action}                & Enable or disable beadle guidance (\texttt{CLAUDE.md} import, marker) in the current repo. \\
+\texttt{set\_poll\_interval} (gated) & \texttt{interval}         & Set the background inbox polling interval. \\
+\texttt{get\_poll\_status} (gated)   & ---                       & Show poller state: interval, active, last check time, unread count. \\
 \bottomrule
 \end{longtable}
 \end{center}
+
+Both gated rows are registered only when a background poller is
+configured (\texttt{h.poller != nil}); the remaining rows above are
+unconditional.
 
 All tool handlers use a \texttt{withClient} pattern: a fresh IMAP
 connection is established per request and closed when the handler
@@ -468,9 +779,17 @@ These invariants are enforced by the architecture and hold across
 all operations:
 
 \begin{enumerate}
-  \item \textbf{Zero agent authority.}  Every action requires a
-    GPG-signed instruction from the owner.  The daemon has no
-    independent decision-making.
+  \item \textbf{Zero agent authority (command execution only).}
+    Every command the daemon executes requires a GPG-signed command
+    file authorized by the owner (\S~Command-File Signature
+    Verification) --- the daemon has no independent decision-making
+    about \emph{what to run}.  This does not cover every action taken
+    on inbound mail: \texttt{OnNewMail} creates a pipeline or a bare
+    mission record from sender permission and transport trust alone,
+    with no signed command anywhere in that earlier decision
+    (\S~Daemon Architecture, Detection and Trust Gate).  With zero
+    commands loaded, nothing downstream runs, but the mission/pipeline
+    record itself is still created.
 
   \item \textbf{Preflight before execute.}  All permissions are
     validated before any command runs.  No partial execution.
@@ -481,11 +800,18 @@ all operations:
     own key from the system keyring, since that is where it already
     lives.
 
-  \item \textbf{Non-expiring keys rejected.}  All command-signing
-    keys must have an expiration date.
+  \item \textbf{Expired and non-expiring keys rejected.}  All
+    command-signing keys must carry an expiration date that has not
+    yet passed --- enforced on the primary key and, when the key has
+    signing-capable subkeys, requiring at least one such subkey with a
+    current, non-expired expiry (\texttt{internal/pgp/expiry.go}).
 
-  \item \textbf{Audit log is tamperproof.}  Append-only,
-    GPG-signed entries.  Only the owner can clear the log.
+  \item \textbf{Audit log is tamperproof (designed, not
+    implemented).}  Append-only, GPG-signed entries; only the owner
+    can clear the log.  No code implements this today ---
+    \texttt{internal/daemon} has no audit-log type, writer, or clear
+    operation (bead beadle-623).  This invariant is retained as the
+    design target, not a description of current behavior.
 
   \item \textbf{No secrets in logs.}  GPG key material, passwords,
     API keys, and raw email content are never logged.
@@ -499,9 +825,14 @@ all operations:
   \item \textbf{File permission enforcement.}  Secret files must
     not be group or world readable (mode 600).
 
-  \item \textbf{Loopback-only TLS exception.}  Self-signed
-    certificate verification is skipped only for loopback
-    addresses (Proton Bridge on localhost).
+  \item \textbf{TLS verification skip is configurable, not
+    loopback-only.}  Certificate verification is skipped
+    automatically for loopback addresses (Proton Bridge's self-signed
+    cert on localhost), but \texttt{tls\_skip\_verify} in config also
+    disables it for \emph{any} host --- added for Docker host
+    networking, where the bridge is not reachable via loopback.  The
+    exception is a configuration choice, not a boundary enforced
+    regardless of configuration.
 \end{enumerate}
 
 %%----------------------------------------------------------------------
@@ -511,11 +842,23 @@ all operations:
 \subsection{Network Boundary}
 
 \begin{itemize}
-  \item \textbf{IMAP/SMTP}: localhost only (Proton Bridge).
-    STARTTLS with self-signed cert exception for loopback.
+  \item \textbf{IMAP/SMTP}: \texttt{127.0.0.1} is the default host,
+    not an enforced boundary --- \texttt{imap\_host}/\texttt{smtp\_host}
+    are plain config fields, and \texttt{docs/TESTING.md}'s own
+    Fastmail signing procedure switches \texttt{smtp\_host} to a
+    non-loopback host.  STARTTLS (or implicit TLS on port 465,
+    \S~Proton Bridge SMTP) with a self-signed-cert exception for
+    loopback addresses; \texttt{tls\_skip\_verify} extends that
+    exception to any host (Design Invariant~10).
   \item \textbf{Resend API}: outbound HTTPS to
     \texttt{api.resend.com}.  Bearer token authentication.
-  \item \textbf{MCP}: stdio transport.  No network listener.
+  \item \textbf{MCP}: stdio by default.  \texttt{serve --transport ws}
+    instead binds \texttt{0.0.0.0} (all interfaces, not loopback) on
+    port 8420 by default, with \texttt{CheckOrigin} accepting every
+    origin unconditionally --- the only access control referenced
+    anywhere in the codebase is an external \texttt{mcp-proxy}'s
+    \texttt{MCP\_PROXY\_TOKEN}, named in a code comment, not enforced
+    by this binary itself (bead beadle-nimy).
 \end{itemize}
 
 \subsection{Process Boundary}
@@ -543,7 +886,276 @@ all operations:
 \end{itemize}
 
 %%----------------------------------------------------------------------
-\section{Daemon Architecture (DES-027/028/029)}
+\section{Daemon Formalisation}
+%%----------------------------------------------------------------------
+
+The sections above cover \texttt{beadle-email}.  \texttt{beadle-daemon}
+is a second binary with its own state and its own trust boundary;
+this section formalises the three pieces of daemon-only state a
+defect audit found completely unmodeled: pipeline lifecycle,
+per-contact permission, and command-file signature verification ---
+plus the gate that composes all three, together with the email
+channel's own trust model, into one admission decision.  Nothing
+here models \emph{inter-stage file-flow} --- attachments or generated
+artifacts passed between pipeline stages as file references, rather
+than only through the \texttt{pipe} value (\S~Pipeline Orchestrator).
+That is designed (DES-032) but not implemented: \texttt{Command} has
+no file-flow fields today, and a schema for it here would
+misrepresent designed-only behaviour as shipped.  This is distinct
+from --- and does not touch --- the pipeline-\emph{record} persistence
+and retention sweep \S~Pipeline Persistence describes, which is real,
+shipped code.
+
+\begin{zed}
+  [CMDID]
+\end{zed}
+
+$CMDID$ identifies one command file by its declared name (the map
+key in \texttt{internal/daemon.Command}'s registry), not by its
+file path or its content hash.
+
+\subsection{Pipeline Lifecycle}
+
+\begin{zed}
+  PipelineStatus ::= psRunning | psFailed | psCompleted
+\end{zed}
+
+Three states, matching \texttt{internal/daemon/pipeline.go}'s
+\texttt{Status} field exactly: $psRunning$ while a pipeline's stages
+are still executing, $psFailed$ on any stage error or on daemon
+restart with the pipeline still in flight (Crash Recovery, Key
+Property~9 below), $psCompleted$ once every stage --- including the
+auto-appended reply --- has finished.  A completed pipeline may
+still carry a non-fatal auto-reply error (\texttt{Pipeline.Error});
+\texttt{PipelineStatus} says nothing about that field, by design ---
+test $status$ for success, not $Error$, exactly as the Go comment on
+\texttt{Pipeline.Error} instructs.
+
+\begin{schema}{Pipeline}
+  status : PipelineStatus
+\end{schema}
+
+\begin{schema}{PipelineTransition}
+  \Delta Pipeline
+  \where
+  (status \neq psRunning \implies status' = status) \\
+  \land \\
+  (status' = psRunning \implies status = psRunning)
+\end{schema}
+
+\texttt{PipelineTransition} states the property this section exists
+to capture: a pipeline that leaves $psRunning$ never returns to it,
+and in fact never changes state again at all --- $psFailed$ and
+$psCompleted$ are absorbing.  The first conjunct pins a
+non-running pipeline's status; the second forbids any transition
+\emph{into} $psRunning$ except from $psRunning$ itself.  Together
+they leave exactly one live transition family: $psRunning \to
+psRunning$, $psRunning \to psFailed$, and $psRunning \to
+psCompleted$ are all permitted; nothing else is.
+
+\subsection{Per-Contact Permission}
+
+\begin{schema}{Permission}
+  read : ZBOOL \\
+  write : ZBOOL \\
+  execute : ZBOOL
+\end{schema}
+
+The three bits are independent --- \texttt{Permission} carries no
+predicate part because nothing in \texttt{internal/contacts}
+couples them.  A contact can hold $execute = ztrue \land read =
+zfalse$ (execute-only) exactly as validly as any other combination;
+this schema does not narrow that.
+
+\subsection{Command-File Signature Verification: Decision Logic}
+
+This formalises the outcome of the procedure \S~PGP
+Subsystem's own \S~Command-File Signature Verification already
+describes step by step; it does not repeat those steps.
+
+\begin{zed}
+  CommandSigOutcome ::= csGood | csMissing | csWrongKey
+                       | csExpired | csInvalid
+\end{zed}
+
+The five outcomes correspond exactly to
+\texttt{internal/daemon/signature.go}'s \texttt{SignatureReason}
+constants ($csMissing$, $csInvalid$, $csWrongKey$, $csExpired$) plus
+$csGood$, its unstated fifth case: a $nil$ \texttt{error} from
+\texttt{VerifySignature}.  $csInvalid$ covers everything the Go
+comment calls \emph{``do not trust this signature''} ---
+\texttt{BADSIG}, \texttt{ERRSIG}, \texttt{REVKEYSIG},
+\texttt{EXPSIG}, a malformed owner fingerprint, and any unrecognised
+\texttt{gpg --status-fd} line, none of which get their own outcome
+because none of them get their own \texttt{SignatureReason} in the
+Go code either.
+
+\begin{schema}{CommandSigInput}
+  fingerprintValid : ZBOOL \\
+  hasSignature : ZBOOL \\
+  importedKeyCount : \nat \\
+  keyExpired : ZBOOL \\
+  sawGoodSig : ZBOOL \\
+  sawExpKeySig : ZBOOL \\
+  sawNoPubkey : ZBOOL \\
+  sawBadOrErrSig : ZBOOL
+\end{schema}
+
+$fingerprintValid$ is whether the configured owner key ID matches a
+40-hex OpenPGP fingerprint.  $importedKeyCount$ is the number of
+keys with exactly that fingerprint found in the isolated keyring
+after import --- this is what makes command-file verification
+\emph{stricter} than inbound message verification:
+\texttt{VerifyEnvironment} (above) imports every system key, or
+whatever key the message itself attached, with no uniqueness
+requirement; \texttt{CommandSigInput} imports \emph{one named key}
+and treats anything other than exactly one match as a hard failure,
+never a ``pick one.''  The four $saw$-prefixed fields mirror
+\texttt{classifyStatusLines}'s four collected \texttt{[GNUPG:]}
+status lines; $sawBadOrErrSig$ covers
+\texttt{BADSIG}/\texttt{ERRSIG}/\texttt{REVKEYSIG}/\texttt{EXPSIG}
+together, since all four collapse to the same $csInvalid$ outcome
+below.
+
+\begin{schema}{VerifyCommandSignature}
+  CommandSigInput \\
+  outcome! : CommandSigOutcome
+  \where
+  (fingerprintValid = zfalse \\
+  \quad \implies outcome! = csInvalid) \\
+  \land \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = zfalse \\
+  \quad \implies outcome! = csMissing) \\
+  \land \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount \neq 1 \\
+  \quad \implies outcome! = csInvalid) \\
+  \land \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount = 1 \\
+  \quad \land keyExpired = ztrue \\
+  \quad \implies outcome! = csExpired) \\
+  \land \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount = 1 \\
+  \quad \land keyExpired = zfalse \\
+  \quad \land sawNoPubkey = ztrue \\
+  \quad \implies outcome! = csWrongKey) \\
+  \land \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount = 1 \\
+  \quad \land keyExpired = zfalse \\
+  \quad \land sawNoPubkey = zfalse \\
+  \quad \land sawGoodSig = ztrue \\
+  \quad \implies outcome! = csGood) \\
+  \land \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount = 1 \\
+  \quad \land keyExpired = zfalse \\
+  \quad \land sawNoPubkey = zfalse \\
+  \quad \land sawGoodSig = zfalse \\
+  \quad \land sawExpKeySig = ztrue \\
+  \quad \implies outcome! = csExpired) \\
+  \land \\
+  (fingerprintValid = ztrue \\
+  \quad \land hasSignature = ztrue \\
+  \quad \land importedKeyCount = 1 \\
+  \quad \land keyExpired = zfalse \\
+  \quad \land sawNoPubkey = zfalse \\
+  \quad \land sawGoodSig = zfalse \\
+  \quad \land sawExpKeySig = zfalse \\
+  \quad \implies outcome! = csInvalid)
+\end{schema}
+
+The eight cases are exhaustive and mutually exclusive by the same
+construction as \texttt{ClassifyTrust}: each guard rules out every
+earlier one, so exactly one implication's antecedent holds for any
+assignment to the eight inputs, and $outcome!$ is forced accordingly.
+Only one branch reaches $csGood$ --- everything else, including an
+unrecognised status line that matches none of the four $saw$ flags,
+is an error.  That is \texttt{classifyStatusLines}'s own invariant,
+stated in its comment as ``there is no implicit fallthrough to
+nil''; this schema is that invariant, checked.
+
+The canonical payload that gets signed is \texttt{cmd} with its
+\texttt{Signature} field cleared to the empty string
+(\texttt{CanonicalCommandBytes}) --- not modeled as a separate
+schema here, in keeping with this document's practice of leaving
+byte-level serialisation to prose (the same choice already made for
+\texttt{ComposeRaw} and \texttt{ParseMIME}).  The property that
+matters formally is that signing and verifying agree on what
+``canonical'' means because both call the same function; nothing in
+\texttt{CommandSigInput} depends on \texttt{Signature}'s own bytes.
+
+\begin{schema}{LoadedCommands}
+  commands : \power CMDID \\
+  sigOutcome : CMDID \pfun CommandSigOutcome
+  \where
+  commands = \{ c : \dom sigOutcome | sigOutcome(c) = csGood \}
+\end{schema}
+
+Command-file signature verification does not happen per email: it
+happens once, when \texttt{LoadCommands} reads the command directory
+at daemon startup (\texttt{internal/daemon/command.go}).  A command
+that fails verification is simply absent from $commands$ --- it can
+never be selected by the planner for any message, however trusted.
+\texttt{LoadedCommands} is the daemon's runnable command set; it
+does not vary per inbound message the way \texttt{DaemonGate} below
+does.
+
+\subsection{The Execution Gate}
+
+\begin{schema}{DaemonGate}
+  Permission \\
+  LoadedCommands \\
+  trust : TrustLevel \\
+  keyBound : ZBOOL \\
+  cmd? : CMDID \\
+  admit! : ZBOOL
+  \where
+  admit! = ztrue \iff \\
+  \quad ((trust = trusted) \lor (trust = verified \land keyBound = ztrue)) \\
+  \quad \land execute = ztrue \\
+  \quad \land cmd? \in commands
+\end{schema}
+
+\texttt{DaemonGate} is where the trust model (\S~Trust Model),
+per-contact permission, and command-file signature verification
+meet.  Execution requires all three, independently: transport trust
+at $trusted$ or $verified$ \emph{and} the sender's $execute$ bit
+\emph{and} a command that survived \texttt{VerifyCommandSignature}
+at load time.
+
+$keyBound$ makes explicit an asymmetry the code has but the trust
+model above does not state: for daemon execution, $verified$ is not
+enough on its own.  \texttt{internal/daemon/handler.go}'s
+\texttt{verifyTrust} additionally requires that, when a contact has
+a registered \texttt{GPGKeyID}, the signing key on the message
+actually matches it --- a mismatch is treated as $untrusted$, not as
+``verified but unbound.''  $keyBound$ is $ztrue$ exactly when the
+contact has no registered key, or the signer's key matches the one
+it has.  The Go implementation folds this directly into the
+\texttt{TrustLevel} it returns (a key mismatch computes as
+$untrusted$ before \texttt{DaemonGate} ever sees it); this schema
+pulls the two conditions apart because that is what makes the
+asymmetry with \texttt{beadle-email}'s own, unbound notion of
+$verified$ visible at all.  Read literally, \texttt{DaemonGate}'s
+$trust = verified \land keyBound = ztrue$ disjunct is therefore
+never the operative check in the running system ---
+\texttt{verifyTrust} has already collapsed it into $trust$ itself by
+the time this schema's predicate runs --- but the two formulations
+denote the same function, and only the decomposed one documents why
+``verified'' means something stronger here than it does for
+\texttt{beadle-email}'s own tools.
+
+%%----------------------------------------------------------------------
+\section{Daemon Architecture}
 %%----------------------------------------------------------------------
 
 \texttt{beadle-daemon} is a standalone Go process that monitors email
@@ -554,7 +1166,7 @@ contacts send instructions.
 
 The daemon reuses the same \texttt{Poller} as \texttt{beadle-email},
 decoupled via a \texttt{NewMailFunc} callback.  When new mail is
-detected, the handler:
+detected, the handler (\texttt{OnNewMail}, DES-027, SETTLED):
 
 \begin{enumerate}
   \item Fetches recent unread messages via IMAP.
@@ -562,27 +1174,68 @@ detected, the handler:
   \item Checks the \texttt{x} (execute) permission bit.
   \item Verifies transport trust --- Proton E2E (trusted) or PGP
     signature with key bound to contact (verified).  Unverified
-    messages from \texttt{rwx} contacts are rejected.
-  \item On pass: creates a pipeline.
+    messages from \texttt{rwx} contacts are rejected.  Trust in the
+    Proton-E2E branch rests on IMAP actually being Proton Bridge on
+    localhost, which nothing here confirms yet (bead beadle-hv7i).
+  \item On pass: creates a pipeline when a spawner and command
+    templates are configured; otherwise falls back to a bare mission
+    record (\texttt{h.missions.Create}) with no pipeline or signed
+    command involved at all (Design Invariant~1).
 \end{enumerate}
 
 \subsection{Pipeline Orchestrator}
 
 A pipeline decomposes an email instruction into a sequence of typed
-commands.  Each command is a GPG-signed YAML definition with a typed
-argument schema, write-set, budget, timeout, and tool list.
+commands (DES-030, DES-031, both SETTLED).  Each command is a
+GPG-signed YAML definition (\S~Command-File Signature Verification)
+with a typed argument schema, write-set, budget, timeout, and tool
+list, run by one of two runners:
+
+\begin{itemize}
+  \item \textbf{claude} --- spawns an ephemeral \texttt{claude -p
+    --bare} session per stage (\S~Worker Isolation).
+  \item \textbf{cli} --- runs a whitelisted binary directly, or a
+    compound sequence of binaries declared as \texttt{steps}, chained
+    together via \texttt{io.Pipe} goroutines.  A binary's resolved,
+    symlink-followed path (\texttt{filepath.\allowbreak EvalSymlinks})
+    must still land inside a whitelisted directory.  Output is capped
+    at 1~MB
+    (\texttt{io.\allowbreak LimitReader}); anything beyond the cap is
+    discarded
+    and the result is marked truncated, not silently grown.
+\end{itemize}
+
+A stage's data flows to the next through a top-level \texttt{pipe}
+value, shaped by each command's declared \texttt{mode}:
+
+\begin{itemize}
+  \item \texttt{process} --- the stage's output replaces \texttt{pipe}
+    for the next stage, after validation against the command's
+    \texttt{output\_schema} (\texttt{"text"} or a JSON Schema object).
+  \item \texttt{passthrough} --- \texttt{pipe} is unchanged; the
+    stage's own result is still recorded like any other stage.
+\end{itemize}
+
+Stage args and the prior stage's pipeline output are carried to the
+worker as free text in the mission contract's top-level
+\texttt{context} field --- ethos's \texttt{inputs} schema recognizes
+only \texttt{trigger}, \texttt{files}, \texttt{ticket}, and
+\texttt{references}; there is no \texttt{inputs.args} or
+\texttt{inputs.previous\_output} field under any name.  Assuming
+otherwise is exactly what shipped broken as beadle-8gt.
 
 \begin{verbatim}
   Email instruction
     -> Planner (LLM or rule-based)
-    -> [cmd1 | cmd2 | ... | auto-reply]
-    -> Sequential mission execution
+    -> [cmd1 (process/passthrough) | cmd2 | ... | auto-reply]
+    -> Sequential mission execution; context field carries stage
+       args + prior pipe value
 \end{verbatim}
 
-Each stage spawns an ephemeral \texttt{claude -p --bare} session with
-per-command MCP configuration and a minimal environment.  Output flows
-between stages via \texttt{inputs.previous\_output} in the ethos
-mission contract.
+File-flow support --- attachments and generated artifacts moving
+between stages as file references, rather than only through
+\texttt{pipe} --- is designed (DES-032) but not implemented:
+\texttt{Command} has no file-flow fields today.
 
 \subsection{Auto-Reply (DES-029)}
 
@@ -597,14 +1250,20 @@ originator never receives silence.
 
 \subsection{Worker Isolation}
 
-Workers run with:
+Isolation here is process-level only, not container-level: workers
+share the daemon host's kernel, network namespace, and filesystem
+outside their restricted \texttt{PATH}.  Container isolation (network
+namespace, seccomp) is an unfiled TODO in \texttt{spawner.go}, not yet
+implemented.  Within that scope, workers run with:
 
 \begin{itemize}
   \item \texttt{--bare} mode (no hooks, plugins, CLAUDE.md).
-  \item Restricted PATH (claude binary dir + \texttt{/usr/bin}).
+  \item Restricted PATH: the resolved \texttt{claude} binary's own
+    directory, plus \texttt{/usr/bin} and \texttt{/usr/local/bin}.
   \item Per-command MCP servers from a registry.
   \item Adversarial robustness instructions in the system prompt.
-  \item 30-minute timeout, \$5 budget cap, 50-turn limit.
+  \item 30-minute timeout, \$5 budget cap, 50-turn limit --- each
+    overridable; these are the defaults.
   \item Protected env vars (HOME, PATH, ANTHROPIC\_API\_KEY) forced
     after command overrides.
 \end{itemize}
@@ -613,8 +1272,17 @@ Workers run with:
 
 Pipeline state is written to
 \texttt{\~{}/.punt-labs/beadle/pipelines/<id>.json} via atomic rename
-at each state transition.  On daemon startup, in-flight pipelines
-are marked failed and the originator is notified.
+(write to \texttt{.tmp-<id>.json}, then \texttt{os.Rename}) at each
+state transition, under 0700/0600 permissions, with a path-traversal
+guard on the pipeline ID.  On daemon startup, in-flight
+(\texttt{"running"}) pipelines are marked failed and the originator is
+notified.  A 30-day retention sweep runs on a recurring ticker
+(\texttt{DefaultRetention}); orphaned \texttt{.tmp-*.json} files left
+by a process that died between write and rename are reaped separately,
+after 5 minutes, since a torn write may not even parse as a pipeline
+record.  \texttt{cmd/beadle-daemon}'s \texttt{main} wires this store
+into both the startup sweep and the \texttt{Executor} that runs live
+pipelines, so both see the same records.
 
 %%----------------------------------------------------------------------
 \section{Key Properties}
@@ -633,9 +1301,13 @@ inspection and testing:
     priority over file, file over environment variable.  The
     \texttt{ResolveCredential} schema enforces this ordering.
 
-  \item \textbf{GPG isolation}: the $isolated = ztrue$ invariant
-    in \texttt{GPGEnvironment} ensures no PGP operation writes to
-    the user's system keyring.
+  \item \textbf{GPG isolation (verification only)}: the $isolated =
+    ztrue$ invariant in \texttt{VerifyEnvironment} ensures no PGP
+    \emph{verification} operation writes to the user's system
+    keyring.  Signing and decryption are a deliberate exception ---
+    they use the owner's own key from the system keyring, since that
+    is where it already lives (Design Invariant~3, \S~PGP Signing,
+    DES-024).
 
   \item \textbf{Send fallback}: if SMTP is available, it is
     always preferred.  Resend is used only when SMTP is
@@ -645,9 +1317,13 @@ inspection and testing:
     creates and destroys its own IMAP connection, preventing
     stale state across calls.
 
-  \item \textbf{Trust gate for execution}: only messages with
+  \item \textbf{Trust gate before creation}: only messages with
     transport trust $\geq verified$ (PGP) or $= trusted$ (Proton E2E)
-    AND contact \texttt{x}-bit can trigger daemon pipelines.
+    AND contact \texttt{x}-bit reach mission or pipeline creation
+    (\S~Detection and Trust Gate) --- formalised as
+    \texttt{DaemonGate} in \S~Daemon Formalisation, which also states
+    the command-signature and key-binding conditions this one-line
+    summary elides.
 
   \item \textbf{Auto-reply}: every pipeline terminates with a reply
     to the originator.  Success sends the final output.  Failure
@@ -661,6 +1337,31 @@ inspection and testing:
   \item \textbf{Crash recovery}: pipeline state is persisted at each
     transition.  On restart, in-flight pipelines are marked failed
     and originators are notified.
+
+  \item \textbf{Command-signature strictness}:
+    \texttt{VerifyCommandSignature} accepts a command file only when
+    exactly one key with the configured owner fingerprint is
+    present in the isolated keyring and \texttt{gpg --status-fd}
+    reports $GOODSIG$; every other combination --- zero or multiple
+    matching keys, a missing signature, an expired key, or any
+    non-$GOODSIG$ status line --- is $csInvalid$, $csMissing$,
+    $csExpired$, or $csWrongKey$, never a silent pass.
+
+  \item \textbf{Pipeline absorption}: \texttt{PipelineTransition}
+    proves $psFailed$ and $psCompleted$ are absorbing states --- a
+    pipeline that leaves $psRunning$ never returns to it, and never
+    moves between the two terminal states either.
+
+  \item \textbf{Daemon execution composition}: \texttt{DaemonGate}
+    requires transport trust at $trusted$ or $verified$, the
+    sender's $execute$ bit, \emph{and} a command that passed
+    \texttt{VerifyCommandSignature} at load time --- three
+    independently-sourced checks, none of which substitutes for
+    another.  For daemon execution specifically, $verified$ carries
+    an additional obligation --- the signing key must match the
+    contact's registered key when one is registered --- that
+    \texttt{beadle-email}'s own tools do not require of a merely
+    $verified$ message.
 \end{enumerate}
 
 \end{document}

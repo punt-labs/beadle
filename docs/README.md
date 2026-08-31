@@ -63,6 +63,7 @@ design question. `ARCHITECTURE.md` wins on any conflict.
 
 | Doc | What it is |
 |-----|-----------|
+| [`artifacts/daemon-status.html`](artifacts/daemon-status.html) | Opens with a Mermaid flowchart of the whole mail pipeline colour-coded real/partial/absent, with each gap called out against the stage it affects; the sections below restate the same information in prose. Intended design vs. what is actually implemented for `beadle-daemon`, stage by stage, with the documented invariants marked real/partial/absent and an ordered path to closing the gaps. Generated 2026-08-31 against `14aa9ba`; every status was read from source. States plainly that the "tamperproof audit log" invariant has no implementation, that a fresh operator cannot configure the daemon without reading `internal/daemon`, and that the new test tier proves the gates but not their trigger. |
 | [`artifacts/trust-model-explainer.html`](artifacts/trust-model-explainer.html) | Self-contained HTML page explaining Beadle's trust model in plain language: the agent-mailbox framing, the two independent checks (message verification, per-contact `rwx` grants), and why only recipe execution needs an extra authorizer-signature lock. Uses "authorizer" for the concept `daemon.json`'s `owner_handle`/`owner_gpg_key_id` names in code today — see `beadle-4ul` for the pending rename. |
 
 ## Archive

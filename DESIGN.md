@@ -724,7 +724,7 @@ runs `install.sh` on a Linux machine with these backends configured.
 
 ## DES-018: list_messages output format — single FROM column, ID as row prefix
 
-**Status:** PROPOSED 2026-04-08. Replaces the post-0he/post-z34 format
+**Status:** SETTLED 2026-04-08. Replaces the post-0he/post-z34 format
 that overflowed the 80-column budget and crushed SUBJECT to a 10-char
 stub. Supersedes the EMAIL column from beadle-0he and the "(via X)"
 relay annotation from beadle-z34.
@@ -1031,7 +1031,8 @@ format unchanged.
 
 ## DES-020: GPG signing keys must have an expiration date
 
-**Status:** PROPOSED (beadle-72e)
+**Status:** SETTLED (beadle-72e). Enforced in `internal/pgp/expiry.go`;
+listed as a design invariant in `docs/ARCHITECTURE.md`.
 
 **Decision:** Beadle rejects any GPG key as a signing key if it has no
 expiration date. `CheckKeyExpiry` runs before every signing operation and
@@ -1259,8 +1260,9 @@ certificates on localhost.
 
 ## DES-024: Inbound PGP decryption uses system keyring
 
-**Status:** PROPOSED (beadle-ksk, PR #134, 2026-04-11). Pending security
-review discussion — deferred by CEO.
+**Status:** SETTLED (beadle-ksk, PR #134, 2026-04-11). Implemented in
+`internal/pgp/decrypt.go`. Security review discussion deferred by the CEO;
+the decision itself is settled.
 
 **Decision:** `pgp.Decrypt()` runs `gpg --decrypt` using the default
 GNUPGHOME (system keyring), not an isolated temporary keyring. This is a
@@ -1458,7 +1460,8 @@ No wget in the image.
 
 ## DES-027: Orchestrator — daemon spawns Claude Code workers via print mode
 
-**Status:** PROPOSED (beadle-vyv, 2026-04-13).
+**Status:** SETTLED (beadle-vyv, 2026-04-13). Implemented in
+`internal/daemon/spawner.go`.
 
 **Decision:** Beadle's orchestrator is a Go daemon that spawns ephemeral
 Claude Code sessions in print mode (`claude -p`) to execute ethos missions
@@ -1635,7 +1638,8 @@ when no one is home.
 
 ## DES-028: Pipeline orchestrator — missions as typed commands with composition
 
-**Status:** PROPOSED (beadle-88g, 2026-04-14).
+**Status:** SETTLED (beadle-88g, 2026-04-14). Superseded by **DES-031**,
+which replaced the v1 linear model with process/passthrough modes.
 
 **Decision:** The daemon's pipeline orchestrator treats ethos missions as
 typed commands. An email instruction decomposes into a sequence of commands
@@ -2519,6 +2523,9 @@ SUBJECT. Scoped to the current repo, an agent in `beadle` sees its handful of
 
 ## DES-034: Command-file signature verification — canonical-subset signing, isolated verification against a known owner key
 
+**Status:** SETTLED (beadle-iru). `VerifySignature` implemented in
+`internal/daemon/signature.go`.
+
 **Decision:** `VerifySignature(cmd *Command, gpgBinary, ownerKeyID string)
 error` signs/verifies the canonical `yaml.Marshal` of `Command` with
 `Signature` cleared, in an isolated GNUPGHOME that imports only the owner's
@@ -2564,6 +2571,9 @@ original "beadle-9zh" pointer was wrong — that epic never covered this;
 see DES-035's rationale).
 
 ## DES-035: Wiring VerifySignature into daemon startup — daemon.json, owner_gpg_key_id, and the no-ethos owner-key path
+
+**Status:** SETTLED (beadle-iru). Wired into `LoadCommands`/`loadCommand`
+in `internal/daemon/command.go`.
 
 **Decision:** a new `~/.punt-labs/beadle/daemon.json` (`internal/daemon.Config`)
 holds exactly one owner-key source: `owner_handle` (resolved through
@@ -2653,9 +2663,8 @@ commands loading.
 
 ## DES-036: Daemon mail-triggered pipeline gets a dev/CI-parity test tier
 
-**Date**: 2026-08-31
-**Status**: Accepted
-**Missions**: `m-2026-08-30-053` (design), `m-2026-08-31-002` (implementation), PR #261
+**Status:** SETTLED (2026-08-31, PR #261).
+**Missions:** `m-2026-08-30-053` (design), `m-2026-08-31-002` (implementation), PR #261
 
 **Context**: The daemon path — email → trust classification → per-contact
 permission → planner → executor → `ethos mission create` → worker spawn — had

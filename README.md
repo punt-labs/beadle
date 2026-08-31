@@ -14,8 +14,10 @@ classified into one of four trust levels, from Proton-to-Proton
 end-to-end encryption down to an unverified message with no signature, and
 per-contact `rwx` permissions gate what the agent can read, reply to, and
 act on. It is the first shipping piece of a larger vision for a
-GPG-signed, autonomous agent daemon; that daemon is hypothesis stage and
-not yet part of this release.
+GPG-signed, autonomous agent daemon (`beadle-daemon`). That daemon works —
+GPG-signed command files, trust and permission gates, a pipeline runner — but
+is not part of this release: it ships no binary, and no `init`/`sign` tooling
+exists yet for an operator to configure it.
 
 **Platforms:** macOS, Linux
 
