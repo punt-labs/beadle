@@ -2,22 +2,93 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 )
 
-// MCPServerConfig defines how to invoke an MCP server.
+// MCPServerConfig defines how to invoke an MCP server -- either a local
+// stdio subprocess (Command/Args, the original and still the common shape)
+// or a remote HTTP server (Type/URL/Headers). omitempty on every field
+// after Command/Args means an existing stdio entry marshals exactly as it
+// always has: Command/Args were never empty for those entries, so their
+// presence in the output is unaffected, while Type/URL/Headers simply never
+// appear. An http entry is the mirror image: Command and Args stay their
+// zero values and are omitted, leaving only Type/URL/Headers.
 type MCPServerConfig struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Type    string            `json:"type,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// DefaultMCPRegistry returns the built-in server registry.
+// Validate reports whether c names exactly one of a stdio server (Command,
+// optionally Args) or an HTTP server (Type "http" with a non-empty URL).
+// Any other shape -- neither set, or both -- would marshal to a config
+// Claude Code cannot use: an empty {} for a typo'd or half-filled-in
+// registry entry, or a {"type":"http"} with no URL that fails at connect
+// -- landing on the same invisible-failure path a missing declared env var
+// takes in runner.go's resolveEnvVars (see
+// TestCLIRunner_MissingDeclaredEnvVarFailsStage), just one step earlier.
+func (c MCPServerConfig) Validate() error {
+	stdio := c.Command != ""
+	httpShape := c.Type != "" || c.URL != "" || len(c.Headers) > 0
+	switch {
+	case stdio && httpShape:
+		return errors.New("sets both stdio fields (command/args) and http fields (type/url/headers)")
+	case stdio:
+		return nil
+	case httpShape:
+		if c.Type != "http" {
+			return fmt.Errorf("has an unrecognized type %q (want %q)", c.Type, "http")
+		}
+		if c.URL == "" {
+			return fmt.Errorf("has type %q but no url", c.Type)
+		}
+		return nil
+	default:
+		return errors.New("sets neither stdio fields (command) nor http fields (type/url)")
+	}
+}
+
+// DefaultMCPRegistry returns the built-in server registry. context7 wants
+// its key as a bearer token -- "Authorization: Bearer <key>" -- matching
+// the working reference config on this host. That form is used here for
+// consistency with that config and to future-proof against context7 later
+// enforcing auth, not because a bare "CONTEXT7_API_KEY" header was observed
+// to fail: measured directly, context7's endpoint returns 200 on
+// initialize/tools-list for a Bearer token, the literal "CONTEXT7_API_KEY"
+// header string, and no Authorization header at all, so today the key
+// affects rate limits rather than access, as far as anyone here has
+// established. The value is a literal "${CONTEXT7_API_KEY}" placeholder,
+// not the key itself. This assumes Claude Code expands ${VAR} references
+// in mcp-config against the worker subprocess's own environment at spawn
+// time -- ClaudeRunner.Run (runner.go) is what puts CONTEXT7_API_KEY into
+// that environment, by resolving it from cmd.EnvVars (the declared
+// env-var allowlist) via resolveEnvVars, so the value is available to
+// expand from if Claude Code does so. This expansion is assumed, not
+// verified -- it cannot be verified against an endpoint that ignores auth,
+// since a successful call proves nothing either way about whether
+// expansion happened. If it turns out Claude Code does not expand the
+// placeholder, context7 receives the literal string
+// "Bearer ${CONTEXT7_API_KEY}" and fails auth -- which would present as a
+// bad key, not as a config problem, so a future investigation of a
+// context7 auth failure should check this assumption first. No secret
+// value is ever written into this registry, a generated mcp-config file,
+// or a log line.
 func DefaultMCPRegistry() map[string]MCPServerConfig {
 	return map[string]MCPServerConfig{
 		"ethos":        {Command: "ethos", Args: []string{"mcp"}},
 		"beadle-email": {Command: "beadle-email", Args: []string{"serve"}},
 		"biff":         {Command: "biff", Args: []string{"mcp"}},
+		"context7": {
+			Type: "http",
+			URL:  "https://mcp.context7.com/mcp",
+			Headers: map[string]string{
+				"Authorization": "Bearer ${CONTEXT7_API_KEY}",
+			},
+		},
 	}
 }
 
@@ -39,6 +110,9 @@ func (t *MissionTemplate) BuildMCPConfig(servers []string, registry map[string]M
 		cfg, ok := registry[name]
 		if !ok {
 			return "", fmt.Errorf("unknown MCP server %q", name)
+		}
+		if err := cfg.Validate(); err != nil {
+			return "", fmt.Errorf("mcp server %q: %w", name, err)
 		}
 		selected[name] = cfg
 	}

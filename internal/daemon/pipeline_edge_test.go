@@ -37,8 +37,8 @@ func TestExecutor_HybridPipeline(t *testing.T) {
 				},
 			},
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"passthru-cat": {
@@ -113,8 +113,8 @@ func TestExecutor_PassthroughDataSurvival(t *testing.T) {
 				},
 			},
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"notify": {
@@ -124,8 +124,8 @@ func TestExecutor_PassthroughDataSurvival(t *testing.T) {
 			Prompt:       "Notify",
 			OutputSchema: "text",
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"transform": {
@@ -135,8 +135,8 @@ func TestExecutor_PassthroughDataSurvival(t *testing.T) {
 			Prompt:       "Transform",
 			OutputSchema: "text",
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"reply": testCommands()["reply"],
@@ -195,8 +195,8 @@ func TestExecutor_SchemaValidationRejection(t *testing.T) {
 				},
 			},
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"reply": testCommands()["reply"],
@@ -243,8 +243,8 @@ func TestExecutor_TextModeBypass(t *testing.T) {
 			Prompt:       "Freeform output",
 			OutputSchema: "text",
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"reply": testCommands()["reply"],
@@ -351,8 +351,8 @@ func TestExecutor_PipeInitialValue(t *testing.T) {
 			Prompt:       "Inspect pipe",
 			OutputSchema: "text",
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"reply": testCommands()["reply"],
@@ -521,8 +521,8 @@ func TestExecutor_SchemaValidationInvalidJSON(t *testing.T) {
 				},
 			},
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"reply": testCommands()["reply"],
@@ -571,8 +571,8 @@ func TestExecutor_ProcessModeUpdatesPipe(t *testing.T) {
 				},
 			},
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"stage-b": {
@@ -587,8 +587,8 @@ func TestExecutor_ProcessModeUpdatesPipe(t *testing.T) {
 				},
 			},
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"reply": testCommands()["reply"],
@@ -705,24 +705,24 @@ func TestExecutor_MultiplePassthroughStages(t *testing.T) {
 			Name: "notify1", Runner: "claude", Mode: "passthrough",
 			Prompt: "N1", OutputSchema: "text",
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"notify2": {
 			Name: "notify2", Runner: "claude", Mode: "passthrough",
 			Prompt: "N2", OutputSchema: "text",
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"notify3": {
 			Name: "notify3", Runner: "claude", Mode: "passthrough",
 			Prompt: "N3", OutputSchema: "text",
 			Budget: struct {
-				Rounds              int  `yaml:"rounds"`
-				ReflectionAfterEach bool `yaml:"reflection_after_each"`
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 			}{Rounds: 1},
 		},
 		"reply": testCommands()["reply"],

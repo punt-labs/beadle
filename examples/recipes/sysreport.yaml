@@ -1,0 +1,32 @@
+# sysreport is a cli-runner recipe: it runs a single whitelisted binary
+# (scripts/beadle-sysreport, copied to ~/.local/bin) and returns its stdout
+# as the reply. No worker session, no MCP servers, no LLM in the loop.
+#
+# This file is UNSIGNED. Sign it with your own authorizer key before
+# beadle-daemon will load it -- see examples/recipes/README.md.
+name: sysreport
+description: >-
+  Report this machine's free disk space and CPU load average.
+runner: cli
+binary: beadle-sysreport
+timeout: 10s
+output_schema:
+  type: object
+  properties:
+    disk_free_kb:
+      type: integer
+      description: Free space on / in kilobytes.
+    load_1m:
+      type: number
+      description: 1-minute load average.
+    load_5m:
+      type: number
+      description: 5-minute load average.
+    load_15m:
+      type: number
+      description: 15-minute load average.
+  required:
+    - disk_free_kb
+    - load_1m
+    - load_5m
+    - load_15m

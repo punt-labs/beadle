@@ -10,15 +10,41 @@ GOLANGCI_LINT_VERSION := v2.12.2
 GOVULNCHECK_VERSION := v1.7.0
 ETHOS_VERSION := v4.16.0
 
-# Every shell script in the repo, discovered rather than enumerated: a
-# hardcoded list means a new .sh ships unlinted while `make lint` and CI stay
-# green. `--cached` catches tracked scripts, `--others --exclude-standard`
-# catches a new one that is not `git add`ed yet, and gitignored paths (.tmp/,
-# node_modules/) stay out. Assumes no spaces in script paths, which the shell
-# standard forbids anyway.
-SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard '*.sh' 2>/dev/null)
+# Every shell script in the repo, discovered by shebang rather than by
+# extension or a hardcoded list: a script deployed under a literal binary
+# name (scripts/beadle-sysreport, resolved by beadle-daemon's cli-runner
+# whitelist against exactly that filename, no .sh suffix) still needs
+# shellcheck, and an extension-only glob silently skips it -- along with
+# any future extensionless script. `--cached` catches tracked scripts,
+# `--others --exclude-standard` catches a new one that is not `git add`ed
+# yet, and gitignored paths (.tmp/, node_modules/) stay out. Each
+# candidate's first line is read and matched against a shell shebang (sh,
+# bash, dash, zsh, ksh); the match anchors at end-of-line rather than using
+# `\b` (a GNU grep extension a BSD grep lacks), so `#!/usr/bin/env python3`
+# and the like are still correctly excluded. Assumes no spaces in script
+# paths, which the shell standard forbids anyway.
+#
+# DISCOVER_SHELL_SCRIPTS is a shared pipeline stage, not inlined here,
+# because it is also exercised directly by test-shell-discovery below: a
+# candidate filename arrives at the inner shell as a genuine argv element
+# ("$$@"), never spliced into the TEXT of the -c script, so a filename
+# containing shell metacharacters (an embedded quote, a semicolon) cannot
+# break out of quoting and execute. An earlier version used `xargs -I{}`,
+# substituting each filename directly into the script string -- `git
+# ls-files --others` includes untracked files, so a crafted filename in
+# the working tree was enough to run arbitrary shell during `make check`.
+# Both this variable and the test below must keep calling the identical
+# command so a future edit to one cannot silently reintroduce the bug the
+# test exists to catch.
+define DISCOVER_SHELL_SCRIPTS
+xargs -0 sh -c 'for f in "$$@"; do [ -f "$$f" ] || continue; \
+	head -n1 "$$f" 2>/dev/null | grep -aqE "^#!.*(sh|bash|dash|zsh|ksh)$$" && printf "%s\n" "$$f"; \
+done' _
+endef
 
-.PHONY: help lint lint-strict lint-shell vet staticcheck vulncheck docs tools-ethos test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
+SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard -z 2>/dev/null | $(DISCOVER_SHELL_SCRIPTS))
+
+.PHONY: help lint lint-strict lint-shell test-shell-discovery vet staticcheck vulncheck docs tools-ethos test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -38,10 +64,20 @@ lint-strict: ## Lint (golangci-lint: errcheck, gosec, revive, gofumpt, ...)
 vulncheck: ## Scan imports + call graph for known Go vulnerabilities
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
-lint-shell: ## Lint every shell script in the repo (shellcheck)
+lint-shell: test-shell-discovery ## Lint every shell script in the repo (shellcheck)
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found — install it (apt install shellcheck / brew install shellcheck)"; exit 1; }
-	@test -n "$(SHELL_SCRIPTS)" || { echo "lint-shell: discovered no *.sh — 'git ls-files' returned nothing (not a git checkout?)"; exit 1; }
+	@test -n "$(SHELL_SCRIPTS)" || { echo "lint-shell: discovered no shell scripts (by shebang) — 'git ls-files' returned nothing (not a git checkout?)"; exit 1; }
 	shellcheck $(SHELL_SCRIPTS)
+
+test-shell-discovery: ## Regression test: a malicious filename must not execute during shell-script discovery (beadle-qtei)
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+	( cd "$$tmp" && git init -q && \
+	  printf '#!/bin/sh\necho hi\n' > 'x";touch PWNED;"y' && \
+	  chmod +x 'x";touch PWNED;"y' && \
+	  git ls-files --cached --others --exclude-standard -z | $(DISCOVER_SHELL_SCRIPTS) > found.txt; \
+	  test ! -e PWNED || { echo "test-shell-discovery: FAIL -- a crafted filename executed as shell text (PWNED created)"; exit 1; }; \
+	  grep -qF 'x";touch PWNED;"y' found.txt || { echo "test-shell-discovery: FAIL -- the crafted-but-legitimate script was not discovered"; exit 1; } ) && \
+	echo "test-shell-discovery: PASS"
 
 docs: ## Lint markdown
 	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"
