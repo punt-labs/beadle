@@ -58,15 +58,23 @@ func (c MCPServerConfig) Validate() error {
 // "CONTEXT7_API_KEY" header (a prior version of this registry) 401s
 // silently on every worker session, since a mission that carries a
 // `claude` runner with no output_schema still exits 0 with fluent model
-// recall in place of a real lookup (see FIX 3,
-// .tmp/FIXBRIEF-recipe-tooling.md). The value is a literal
-// "${CONTEXT7_API_KEY}" placeholder, not the key itself -- Claude Code
-// expands ${VAR} references in mcp-config against the worker subprocess's
-// own environment at spawn time, and ClaudeRunner.Run (runner.go) is what
-// actually puts CONTEXT7_API_KEY into that environment, by resolving it
-// from cmd.EnvVars (the declared env-var allowlist) via resolveEnvVars. No
-// secret value is ever written into this registry, a generated
-// mcp-config file, or a log line.
+// recall in place of a real lookup. The value is a literal
+// "${CONTEXT7_API_KEY}" placeholder, not the key itself. This assumes Claude
+// Code expands ${VAR} references in mcp-config against the worker
+// subprocess's own environment at spawn time -- ClaudeRunner.Run (runner.go)
+// is what puts CONTEXT7_API_KEY into that environment, by resolving it from
+// cmd.EnvVars (the declared env-var allowlist) via resolveEnvVars, so the
+// value is available to expand from if Claude Code does so. This has not
+// been independently confirmed: context7's endpoint returns 200 on
+// initialize/tools-list for a Bearer token, the literal
+// "CONTEXT7_API_KEY" header string, and no Authorization header at all, so a
+// successful call proves nothing either way about whether expansion
+// happened. If it turns out Claude Code does not expand the placeholder,
+// context7 receives the literal string "Bearer ${CONTEXT7_API_KEY}" and
+// fails auth -- which would present as a bad key, not as a config problem,
+// so a future investigation of a context7 auth failure should check this
+// assumption first. No secret value is ever written into this registry, a
+// generated mcp-config file, or a log line.
 func DefaultMCPRegistry() map[string]MCPServerConfig {
 	return map[string]MCPServerConfig{
 		"ethos":        {Command: "ethos", Args: []string{"mcp"}},
