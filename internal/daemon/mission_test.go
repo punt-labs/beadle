@@ -76,7 +76,13 @@ func TestBuildContract(t *testing.T) {
 			require.Equal(t, 1, len(sc))
 			criteria := sc[0].(string)
 			assert.Contains(t, criteria, "inputs.trigger")
-			assert.Contains(t, criteria, "beadle-email")
+			// beadle-ivtd: success_criteria must no longer direct the worker
+			// to fetch the email itself via beadle-email tools -- that
+			// required granting mailbox read access (any message, not just
+			// this one) for a single-message task. See BuildContract's doc
+			// comment for why this function has no narrower alternative to
+			// offer instead.
+			assert.NotContains(t, criteria, "beadle-email")
 			if tt.meta.Subject != "" {
 				assert.NotContains(t, criteria, tt.meta.Subject,
 					"success_criteria must not contain attacker-controlled subject")

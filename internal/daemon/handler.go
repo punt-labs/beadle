@@ -172,6 +172,16 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 		}
 
 		if h.spawner != nil && h.templates != nil {
+			// Fetched synchronously, on this goroutine, while client is still
+			// open -- OnNewMail's own defer closes it right after this loop
+			// returns, before the async worker goroutine below would ever
+			// get a turn to use it.
+			body, err := h.fetchBody(client, msg.ID)
+			if err != nil {
+				h.logger.Error("skip message: fetch body failed", "from", addr, "id", msg.ID, "error", err)
+				continue
+			}
+
 			select {
 			case h.workerSem <- struct{}{}:
 				h.wg.Add(1)
@@ -197,7 +207,7 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 						Store:  h.store,
 						Logger: h.logger,
 					}
-					p, err := executor.Run(h.ctx, meta, "")
+					p, err := executor.Run(h.ctx, meta, body)
 					if err != nil {
 						h.logger.Error("pipeline failed",
 							"pipeline", p.ID, "from", addr,
@@ -221,6 +231,23 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 			h.logger.Info("mission created (no spawner)", "mission", missionID, "from", addr)
 		}
 	}
+}
+
+// fetchBody retrieves msgID's full body from INBOX, so the pipeline the
+// caller is about to run can act on the actual triggering message instead
+// of nothing (beadle-ivtd). msgID is expected to be the numeric IMAP UID
+// string ListMessages returned, the same assumption verifyTrust's own
+// ParseUint call makes of it.
+func (h *MailHandler) fetchBody(client *email.Client, msgID string) (string, error) {
+	uid, err := strconv.ParseUint(msgID, 10, 32)
+	if err != nil {
+		return "", fmt.Errorf("parse message uid %q: %w", msgID, err)
+	}
+	full, err := client.FetchMessage("INBOX", uint32(uid))
+	if err != nil {
+		return "", fmt.Errorf("fetch message %s: %w", msgID, err)
+	}
+	return full.Body, nil
 }
 
 // verifyTrust determines the transport trust level for a message.
