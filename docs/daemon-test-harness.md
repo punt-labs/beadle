@@ -412,8 +412,8 @@ author the hard way.
 `ethos` is a separate Go module — as of `v4.16.0` (commit `13f83dc`), the
 module path is `github.com/punt-labs/ethos/v4`, matching the major-version
 suffix Go modules require — with its CLI at `cmd/ethos`
-(`/home/jfreeman/Coding/punt-labs/ethos/go.mod:1`,
-`/home/jfreeman/Coding/punt-labs/ethos/cmd/ethos`). Before this rename,
+(`../ethos/go.mod:1`,
+`../ethos/cmd/ethos`). Before this rename,
 `ethos` tagged `v4.x` releases under the unsuffixed `github.com/punt-labs/ethos`
 path, which Go's module resolver cannot treat as a `v4` module at all — a `go
 install .../ethos@v4.15.0` resolved only through an incompatible v1
