@@ -53,28 +53,30 @@ func (c MCPServerConfig) Validate() error {
 }
 
 // DefaultMCPRegistry returns the built-in server registry. context7 wants
-// its key as a bearer token -- "Authorization: Bearer <key>" -- confirmed
-// against the working reference config on this host; a bare
-// "CONTEXT7_API_KEY" header (a prior version of this registry) 401s
-// silently on every worker session, since a mission that carries a
-// `claude` runner with no output_schema still exits 0 with fluent model
-// recall in place of a real lookup. The value is a literal
-// "${CONTEXT7_API_KEY}" placeholder, not the key itself. This assumes Claude
-// Code expands ${VAR} references in mcp-config against the worker
-// subprocess's own environment at spawn time -- ClaudeRunner.Run (runner.go)
-// is what puts CONTEXT7_API_KEY into that environment, by resolving it from
-// cmd.EnvVars (the declared env-var allowlist) via resolveEnvVars, so the
-// value is available to expand from if Claude Code does so. This has not
-// been independently confirmed: context7's endpoint returns 200 on
-// initialize/tools-list for a Bearer token, the literal
-// "CONTEXT7_API_KEY" header string, and no Authorization header at all, so a
-// successful call proves nothing either way about whether expansion
-// happened. If it turns out Claude Code does not expand the placeholder,
-// context7 receives the literal string "Bearer ${CONTEXT7_API_KEY}" and
-// fails auth -- which would present as a bad key, not as a config problem,
-// so a future investigation of a context7 auth failure should check this
-// assumption first. No secret value is ever written into this registry, a
-// generated mcp-config file, or a log line.
+// its key as a bearer token -- "Authorization: Bearer <key>" -- matching
+// the working reference config on this host. That form is used here for
+// consistency with that config and to future-proof against context7 later
+// enforcing auth, not because a bare "CONTEXT7_API_KEY" header was observed
+// to fail: measured directly, context7's endpoint returns 200 on
+// initialize/tools-list for a Bearer token, the literal "CONTEXT7_API_KEY"
+// header string, and no Authorization header at all, so today the key
+// affects rate limits rather than access, as far as anyone here has
+// established. The value is a literal "${CONTEXT7_API_KEY}" placeholder,
+// not the key itself. This assumes Claude Code expands ${VAR} references
+// in mcp-config against the worker subprocess's own environment at spawn
+// time -- ClaudeRunner.Run (runner.go) is what puts CONTEXT7_API_KEY into
+// that environment, by resolving it from cmd.EnvVars (the declared
+// env-var allowlist) via resolveEnvVars, so the value is available to
+// expand from if Claude Code does so. This expansion is assumed, not
+// verified -- it cannot be verified against an endpoint that ignores auth,
+// since a successful call proves nothing either way about whether
+// expansion happened. If it turns out Claude Code does not expand the
+// placeholder, context7 receives the literal string
+// "Bearer ${CONTEXT7_API_KEY}" and fails auth -- which would present as a
+// bad key, not as a config problem, so a future investigation of a
+// context7 auth failure should check this assumption first. No secret
+// value is ever written into this registry, a generated mcp-config file,
+// or a log line.
 func DefaultMCPRegistry() map[string]MCPServerConfig {
 	return map[string]MCPServerConfig{
 		"ethos":        {Command: "ethos", Args: []string{"mcp"}},
