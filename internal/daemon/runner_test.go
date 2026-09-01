@@ -450,12 +450,19 @@ func TestCLIRunner_CompoundInvalidTimeoutLogged(t *testing.T) {
 
 // TestCLIRunner_MissingDeclaredEnvVarFailsStage is the regression test for
 // a defect fixed in PR #263: a declared env_vars entry absent from the
-// daemon's own environment used to be logged at Error and
-// the command run anyway -- exactly how docs-ask.yaml's context7 lookup
-// could 401 silently and still return a fluent, wrong answer. This is a
-// permanent misconfiguration (the deployment, not the request, is missing
-// the var), so it must fail the stage; Executor.Run (pipeline.go) turns
-// that into a failed pipeline and a reply to the sender via fireElse.
+// daemon's own environment used to be logged at Error and the command run
+// anyway. That mattered because context7 does not enforce auth -- its
+// endpoint returns 200 on initialize/tools-list for a valid Bearer token,
+// the literal header string, or no Authorization header at all -- so
+// docs-ask.yaml's context7 lookup would not error on a missing
+// CONTEXT7_API_KEY; it would just run unauthenticated and return a
+// fluent, wrong-looking-right answer with nothing to flag the
+// difference. The fix does not depend on the remote service noticing: a
+// declared env var is a contract, and this is a permanent
+// misconfiguration (the deployment, not the request, is missing the
+// var), so it must fail the stage on that basis alone; Executor.Run
+// (pipeline.go) turns that into a failed pipeline and a reply to the
+// sender via fireElse.
 func TestCLIRunner_MissingDeclaredEnvVarFailsStage(t *testing.T) {
 	_, wl := setupWhitelist(t, "env")
 	runner := &CLIRunner{Whitelist: wl}

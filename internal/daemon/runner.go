@@ -35,11 +35,20 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	// unit/plist that starts beadle-daemon) fails identically on every
 	// run, so there is no reason to pay for mission creation and MCP
 	// config generation before finding out. Failing the stage here -- not
-	// logging and continuing -- is the fix for beadle-qtei's invisible
-	// context7 401: the caller (Executor.Run, pipeline.go) already marks
-	// the pipeline failed and replies to the sender via fireElse on any
-	// error this returns, so a missing key now actually reaches the
-	// sender instead of silently degrading to model recall.
+	// logging and continuing -- is the fix for beadle-qtei: a recipe's
+	// declared env_vars is a contract, and a declared dependency that is
+	// absent must fail the stage on that basis alone. This does not lean
+	// on the downstream service noticing and erroring instead -- context7
+	// itself returns 200 on initialize/tools-list whether the request
+	// carries a valid Bearer token, the literal header string, or no
+	// Authorization header at all, so a missing CONTEXT7_API_KEY produces
+	// no remote error for the pipeline to catch; it would just run
+	// against whatever unauthenticated access the endpoint gives, with
+	// nothing to signal the difference. The caller (Executor.Run,
+	// pipeline.go) already marks the pipeline failed and replies to the
+	// sender via fireElse on any error this returns, so a missing key now
+	// actually reaches the sender instead of silently degrading to model
+	// recall.
 	envOverrides, missingEnv := resolveEnvVars(cmd.EnvVars)
 	if len(missingEnv) > 0 {
 		return "", fmt.Errorf("command %q declares env var(s) %v, absent from the "+
