@@ -215,14 +215,20 @@ func verifyRoundTrip(canon []byte, signingPath, gpgBinary, signer string) error 
 // one daemon.json names as the authorizer, unless force is set: signing
 // with any other key produces a file beadle-daemon will refuse to load
 // anyway, just discovered later and further from the mistake. When
-// daemon.json does not exist or does not resolve to a usable fingerprint,
-// there is nothing to compare against and sign proceeds -- --signer is the
-// operator's own explicit choice in that case, most commonly because
-// daemon.json has not been written yet (see `init`).
+// daemon.json does not exist, there is nothing to compare against and sign
+// proceeds -- --signer is the operator's own explicit choice in that case,
+// most commonly because daemon.json has not been written yet (see `init`).
+// Any other resolution failure -- an unreadable or malformed daemon.json --
+// is never silently ignored: an operator with a corrupt config would
+// otherwise sign happily today and have the daemon refuse to load the file
+// later, with the diagnosis far from the cause.
 func checkSignerMatchesAuthorizer(w io.Writer, dataDir string, resolver *identity.Resolver, signer string, force bool) error {
 	expected, err := resolveVerifySigner(dataDir, resolver)
 	if err != nil {
-		return nil
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
 	}
 	if strings.EqualFold(expected, signer) {
 		return nil

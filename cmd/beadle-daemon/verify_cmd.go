@@ -104,7 +104,12 @@ func resolveVerifySigner(dataDir string, resolver *identity.Resolver) (string, e
 	cfg, err := daemon.LoadConfig(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("no daemon.json at %s -- run `beadle-daemon init` first, or pass --signer explicitly", configPath)
+			// %w, not %s: a caller that needs to tell "no daemon.json yet"
+			// (ignorable -- signing before init is a real workflow) apart
+			// from "daemon.json exists but is unreadable or malformed"
+			// (never ignorable) recovers the distinction via
+			// errors.Is(err, os.ErrNotExist) on what this function returns.
+			return "", fmt.Errorf("no daemon.json at %s -- run `beadle-daemon init` first, or pass --signer explicitly: %w", configPath, err)
 		}
 		return "", fmt.Errorf("read %s: %w", configPath, err)
 	}

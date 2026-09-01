@@ -377,6 +377,37 @@ func TestRunSign_PassphraseProtectedKeyWithEnvPassphraseSucceeds(t *testing.T) {
 	assert.Contains(t, out.String(), "round-trip verified")
 }
 
+// TestRunSign_MalformedDaemonJSONRefusesToSign proves checkSignerMatchesAuthorizer
+// does not treat every resolveVerifySigner failure as "nothing to compare
+// against" -- only an absent daemon.json is ignorable. A daemon.json that
+// exists but names an ambiguous or unresolvable authorizer must refuse to
+// sign, not sign happily and leave the daemon to discover the problem later.
+func TestRunSign_MalformedDaemonJSONRefusesToSign(t *testing.T) {
+	dataDir := t.TempDir()
+	resolver := identity.NewResolver(t.TempDir(), dataDir, "")
+
+	// Both owner_handle and owner_gpg_key_id set is the ambiguous case
+	// ResolveOwnerKeyID refuses outright (config.go).
+	configPath := filepath.Join(dataDir, "daemon.json")
+	require.NoError(t, os.WriteFile(configPath,
+		[]byte(`{"owner_handle":"someone","owner_gpg_key_id":"0123456789ABCDEF0123456789ABCDEF01234567"}`),
+		0o600))
+
+	path := filepath.Join(t.TempDir(), "sysreport.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(minimalCommandYAML), 0o600))
+
+	var out bytes.Buffer
+	err := runSign(&out, dataDir, resolver, path, "0123456789ABCDEF0123456789ABCDEF01234567", "gpg", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous")
+
+	unchanged, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	assert.Equal(t, minimalCommandYAML, string(unchanged))
+	_, statErr := os.Stat(path + ".signing")
+	assert.True(t, os.IsNotExist(statErr), "nothing must be written when the authorizer config cannot be resolved")
+}
+
 func TestRunSign_MissingFile(t *testing.T) {
 	dataDir, resolver := unconfiguredDaemon(t)
 	var out bytes.Buffer

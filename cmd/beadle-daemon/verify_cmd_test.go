@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -113,6 +114,21 @@ func TestResolveVerifySigner_AbsentDaemonJSONNamesInitRemedy(t *testing.T) {
 	_, err := resolveVerifySigner(dataDir, resolver)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "beadle-daemon init")
+}
+
+// TestResolveVerifySigner_AbsentDaemonJSONIsErrNotExist proves the returned
+// error still carries os.ErrNotExist in its chain despite the added
+// human-readable wrapping -- checkSignerMatchesAuthorizer (sign_cmd.go)
+// depends on errors.Is(err, os.ErrNotExist) to tell "nothing to compare
+// against yet" apart from every other resolution failure, which it must
+// never ignore.
+func TestResolveVerifySigner_AbsentDaemonJSONIsErrNotExist(t *testing.T) {
+	dataDir := t.TempDir()
+	resolver := identity.NewResolver(t.TempDir(), dataDir, "")
+
+	_, err := resolveVerifySigner(dataDir, resolver)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, os.ErrNotExist))
 }
 
 // TestResolveVerifySigner_ResolvesFromDaemonJSON proves the default path
