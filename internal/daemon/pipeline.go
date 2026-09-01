@@ -19,15 +19,23 @@ import (
 
 // Pipeline tracks the execution state of a planned command sequence.
 type Pipeline struct {
-	Version   int           `json:"version"`
-	ID        string        `json:"id"`
-	CreatedAt time.Time     `json:"created_at"`
-	Email     EmailMeta     `json:"email"`
-	Commands  []CommandCall `json:"commands"`
-	ElseCmd   *CommandCall  `json:"else_cmd"`
-	Current   int           `json:"current"`
-	Results   []string      `json:"results"`
-	Status    string        `json:"status"`
+	Version   int       `json:"version"`
+	ID        string    `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	Email     EmailMeta `json:"email"`
+	// Body is the triggering email's body, carried so a stage can act on the
+	// actual message content instead of being handed a shell and left to go
+	// fetch it itself (beadle-ivtd) -- see buildStageContract, which caps it
+	// before it reaches the mission contract a worker reads. The uncapped
+	// value is kept here; it is bounded on disk the same way the rest of
+	// this record is, by PipelineStore's existing retention pruning, not by
+	// a length limit on this field.
+	Body     string        `json:"body"`
+	Commands []CommandCall `json:"commands"`
+	ElseCmd  *CommandCall  `json:"else_cmd"`
+	Current  int           `json:"current"`
+	Results  []string      `json:"results"`
+	Status   string        `json:"status"`
 	// Error may be set even when Status is "completed" -- it records a
 	// non-fatal auto-reply failure. Test Status for success, not Error.
 	Error    string   `json:"error"`
@@ -55,6 +63,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 		ID:        uuid.New().String(),
 		CreatedAt: time.Now(),
 		Email:     meta,
+		Body:      body,
 		Status:    "running",
 	}
 	e.save(p)
@@ -210,10 +219,17 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 //
 // ethos's inputs schema recognizes only trigger, files, ticket, and
 // references (see ethos's internal/mission/inputs.go) -- there is no
-// inputs.args or inputs.pipeline_output. Stage args and the prior stage's
-// pipeline output are carried instead as free text in the top-level
-// context field, which exists for exactly this kind of information.
-func buildStageContract(meta EmailMeta, cmd *Command, call CommandCall, pipe string) string {
+// inputs.args or inputs.pipeline_output. Stage args, the prior stage's
+// pipeline output, and the triggering email's body are carried instead as
+// free text in the top-level context field, which exists for exactly this
+// kind of information.
+//
+// body is the triggering email's raw content (Pipeline.Body) -- passed here
+// so a stage acts on the actual message instead of being handed a shell and
+// left to fetch it itself (beadle-ivtd). It is adversarial input from an
+// external sender, same as meta's fields, so stageContext caps it the same
+// way.
+func buildStageContract(meta EmailMeta, cmd *Command, call CommandCall, pipe, body string) string {
 	return fmt.Sprintf(`leader: claude
 worker: bwk
 evaluator:
@@ -236,7 +252,7 @@ budget:
 		escapeYAMLValue(meta.MessageID),
 		escapeYAMLValue(meta.From),
 		escapeYAMLValue(meta.Subject),
-		escapeYAMLPipe(stageContext(call.Args, pipe)),
+		escapeYAMLPipe(stageContext(call.Args, pipe, body)),
 		writeSetYAML(cmd.WriteSet),
 		escapeYAMLPipe(cmd.Prompt),
 		cmd.Budget.Rounds,
@@ -244,15 +260,16 @@ budget:
 	)
 }
 
-// stageContext formats a stage's call args and the prior stage's pipeline
-// output as the free-text content of the mission contract's context field.
-// Args are sorted by key for deterministic output. Each arg value is capped
-// at maxContractFieldRunes, matching escapeYAMLValue's cap on other
+// stageContext formats a stage's call args, the prior stage's pipeline
+// output, and the triggering email's body as the free-text content of the
+// mission contract's context field. Args are sorted by key for
+// deterministic output. Each arg value and the body are capped at
+// maxContractFieldRunes, matching escapeYAMLValue's cap on other
 // user-controlled contract fields -- the pipe value itself is left
 // uncapped, since pipe data can be up to 1MB and escapeYAMLPipe (applied by
 // the caller to the whole returned string) is the field meant to carry it
 // uncapped.
-func stageContext(args map[string]any, pipe string) string {
+func stageContext(args map[string]any, pipe, body string) string {
 	pipeValue := "none"
 	if pipe != "" {
 		pipeValue = pipe
@@ -273,7 +290,12 @@ func stageContext(args map[string]any, pipe string) string {
 		argsText = strings.Join(parts, ", ")
 	}
 
-	return "stage args: " + argsText + "\npipeline output: " + pipeValue
+	bodyText := "none"
+	if body != "" {
+		bodyText = capRunes(body, maxContractFieldRunes)
+	}
+
+	return "stage args: " + argsText + "\npipeline output: " + pipeValue + "\nemail body: " + bodyText
 }
 
 // truncationMarker is appended by capRunes when a value is actually cut, so

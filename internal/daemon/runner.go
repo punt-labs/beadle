@@ -57,7 +57,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 			"command", cmd.Name, missingEnv)
 	}
 
-	contract := buildStageContract(p.Email, cmd, call, pipe)
+	contract := buildStageContract(p.Email, cmd, call, pipe, p.Body)
 
 	missionID, err := createMissionFromContract(r.Templates.TmpDir, contract)
 	if err != nil {
