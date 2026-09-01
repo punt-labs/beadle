@@ -28,9 +28,9 @@ type MCPServerConfig struct {
 // Any other shape -- neither set, or both -- would marshal to a config
 // Claude Code cannot use: an empty {} for a typo'd or half-filled-in
 // registry entry, or a {"type":"http"} with no URL that fails at connect
-// -- landing on the same invisible-failure path FIX 3 in
-// .tmp/FIXBRIEF-recipe-tooling.md describes for a missing declared env
-// var, just one step earlier.
+// -- landing on the same invisible-failure path a missing declared env var
+// takes in runner.go's resolveEnvVars (see
+// TestCLIRunner_MissingDeclaredEnvVarFailsStage), just one step earlier.
 func (c MCPServerConfig) Validate() error {
 	stdio := c.Command != ""
 	httpShape := c.Type != "" || c.URL != "" || len(c.Headers) > 0

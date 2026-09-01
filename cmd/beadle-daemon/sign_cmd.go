@@ -71,13 +71,13 @@ func init() {
 // the system GPG keyring, and splices the signature into a copy of the
 // original file bytes -- never a full re-marshal, which would drop
 // comments, materialize every zero-value field, and can even alter a
-// leading newline inside a string scalar (see FIX 2 in
-// .tmp/FIXBRIEF-recipe-tooling.md). It proves the result round-trips two
-// distinct ways before writing anything: the reloaded file's canonical
-// bytes must equal what was actually signed, and the reloaded file must
-// independently pass daemon.VerifySignature -- the same check
-// beadle-daemon's own loadCommand runs. Any failure refuses to write; it
-// never tries to normalize the recipe to make it pass.
+// leading newline inside a string scalar (see TestRunSign_PreservesComments
+// and TestRunSign_PreservesLeadingNewlineInPrompt). It proves the result
+// round-trips two distinct ways before writing anything: the reloaded
+// file's canonical bytes must equal what was actually signed, and the
+// reloaded file must independently pass daemon.VerifySignature -- the same
+// check beadle-daemon's own loadCommand runs. Any failure refuses to write;
+// it never tries to normalize the recipe to make it pass.
 func runSign(w io.Writer, dataDir string, resolver *identity.Resolver, path, signer, gpgBinary string, force bool) error {
 	if !signFingerprintPattern.MatchString(signer) {
 		return fmt.Errorf("--signer %q is not a full 40-hex OpenPGP fingerprint", signer)
@@ -248,9 +248,10 @@ func checkSignerMatchesAuthorizer(w io.Writer, dataDir string, resolver *identit
 // "signature:" key (and its block, if any) removed, followed by a fresh
 // signature key encoding sig. This preserves every comment and the
 // author's own formatting decisions, exactly as re-marshaling the full
-// decoded struct cannot (see FIX 2, .tmp/FIXBRIEF-recipe-tooling.md: a
-// full re-marshal drops comments, materializes every zero-value field,
-// and can even alter a leading newline inside a string scalar).
+// decoded struct cannot: a full re-marshal drops comments, materializes
+// every zero-value field, and can even alter a leading newline inside a
+// string scalar (see TestRunSign_PreservesComments and
+// TestRunSign_PreservesLeadingNewlineInPrompt).
 // "signature" is the one key CanonicalCommandBytes always clears before
 // hashing, so replacing it here can never change what gets signed.
 func spliceSignature(original []byte, sig string) ([]byte, error) {

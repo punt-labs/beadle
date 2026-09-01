@@ -122,9 +122,11 @@ func (h *capturingHandler) recordsText() string {
 // Both assertions are required together. Delivery alone (a fixed-payload
 // stub that merely exits 0) cannot distinguish "the value reached the
 // subprocess" from "envOverrides was silently dropped and the stub
-// succeeded anyway" -- exactly the shape of bug FIX 3
-// (.tmp/FIXBRIEF-recipe-tooling.md) found in the context7 MCP header,
-// which a test asserting only non-logging would never have caught, since
+// succeeded anyway" -- exactly the shape of bug PR #263 fixed in the
+// context7 MCP header (a declared env var silently missing from the
+// worker subprocess's environment; see
+// TestCLIRunner_MissingDeclaredEnvVarFailsStage in runner_test.go), which
+// a test asserting only non-logging would never have caught, since
 // the value not appearing in a log is equally true whether or not it ever
 // reached the subprocess. Non-logging alone says nothing about delivery
 // either. writeEnvEchoingClaudeBinary's stub reads the env var back and

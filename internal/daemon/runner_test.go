@@ -449,8 +449,8 @@ func TestCLIRunner_CompoundInvalidTimeoutLogged(t *testing.T) {
 }
 
 // TestCLIRunner_MissingDeclaredEnvVarFailsStage is the regression test for
-// FIX 3 (.tmp/FIXBRIEF-recipe-tooling.md): a declared env_vars entry
-// absent from the daemon's own environment used to be logged at Error and
+// a defect fixed in PR #263: a declared env_vars entry absent from the
+// daemon's own environment used to be logged at Error and
 // the command run anyway -- exactly how docs-ask.yaml's context7 lookup
 // could 401 silently and still return a fluent, wrong answer. This is a
 // permanent misconfiguration (the deployment, not the request, is missing

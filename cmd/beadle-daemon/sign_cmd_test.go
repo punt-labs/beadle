@@ -99,11 +99,10 @@ func TestRunSign_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestRunSign_PreservesComments is the regression test for FIX 2 finding
-// 2 (.tmp/FIXBRIEF-recipe-tooling.md): a full struct re-marshal drops
-// every comment in the source file. The splice approach never re-marshals
-// anything but the signature field, so an author's comment must survive
-// signing verbatim.
+// TestRunSign_PreservesComments is the regression test for a defect fixed
+// in PR #263: a full struct re-marshal drops every comment in the source
+// file. The splice approach never re-marshals anything but the signature
+// field, so an author's comment must survive signing verbatim.
 func TestRunSign_PreservesComments(t *testing.T) {
 	gpgBin := gpgBinary(t)
 	home := testenv.ShortGPGHome(t)
