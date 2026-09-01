@@ -40,6 +40,9 @@ type WorkerSpawner struct {
 	Logger    *slog.Logger
 }
 
+// Compile-time check: *WorkerSpawner satisfies Spawner (pipeline.go).
+var _ Spawner = (*WorkerSpawner)(nil)
+
 // workerJSON is the JSON shape returned by claude --output-format json.
 type workerJSON struct {
 	Result    string `json:"result"`
