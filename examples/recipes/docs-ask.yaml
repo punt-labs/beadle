@@ -2,6 +2,11 @@
 # the context7 MCP server available, so the worker can look up current
 # library/framework documentation instead of guessing from training data.
 #
+# tools: [] is deliberate: this recipe needs nothing beyond its declared
+# context7 MCP server. Answering a documentation question is read-only and
+# needs no filesystem or shell access -- context7's lookup is an MCP tool,
+# gated by mcp_servers above, not a built-in.
+#
 # This file is UNSIGNED. Sign it with your own authorizer key before
 # beadle-daemon will load it -- see examples/recipes/README.md.
 name: docs-ask
@@ -11,6 +16,7 @@ description: >-
 runner: claude
 mcp_servers:
   - context7
+tools: []
 env_vars:
   - CONTEXT7_API_KEY
 args:
@@ -25,7 +31,7 @@ prompt: >-
   prefer context7's result over training-data recall, since the docs it
   returns may be more current. Give a concise, accurate answer grounded in
   what context7 returns, and say plainly if the documentation does not
-  cover the question. Submit the answer as the mission result.
+  cover the question. Give the answer as your final response.
 budget:
   rounds: 3
   reflection_after_each: true
