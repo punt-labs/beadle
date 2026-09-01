@@ -62,6 +62,7 @@ type FakeSpawnerCall struct {
 	MissionID        string
 	MCPConfigPath    string
 	SystemPromptPath string
+	Tools            []string
 	EnvOverrides     map[string]string
 }
 
@@ -80,7 +81,7 @@ type FakeSpawner struct {
 
 // Run implements daemon.Spawner. It is safe for concurrent use, since
 // OnNewMail spawns each pipeline in its own goroutine.
-func (s *FakeSpawner) Run(_ context.Context, missionID, mcpConfigPath, systemPromptPath string, envOverrides map[string]string) (daemon.WorkerResult, error) {
+func (s *FakeSpawner) Run(_ context.Context, missionID, mcpConfigPath, systemPromptPath string, tools []string, envOverrides map[string]string) (daemon.WorkerResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -88,6 +89,7 @@ func (s *FakeSpawner) Run(_ context.Context, missionID, mcpConfigPath, systemPro
 		MissionID:        missionID,
 		MCPConfigPath:    mcpConfigPath,
 		SystemPromptPath: systemPromptPath,
+		Tools:            cloneTools(tools),
 		EnvOverrides:     cloneEnvOverrides(envOverrides),
 	})
 	if s.Err != nil {
@@ -104,6 +106,17 @@ func (s *FakeSpawner) Calls() []FakeSpawnerCall {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]FakeSpawnerCall(nil), s.calls...)
+}
+
+// cloneTools returns a copy of t, for the same reason cloneEnvOverrides
+// copies its map: a recorded FakeSpawnerCall must not change after Run
+// returns because a caller mutated or reused the slice it passed in.
+// Preserves the nil/non-nil distinction.
+func cloneTools(t []string) []string {
+	if t == nil {
+		return nil
+	}
+	return append([]string(nil), t...)
 }
 
 // cloneEnvOverrides returns a copy of m, so a recorded FakeSpawnerCall

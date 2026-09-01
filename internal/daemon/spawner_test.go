@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -149,7 +150,7 @@ func TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged(t *testing.T) {
 	promptPath := filepath.Join(tmpDir, "prompt.txt")
 	require.NoError(t, os.WriteFile(promptPath, []byte("prompt"), 0o600))
 
-	result, err := s.Run(context.Background(), "m-test-005", mcpPath, promptPath,
+	result, err := s.Run(context.Background(), "m-test-005", mcpPath, promptPath, nil,
 		map[string]string{"CONTEXT7_API_KEY": secretValue})
 	require.NoError(t, err)
 	assert.False(t, result.IsError)
@@ -160,6 +161,96 @@ func TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged(t *testing.T) {
 		"an envOverrides value must never appear in a log line")
 	assert.Contains(t, h.recordsText(), "CONTEXT7_API_KEY",
 		"the env var NAME is fine to log -- only the value is sensitive")
+}
+
+// writeArgEchoingClaudeBinary writes a shell script named "claude" that
+// dumps its own argv, one per line, into a file at argFile, then emits a
+// minimal successful workerJSON payload so WorkerSpawner.Run's own output
+// parsing succeeds. Mirrors writeEnvEchoingClaudeBinary's approach of
+// proving a claim about the constructed exec.Cmd by having the "binary"
+// itself report what it received, rather than reaching into WorkerSpawner's
+// unexported argument-building step directly.
+func writeArgEchoingClaudeBinary(t *testing.T, argFile string) (dir string) {
+	t.Helper()
+	dir = t.TempDir()
+	script := "#!/bin/sh\n" +
+		`for a in "$@"; do printf '%s\n' "$a" >> ` + shellQuote(argFile) + "; done\n" +
+		`printf '{"result":"ok","session_id":"s1","is_error":false}\n'` + "\n"
+	path := filepath.Join(dir, "claude")
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+	return dir
+}
+
+// shellQuote wraps s in single quotes for embedding in a generated shell
+// script, escaping any single quote already in s. t.TempDir() paths never
+// contain one, but the helper does not assume that.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// readArgLines reads argFile (one arg per line, written by
+// writeArgEchoingClaudeBinary) and returns its lines with any trailing
+// blank line dropped.
+func readArgLines(t *testing.T, argFile string) []string {
+	t.Helper()
+	data, err := os.ReadFile(argFile)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return nil
+	}
+	return lines
+}
+
+// TestWorkerSpawner_Run_Tools is the regression test for beadle-ivtd: a
+// recipe's declared Tools must reach the worker subprocess's --tools flag
+// verbatim, and a recipe declaring none must produce --tools "" -- not the
+// flag omitted, and not a default grant.
+func TestWorkerSpawner_Run_Tools(t *testing.T) {
+	tests := []struct {
+		name      string
+		tools     []string
+		wantValue string
+	}{
+		{"no tools declared gets an explicit empty grant", nil, ""},
+		{"empty slice gets an explicit empty grant", []string{}, ""},
+		{"declared tools pass through verbatim", []string{"Read", "Bash"}, "Read,Bash"},
+		{"a single declared tool", []string{"Read"}, "Read"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			argFile := filepath.Join(t.TempDir(), "args.txt")
+			dir := writeArgEchoingClaudeBinary(t, argFile)
+			t.Setenv("PATH", dir)
+
+			tmpDir := t.TempDir()
+			mcpPath := filepath.Join(tmpDir, "mcp.json")
+			require.NoError(t, os.WriteFile(mcpPath, []byte(`{"mcpServers":{}}`), 0o600))
+			promptPath := filepath.Join(tmpDir, "prompt.txt")
+			require.NoError(t, os.WriteFile(promptPath, []byte("prompt"), 0o600))
+
+			s := &WorkerSpawner{APIKey: "test-api-key", Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			result, err := s.Run(context.Background(), "m-test-006", mcpPath, promptPath, tt.tools, nil)
+			require.NoError(t, err)
+			assert.False(t, result.IsError)
+
+			args := readArgLines(t, argFile)
+			idx := -1
+			for i, a := range args {
+				if a == "--tools" {
+					idx = i
+					break
+				}
+			}
+			require.GreaterOrEqual(t, idx, 0, "--tools flag must always be present: %v", args)
+			require.Less(t, idx+1, len(args), "--tools flag must have a value: %v", args)
+			assert.Equal(t, tt.wantValue, args[idx+1])
+
+			if tt.wantValue == "" {
+				assert.NotContains(t, args, "Bash", "no tools declared must grant no built-in tool, including Bash")
+			}
+		})
+	}
 }
 
 func TestValidMissionID(t *testing.T) {

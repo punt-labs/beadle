@@ -113,6 +113,7 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 				Prompt:       "Do the test task",
 				OutputSchema: "text",
 				WriteSet:     []string{"output/test-command.txt"},
+				Tools:        []string{"Read"},
 			}
 			fixture.Budget.Rounds = 1
 			signed := daemontest.SignCommand(t, gpgBin, ownerHome, ownerEmail, fixture)
@@ -143,7 +144,15 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 			handler.OnNewMail(1)
 			handler.Stop()
 
-			assert.Len(t, spawner.Calls(), tt.wantSpawnerCalls, "spawner call count")
+			calls := spawner.Calls()
+			assert.Len(t, calls, tt.wantSpawnerCalls, "spawner call count")
+			if tt.wantSpawnerCalls > 0 {
+				// beadle-ivtd: the recipe's declared Tools must reach the
+				// spawned worker, end to end through the real pipeline --
+				// not just WorkerSpawner.Run in isolation (spawner_test.go).
+				assert.Equal(t, []string{"Read"}, calls[0].Tools,
+					"the fixture command's declared Tools must reach the spawner")
+			}
 		})
 	}
 }

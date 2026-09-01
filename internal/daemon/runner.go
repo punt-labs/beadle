@@ -84,7 +84,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	}
 	defer func() { _ = os.Remove(promptPath) }()
 
-	wr, err := r.Spawner.Run(ctx, missionID, mcpPath, promptPath, envOverrides)
+	wr, err := r.Spawner.Run(ctx, missionID, mcpPath, promptPath, cmd.Tools, envOverrides)
 	if err != nil {
 		return "", fmt.Errorf("spawn worker: %w", err)
 	}

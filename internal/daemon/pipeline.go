@@ -36,7 +36,7 @@ type Pipeline struct {
 
 // Spawner runs a Claude Code worker session for a mission.
 type Spawner interface {
-	Run(ctx context.Context, missionID, mcpConfigPath, systemPromptPath string, envOverrides map[string]string) (WorkerResult, error)
+	Run(ctx context.Context, missionID, mcpConfigPath, systemPromptPath string, tools []string, envOverrides map[string]string) (WorkerResult, error)
 }
 
 // Executor plans, validates, and runs a command pipeline for an incoming email.
