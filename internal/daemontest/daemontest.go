@@ -23,6 +23,7 @@ package daemontest
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
 	"sync"
 	"testing"
@@ -64,6 +65,18 @@ type FakeSpawnerCall struct {
 	SystemPromptPath string
 	Tools            []string
 	EnvOverrides     map[string]string
+
+	// MCPConfigContent and SystemPromptContent hold the bytes of the
+	// mcp-config and system-prompt files at the moment Run was called.
+	// ClaudeRunner.Run (runner.go) creates both files before calling
+	// Spawner.Run and removes them (via deferred os.Remove) only after
+	// Run returns, so reading them here -- inside Run -- is the one
+	// window in which a test can observe their contents; by the time
+	// Run's caller regains control, the files are gone. nil when the
+	// read failed, so a test path that never expects these files
+	// populated (or races the cleanup) does not fail the spawn itself.
+	MCPConfigContent    []byte
+	SystemPromptContent []byte
 }
 
 // FakeSpawner implements daemon.Spawner without spawning a real Claude Code
@@ -85,12 +98,23 @@ func (s *FakeSpawner) Run(_ context.Context, missionID, mcpConfigPath, systemPro
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Best-effort: the caller (ClaudeRunner.Run) removes both files via
+	// deferred os.Remove once Run returns, so this is the only window in
+	// which their contents are readable. A read failure is not this
+	// method's failure to report -- some test paths never populate these
+	// files at all (e.g. the spawner is never reached) -- so a failed
+	// read simply leaves the field nil rather than erroring Run.
+	mcpContent, _ := os.ReadFile(mcpConfigPath)       //nolint:gosec // test fixture: paths come from ClaudeRunner.Run's own os.CreateTemp call, not external input
+	promptContent, _ := os.ReadFile(systemPromptPath) //nolint:gosec // test fixture: paths come from ClaudeRunner.Run's own os.CreateTemp call, not external input
+
 	s.calls = append(s.calls, FakeSpawnerCall{
-		MissionID:        missionID,
-		MCPConfigPath:    mcpConfigPath,
-		SystemPromptPath: systemPromptPath,
-		Tools:            cloneTools(tools),
-		EnvOverrides:     cloneEnvOverrides(envOverrides),
+		MissionID:           missionID,
+		MCPConfigPath:       mcpConfigPath,
+		SystemPromptPath:    systemPromptPath,
+		Tools:               cloneTools(tools),
+		EnvOverrides:        cloneEnvOverrides(envOverrides),
+		MCPConfigContent:    mcpContent,
+		SystemPromptContent: promptContent,
 	})
 	if s.Err != nil {
 		return daemon.WorkerResult{}, s.Err
