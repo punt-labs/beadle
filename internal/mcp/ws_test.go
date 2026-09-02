@@ -87,6 +87,64 @@ func TestWSServer_MCPInitialize(t *testing.T) {
 	assert.Equal(t, "beadle-email", result["serverInfo"].(map[string]any)["name"])
 }
 
+// TestWSServer_RejectsNoToken guards beadle-nimy: the WebSocket transport
+// has no authentication of its own, so any client that can reach the port
+// can open a full MCP session. A client that dials with no auth token at
+// all must be rejected -- today it is accepted, because ws.go has no
+// authentication mechanism whatsoever.
+func TestWSServer_RejectsNoToken(t *testing.T) {
+	s := server.NewMCPServer("beadle-email", "test", server.WithToolCapabilities(false))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	ws := mcptools.NewWSServer(s, "test", logger)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mcp", ws.HandleMCP)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/mcp"
+	conn, wsResp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if conn != nil {
+		defer conn.Close()
+	}
+	if wsResp != nil {
+		defer func() { _ = wsResp.Body.Close() }()
+	}
+
+	rejected := err != nil || (wsResp != nil && wsResp.StatusCode != http.StatusSwitchingProtocols)
+	assert.True(t, rejected, "a WebSocket dial with no auth token must be rejected, not upgraded")
+}
+
+// TestWSServer_RejectsOriginHeader guards beadle-nimy: ws.go's upgrader sets
+// CheckOrigin to unconditionally return true, so any cross-origin request
+// is accepted -- the classic CSRF-over-WebSocket exposure for a server with
+// no other origin check. A dial carrying an explicit foreign Origin header
+// must be rejected.
+func TestWSServer_RejectsOriginHeader(t *testing.T) {
+	s := server.NewMCPServer("beadle-email", "test", server.WithToolCapabilities(false))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	ws := mcptools.NewWSServer(s, "test", logger)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mcp", ws.HandleMCP)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/mcp"
+	headers := http.Header{}
+	headers.Set("Origin", "http://evil.example.com")
+	conn, wsResp, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if conn != nil {
+		defer conn.Close()
+	}
+	if wsResp != nil {
+		defer func() { _ = wsResp.Body.Close() }()
+	}
+
+	rejected := conn == nil || err != nil
+	assert.True(t, rejected, "a WebSocket dial with a foreign Origin header must be rejected")
+}
+
 func TestWSServer_ListenAndServe(t *testing.T) {
 	s := server.NewMCPServer("beadle-email", "test", server.WithToolCapabilities(false))
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
