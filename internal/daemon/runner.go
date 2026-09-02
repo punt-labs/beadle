@@ -78,7 +78,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	}
 	defer func() { _ = os.Remove(mcpPath) }()
 
-	promptPath, err := r.Templates.BuildSystemPrompt(missionID)
+	promptPath, err := r.Templates.BuildSystemPromptForTools(missionID, cmd.Tools)
 	if err != nil {
 		return "", fmt.Errorf("build system prompt: %w", err)
 	}
