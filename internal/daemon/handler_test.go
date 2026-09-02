@@ -13,6 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/punt-labs/beadle/internal/channel"
+	"github.com/punt-labs/beadle/internal/contacts"
+	"github.com/punt-labs/beadle/internal/email"
 	"github.com/punt-labs/beadle/internal/testenv"
 	"github.com/punt-labs/beadle/internal/testserver"
 )
@@ -212,6 +215,31 @@ func TestOnNewMail_PGPKeyMatch(t *testing.T) {
 	handler.OnNewMail(1)
 
 	assert.Equal(t, 1, len(mock.calls), "mission should be created: key matches")
+}
+
+// TestVerifyTrust_RejectsProtonHeadersOnNonLocalIMAPHost guards
+// beadle-hv7i: verifyTrust's Trusted branch passes through
+// channel.Trusted purely from the message's own TrustLevel field,
+// without checking that the IMAP source is actually Proton Bridge on
+// localhost. The Trusted classification's whole safety argument is that
+// Bridge -- not an arbitrary IMAP server -- controls the
+// X-Pm-Content-Encryption/X-Pm-Origin headers; against a non-local IMAP
+// host, nothing stops a message from carrying forged versions of those
+// headers and being accepted as Trusted anyway.
+func TestVerifyTrust_RejectsProtonHeadersOnNonLocalIMAPHost(t *testing.T) {
+	h := &MailHandler{logger: discardLogger()}
+	cfg := &email.Config{IMAPHost: "remote-imap.example.com"}
+	msg := channel.MessageSummary{
+		ID:         "1",
+		TrustLevel: channel.Trusted,
+		HasSig:     false,
+	}
+	contact := contacts.Contact{}
+
+	result := h.verifyTrust(nil, cfg, msg, contact)
+
+	assert.NotEqual(t, channel.Trusted, result,
+		"a Trusted classification must not pass through when the IMAP host is not localhost/Proton Bridge")
 }
 
 type testMsg struct {
