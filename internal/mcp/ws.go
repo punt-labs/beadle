@@ -124,13 +124,19 @@ func (ws *WSServer) HandleHealth(w http.ResponseWriter, _ *http.Request) {
 // a guessed token matched.
 func (ws *WSServer) authorized(r *http.Request) bool {
 	presented := r.URL.Query().Get("token")
+	fromQuery := presented != ""
 	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 		presented = strings.TrimPrefix(auth, "Bearer ")
+		fromQuery = false
 	}
 	if presented == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(presented), []byte(ws.token)) == 1
+	ok := subtle.ConstantTimeCompare([]byte(presented), []byte(ws.token)) == 1
+	if ok && fromQuery {
+		ws.logger.Warn("token presented via query parameter; prefer Authorization header to avoid log exposure", "remote", r.RemoteAddr)
+	}
+	return ok
 }
 
 // HandleMCP authenticates the request, then upgrades the connection to
@@ -140,6 +146,7 @@ func (ws *WSServer) authorized(r *http.Request) bool {
 // and a bare WebSocket dialer can authenticate.
 func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	if !ws.authorized(r) {
+		ws.logger.Warn("unauthorized mcp connection attempt", "remote", r.RemoteAddr)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

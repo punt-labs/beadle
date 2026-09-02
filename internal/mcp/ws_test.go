@@ -135,6 +135,7 @@ func TestWSServer_RejectsOriginHeader(t *testing.T) {
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/mcp"
 	headers := http.Header{}
 	headers.Set("Origin", "http://evil.example.com")
+	headers.Set("Authorization", "Bearer "+ws.Token())
 	conn, wsResp, err := websocket.DefaultDialer.Dial(wsURL, headers)
 	if conn != nil {
 		defer conn.Close()

@@ -158,7 +158,6 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 		// Proton E2E headers are safe when IMAP source is Proton Bridge on
 		// localhost — Bridge controls these headers for internal messages.
 		// External SMTP injection of these headers is blocked by Bridge.
-		// TODO(beadle-xxx): verify IMAP is localhost as additional guard.
 		trust := h.verifyTrust(client, cfg, msg, contact)
 		if trust != channel.Verified && trust != channel.Trusted {
 			h.logger.Warn("skip message: insufficient transport trust",
@@ -320,6 +319,8 @@ func isLoopbackHost(host string) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
 	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
