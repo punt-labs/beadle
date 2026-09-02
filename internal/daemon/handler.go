@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -255,11 +256,19 @@ func (h *MailHandler) fetchBody(client *email.Client, msgID string) (string, err
 // cryptographic proof of sender identity for x-bit execution.
 // If the contact has a GPGKeyID set, the signing key must match.
 func (h *MailHandler) verifyTrust(client *email.Client, cfg *email.Config, msg channel.MessageSummary, contact contacts.Contact) channel.TrustLevel {
-	// Proton E2E: Bridge sets these headers for internal messages only.
-	// Safe when IMAP source is Bridge on localhost (Bridge controls headers).
-	// TODO: verify IMAP host is loopback as additional guard.
+	// Proton E2E: Bridge sets these headers for internal messages only, and
+	// that guarantee holds only when the IMAP source is Bridge on
+	// localhost -- Bridge is what controls the headers. Against a non-local
+	// IMAP host, the same X-Pm-* headers could be forged by anything
+	// upstream of that server, so the Trusted classification is downgraded
+	// unless the configured IMAP host is loopback.
 	if msg.TrustLevel == channel.Trusted {
-		return channel.Trusted
+		if isLoopbackHost(cfg.IMAPHost) {
+			return channel.Trusted
+		}
+		h.logger.Warn("trusted classification rejected: IMAP host is not loopback",
+			"host", cfg.IMAPHost)
+		return channel.Unverified
 	}
 	if !msg.HasSig {
 		return channel.Unverified
@@ -301,6 +310,17 @@ func (h *MailHandler) verifyTrust(client *email.Client, cfg *email.Config, msg c
 	}
 
 	return channel.Verified
+}
+
+// isLoopbackHost reports whether host -- an IMAPHost value, which may or
+// may not carry a ":port" suffix -- names the local machine. Only a
+// loopback IMAP source can be trusted to control Proton's E2E headers;
+// anything else could have those headers forged upstream.
+func isLoopbackHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
 // loadConfig loads identityEmail's config with no fallback, deliberately —
