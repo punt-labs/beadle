@@ -68,8 +68,15 @@ type Command struct {
 		Rounds              int  `yaml:"rounds" json:"rounds"`
 		ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
 	} `yaml:"budget" json:"budget"`
-	Timeout    string   `yaml:"timeout" json:"timeout"` // duration string (2m, 30m, etc.)
-	Prompt     string   `yaml:"prompt" json:"prompt"`
+	Timeout string `yaml:"timeout" json:"timeout"` // duration string (2m, 30m, etc.)
+	Prompt  string `yaml:"prompt" json:"prompt"`
+	// Tools is the claude runner's built-in tool grant, threaded to
+	// WorkerSpawner.Run's --tools flag (spawner.go). Empty means none --
+	// the worker gets zero built-in tools, not a default set. Only meaningful
+	// for the claude runner; ValidateCommand rejects it on a cli recipe. MCP
+	// tools (send_email, ethos mission calls) are a separate grant, scoped by
+	// MCPServers below -- a recipe with Tools: [] and an MCP server declared
+	// still reaches that server's tools.
 	Tools      []string `yaml:"tools" json:"tools,omitempty"`
 	MCPServers []string `yaml:"mcp_servers" json:"mcp_servers,omitempty"`
 	EnvVars    []string `yaml:"env_vars" json:"env_vars,omitempty"`
@@ -80,6 +87,33 @@ var validArgTypes = map[string]bool{
 	"enum":   true,
 	"int":    true,
 	"bool":   true,
+}
+
+// validToolNames is the set of Claude Code built-in tool names a recipe may
+// grant itself via Tools. A name outside this set is almost always a typo,
+// and a typo here must fail recipe validation loudly -- the alternative is
+// the tool silently granting nothing (an unrecognized name that never
+// matches anything the worker actually has) or, worse, someone assuming a
+// typo'd name still works. Mirrors the tool names the installed `claude`
+// CLI's own --tools flag recognizes (verified directly against its binary);
+// it does not include MCP-server-scoped tools, which are named and gated
+// separately (see Tools' doc comment above).
+var validToolNames = map[string]bool{
+	"Bash":         true,
+	"Read":         true,
+	"Edit":         true,
+	"Write":        true,
+	"Glob":         true,
+	"Grep":         true,
+	"Agent":        true,
+	"Task":         true,
+	"WebFetch":     true,
+	"WebSearch":    true,
+	"NotebookEdit": true,
+	"TodoWrite":    true,
+	"BashOutput":   true,
+	"KillShell":    true,
+	"ExitPlanMode": true,
 }
 
 // verificationError wraps an operational failure that happened while
@@ -244,6 +278,18 @@ func ValidateCommand(cmd *Command) error {
 		}
 		if cmd.Binary != "" && len(cmd.Steps) > 0 {
 			return fmt.Errorf("cli runner: set binary or steps, not both")
+		}
+		if len(cmd.Tools) > 0 {
+			return fmt.Errorf("tools is not valid for cli runner")
+		}
+	}
+
+	// Tools validation: every declared name must be a real Claude Code
+	// built-in tool. A typo here must fail at load, not silently grant
+	// nothing (an unrecognized name matches no real tool) or everything.
+	for _, tool := range cmd.Tools {
+		if !validToolNames[tool] {
+			return fmt.Errorf("unrecognized tool %q (see internal/daemon/command.go's validToolNames)", tool)
 		}
 	}
 

@@ -460,6 +460,52 @@ budget:
 	assert.Equal(t, "process", cmds["min"].Mode)
 }
 
+func TestValidateCommand_Tools(t *testing.T) {
+	base := func() *Command {
+		return &Command{
+			Name:         "test",
+			Runner:       "claude",
+			Prompt:       "hello",
+			OutputSchema: "text",
+			Budget: struct {
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
+			}{Rounds: 1},
+		}
+	}
+
+	t.Run("no tools declared is valid", func(t *testing.T) {
+		cmd := base()
+		require.NoError(t, ValidateCommand(cmd))
+		assert.Empty(t, cmd.Tools)
+	})
+
+	t.Run("known tool names are valid", func(t *testing.T) {
+		cmd := base()
+		cmd.Tools = []string{"Read", "Bash"}
+		require.NoError(t, ValidateCommand(cmd))
+	})
+
+	t.Run("unknown tool name fails validation", func(t *testing.T) {
+		cmd := base()
+		cmd.Tools = []string{"Bash", "Delete"}
+		err := ValidateCommand(cmd)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `unrecognized tool "Delete"`)
+	})
+
+	t.Run("tools not valid for cli runner", func(t *testing.T) {
+		cmd := base()
+		cmd.Runner = "cli"
+		cmd.Prompt = ""
+		cmd.Binary = "beadle-sysreport"
+		cmd.Tools = []string{"Bash"}
+		err := ValidateCommand(cmd)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tools is not valid for cli runner")
+	})
+}
+
 func TestValidateArgs(t *testing.T) {
 	cmd := &Command{
 		Name: "test",

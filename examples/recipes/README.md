@@ -6,8 +6,45 @@ sender's email matches it. Nothing in `beadle-daemon` runs unless it was
 authorized this way -- see `docs/ARCHITECTURE.md`'s "zero agent authority"
 invariant.
 
-The two files here are worked examples, not fixtures: copy one, adjust it,
+The four files here are worked examples, not fixtures: copy one, adjust it,
 sign it, and it is a real recipe.
+
+## Declaring tools
+
+A `claude`-runner recipe's `tools:` list is the worker's entire built-in
+tool grant -- `Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, and the rest
+of the set `internal/daemon/command.go`'s `validToolNames` enumerates.
+**Empty means none, not a default set** -- a recipe that declares no tools
+gets no built-in tools at all, not the shell every worker used to receive
+regardless of what its recipe said. An unrecognized name fails at
+`beadle-daemon sign` and at daemon startup, not silently at runtime.
+
+MCP-server tools (`send_email`, context7's lookup, ...) are a separate
+grant, made by `mcp_servers`, not by `tools`. A recipe can declare
+`tools: []` and still reach every tool its listed MCP servers expose --
+`summarize.yaml` and `docs-ask.yaml` below both do exactly this.
+
+Declare the narrowest `tools` list the recipe's prompt actually exercises.
+`sysreport.yaml` is a `cli`-runner recipe and never spawns a worker at all,
+so `tools` does not apply to it -- `ValidateCommand` rejects the field on
+that runner.
+
+## summarize.yaml
+
+A `claude`-runner recipe, and the one the shipped daemon's built-in planner
+rule actually selects (see the comment at the top of the file for the
+coupling). `tools: []`, no `mcp_servers`: it summarizes the triggering
+email's body, which arrives directly in the mission's context field, and
+answers in plain text -- there is nothing here that needs a shell, a file,
+or an MCP server.
+
+## reply.yaml
+
+A `claude`-runner recipe the executor appends automatically after every
+pipeline's last stage (and on the failure path). `tools: []`; its one
+capability is the `beadle-email` MCP server's `send_email` tool. Required
+reading in the file's own header comment: without a signed recipe named
+exactly `reply`, a pipeline completes and delivers nothing.
 
 ## sysreport.yaml
 
@@ -32,7 +69,8 @@ this is deliberate and is not something a recipe can widen.
 A `claude`-runner recipe. The daemon spawns a Claude Code worker with the
 `context7` MCP server available, so it can look up current
 library/framework/API documentation instead of guessing from training data.
-The question comes in as the `question` stage arg.
+The question comes in as the `question` stage arg. `tools: []`: answering a
+documentation question needs no built-in tool, only context7's MCP lookup.
 
 `context7` needs an API key. Set `CONTEXT7_API_KEY` in the daemon's own
 process environment (systemd unit, launchd plist, or shell profile that

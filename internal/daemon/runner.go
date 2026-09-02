@@ -57,7 +57,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 			"command", cmd.Name, missingEnv)
 	}
 
-	contract := buildStageContract(p.Email, cmd, call, pipe)
+	contract := buildStageContract(p.Email, cmd, call, pipe, p.Body)
 
 	missionID, err := createMissionFromContract(r.Templates.TmpDir, contract)
 	if err != nil {
@@ -69,7 +69,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 		"command", call.Command, "mission", missionID)
 
 	servers := cmd.MCPServers
-	if len(servers) == 0 {
+	if servers == nil {
 		servers = []string{"ethos", "beadle-email"}
 	}
 	mcpPath, err := r.Templates.BuildMCPConfig(servers, r.Registry)
@@ -78,13 +78,13 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	}
 	defer func() { _ = os.Remove(mcpPath) }()
 
-	promptPath, err := r.Templates.BuildSystemPrompt(missionID)
+	promptPath, err := r.Templates.BuildSystemPromptForTools(missionID, cmd.Tools)
 	if err != nil {
 		return "", fmt.Errorf("build system prompt: %w", err)
 	}
 	defer func() { _ = os.Remove(promptPath) }()
 
-	wr, err := r.Spawner.Run(ctx, missionID, mcpPath, promptPath, envOverrides)
+	wr, err := r.Spawner.Run(ctx, missionID, mcpPath, promptPath, cmd.Tools, envOverrides)
 	if err != nil {
 		return "", fmt.Errorf("spawn worker: %w", err)
 	}

@@ -699,42 +699,50 @@ func TestStageContext(t *testing.T) {
 		name string
 		args map[string]any
 		pipe string
+		body string
 		want string
 	}{
 		{
-			name: "no args, no pipe",
+			name: "no args, no pipe, no body",
 			args: map[string]any{},
 			pipe: "",
-			want: "stage args: none\npipeline output: none",
+			want: "stage args: none\npipeline output: none\nemail body: none",
 		},
 		{
 			name: "one arg, no pipe",
 			args: map[string]any{"env": "prod"},
 			pipe: "",
-			want: "stage args: env=prod\npipeline output: none",
+			want: "stage args: env=prod\npipeline output: none\nemail body: none",
 		},
 		{
 			name: "multiple args sorted by key",
 			args: map[string]any{"zebra": "z", "alpha": "a", "mid": 1},
 			pipe: "",
-			want: "stage args: alpha=a, mid=1, zebra=z\npipeline output: none",
+			want: "stage args: alpha=a, mid=1, zebra=z\npipeline output: none\nemail body: none",
 		},
 		{
 			name: "pipe carried through",
 			args: map[string]any{},
 			pipe: `{"title":"x"}`,
-			want: `stage args: none` + "\n" + `pipeline output: {"title":"x"}`,
+			want: `stage args: none` + "\n" + `pipeline output: {"title":"x"}` + "\nemail body: none",
 		},
 		{
 			name: "args and pipe together",
 			args: map[string]any{"to": "jim@test.com"},
 			pipe: "prior output",
-			want: "stage args: to=jim@test.com\npipeline output: prior output",
+			want: "stage args: to=jim@test.com\npipeline output: prior output\nemail body: none",
+		},
+		{
+			name: "body carried through",
+			args: map[string]any{},
+			pipe: "",
+			body: "please summarize this",
+			want: "stage args: none\npipeline output: none\nemail body: please summarize this",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stageContext(tt.args, tt.pipe)
+			got := stageContext(tt.args, tt.pipe, tt.body)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -745,13 +753,27 @@ func TestStageContext_LongArgValueCapped(t *testing.T) {
 	for i := 0; i < maxContractFieldRunes+100; i++ {
 		long += "a"
 	}
-	got := stageContext(map[string]any{"note": long}, "")
+	got := stageContext(map[string]any{"note": long}, "", "")
 
 	capped := ""
 	for i := 0; i < maxContractFieldRunes; i++ {
 		capped += "a"
 	}
-	assert.Equal(t, "stage args: note="+capped+truncationMarker+"\npipeline output: none", got)
+	assert.Equal(t, "stage args: note="+capped+truncationMarker+"\npipeline output: none\nemail body: none", got)
+}
+
+// TestStageContext_LongBodyCapped is the regression test for FIX 2's
+// adversarial-input requirement: the triggering email's body is capped at
+// maxContractFieldRunes before it reaches the mission contract, the same
+// bound applied to every other user-controlled contract field, so an
+// oversized or hostile email body cannot inflate the contract without
+// bound.
+func TestStageContext_LongBodyCapped(t *testing.T) {
+	long := strings.Repeat("b", maxContractFieldRunes+100)
+	got := stageContext(map[string]any{}, "", long)
+
+	capped := strings.Repeat("b", maxContractFieldRunes)
+	assert.Equal(t, "stage args: none\npipeline output: none\nemail body: "+capped+truncationMarker, got)
 }
 
 func TestCapRunes(t *testing.T) {
@@ -823,7 +845,7 @@ func TestBuildStageContract(t *testing.T) {
 	}
 	call := CommandCall{Command: "deploy", Args: map[string]any{"env": "prod"}}
 
-	out := buildStageContract(meta, cmd, call, `{"summary":"prior stage output"}`)
+	out := buildStageContract(meta, cmd, call, `{"summary":"prior stage output"}`, "please deploy this")
 
 	var doc map[string]any
 	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
@@ -847,6 +869,8 @@ func TestBuildStageContract(t *testing.T) {
 	require.True(t, ok, "context must be a string")
 	assert.Contains(t, contextVal, "env=prod")
 	assert.Contains(t, contextVal, `{"summary":"prior stage output"}`)
+	assert.Contains(t, contextVal, "please deploy this",
+		"the triggering email's body must reach the contract -- beadle-ivtd FIX 2")
 
 	ws, ok := doc["write_set"].([]any)
 	require.True(t, ok, "write_set must be a list")
@@ -870,14 +894,14 @@ func TestBuildStageContract_NoArgsNoPipe(t *testing.T) {
 	}
 	call := CommandCall{Command: "greet", Args: map[string]any{}}
 
-	out := buildStageContract(meta, cmd, call, "")
+	out := buildStageContract(meta, cmd, call, "", "")
 
 	var doc map[string]any
 	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
 
 	contextVal, ok := doc["context"].(string)
 	require.True(t, ok, "context must be a string")
-	assert.Equal(t, "stage args: none\npipeline output: none", contextVal)
+	assert.Equal(t, "stage args: none\npipeline output: none\nemail body: none", contextVal)
 }
 
 // TestBuildStageContract_PromptUncappedMetadataCapped is the regression test
@@ -899,8 +923,9 @@ func TestBuildStageContract_PromptUncappedMetadataCapped(t *testing.T) {
 		}{Rounds: 1},
 	}
 	call := CommandCall{Command: "greet", Args: map[string]any{}}
+	longBody := strings.Repeat("e", maxContractFieldRunes+250)
 
-	out := buildStageContract(meta, cmd, call, "")
+	out := buildStageContract(meta, cmd, call, "", longBody)
 
 	var doc map[string]any
 	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
@@ -919,6 +944,13 @@ func TestBuildStageContract_PromptUncappedMetadataCapped(t *testing.T) {
 	assert.Equal(t, wantCapped, trigger["message_id"], "message_id must remain capped")
 	assert.Equal(t, wantCapped, trigger["from"], "from must remain capped")
 	assert.Equal(t, wantCapped, trigger["subject"], "subject must remain capped")
+
+	contextVal, ok := doc["context"].(string)
+	require.True(t, ok, "context must be a string")
+	assert.NotContains(t, contextVal, longBody,
+		"the full, uncapped email body must not reach the contract -- it is adversarial input")
+	assert.Contains(t, contextVal, longBody[:maxContractFieldRunes],
+		"the capped prefix of the email body must still reach the contract")
 }
 
 // TestBuildStageContract_ValidatesAgainstRealEthosCLI invokes the real
@@ -956,7 +988,7 @@ func TestBuildStageContract_ValidatesAgainstRealEthosCLI(t *testing.T) {
 	}
 	call := CommandCall{Command: "deploy", Args: map[string]any{"env": "prod"}}
 
-	contract := buildStageContract(meta, cmd, call, `{"prior":"output"}`)
+	contract := buildStageContract(meta, cmd, call, `{"prior":"output"}`, "")
 
 	f, err := os.CreateTemp(t.TempDir(), "contract-*.yaml")
 	require.NoError(t, err)
@@ -1021,7 +1053,7 @@ func TestBuildStageContract_RealEthosCLIRejectsMalformedContract(t *testing.T) {
 	}
 	call := CommandCall{Command: "deploy", Args: map[string]any{"env": "prod"}}
 
-	contract := buildStageContract(meta, cmd, call, `{"prior":"output"}`)
+	contract := buildStageContract(meta, cmd, call, `{"prior":"output"}`, "")
 
 	var doc map[string]any
 	require.NoError(t, yaml.Unmarshal([]byte(contract), &doc))

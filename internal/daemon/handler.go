@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -157,7 +158,6 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 		// Proton E2E headers are safe when IMAP source is Proton Bridge on
 		// localhost — Bridge controls these headers for internal messages.
 		// External SMTP injection of these headers is blocked by Bridge.
-		// TODO(beadle-xxx): verify IMAP is localhost as additional guard.
 		trust := h.verifyTrust(client, cfg, msg, contact)
 		if trust != channel.Verified && trust != channel.Trusted {
 			h.logger.Warn("skip message: insufficient transport trust",
@@ -172,6 +172,16 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 		}
 
 		if h.spawner != nil && h.templates != nil {
+			// Fetched synchronously, on this goroutine, while client is still
+			// open -- OnNewMail's own defer closes it right after this loop
+			// returns, before the async worker goroutine below would ever
+			// get a turn to use it.
+			body, err := h.fetchBody(client, msg.ID)
+			if err != nil {
+				h.logger.Error("skip message: fetch body failed", "from", addr, "id", msg.ID, "error", err)
+				continue
+			}
+
 			select {
 			case h.workerSem <- struct{}{}:
 				h.wg.Add(1)
@@ -197,7 +207,7 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 						Store:  h.store,
 						Logger: h.logger,
 					}
-					p, err := executor.Run(h.ctx, meta, "")
+					p, err := executor.Run(h.ctx, meta, body)
 					if err != nil {
 						h.logger.Error("pipeline failed",
 							"pipeline", p.ID, "from", addr,
@@ -223,16 +233,41 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 	}
 }
 
+// fetchBody retrieves msgID's full body from INBOX, so the pipeline the
+// caller is about to run can act on the actual triggering message instead
+// of nothing (beadle-ivtd). msgID is expected to be the numeric IMAP UID
+// string ListMessages returned, the same assumption verifyTrust's own
+// ParseUint call makes of it.
+func (h *MailHandler) fetchBody(client *email.Client, msgID string) (string, error) {
+	uid, err := strconv.ParseUint(msgID, 10, 32)
+	if err != nil {
+		return "", fmt.Errorf("parse message uid %q: %w", msgID, err)
+	}
+	full, err := client.FetchMessage("INBOX", uint32(uid))
+	if err != nil {
+		return "", fmt.Errorf("fetch message %s: %w", msgID, err)
+	}
+	return full.Body, nil
+}
+
 // verifyTrust determines the transport trust level for a message.
 // Proton headers are SMTP-injectable; only PGP verification provides
 // cryptographic proof of sender identity for x-bit execution.
 // If the contact has a GPGKeyID set, the signing key must match.
 func (h *MailHandler) verifyTrust(client *email.Client, cfg *email.Config, msg channel.MessageSummary, contact contacts.Contact) channel.TrustLevel {
-	// Proton E2E: Bridge sets these headers for internal messages only.
-	// Safe when IMAP source is Bridge on localhost (Bridge controls headers).
-	// TODO: verify IMAP host is loopback as additional guard.
+	// Proton E2E: Bridge sets these headers for internal messages only, and
+	// that guarantee holds only when the IMAP source is Bridge on
+	// localhost -- Bridge is what controls the headers. Against a non-local
+	// IMAP host, the same X-Pm-* headers could be forged by anything
+	// upstream of that server, so the Trusted classification is downgraded
+	// unless the configured IMAP host is loopback.
 	if msg.TrustLevel == channel.Trusted {
-		return channel.Trusted
+		if isLoopbackHost(cfg.IMAPHost) {
+			return channel.Trusted
+		}
+		h.logger.Warn("trusted classification rejected: IMAP host is not loopback",
+			"host", cfg.IMAPHost)
+		return channel.Unverified
 	}
 	if !msg.HasSig {
 		return channel.Unverified
@@ -274,6 +309,19 @@ func (h *MailHandler) verifyTrust(client *email.Client, cfg *email.Config, msg c
 	}
 
 	return channel.Verified
+}
+
+// isLoopbackHost reports whether host -- an IMAPHost value, which may or
+// may not carry a ":port" suffix -- names the local machine. Only a
+// loopback IMAP source can be trusted to control Proton's E2E headers;
+// anything else could have those headers forged upstream.
+func isLoopbackHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }
 
 // loadConfig loads identityEmail's config with no fallback, deliberately —

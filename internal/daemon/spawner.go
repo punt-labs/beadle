@@ -40,6 +40,9 @@ type WorkerSpawner struct {
 	Logger    *slog.Logger
 }
 
+// Compile-time check: *WorkerSpawner satisfies Spawner (pipeline.go).
+var _ Spawner = (*WorkerSpawner)(nil)
+
 // workerJSON is the JSON shape returned by claude --output-format json.
 type workerJSON struct {
 	Result    string `json:"result"`
@@ -57,10 +60,15 @@ func (s *WorkerSpawner) logger() *slog.Logger {
 // Run executes a Claude Code worker for the given mission.
 // The context governs subprocess lifetime — cancel it for graceful shutdown.
 // mcpConfigPath and systemPromptPath must be paths to existing files;
-// the caller is responsible for cleanup. envOverrides are added to the
-// subprocess environment (e.g. secrets resolved by the daemon for a command).
-// Pass nil when no overrides are needed.
-func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, systemPromptPath string, envOverrides map[string]string) (WorkerResult, error) {
+// the caller is responsible for cleanup. tools is the recipe's declared
+// Command.Tools, passed verbatim to claude's --tools flag: a nil or empty
+// slice joins to "", which --tools documents as disabling every built-in
+// tool -- empty means none, not a default set. This governs only the
+// built-in tool surface; MCP-server tools are a separate grant made by
+// mcpConfigPath's contents. envOverrides are added to the subprocess
+// environment (e.g. secrets resolved by the daemon for a command). Pass nil
+// when no overrides are needed.
+func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, systemPromptPath string, tools []string, envOverrides map[string]string) (WorkerResult, error) {
 	if !ValidMissionID(missionID) {
 		return WorkerResult{MissionID: missionID}, fmt.Errorf("invalid mission ID %q", missionID)
 	}
@@ -91,7 +99,13 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 		"--max-turns", strconv.Itoa(maxTurns),
 		"--max-budget-usd", maxBudget,
 		"--permission-mode", "auto",
-		"--allowedTools", "Bash,Read,Edit,Write,Glob,Grep,Agent",
+		// --tools ""  disables every built-in tool; --tools "Bash,Read" grants
+		// exactly those. strings.Join(nil, ",") == "", so a recipe with no
+		// declared Tools gets none by construction -- there is no separate
+		// omit-the-flag branch to keep in sync with that rule. This governs
+		// only the built-in surface (Bash, Read, Edit, ...); MCP-server tools
+		// are granted separately, by what mcpConfigPath lists.
+		"--tools", strings.Join(tools, ","),
 		// -- ends option parsing; prompt is always positional even if it starts with -
 		"--", prompt,
 	}

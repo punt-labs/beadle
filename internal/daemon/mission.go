@@ -22,10 +22,22 @@ type EmailMeta struct {
 // apart.
 const maxContractFieldRunes = 500
 
-// BuildContract generates a mission contract YAML string from email metadata.
-// Email provenance is recorded in inputs.trigger (structured metadata for audit).
-// The subject is in inputs.trigger, NOT in success_criteria — success_criteria
-// uses fixed text that directs the worker to read the email via beadle-email tools.
+// BuildContract generates a mission contract YAML string from email metadata,
+// for the path where no worker is spawned automatically (handler.go's
+// fallback when spawner or templates is nil) -- the mission just records
+// intent for someone to pick up later via `ethos mission show`. Email
+// provenance is recorded in inputs.trigger (structured metadata for audit).
+// The subject is in inputs.trigger, not in success_criteria.
+//
+// success_criteria deliberately does not tell the worker how to get the
+// email content: it used to direct the worker to fetch it itself via
+// beadle-email tools, which meant granting mailbox read access -- any
+// message, not just this one -- for a single-message task (beadle-ivtd).
+// This function has no way to grant the narrower alternative (passing the
+// body directly, as the pipeline path now does in buildStageContract)
+// since nothing here spawns a worker with a scoped body in hand; whoever
+// eventually works this mission decides how to get the content, under
+// whatever grant their own invocation configures.
 // All user-controlled values are double-quoted via escapeYAMLValue.
 func BuildContract(meta EmailMeta) string {
 	return fmt.Sprintf(`leader: claude
@@ -42,7 +54,7 @@ inputs:
 write_set:
   - daemon output
 success_criteria:
-  - "Complete the task described in the triggering email. Read the email via beadle-email tools using the message ID in inputs.trigger."
+  - "Complete the task described in the triggering email (see inputs.trigger)."
 budget:
   rounds: 1
   reflection_after_each: false
