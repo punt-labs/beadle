@@ -69,7 +69,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 		"command", call.Command, "mission", missionID)
 
 	servers := cmd.MCPServers
-	if len(servers) == 0 {
+	if servers == nil {
 		servers = []string{"ethos", "beadle-email"}
 	}
 	mcpPath, err := r.Templates.BuildMCPConfig(servers, r.Registry)
