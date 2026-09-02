@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +23,10 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-const wsReadLimit = 16 * 1024 * 1024 // 16 MB
+const (
+	wsReadLimit = 16 * 1024 * 1024 // 16 MB
+	tokenBytes  = 32               // 256-bit bearer token
+)
 
 // WSServer serves MCP sessions over WebSocket at /mcp and a health
 // endpoint at /health. Each WebSocket connection gets its own MCP
@@ -29,31 +36,55 @@ type WSServer struct {
 	version  string
 	logger   *slog.Logger
 	upgrader websocket.Upgrader
+	token    string
 }
 
 // NewWSServer creates a WebSocket server that bridges connections to
-// the given MCP server.
+// the given MCP server. It generates a random bearer token that a
+// client must present to reach /mcp -- retrieve it via Token() and
+// hand it to legitimate clients out of band. CheckOrigin is left at
+// the gorilla/websocket default, which rejects a request whose Origin
+// header names a different host than the request's own Host header
+// and allows requests with no Origin header at all (the case for
+// non-browser MCP/CLI clients).
 func NewWSServer(s *server.MCPServer, version string, logger *slog.Logger) *WSServer {
 	return &WSServer{
 		mcp:     s,
 		version: version,
 		logger:  logger,
-		upgrader: websocket.Upgrader{
-			// Sandbox isolation prevents browser access. For traditional
-			// Docker, mcp-proxy authenticates via MCP_PROXY_TOKEN on upgrade.
-			CheckOrigin: func(_ *http.Request) bool { return true },
-		},
+		token:   generateToken(),
 	}
 }
 
-// ListenAndServe starts the HTTP server on the given port. It blocks
-// until the context is canceled, then shuts down gracefully.
+// generateToken returns a random hex-encoded bearer token. A failure to
+// read from crypto/rand means the platform's entropy source is broken --
+// not a condition this server can recover from or usefully report per
+// connection, so it panics once at startup rather than silently minting a
+// predictable token.
+func generateToken() string {
+	b := make([]byte, tokenBytes)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("generate ws auth token: %v", err))
+	}
+	return hex.EncodeToString(b)
+}
+
+// Token returns the bearer token clients must present to connect.
+func (ws *WSServer) Token() string {
+	return ws.token
+}
+
+// ListenAndServe starts the HTTP server on 127.0.0.1:port. It blocks
+// until the context is canceled, then shuts down gracefully. Binding to
+// loopback only, not 0.0.0.0, is the default for Punt Labs daemons --
+// network exposure requires explicit opt-in this server does not offer
+// today.
 func (ws *WSServer) ListenAndServe(ctx context.Context, port int) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", ws.HandleMCP)
 	mux.HandleFunc("/health", ws.HandleHealth)
 
-	addr := net.JoinHostPort("0.0.0.0", strconv.Itoa(port))
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -87,9 +118,32 @@ func (ws *WSServer) HandleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// HandleMCP upgrades the connection to WebSocket and bridges it to an
-// MCP stdio session via a pair of pipes.
+// authorized reports whether r carries the server's bearer token, either
+// as "Authorization: Bearer <token>" or a "token" query parameter. It uses
+// a constant-time comparison so response timing does not leak how much of
+// a guessed token matched.
+func (ws *WSServer) authorized(r *http.Request) bool {
+	presented := r.URL.Query().Get("token")
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		presented = strings.TrimPrefix(auth, "Bearer ")
+	}
+	if presented == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(ws.token)) == 1
+}
+
+// HandleMCP authenticates the request, then upgrades the connection to
+// WebSocket and bridges it to an MCP stdio session via a pair of pipes.
+// The bearer token is accepted from an "Authorization: Bearer <token>"
+// header or a "token" query parameter, so both a header-capable client
+// and a bare WebSocket dialer can authenticate.
 func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
+	if !ws.authorized(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := ws.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		ws.logger.Error("websocket upgrade failed", "error", err)
