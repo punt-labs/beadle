@@ -285,7 +285,11 @@ func TestBuildSystemPrompt(t *testing.T) {
 			tmpDir := t.TempDir()
 			tmpl := &MissionTemplate{TmpDir: tmpDir}
 
-			path, err := tmpl.BuildSystemPrompt(tt.missionID)
+			// BuildSystemPromptForTools with an explicit Bash grant exercises
+			// the full instruction set, including the result-submission
+			// line; BuildSystemPrompt's nil-tools default now omits it
+			// (nil tools means no built-in tools, per spawner.go's Run).
+			path, err := tmpl.BuildSystemPromptForTools(tt.missionID, []string{"Bash"})
 			require.NoError(t, err)
 			defer os.Remove(path)
 
@@ -307,4 +311,25 @@ func TestBuildSystemPrompt(t *testing.T) {
 			assert.Contains(t, content, "Do NOT access files outside the write_set")
 		})
 	}
+}
+
+// TestBuildSystemPromptNilToolsOmitsBashDependentResult guards the nil-tools
+// case: spawner.go's Run treats a nil (and an empty) tools slice as granting
+// no built-in tools at all, so BuildSystemPrompt (BuildSystemPromptForTools
+// with tools=nil) must not instruct the worker to run
+// "ethos mission result" -- there is no Bash to run it with.
+func TestBuildSystemPromptNilToolsOmitsBashDependentResult(t *testing.T) {
+	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+
+	path, err := tmpl.BuildSystemPrompt("m-1")
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	content := string(data)
+	assert.NotContains(t, content, "ethos mission result",
+		"nil tools grants no Bash, so the result-submission instruction must be omitted")
+	assert.Contains(t, content, "ethos mission show m-1")
 }

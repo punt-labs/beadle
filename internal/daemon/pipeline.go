@@ -25,11 +25,11 @@ type Pipeline struct {
 	Email     EmailMeta `json:"email"`
 	// Body is the triggering email's body, carried so a stage can act on the
 	// actual message content instead of being handed a shell and left to go
-	// fetch it itself (beadle-ivtd) -- see buildStageContract, which caps it
-	// before it reaches the mission contract a worker reads. The uncapped
-	// value is kept here; it is bounded on disk the same way the rest of
-	// this record is, by PipelineStore's existing retention pruning, not by
-	// a length limit on this field.
+	// fetch it itself (beadle-ivtd). It is capped at maxContractFieldRunes
+	// when the pipeline is created (see Run), matching the cap
+	// buildStageContract applies before this value reaches the mission
+	// contract a worker reads -- storing more than a worker will ever see
+	// is wasted disk and memory for no benefit.
 	Body     string        `json:"body"`
 	Commands []CommandCall `json:"commands"`
 	ElseCmd  *CommandCall  `json:"else_cmd"`
@@ -63,7 +63,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 		ID:        uuid.New().String(),
 		CreatedAt: time.Now(),
 		Email:     meta,
-		Body:      body,
+		Body:      capRunes(body, maxContractFieldRunes),
 		Status:    "running",
 	}
 	e.save(p)

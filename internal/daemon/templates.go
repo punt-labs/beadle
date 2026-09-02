@@ -145,10 +145,11 @@ func (t *MissionTemplate) BuildMCPConfig(servers []string, registry map[string]M
 	return path, nil
 }
 
-// BuildSystemPrompt writes a temporary system prompt file for missionID and
-// returns its path, with the full instruction set -- including the
-// result-submission line, which requires a shell. Equivalent to
-// BuildSystemPromptForTools(missionID, nil). The caller must os.Remove the
+// BuildSystemPrompt writes a temporary system prompt file for missionID with
+// no Bash-dependent result-submission instruction. Equivalent to
+// BuildSystemPromptForTools(missionID, nil) -- nil tools means the worker
+// gets none of the built-in tools (see spawner.go's Run), so there is no
+// shell to run "ethos mission result" with. The caller must os.Remove the
 // file after use.
 func (t *MissionTemplate) BuildSystemPrompt(missionID string) (string, error) {
 	return t.BuildSystemPromptForTools(missionID, nil)
@@ -156,12 +157,13 @@ func (t *MissionTemplate) BuildSystemPrompt(missionID string) (string, error) {
 
 // BuildSystemPromptForTools writes a temporary system prompt file for the
 // given mission and returns its path. tools is the worker's declared tool
-// set -- nil means the default/all tools are available. The
-// result-submission instruction ("ethos mission result ... --file <path>")
-// requires a shell, so it is included only when Bash is available; a
-// recipe that grants no Bash (Tools: []) would otherwise deadlock waiting
-// on an instruction the worker has no way to follow. The caller must
-// os.Remove the file after use.
+// set, passed verbatim to the same slice spawner.go's Run hands to claude's
+// --tools flag: nil or empty grants no built-in tools at all, not a default
+// set. The result-submission instruction ("ethos mission result ...
+// --file <path>") requires a shell, so it is included only when Bash is
+// among tools; a recipe that grants no Bash would otherwise tell the worker
+// to run a command it has no way to invoke. The caller must os.Remove the
+// file after use.
 func (t *MissionTemplate) BuildSystemPromptForTools(missionID string, tools []string) (string, error) {
 	if !ValidMissionID(missionID) {
 		return "", fmt.Errorf("invalid mission ID %q", missionID)
@@ -176,7 +178,7 @@ Read it: ethos mission show %s
 Execute within the write_set and budget constraints.
 `, missionID, missionID)
 
-	if tools == nil || slices.Contains(tools, "Bash") {
+	if slices.Contains(tools, "Bash") {
 		prompt += fmt.Sprintf("When done, submit your result: ethos mission result %s --file <path>\n", missionID)
 	}
 
