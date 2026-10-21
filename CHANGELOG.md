@@ -59,6 +59,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Go toolchain pinned to 1.26.10** (was 1.26.6). `govulncheck` reported
+  ten Go standard-library advisories reachable from beadle's code
+  (`GO-2026-6603`, `-6605`, `-6607`, `-6608`, `-6610` through `-6613`,
+  `-6617` in `net/http`, `mime/multipart`, and `crypto/tls`, all fixed in
+  1.26.9; `GO-2026-6809` in `crypto/x509`, fixed in 1.26.10), which turned
+  the `vulncheck` gate red on main and on every open PR. The toolchain
+  bump clears all ten. Rides with the `mark3labs/mcp-go` 1.1.0 → 1.2.1
+  and `astral-sh/setup-uv` 10.2.0 → 10.3.0 Dependabot bumps (#273, #274),
+  which could not merge until the gate was green.
+
 - **`internal/daemon.VerifySignature` now performs real GPG signature
   verification** (DES-034), replacing a hard-coded `return nil` that made
   the "zero agent authority" invariant unenforceable — anything trusting

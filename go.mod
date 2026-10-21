@@ -2,7 +2,7 @@ module github.com/punt-labs/beadle
 
 go 1.26.1
 
-toolchain go1.26.6
+toolchain go1.26.10
 
 require (
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
