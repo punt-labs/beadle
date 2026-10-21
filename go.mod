@@ -2,7 +2,7 @@ module github.com/punt-labs/beadle
 
 go 1.26.1
 
-toolchain go1.26.6
+toolchain go1.26.10
 
 require (
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
@@ -11,7 +11,7 @@ require (
 	github.com/emersion/go-smtp v0.25.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/mark3labs/mcp-go v1.1.0
+	github.com/mark3labs/mcp-go v1.2.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
