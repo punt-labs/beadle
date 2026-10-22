@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -246,26 +247,107 @@ func TestServerInstructions_Exposed(t *testing.T) {
 	assert.Equal(t, mcptools.ServerInstructions, out.Result.Instructions)
 }
 
-// TestSetPollInterval_3mSucceeds proves 3m is accepted as a valid polling
-// interval, keeping internal/mcp/poll_tools.go's accepted set in sync with
-// internal/email/config.go's validPollIntervals rather than drifting silently.
-func TestSetPollInterval_3mSucceeds(t *testing.T) {
-	s, _ := newMarkerServer(t)
-	callMCP(t, s, "initialize", 0, initParams())
+// TestSetPollInterval_AcceptsEveryValidInterval proves set_poll_interval
+// accepts every value in email.PollIntervals(), so a value added to that
+// slice is automatically covered here without touching this test again.
+func TestSetPollInterval_AcceptsEveryValidInterval(t *testing.T) {
+	for _, interval := range email.PollIntervals() {
+		t.Run(interval, func(t *testing.T) {
+			s, _ := newMarkerServer(t)
+			callMCP(t, s, "initialize", 0, initParams())
 
-	result := callTool(t, s, "set_poll_interval", map[string]any{"interval": "3m"})
-	assert.False(t, result.IsError, "expected 3m to be accepted")
+			result := callTool(t, s, "set_poll_interval", map[string]any{"interval": interval})
+			assert.False(t, result.IsError, "expected %q to be accepted", interval)
+		})
+	}
 }
 
 // TestSetPollInterval_InvalidErrorListsFullSet proves the error message for
-// an invalid interval names the full accepted set, including 2m and 3m — the
-// two surfaces (this error text and validPollIntervals) cannot drift silently.
+// an invalid interval names every element of email.PollIntervals() — the two
+// surfaces (this error text and validPollIntervals) cannot drift silently.
+// The fixture "bogus" is not a substring of any valid interval, so a match
+// here cannot be satisfied by the echoed input alone; the assertions still
+// check the text after the echoed %q prefix to be explicit about that.
 func TestSetPollInterval_InvalidErrorListsFullSet(t *testing.T) {
 	s, _ := newMarkerServer(t)
 	callMCP(t, s, "initialize", 0, initParams())
 
-	result := callTool(t, s, "set_poll_interval", map[string]any{"interval": "4m"})
+	result := callTool(t, s, "set_poll_interval", map[string]any{"interval": "bogus"})
 	require.True(t, result.IsError)
-	assert.Contains(t, result.text(), "2m")
-	assert.Contains(t, result.text(), "3m")
+	text := result.text()
+	_, rest, found := strings.Cut(text, ": must be ")
+	require.True(t, found, "expected %q to contain the %q separator", text, ": must be ")
+	for _, interval := range email.PollIntervals() {
+		assert.Contains(t, rest, interval)
+	}
+}
+
+// TestSetPollIntervalTool_DescriptionsListFullSet proves both set_poll_interval
+// surface strings — the tool description and the "interval" parameter
+// description — list every element of email.PollIntervals(), so the MCP
+// client-facing text cannot drift from the Go set.
+func TestSetPollIntervalTool_DescriptionsListFullSet(t *testing.T) {
+	s, _ := newMarkerServer(t)
+	callMCP(t, s, "initialize", 0, initParams())
+
+	resp := callMCP(t, s, "tools/list", 99, nil)
+	var out struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Properties map[string]struct {
+						Description string `json:"description"`
+					} `json:"properties"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resp, &out))
+
+	var tool *struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		InputSchema struct {
+			Properties map[string]struct {
+				Description string `json:"description"`
+			} `json:"properties"`
+		} `json:"inputSchema"`
+	}
+	for i := range out.Result.Tools {
+		if out.Result.Tools[i].Name == "set_poll_interval" {
+			tool = &out.Result.Tools[i]
+			break
+		}
+	}
+	require.NotNil(t, tool, "set_poll_interval not registered")
+
+	intervalProp, ok := tool.InputSchema.Properties["interval"]
+	require.True(t, ok, "interval property not found")
+
+	for _, interval := range email.PollIntervals() {
+		assert.Contains(t, tool.Description, interval)
+		assert.Contains(t, intervalProp.Description, interval)
+	}
+}
+
+// TestInboxDoc_ListsFullIntervalSet proves plugin/commands/inbox.md cannot
+// drift from email.PollIntervals(): every accepted interval must have an
+// argument-hint entry and a cron-expression row.
+func TestInboxDoc_ListsFullIntervalSet(t *testing.T) {
+	data, err := os.ReadFile("../../plugin/commands/inbox.md")
+	if err != nil {
+		t.Fatalf("reading plugin/commands/inbox.md: %v", err)
+	}
+	doc := string(data)
+
+	for _, interval := range email.PollIntervals() {
+		if !strings.Contains(doc, "| "+interval+" |") {
+			t.Fatalf("inbox.md argument-hint missing %q (expected \"| %s |\")", interval, interval)
+		}
+		if !strings.Contains(doc, "`"+interval+"` \u2192") {
+			t.Fatalf("inbox.md cron table missing a row for %q (expected \"`%s` \u2192\")", interval, interval)
+		}
+	}
 }
