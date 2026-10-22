@@ -105,13 +105,24 @@ including the real `ethos` CLI, runs for real inside a
   target — no build tag, no `-tags=integration`, no CI-only invocation. A
   developer's `make test`/`make check` and CI's `go test -race -count=1
   ./...` step run identically.
-- **`ethos` is a required tool**, pinned via `Makefile`'s `ETHOS_VERSION`
-  and installed automatically by the `tools-ethos` target, which `test`
-  depends on — a developer never runs `make tools-ethos` by hand except
-  implicitly, the first time `make test`/`make check` provisions it. CI
-  installs the same pinned binary via the same target before its `Test`
-  step and adds `$(go env GOPATH)/bin` to `$GITHUB_PATH` so
-  `exec.LookPath("ethos")` finds it.
+- **`ethos`, `beadle-email`, and `biff` are required tools**, each
+  installed automatically by a `test`-dependency target — a developer
+  never runs any of them by hand except implicitly, the first time
+  `make test`/`make check` provisions them.
+  `internal/daemon/templates_test.go`'s
+  `TestDefaultMCPRegistry_StdioCommandsAreReal` is the consumer: it runs
+  every stdio MCP registry entry's configured command with `--help` and
+  fails loudly, per the no-`t.Skip` rule above, if the binary is missing.
+  `ethos` is pinned via `Makefile`'s `ETHOS_VERSION` and installed by
+  `tools-ethos` (`go install`); `biff` is pinned via `BIFF_VERSION` and
+  installed by `tools-biff` (`uv tool install`); `beadle-email` has no
+  version pin — `tools-beadle-email` self-builds this branch's own
+  `./cmd/beadle-email` with `go build -o`, so the binary under test is
+  the code under review, not a prior release. CI installs the same
+  three tools via the same targets before its `Test` step and adds both
+  `$(go env GOPATH)/bin` (where `go install` places `ethos`) and the uv
+  tool bin directory (where `uv tool install` places `biff`) to
+  `$GITHUB_PATH` so `exec.LookPath` finds all three.
 
 ## Fastmail Test Config
 
