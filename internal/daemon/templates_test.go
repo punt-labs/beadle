@@ -164,8 +164,7 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 
 			out, err := exec.CommandContext(ctx, resolved, args...).CombinedOutput()
 			if err != nil {
-				var exitErr *exec.ExitError
-				if errors.As(err, &exitErr) {
+				if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 					t.Fatalf("registry entry %q: %s %s exited %d (want 0):\n%s",
 						name, cfg.Command, strings.Join(args, " "), exitErr.ExitCode(), out)
 				}
