@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -318,10 +319,34 @@ func mcpCommandPath(cmd string, args []string) string {
 	return strings.Join(append([]string{cmd}, args...), " ")
 }
 
+// ansiEscape matches a CSI (Control Sequence Introducer) escape sequence --
+// ESC '[' followed by zero or more parameter/intermediate bytes (0x30-0x3f)
+// and one final byte (0x40-0x7e), e.g. "\x1b[1m" (bold), "\x1b[1;33m"
+// (bold yellow), "\x1b[0m" (reset). This is the sequence family terminal
+// colour libraries emit; it is not a general ANSI/VT100 parser (OSC, DCS,
+// and other escape families are out of scope), but it is everything a
+// colour-capable terminal's SGR (Select Graphic Rendition) output uses.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
 // usageLine returns the usage window of out: the first line whose TRIMMED
 // form starts with the literal "Usage:", optionally joined with the next
 // non-blank line. Returns "" if no line's trimmed form starts with
 // "Usage:" at all.
+//
+// ANSI escape sequences are stripped from the whole output before it is
+// split into lines. A colour-capable terminal -- rich (ethos, Python's
+// click-based biff) and similar libraries detect this per-stream, not
+// per-host, so the same binary prints plain text to a pipe on one machine
+// and SGR-coloured text to a pipe on another (observed: this test passed
+// locally, where biff's "Usage: biff mcp [OPTIONS]" prints plain, and
+// failed in CI, where the GitHub Actions runner's pipe is detected as
+// colour-capable and the identical line prints as
+// "\x1b[1m \x1b[0m\x1b[1;33mUsage: \x1b[0m\x1b[1mbiff mcp [OPTIONS]\x1b[0m" --
+// the literal "Usage:" is no longer at the start of the trimmed line, it is
+// embedded after a leading escape-coloured space, so HasPrefix missed it
+// only in CI). Stripping escapes before the line scan means the anchor
+// sees exactly the text a human reading the terminal would see, regardless
+// of which host decided to colour it.
 //
 // Anchoring to a line START, not a Contains anywhere in the line, means a
 // sentence that merely mentions the word "Usage:" in passing before the
@@ -358,7 +383,7 @@ func mcpCommandPath(cmd string, args []string) string {
 // reject every runnable-parent server's registry entry on the "[command]"
 // placeholder alone, which is the opposite of what this test should do.
 func usageLine(out string) string {
-	lines := strings.Split(out, "\n")
+	lines := strings.Split(ansiEscape.ReplaceAllString(out, ""), "\n")
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "Usage:") {
@@ -499,6 +524,18 @@ func TestUsageLine(t *testing.T) {
 			name: "no line starts with Usage: at all",
 			out:  "USAGE: fakecli serve\n",
 			want: "",
+		},
+		{
+			// Exact shape observed from `biff mcp --help` on the GitHub
+			// Actions runner: rich detects the pipe as colour-capable and
+			// emits SGR escapes around a leading space and around "Usage: ",
+			// pushing the literal "Usage:" past the start of the raw line.
+			// Stripped of escapes this is the ordinary click leaf shape
+			// ("Usage: biff mcp [OPTIONS]"), so the want is identical to
+			// the plain click-leaf case above.
+			name: "CI colour-capable pipe: ANSI-escaped Usage: line (biff mcp --help on GitHub Actions)",
+			out:  "\x1b[1m \x1b[0m\x1b[1;33mUsage: \x1b[0m\x1b[1mbiff mcp [OPTIONS]\x1b[0m\n\n Start the biff MCP server (stdio transport).\n",
+			want: "Usage: biff mcp [OPTIONS]",
 		},
 	}
 	for _, tt := range tests {
