@@ -9,6 +9,7 @@ STATICCHECK_VERSION := v0.8.1
 GOLANGCI_LINT_VERSION := v2.12.2
 GOVULNCHECK_VERSION := v1.7.0
 ETHOS_VERSION := v4.16.0
+BIFF_VERSION := 1.19.0
 
 # Every shell script in the repo, discovered by shebang rather than by
 # extension or a hardcoded list: a script deployed under a literal binary
@@ -44,7 +45,7 @@ endef
 
 SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard -z 2>/dev/null | $(DISCOVER_SHELL_SCRIPTS))
 
-.PHONY: help lint lint-strict lint-shell test-shell-discovery vet staticcheck vulncheck docs tools-ethos test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
+.PHONY: help lint lint-strict lint-shell test-shell-discovery vet staticcheck vulncheck docs tools-ethos tools-biff tools-beadle-email test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -120,12 +121,23 @@ clean-tex: ## Remove LaTeX intermediate files
 tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4 tests)
 	go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
 
+tools-biff: ## Install the pinned biff CLI (needed by internal/daemon's MCP registry test)
+	uv tool install --force punt-biff==$(BIFF_VERSION)
+
+tools-beadle-email: ## Self-build this branch's beadle-email into GOINSTALL_BIN (same test)
+	mkdir -p $(GOINSTALL_BIN)
+	go build -o $(GOINSTALL_BIN)/beadle-email ./cmd/beadle-email/
+
 # go install places a binary in $GOBIN if set, else $GOPATH/bin -- neither is
 # guaranteed to already be on PATH. Without this, `make test` provisions
 # ethos successfully but exec.LookPath("ethos") still fails: tools-ethos
 # ran, the binary exists, and the remedy message points right back at the
 # command that was just run. Computed once, at parse time, so every `test`
 # invocation prepends the same directory `go install` actually used.
+# tools-beadle-email's self-build deliberately targets this same directory
+# rather than its own: the registry test needs exactly one PATH prefix to
+# find both, and building the branch's own binary here (rather than the
+# uv tool bin dir, which this repo does not control) keeps it so.
 #
 # GOPATH may be a colon-separated list (":"-joined on every GOOS, including
 # darwin and linux -- Go never uses the OS path-list separator here). `go
@@ -138,8 +150,15 @@ ifeq ($(GOINSTALL_BIN),)
 GOINSTALL_BIN := $(shell go env GOPATH | cut -d: -f1)/bin
 endif
 
-test: tools-ethos ## Run tests with race detection
-	PATH="$(GOINSTALL_BIN):$$PATH" go test -race -count=1 ./...
+# `uv tool install` places a binary in `uv tool dir --bin` -- on this host
+# ~/.local/bin, distinct from GOINSTALL_BIN above -- so biff needs its own
+# PATH prefix rather than reusing the Go one. Computed once, at parse time,
+# same as GOINSTALL_BIN, so every `test` invocation prepends the directory
+# `uv tool install` actually used.
+UVTOOL_BIN := $(shell uv tool dir --bin 2>/dev/null)
+
+test: tools-ethos tools-biff tools-beadle-email ## Run tests with race detection
+	PATH="$(GOINSTALL_BIN):$(UVTOOL_BIN):$$PATH" go test -race -count=1 ./...
 
 test-integration: ## Run integration tests (in-process IMAP/SMTP)
 	go test -race -count=1 -tags=integration ./...
