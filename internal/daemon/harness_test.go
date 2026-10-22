@@ -175,10 +175,11 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 
 			// Non-vacuous because storeDir is a fresh t.TempDir per subtest
 			// (never pre-populated) and the can-fail proof (beadle-fbhp:
-			// removing handler.go's Store: h.store wiring breaks this). A
-			// record's presence/Status is attributable to gate 1/2
-			// outcome, not the spawner: the negative rows prove a record
-			// would be written before either gate could fail them.
+			// removing handler.go's Store: h.store wiring breaks this).
+			// Gates 1 and 2 run inside OnNewMail BEFORE Executor.Run (and
+			// therefore any record) exists, so a record appears only after
+			// both pass: the negative rows prove no record is written when
+			// either gate rejects the message first.
 			entries, err := os.ReadDir(storeDir)
 			require.NoError(t, err)
 			if tt.wantRecordStatus == "" {
