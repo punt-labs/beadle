@@ -251,12 +251,16 @@ func TestServerInstructions_Exposed(t *testing.T) {
 
 // TestSetPollInterval_AcceptsEveryValidInterval proves set_poll_interval
 // accepts every value in email.PollIntervals(), so a value added to that
-// slice is automatically covered here without touching this test again.
+// slice is automatically covered here without touching this test again. Uses
+// setupHandlerWithPoller rather than newMarkerServer: set_poll_interval
+// actually starts the poller's background goroutine, and only
+// setupHandlerWithPoller registers t.Cleanup(poller.Stop) to stop it before
+// the subtest's IMAP fixture tears down — newMarkerServer's poller is never
+// started by the other tests in this file, so it has never needed that.
 func TestSetPollInterval_AcceptsEveryValidInterval(t *testing.T) {
 	for _, interval := range email.PollIntervals() {
 		t.Run(interval, func(t *testing.T) {
-			s, _ := newMarkerServer(t)
-			callMCP(t, s, "initialize", 0, initParams())
+			s, _, _ := setupHandlerWithPoller(t)
 
 			result := callTool(t, s, "set_poll_interval", map[string]any{"interval": interval})
 			assert.False(t, result.IsError, "expected %q to be accepted", interval)
@@ -348,17 +352,20 @@ func TestSetPollIntervalTool_DescriptionsListFullSet(t *testing.T) {
 // value, used to prove inbox.md's cron table matches the duration
 // validPollIntervals actually maps value to — not the duration value's own
 // spelling would parse to, which could silently disagree if the map ever
-// mismapped a key. t.Fatalf on any shape this derivation does not cover, so
-// a future interval value (e.g. a multi-hour-and-minute duration) forces
-// this function to be extended rather than silently passing an unverified
-// row.
+// mismapped a key. The "*/N * * * *" form only repeats every N minutes when N
+// divides 60 (e.g. */45 fires at :00 and :45, 45 minutes apart only once an
+// hour, not every 45 minutes), so that case requires 60%N == 0 and falls
+// through to the default otherwise. t.Fatalf on any shape this derivation
+// does not cover, so a future interval value (e.g. a multi-hour-and-minute
+// duration, or a sub-hour value that does not divide 60) forces this
+// function to be extended rather than silently passing an unverified row.
 func cronExpr(t *testing.T, value string) string {
 	t.Helper()
 	d, ok := (&email.Config{PollInterval: value}).PollDuration()
 	require.True(t, ok, "interval %q is not in validPollIntervals", value)
 
 	switch {
-	case d < time.Hour && d%time.Minute == 0:
+	case d < time.Hour && d%time.Minute == 0 && 60%int(d/time.Minute) == 0:
 		return fmt.Sprintf("*/%d * * * *", int(d/time.Minute))
 	case d == time.Hour:
 		return "0 * * * *"
