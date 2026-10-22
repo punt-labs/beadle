@@ -1,0 +1,40 @@
+mission: m-2026-10-22-050
+round: 1
+created_at: "2026-10-22T22:49:19Z"
+author: bwk
+verdict: pass
+confidence: 1
+files_changed:
+    - path: internal/daemon/templates_test.go
+      added: 362
+      removed: 1
+evidence:
+    - name: go test ./internal/daemon/... -run TestDefaultMCPRegistry_StdioCommandsAreReal -v (3 real subtests PASS)
+      status: pass
+    - name: 'go test ./internal/daemon/... -run TestMCPCommandPath -v (3 table cases PASS: serve, mission+show, bare command)'
+      status: pass
+    - name: 'go test ./internal/daemon/... -run TestUsageLine -v (6 table cases PASS: cobra leaf, click leaf, prose-only, mid-sentence Usage, click+trailing-prose, no Usage: line)'
+      status: pass
+    - name: 'go test ./internal/daemon/... -run TestIsLeafUsage -v (3 table cases PASS: cobra leaf true, cobra parent [command] false, click root COMMAND false)'
+      status: pass
+    - name: 'proof A: temporary {ethos, [mission,--json,nosuch]} refused on the per-element Args check'
+      status: pass
+    - name: 'proof B: temporary {ethos, [mission,nosuch]} (no flag, parent usage exits 0) fails on the placeholder check, window pasted'
+      status: pass
+    - name: 'proof C: temporary {ethos, ["",serve]} refused on the empty-element rule'
+      status: pass
+    - name: templates.go reverted with git checkout after each of the three probes; git diff --stat empty each time
+      status: pass
+    - name: go test ./internal/daemon/... -race -count=1 (full package, green)
+      status: pass
+    - name: make vet
+      status: pass
+    - name: make staticcheck
+      status: pass
+    - name: make test (full suite, race)
+      status: pass
+    - name: make docs
+      status: pass
+    - name: make lint-strict (6 pre-existing gosec G204 only, in internal/pgp and internal/testenv, none in templates_test.go)
+      status: pass
+prose: "Round 4 on bead beadle-fbhp. 047 closed at its cap: the evaluator\npassed it and the invariant reviewer found the same class a third\ntime, so this round changes approach rather than patching another\nparsing edge case. One commit, write set templates_test.go only,\nbuild on 1a3e351.\n\nRound 3's residue: a flag planted BETWEEN path elements\n(`ethos mission --json nosuch`) truncated mcpCommandPath's output\nto \"ethos mission\" and the command still exited 0 on the parent's\nown usage; the click branch's join appended a prose line\nunconditionally; \"Usage:\" was matched by Contains anywhere in a\nline, so prose mentioning the word before the real block could\nsatisfy it; and an empty Args element passed the leading-dash-only\nguard. The pattern across all four rounds was parsing flags and\nprose around the path -- this round removes the ambiguity instead.\n\n1. Args is now forbidden from containing a flag or an empty\nelement, checked per element:\n`require.True(t, a != \"\" && !strings.HasPrefix(a, \"-\"), ...)` for\nevery element of cfg.Args, with a message naming the reason no\npositional rule can be written correctly (a flag VALUE is\nindistinguishable by shape from a path element without parsing the\ntool's own flag grammar). mcpCommandPath is now simply cmd plus\nevery element of args, space-joined -- nothing to stop at, because\nthe check above guarantees no flag or empty element reaches it.\nTestMCPCommandPath drops the now-impossible leading-flag and\ntrailing-flag rows and pins exactly {serve}, {mission,show}, {}\n(bare command).\n\n2. Added isLeafUsage(window string) bool, which excludes a\nparent's or root's usage by STRUCTURE rather than by content: cobra\nmarks a non-leaf usage with the \"[command]\" placeholder\n(\"Usage:\\n  ethos mission [command]\"), click marks its root's with\n\"COMMAND\" (\"Usage: biff [OPTIONS] COMMAND [ARGS]...\"). Either\npresent means the window is an invitation to pick a subcommand, not\nhelp for a specific one -- this is what actually excludes\nroot/parent usage, since a parent's own \"Available Commands\" prose\ncan and does mention a real subcommand name. Corrected the comment's\nfalse claim that falling back to root usage exits 0: measured\ndirectly on this host, `ethos nosuch` and `biff nosuch` (unknown\nROOT subcommand) both exit 2; the exit-0 case that matters is a\ncobra PARENT's own usage on an unknown NESTED subcommand\n(`ethos mission nosuch` exits 0).\n\n3. usageLine now anchors to a line whose TrimSpace starts with the\nliteral \"Usage:\" (HasPrefix, not Contains, so a mid-sentence mention\nbefore the real block cannot match), and joins the next non-blank\nline ONLY when nothing already follows \"Usage:\" on that line --\ncobra needs the join (the path is on the next line); click does not\n(the path is already on the Usage: line), and the prior version's\nunconditional join pulled a click leaf's following prose line into\nthe window. The no-usage-line failure message now states the\nliteral requirement and names three frameworks that would not\nsatisfy it: urfave/cli (\"USAGE:\"), argparse (\"usage:\"), Go's flag\npackage (\"Usage of\").\n\nTable rows: TestUsageLine covers a cobra leaf, a click leaf,\nprose-only, \"Usage:\" mid-sentence before the real block (the real\nblock must still be returned), a click line with trailing prose\n(must not join), and no Usage: line at all (returns \"\"). \nTestIsLeafUsage covers a cobra leaf (true), a cobra parent naming\n\"[command]\" (false), and a click root naming \"COMMAND\" (false).\n\nProved all three required cases per the contract, each with a\ntemporary registry entry in templates.go, reverted immediately\nafter with git checkout (git diff --stat empty, confirmed three\nseparate times):\n\n  {ethos, [\"mission\",\"--json\",\"nosuch\"]} -- refused on the\n  per-element Args check:\n    templates_test.go:252: Error: Should be true\n    Messages: registry entry \"probe-between-flag\": Args [mission\n    --json nosuch] contains \"--json\" -- Args is the subcommand path\n    only, no flags and no empty elements (a flag value is\n    indistinguishable by shape from a path element, so no\n    positional rule can single one out correctly)\n\n  {ethos, [\"mission\",\"nosuch\"]} -- no flag, parent usage exits 0,\n  fails on the placeholder check:\n    templates_test.go:289: registry entry \"probe-parent-usage\":\n    ethos mission nosuch --help exited 0, but its usage window\n    \"Usage: ethos mission [command]\" names a subcommand placeholder\n    (\"[command]\" or \"COMMAND\") -- this is a PARENT's or ROOT's usage\n    on an unrecognized subcommand, not help for the entry's own leaf\n    command\n\n  {ethos, [\"\", \"serve\"]} -- refused on the empty-element rule:\n    templates_test.go:252: Error: Should be true\n    Messages: registry entry \"probe-empty-element\": Args [ serve]\n    contains \"\" -- Args is the subcommand path only, no flags and no\n    empty elements (a flag value is indistinguishable by shape from\n    a path element, so no positional rule can single one out\n    correctly)\n\nFull proof transcripts are saved under\n.tmp/missions/results/050-proof-{A,B,C}-*.txt (not part of the\ncommit). All scratch for this mission stayed under the worktree's\n.tmp/, never /tmp.\n\ngo test ./internal/daemon/... -run\nTestDefaultMCPRegistry_StdioCommandsAreReal -v (against the real,\nunmodified registry, after every probe was reverted): all three real\nsubtests (ethos, beadle-email, biff) PASS. go test -race -count=1\n./internal/daemon/ is green.\n\nWorktree gate, run from\n[REDACTED:path]/.claude/worktrees/mcp-serve,\nbranch fix/ethos-mcp-serve (building on 1a3e351): make vet and\nmake staticcheck clean; make test green across every package\nincluding internal/daemon (full race suite); make docs reports 0\nissues in 34 files; make lint-strict reports exactly 6 pre-existing\ngosec G204 findings, this run in internal/pgp/probe.go and\ninternal/testenv/gpg.go (the known ../../.. worktree-path artifact),\nconfirmed zero in templates_test.go by grep -c.\n\nNo push, no PR, no merge, no commit after this result submission.\n"

@@ -1,0 +1,53 @@
+mission_id: m-2026-10-22-016
+status: closed
+type: implement
+created_at: "2026-10-22T17:20:40Z"
+updated_at: "2026-10-22T17:44:52Z"
+closed_at: "2026-10-22T17:44:52Z"
+leader: claude
+worker: adb
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T17:20:40Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-5ma
+    files:
+        - .github/workflows/release.yml
+        - Makefile
+        - README.md
+        - CHANGELOG.md
+write_set:
+    - .github/workflows/release.yml
+    - Makefile
+    - CHANGELOG.md
+success_criteria:
+    - .github/workflows/release.yml builds both ./cmd/beadle-email/ and ./cmd/beadle-daemon/ for all four os/arch pairs with the same CGO_ENABLED=0 and -ldflags, naming them dist/beadle-email-<os>-<arch> and dist/beadle-daemon-<os>-<arch>; checksums.txt covers both sets; the release files glob includes dist/beadle-daemon-*.
+    - Makefile's dist target builds the same eight binaries with the same naming and includes all eight in checksums.txt, so make dist and the workflow produce identical asset sets; the clean target still removes both local binaries.
+    - 'A local `make dist` run completes and `ls dist` shows exactly eight binaries plus checksums.txt; paste the listing. Then `rm -rf dist` is NOT yours to run: leave dist/ in place for the leader to inspect (it is gitignored; confirm with git status that nothing under dist/ is tracked).'
+    - 'actionlint or `python3 -I -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))" .github/workflows/release.yml` parses clean; shellcheck-clean shell in the run blocks (make lint-shell does not cover workflow YAML, so check the loop body by eye against shell.md: quote every expansion).'
+    - 'CHANGELOG.md gets an Added entry under Unreleased: release assets now include beadle-daemon for the four platforms. Under 5 lines.'
+    - make check passes (see the worktree note in context).
+    - Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes. Conventional Commits form, fix(release) and chore(make). Stage only write-set files with git add by name. Do not push, do not touch PRs or merge — the leader does that.
+budget:
+    rounds: 2
+    reflection_after_each: true
+current_round: 1
+context: |
+    Bead beadle-5ma. release.yml builds and uploads only beadle-email;
+    cmd/beadle-daemon exists (Makefile build-daemon) but ships in no
+    release, so a user must build it from source. Mirror the existing
+    loop for the second binary; do not restructure the workflow, do not
+    bump action pins (they are SHA-pinned and current), and do not touch
+    install.sh or README (the install script installs beadle-email only
+    by design; a daemon installer is separate scope).
+
+    Worktree: [REDACTED:path]/.claude/worktrees/release-daemon
+    Branch: fix/release-daemon-binary (created from main, checked out there).
+    Edit and commit in that worktree. KNOWN ARTIFACT: `make lint-strict`
+    run from any git worktree reports six spurious gosec G204 findings
+    because golangci-lint reports paths as ../../..; they are not real.
+    Your diff touches no Go, so run `make vet`, `make test`, `make docs`,
+    `make lint-shell` from the worktree and `make lint-strict` expecting
+    ONLY those six pre-existing G204 lines. Report the output verbatim.
+    The leader runs the full gate from the main checkout before the PR.

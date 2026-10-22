@@ -1,0 +1,47 @@
+mission: m-2026-10-22-019
+round: 1
+created_at: "2026-10-22T17:44:36Z"
+author: bwk
+verdict: pass
+confidence: 1
+files_changed:
+    - path: internal/email/poller.go
+      added: 28
+      removed: 2
+    - path: internal/email/poller_test.go
+      added: 23
+      removed: 1
+evidence:
+    - name: go test -race -count=3 ./internal/email/... -run 'TestPoller_SetInterval_Invalid|TestPoller_Start_InvalidPollIntervalNamesFullSet' -v
+      status: pass
+    - name: go test -race -count=1 ./internal/email/... -v (full package)
+      status: pass
+    - name: make check
+      status: pass
+prose: |
+    Added validIntervalsList() to internal/email/poller.go: it renders
+    validPollIntervals (internal/email/config.go) as a single
+    comma-separated string, sorted ascending by duration rather than map
+    iteration order, which Go leaves undefined. Both of the file's
+    hand-written enumerations now build from this one function instead of
+    a third hardcoded copy: the Start config-validation error (formerly
+    "valid: 1m, 5m, 10m, 15m, 30m, 1h, 2h, n=disable") and
+    InvalidIntervalError.Error (formerly "must be 1m, 5m, 10m, 15m, 30m,
+    1h, 2h, or n"). The rendered text is "1m, 2m, 3m, 5m, 10m, 15m, 30m,
+    1h, 2h" in ascending order, verified directly.
+
+    Pinned both strings with tests: TestPoller_SetInterval_Invalid now
+    additionally asserts the error contains "2m" and "3m"; a new test,
+    TestPoller_Start_InvalidPollIntervalNamesFullSet, writes an
+    identity-scoped email.json with an invalid poll_interval, calls
+    Start(), and asserts the same on the config-validation error path.
+    Both pass under go test -race -count=3 (confirming the sort makes the
+    rendering deterministic, not an accident of one map iteration), and
+    the full internal/email package test suite is green.
+
+    One commit, 27cd08e, fix(email) scope, only the two write-set files
+    staged by name. README.md, CHANGELOG.md, and DESIGN.md (dirty from
+    the leader) were left untouched. Full make check from the main
+    checkout on fix/poll-intervals passes: golangci-lint 0 issues,
+    govulncheck 0 vulnerabilities in code, markdownlint 0 issues in 36
+    files, and go test -race -count=1 ./... green across every package.

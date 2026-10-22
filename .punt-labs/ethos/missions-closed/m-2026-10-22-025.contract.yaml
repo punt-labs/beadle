@@ -1,0 +1,48 @@
+mission_id: m-2026-10-22-025
+status: failed
+type: implement
+created_at: "2026-10-22T17:53:12Z"
+updated_at: "2026-10-22T18:07:20Z"
+closed_at: "2026-10-22T18:07:20Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T17:53:12Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-f34m
+    files:
+        - internal/daemon/templates_test.go
+        - internal/daemon/templates.go
+        - cmd/beadle-email/admin_cmd.go
+write_set:
+    - internal/daemon/templates_test.go
+    - cmd/beadle-email/admin_cmd.go
+success_criteria:
+    - TestDefaultMCPRegistry_StdioCommandsAreReal asserts that the combined output of each `<cmd> <args> --help` contains a usage line (case-insensitive "usage"), not only exit 0, because a server that swallows --help and starts also exits 0 on stdin EOF (measured on this host for ethos serve and beadle-email serve).
+    - The test checks ctx.Err() before the *exec.ExitError branch and fails with a message naming the 5s deadline and that --help may have started the server, so a timeout no longer reads as "exited -1".
+    - 'The test counts stdio entries actually exercised and require.Greater(count, 0) after the loop, so an all-http or empty registry cannot pass vacuously; and it calls require.NoError(t, cfg.Validate()) before skipping an entry with no Command, so the skip is justified by shape (the comment at the skip is corrected: it is for http entries only after Validate passes).'
+    - 'The t.Fatalf install remedy for a missing binary is per-command, not the ethos-only sentence: ethos via `make tools-ethos`; beadle-email via `make tools-beadle-email` (self-build of ./cmd/beadle-email); biff via `make tools-biff`. The doc comment above the test says the same three. (A follow-on adb mission adds those two Makefile targets and the CI steps; this mission only makes the test and its messages correct.)'
+    - 'cmd/beadle-email/admin_cmd.go: the serve command gets `Args: cobra.NoArgs` so `beadle-email serve bogus` is rejected like `ethos serve bogus` and `biff mcp bogus` are; add or extend a test in cmd/beadle-email proving a stray positional to serve exits non-zero. The test comment in templates_test.go documents that a wrong TRAILING positional still passes under --help on all three binaries (cobra and click handle help before arg validation) and that this test guards the leading subcommand only.'
+    - 'From the worktree: make vet, make staticcheck, make test, make docs clean; make lint-strict shows only the six known G204 artifact lines. Paste the TestDefaultMCPRegistry_StdioCommandsAreReal -v output showing three subtests ran.'
+    - 'Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes. Two commits: test(daemon) for templates_test.go, fix(beadle-email) for admin_cmd.go and its test. Stage by name. Do not push, do not touch PRs or merge — the leader does that.'
+budget:
+    rounds: 2
+    reflection_after_each: true
+current_round: 1
+context: |
+    Review findings on bead beadle-f34m (branch fix/ethos-mcp-serve) from
+    the silent-failure pass: the new registry exec test has an exit-0-only
+    pass condition that a started server also satisfies; a timeout reports
+    as a crash; it can pass vacuously; its skip comment is wrong for a
+    typo'd {} entry; and its install remedy names a target that only
+    provisions ethos. Separately, beadle-email serve accepts stray
+    positionals. Fix all of it here. Do not touch templates.go or any
+    Makefile/CI file; provisioning is the next mission.
+
+    Worktree: [REDACTED:path]/.claude/worktrees/mcp-serve
+    Branch: fix/ethos-mcp-serve. The store-wiring mission (harness_test.go)
+    has just closed in this worktree; build on its HEAD. KNOWN ARTIFACT:
+    `make lint-strict` from any worktree reports six spurious gosec G204
+    findings (../../.. path prefix); not real.

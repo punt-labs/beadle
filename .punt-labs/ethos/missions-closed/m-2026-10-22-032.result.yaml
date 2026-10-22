@@ -1,0 +1,121 @@
+mission: m-2026-10-22-032
+round: 1
+created_at: "2026-10-22T19:39:13Z"
+author: adb
+verdict: pass
+confidence: 0.95
+files_changed:
+    - path: Makefile
+      added: 57
+      removed: 8
+    - path: .github/workflows/test.yml
+      added: 12
+      removed: 4
+    - path: docs/TESTING.md
+      added: 36
+      removed: 7
+evidence:
+    - name: make vet (worktree)
+      status: pass
+    - name: make staticcheck (worktree)
+      status: pass
+    - name: 'make lint-shell (worktree): test-shell-discovery PASS, shellcheck clean'
+      status: pass
+    - name: 'make docs (worktree): markdownlint-cli2, 0 issues in 34 files'
+      status: pass
+    - name: 'make test (worktree, normal PATH): all 17 packages ok, including internal/daemon; tools-biff printed the skip line (already installed)'
+      status: pass
+    - name: 'make vulncheck (worktree): 0 vulnerabilities in code/imports'
+      status: pass
+    - name: 'make lint-strict (worktree): exactly 6 gosec G204 findings, all at ../../../ worktree-artifact paths in internal/pgp/probe.go and internal/testenv/gpg.go -- the documented known artifact; none in the three write-set files'
+      status: pass
+    - name: 'actionlint .github/workflows/test.yml: 0 findings (fixed an SC2129 "use one redirect" finding my first draft of the PATH step introduced)'
+      status: pass
+    - name: 'Fidelity 1 -- uv shimmed to exit 2 on `tool dir --bin` (old uv simulation): make test fails at tools-biff with "your uv is too old to support --bin; upgrade uv", before any go test runs. Exact output: "tools-biff: ''uv tool dir --bin'' produced no output -- your uv is too old to support --bin; upgrade uv" / "make: *** [Makefile:131: tools-biff] Error 1"'
+      status: pass
+    - name: 'Fidelity 2 -- uv absent from PATH entirely: make test fails at tools-biff with "uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff", before any go test runs'
+      status: pass
+    - name: 'Fidelity 3 -- scrubbed-PATH demo (env -i, PATH=/usr/local/go/bin:/usr/bin:/bin plus a uv-only shim dir, no pre-existing ~/.local/bin or ~/go/bin entries): make test provisions ethos (fresh go install), biff (skipped -- already pinned-version-installed from a prior host state, confirmed by uninstalling first and re-running to show a genuine install-then-skip transition), and beadle-email (self-build into per-checkout .tmp/bin); all 17 packages pass, including internal/daemon'
+      status: pass
+    - name: 'Fidelity 3b -- TestDefaultMCPRegistry_StdioCommandsAreReal -v under the same scrubbed PATH, WITH the provisioning PATH prefix prepended exactly as make test''s own PATH= line does: all three subtests (ethos, beadle-email, biff) PASS'
+      status: pass
+    - name: 'Fidelity 3c -- same test, same scrubbed PATH, WITHOUT the provisioning prefix: all three subtests FAIL with the exact per-binary remedy text from mcpCommandInstallRemedy, confirming the fix is load-bearing'
+      status: pass
+    - name: 'tools-biff idempotency demo: ran `make tools-biff` twice in a row with punt-biff v1.19.0 already installed -- both runs printed only the skip line, zero uv package operations. Also uninstalled punt-biff first and ran `make tools-biff` twice more: run 1 performed a real `uv tool install` (resolved/installed 77 packages, installed biff + biff-hook); run 2 printed only the skip line'
+      status: pass
+    - name: 'Concurrency structural fix: `make -n tools-beadle-email` run from both the main checkout and this worktree resolves BEADLE_EMAIL_BIN to two distinct $(CURDIR)/.tmp/bin paths -- no shared output directory between checkouts, by construction. strace -e trace=openat,rename,unlink on `go build -o .tmp/bin/beadle-email` confirms go build opens the target O_RDONLY (no O_TRUNC/O_CREAT observed on it, no rename) -- the write is genuinely non-atomic, matching the addendum''s premise; the fix is giving each checkout its own directory, not making the write atomic'
+      status: pass
+prose: |
+    File hashes (sha256) at submission:
+      Makefile: 87adab13abe895d4eef0a73c245e0e38239d3d28fca59e7e12e0709b75342369
+      .github/workflows/test.yml: c57fa68c8258f9c20537412ae43d5d4b228008c958ab0ffe7ba0c4a3eb9b0ef5
+      docs/TESTING.md: f66ca8ea732c13f61fea0f9d4affe74782dd63d88a6946c0423ae2cc0e7c5afe
+
+    Three commits on fix/ethos-mcp-serve, building on e438ec6:
+
+    3802f97 chore(make): close provisioning silent-failure gaps and the
+    host-global race
+      - tools-biff: fails loudly (uv absent -> install hint; `uv tool dir
+        --bin` empty -> upgrade hint, the lint-shell
+        `command -v X || { echo hint; exit 1; }` pattern) before
+        attempting install; skips the install entirely when
+        `uv tool list` already shows the pinned punt-biff version
+        (idempotent -- the --force unlink-then-link window only opens on
+        an actual version bump, not on every `make test`); kept --force
+        with a comment stating what it overrides (a non-uv-installed biff
+        already in the bin dir) now that the pin+skip-check is what
+        actually drives reinstall on version drift
+      - BEADLE_EMAIL_BIN := $(CURDIR)/.tmp/bin -- new per-checkout
+        variable; tools-beadle-email now builds into it instead of
+        GOINSTALL_BIN. $(CURDIR), not a bare relative path, because `go
+        test` chdirs each package's test binary into that package's own
+        source directory, and a relative PATH entry would resolve
+        against the wrong directory inside the test subprocess.
+        GOINSTALL_BIN keeps its original job (ethos only) and its
+        host-global sharing is still sound there, since every concurrent
+        `go install` of the pinned ethos version writes identical bytes;
+        the comment above it is rewritten to say so explicitly and to
+        retract the old "exactly one PATH prefix" argument, which held
+        only while both tools shared one directory
+      - test recipe's PATH: $(if $(UVTOOL_BIN),$(UVTOOL_BIN):,) so a
+        missing UVTOOL_BIN is omitted from PATH rather than spliced in as
+        an empty component (which both the shell and exec.LookPath treat
+        as cwd) -- defense in depth now that tools-biff's own recipe
+        already fails before `test`'s PATH= line is ever constructed via
+        the normal `make test` entry point
+
+    5ab07c0 chore(ci): add the per-checkout bin dir to GITHUB_PATH
+      - $GITHUB_WORKSPACE/.tmp/bin prepended to GITHUB_PATH alongside the
+        existing GOPATH/bin and uv tool bin dir entries, matching
+        BEADLE_EMAIL_BIN's new per-checkout home
+      - fixed an SC2129 shellcheck finding (actionlint catches it)
+        introduced by the three-redirect PATH step: grouped into one
+        `{ ... } >> "$GITHUB_PATH"` block
+
+    8e85152 docs(testing): document the host-global vs per-checkout
+    provisioning split
+      - states explicitly that tools-ethos/tools-biff still write to
+        shared, host-global directories (safe because both are
+        version-pinned -- concurrent installs write identical bytes) and
+        that this is NOT true of tools-beadle-email, whose content is
+        per-branch
+      - restates the "runs identically" caveat: holds through `make
+        test`/`make check` only -- a bare `go test ./...` has no
+        `.tmp/bin` on PATH and falls back to whatever `beadle-email` the
+        shell's own PATH resolves first
+      - names the one remaining race honestly: a version-pin bump on
+        tools-ethos or tools-biff racing a concurrent `make test` on the
+        same host can still interleave; tools-beadle-email's per-checkout
+        directory is immune by construction
+
+    Demo: ran every evidence item above against this worktree at HEAD
+    8e85152 (built on e438ec6, which the leader confirmed adds -ldflags
+    to the self-build rather than the contract's stated 5befda6). All
+    scratch shims (old-uv exit-2 shim, uv-symlink-only shim for the
+    scrubbed-PATH demo) built under
+    [REDACTED:path]/.tmp/mission032-scratch/,
+    never in the tree; not committed, not referenced by any tracked
+    file. .tmp/bin build artifacts removed from the worktree after every
+    demo run; `git status --short` clean before each commit and clean
+    now. Did not touch internal/daemon/templates_test.go or any other
+    file outside the write set. Not pushed; no PR or merge touched.

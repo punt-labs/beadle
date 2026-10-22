@@ -1,0 +1,146 @@
+mission: m-2026-10-22-028
+round: 1
+created_at: "2026-10-22T18:08:35Z"
+author: bwk
+verdict: pass
+confidence: 1
+files_changed:
+    - path: internal/daemon/templates_test.go
+      added: 100
+      removed: 1
+    - path: cmd/beadle-email/admin_cmd.go
+      added: 1
+      removed: 0
+    - path: cmd/beadle-email/admin_cmd_test.go
+      added: 14
+      removed: 0
+evidence:
+    - name: 'go test ./internal/daemon/... -run TestDefaultMCPRegistry_StdioCommandsAreReal -v (3 subtests: ethos, beadle-email, biff, all pass)'
+      status: pass
+    - name: usage-text check verified against a disposable fake binary that swallows --help and exits 0 (not committed)
+      status: pass
+    - name: 'timeout check verified against a disposable hanging binary: ctx.Err()="context deadline exceeded", underlying err="signal: killed" (not committed)'
+      status: pass
+    - name: go test ./cmd/beadle-email/... -run TestServeCmd_RejectsStrayPositional -v (pass, rejects via rootCmd.Execute())
+      status: pass
+    - name: go test ./internal/daemon/... -race -count=1 (full package, green)
+      status: pass
+    - name: go test ./cmd/beadle-email/... -race -count=1 (full package, green)
+      status: pass
+    - name: make vet
+      status: pass
+    - name: make staticcheck
+      status: pass
+    - name: make test (full suite, race)
+      status: pass
+    - name: make docs
+      status: pass
+    - name: make lint-strict (6 pre-existing gosec G204 only, none in the 3 write-set files)
+      status: pass
+prose: |
+    This mission records work already committed as 80366ce and 06115c9
+    on fix/ethos-mcp-serve, per its own success criteria: no new code.
+    It exists to cover admin_cmd_test.go, the file m-2026-10-22-025's
+    write set omitted (that mission closed failed on an escalate at
+    exactly this gap, a contract defect on the leader's side, not a
+    worker error).
+
+    Commit 80366ce (test(daemon), internal/daemon/templates_test.go)
+    addresses all five silent-failure findings on
+    TestDefaultMCPRegistry_StdioCommandsAreReal:
+
+    1. Usage-line requirement. Measured directly on this host:
+       `echo -n "" | timeout 2 ethos serve --help` and
+       `echo -n "" | timeout 2 beadle-email serve --help` both exit 0 --
+       neither binary special-cases --help in its RunE, so cobra parses
+       the flag and falls through to the server body, which returns nil
+       once its stdin pipe (CombinedOutput's pipe) reaches EOF. Exit 0
+       alone therefore cannot distinguish "printed usage and exited"
+       from "started the server." Added
+       `strings.Contains(strings.ToLower(string(out)), "usage")` as a
+       second requirement. Verified this specifically catches the gap:
+       built a disposable `fakeserver` script that reads stdin to EOF
+       and exits 0 with no output, confirmed the usage check flags it
+       (built under /tmp for the proof only, not committed).
+
+    2. Timeout misread as crash. ctx.Err() is now checked immediately
+       after CombinedOutput returns, before the *exec.ExitError branch,
+       and fails with a message naming the 5s deadline and that --help
+       may have started the server. Verified against a disposable Go
+       binary that sleeps 100s after reading stdin: with a 1s timeout,
+       ctx.Err() reports "context deadline exceeded" while the
+       underlying CombinedOutput error is "signal: killed" (what the
+       original code would have read as an *exec.ExitError with
+       ExitCode() -1, i.e. "exited -1") -- confirming the new check
+       intercepts that case before it reaches the exit-code branch.
+
+    3. Vacuous skip / wrong skip justification. cfg.Validate() is now
+       called on every entry BEFORE the `cfg.Command == ""` skip, so a
+       typo'd {} entry (also Command == "") fails loudly via Validate
+       instead of silently matching the http-entry skip. The skip's
+       comment now says "Validate above confirmed this is a deliberate
+       http shape," not just "nothing to exec."
+
+    4. Vacuous pass. The loop now counts `exercised` stdio entries and
+       the test ends with
+       `require.Greater(t, exercised, 0, ...)` so an all-http or
+       emptied registry fails loudly instead of reporting PASS with
+       zero subtests.
+
+    5. Ethos-only install remedy. Replaced the inline ethos-specific
+       sentence with `mcpCommandInstallRemedy(cmd)`, a small switch
+       naming the actual Makefile target per binary: tools-ethos,
+       tools-beadle-email (noted as a self-build of ./cmd/beadle-email),
+       tools-biff. Per the contract, those two new Makefile targets and
+       their CI wiring are explicitly NOT in this mission -- did not
+       touch templates.go, any Makefile, or any CI file.
+
+    Required -v output showing three subtests ran:
+
+      === RUN   TestDefaultMCPRegistry_StdioCommandsAreReal
+      === RUN   TestDefaultMCPRegistry_StdioCommandsAreReal/ethos
+      === RUN   TestDefaultMCPRegistry_StdioCommandsAreReal/beadle-email
+      === RUN   TestDefaultMCPRegistry_StdioCommandsAreReal/biff
+      --- PASS: TestDefaultMCPRegistry_StdioCommandsAreReal (0.71s)
+          --- PASS: TestDefaultMCPRegistry_StdioCommandsAreReal/ethos (0.00s)
+          --- PASS: TestDefaultMCPRegistry_StdioCommandsAreReal/beadle-email (0.01s)
+          --- PASS: TestDefaultMCPRegistry_StdioCommandsAreReal/biff (0.70s)
+      PASS
+      ok  	github.com/punt-labs/beadle/internal/daemon	(cached)
+
+    Commit 06115c9 (fix(beadle-email), admin_cmd.go + admin_cmd_test.go)
+    adds Args: cobra.NoArgs to serveCmd. Measured `beadle-email serve
+    bogus` on this host before the fix: it silently started the real
+    MCP server (IMAP poll tick logged) and exited 0 on stdin EOF, unlike
+    `ethos serve bogus` ("unknown command", exit 2) and `biff mcp bogus`
+    ("Got unexpected extra argument(s)", exit 2). Confirmed via cobra's
+    own source (command.go's execute: ValidateArgs at line 968 runs
+    before RunE at line 1014) that the rejection happens before any IMAP
+    dial or network I/O. Added TestServeCmd_RejectsStrayPositional in
+    admin_cmd_test.go, driven through the real rootCmd.Execute() entry
+    point via the existing runRootCmd helper (not a bespoke SetArgs
+    dance), asserting a non-nil error containing "bogus". This is the
+    file this mission's write set now covers that m-2026-10-22-025's did
+    not.
+
+    templates_test.go documents (per the contract) that a wrong TRAILING
+    positional on a command like `ethos serve bogus --help` would still
+    pass under --help on all three binaries, since both cobra and click
+    resolve --help before arg validation; this guards the
+    leading-subcommand shape only, which is exactly the shape the
+    original defect (ethos mcp) had.
+
+    No new code in this mission, as its own criterion requires -- both
+    commits (80366ce, 06115c9) predate this mission's creation.
+
+    Worktree gate, run from
+    [REDACTED:path]/.claude/worktrees/mcp-serve,
+    branch fix/ethos-mcp-serve (building on b6981f3): make vet and
+    make staticcheck clean; make test green across every package
+    including internal/daemon and cmd/beadle-email (full race suite);
+    make docs reports 0 issues in 34 files; make lint-strict reports
+    exactly 6 pre-existing gosec G204 findings (the known ../../..
+    worktree-path artifact), confirmed zero across the three write-set
+    files by grep -c.
+
+    No push, no PR, no merge, no commit for this mission.

@@ -1,0 +1,73 @@
+mission: m-2026-10-22-023
+round: 1
+created_at: "2026-10-22T17:54:25Z"
+author: bwk
+verdict: pass
+confidence: 1
+files_changed:
+    - path: internal/email/poller.go
+      added: 36
+      removed: 2
+    - path: internal/email/poller_test.go
+      added: 32
+      removed: 1
+    - path: internal/mcp/poll_tools.go
+      added: 4
+      removed: 3
+    - path: internal/mcp/poll_tools_test.go
+      added: 106
+      removed: 0
+evidence:
+    - name: go test -race -count=1 ./internal/email/... -run 'TestPoller_SetInterval_Invalid|TestPoller_Start_InvalidPollIntervalNamesFullSet|TestPollIntervals_SortedAscending' -v
+      status: pass
+    - name: go test -race -count=1 ./internal/mcp/... -run 'TestSetPollInterval_AcceptsEveryValidInterval|TestSetPollInterval_InvalidErrorListsFullSet|TestSetPollIntervalTool_DescriptionsListFullSet|TestInboxDoc_ListsFullIntervalSet' -v
+      status: pass
+    - name: full internal/email and internal/mcp package test runs
+      status: pass
+    - name: 'fidelity check: temporarily broke plugin/commands/inbox.md''s 2m argument-hint entry and confirmed TestInboxDoc_ListsFullIntervalSet fails with the expected message, then restored the file (git status clean on inbox.md)'
+      status: pass
+    - name: make check
+      status: pass
+prose: |
+    internal/email/poller.go and poller_test.go were already complete from
+    the prior round (commit 5d3beb2, folded into this mission's write set
+    per the leader): PollIntervals() []string and PollIntervalList()
+    string are exported, both error strings build from PollIntervalList(),
+    and the two literal "2m"/"3m" assertions are loops over PollIntervals().
+    TestPollIntervals_SortedAscending pins the exact expected order.
+    Nothing further was needed here; verified all three tests still pass.
+
+    internal/mcp/poll_tools.go: replaced all three hand-written interval
+    enumerations (the set_poll_interval tool description, its "interval"
+    parameter description, and the invalid-interval error) with
+    email.PollIntervalList(). No literal enumeration of the set remains
+    in the file (grepped for confirmation).
+
+    internal/mcp/poll_tools_test.go: replaced TestSetPollInterval_3mSucceeds
+    with TestSetPollInterval_AcceptsEveryValidInterval, a table-driven test
+    (t.Run per value) ranging over email.PollIntervals(). Rewrote
+    TestSetPollInterval_InvalidErrorListsFullSet to use the fixture "bogus"
+    (not a substring of any valid interval) and assert on the error text
+    after the echoed input (via strings.Cut on ": must be "), so the
+    fixture alone cannot satisfy the assertion. Added
+    TestSetPollIntervalTool_DescriptionsListFullSet, which reads
+    tools/list and checks both the tool description and the "interval"
+    property description against every element of email.PollIntervals().
+    Added TestInboxDoc_ListsFullIntervalSet, which reads
+    ../../plugin/commands/inbox.md relative to the package directory and
+    t.Fatalf's (never t.Skip) if any interval is missing its
+    argument-hint entry ("| v |") or its cron-table row ("`v` →").
+    Verified this test actually catches drift: temporarily broke the
+    doc's 2m entry, confirmed the test failed with the expected message,
+    then restored the file (inbox.md shows no diff — it is outside this
+    mission's write set).
+
+    Two commits, one per package per the contract: 5d3beb2 (fix(email),
+    from the prior round, already satisfying this round's email
+    requirements) and 38a061f (fix(mcp), this round's work). Only the
+    two mcp write-set files staged by name in 38a061f. README.md,
+    CHANGELOG.md, DESIGN.md left untouched throughout. Full make check
+    from the main checkout on fix/poll-intervals passes: golangci-lint 0
+    issues, govulncheck 0 vulnerabilities in code, markdownlint 0 issues
+    in 36 files, and go test -race -count=1 ./... green across every
+    package.

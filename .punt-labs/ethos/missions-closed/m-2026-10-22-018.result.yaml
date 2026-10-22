@@ -1,0 +1,33 @@
+mission: m-2026-10-22-018
+round: 1
+created_at: "2026-10-22T17:32:38Z"
+author: bwk
+verdict: pass
+confidence: 1
+files_changed:
+    - path: internal/email/poller_test.go
+      added: 1
+      removed: 1
+    - path: internal/mcp/handler_test.go
+      added: 1
+      removed: 1
+evidence:
+    - name: go test -race -count=1 ./internal/email/... -run TestPoller_SetInterval_Invalid -v
+      status: pass
+    - name: go test -race -count=1 ./internal/mcp/... -run TestHandler_SetPollInterval_Invalid -v
+      status: pass
+    - name: make check
+      status: pass
+prose: |
+    Swapped the invalid-interval fixture from "3m" to "4m" in
+    TestPoller_SetInterval_Invalid (internal/email/poller_test.go:56) and
+    TestHandler_SetPollInterval_Invalid (internal/mcp/handler_test.go:1105).
+    3m became valid when m-2026-10-22-014 added it to validPollIntervals;
+    4m stays invalid under the new set, matching the boundary case in
+    internal/email/config_test.go. No other assertion in either file
+    changed. One commit, a3e2b19, test(email,mcp) scope, only the two
+    write-set files staged by name. Full `make check` from the main
+    checkout on fix/poll-intervals passes: lint, staticcheck,
+    golangci-lint (0 issues), govulncheck (0 vulnerabilities in code),
+    markdownlint (0 issues in 36 files), and `go test -race -count=1
+    ./...` all green across every package.

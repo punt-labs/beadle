@@ -1,0 +1,51 @@
+mission_id: m-2026-10-22-032
+status: closed
+type: implement
+created_at: "2026-10-22T18:29:22Z"
+updated_at: "2026-10-22T19:48:06Z"
+closed_at: "2026-10-22T19:48:06Z"
+leader: claude
+worker: adb
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T18:29:22Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-f34m
+    files:
+        - Makefile
+        - .github/workflows/test.yml
+        - docs/TESTING.md
+write_set:
+    - Makefile
+    - .github/workflows/test.yml
+    - docs/TESTING.md
+success_criteria:
+    - 'UVTOOL_BIN can no longer go silently empty: drop the 2>/dev/null on `uv tool dir --bin`, and tools-biff fails loudly with an install hint when uv is absent (the lint-shell pattern at Makefile ~line 69: command -v uv || { echo hint; exit 1; }) and when UVTOOL_BIN is empty after uv is present (an old uv without --bin). The test recipe''s PATH never contains an empty component: use $(if $(UVTOOL_BIN),$(UVTOOL_BIN):,) or equivalent so a missing dir is omitted, not inserted as "".'
+    - 'docs/TESTING.md states, in the required-tools bullet, that tools-beadle-email overwrites $(GOINSTALL_BIN)/beadle-email on every `make test` (so a developer''s own go install copy is replaced by the branch build), and that the "runs identically" claim holds through `make test` only: a bare `go test ./...` resolves whatever beadle-email is first on the shell PATH, which may be a prior release.'
+    - The --force flag on tools-biff either carries a one-line comment stating what it overrides (a non-uv biff already in the bin dir; the ==pin handles version drift) or is dropped; choose and say which.
+    - 'Fidelity: with uv shadowed by a scratch shim that exits 2 on `tool dir --bin` (simulating an old uv), `make test` fails at tools-biff with the hint text, before any go test runs; paste that output. With uv absent from PATH entirely, same. With uv present, `make test` still passes under the scrubbed PATH demo from m-2026-10-22-029.'
+    - actionlint clean on test.yml if touched; docs/TESTING.md lints by name; worktree gate as in context.
+    - Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes. chore(make) and docs(testing). Stage by name. Do not push, do not touch PRs or merge — the leader does that. Do not commit after submitting the result.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 2 on the provisioning work (m-2026-10-22-029, bead beadle-f34m),
+    branch fix/ethos-mcp-serve, worktree
+    [REDACTED:path]/.claude/worktrees/mcp-serve, HEAD
+    5befda6. The silent-failure review found: UVTOOL_BIN := $(shell uv tool
+    dir --bin 2>/dev/null) goes empty when uv is too old for --bin, leaving
+    PATH="$GOINSTALL_BIN::$PATH" (empty component = cwd) and reproducing
+    the remedy-points-at-the-target-you-just-ran failure the Makefile
+    comment says the prefix exists to prevent (HIGH); tools-beadle-email
+    clobbers a developer's go install copy without the docs saying so
+    (MEDIUM); tools-biff has no uv-missing remedy (MEDIUM); --force's real
+    effect is undocumented (LOW); TESTING.md's "run identically" holds only
+    via make test (LOW). Also observed by the leader: two concurrent `make
+    test` runs on one host race on the shared bin dirs; the reviewer judged
+    the CI path sound and the single-writer assumption acceptable, so no
+    change for that, but TESTING.md may note it in one sentence if you
+    find a natural place. KNOWN ARTIFACT: lint-strict from a worktree
+    reports six spurious G204 lines; not real.

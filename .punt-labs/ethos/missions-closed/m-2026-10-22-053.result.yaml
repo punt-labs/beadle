@@ -1,0 +1,164 @@
+mission: m-2026-10-22-053
+round: 1
+created_at: "2026-10-22T23:10:26Z"
+author: bwk
+verdict: pass
+confidence: 1
+files_changed:
+    - path: internal/daemon/templates_test.go
+      added: 402
+      removed: 1
+evidence:
+    - name: go test ./internal/daemon/... -run TestDefaultMCPRegistry_StdioCommandsAreReal -v (3 real subtests PASS)
+      status: pass
+    - name: go test ./internal/daemon/... -run TestMCPCommandPath -v (4 table cases PASS, including the new no-trim whitespace row)
+      status: pass
+    - name: go test ./internal/daemon/... -run TestUsageLine -v (6 table cases PASS)
+      status: pass
+    - name: go test ./internal/daemon/... -run TestIsLeafUsage -v (3 table cases PASS)
+      status: pass
+    - name: 'proof 1: temporary {ethos,[serve," "]} entry refused on the per-element rule (whitespace-only element)'
+      status: pass
+    - name: 'proof 2: temporary {ethos,[mission]} entry (non-runnable group, exits 0, path contained) fails on the placeholder check, window pasted'
+      status: pass
+    - name: templates.go reverted with git checkout after each of the two probes; git diff --stat empty both times
+      status: pass
+    - name: go test ./internal/daemon/... -race -count=1 (full package, green)
+      status: pass
+    - name: make vet
+      status: pass
+    - name: make staticcheck
+      status: pass
+    - name: make test (full suite, race)
+      status: pass
+    - name: make docs
+      status: pass
+    - name: make lint-strict (0 issues this run -- within the known-artifact bound of at most six spurious G204 lines, none in templates_test.go)
+      status: pass
+prose: |
+    Round 5 on bead beadle-fbhp. 050 closed: both reviewers passed the
+    structural fix, the parent/root class is closed. What remained was
+    one constructible gap (whitespace) and four prose errors in the
+    comments describing rounds 4's fix. One commit, write set
+    templates_test.go only, build on b652336.
+
+    Whitespace gap: a whitespace-only Args element (e.g. {"serve", " "})
+    passed the old per-element guard (a != "" && !HasPrefix(a, "-")),
+    and mcpCommandPath's own strings.TrimSpace then collapsed the joined
+    path "ethos serve " to "ethos serve" -- identical to the real leaf
+    entry {"serve"} -- even though `ethos serve " "` is a DIFFERENT,
+    failing invocation at runtime. Measured directly on this host:
+    `ethos serve " "` exits 2 ("unknown command \" \" for \"ethos
+    serve\""). Fixed the rule to
+    `a != "" && a == strings.TrimSpace(a) && !strings.HasPrefix(a, "-")`
+    and removed mcpCommandPath's TrimSpace entirely (now a plain
+    strings.Join with no normalization), so a whitespace-only element
+    can neither pass the guard nor be silently repaired by the join.
+    TestMCPCommandPath gained a row pinning the no-trim behavior:
+    {"serve", " "} -> "ethos serve  " (the literal, untrimmed join).
+
+    Proved per the contract: temporarily added {Command: "ethos", Args:
+    ["serve", " "]} to DefaultMCPRegistry in templates.go. The new
+    per-element rule failed on it:
+
+      templates_test.go:255: Error: Should be true
+      Messages: registry entry "probe-whitespace": Args [serve  ]
+      contains " " -- Args is the subcommand path only, no flags and no
+      empty or whitespace-only elements (a flag value is
+      indistinguishable by shape from a path element, so no positional
+      rule can single one out correctly)
+
+    Reverted templates.go with git checkout; git diff --stat produced no
+    output (confirmed empty).
+
+    Four prose fixes, all in templates_test.go's comments:
+
+    1. The main comment's bullet on isLeafUsage overstated its role,
+    crediting it with excluding BOTH a non-runnable group's usage
+    ({ethos, ["mission"]}) AND an unknown nested subcommand under a real
+    leaf ({ethos, ["mission", "nosuch"]}). With flags now banned from
+    Args (round 4), the second case is already rejected by the path
+    check alone: `ethos mission nosuch --help` prints the SAME parent
+    usage window as `ethos mission --help` ("Usage: ethos mission
+    [command]"), which does not contain the configured path "ethos
+    mission nosuch" -- isLeafUsage plays no role there. Reworded to
+    credit each check for what it actually does, and added the
+    non-runnable-group case as the proof isLeafUsage actually needs
+    (below), since the path check genuinely cannot reject that one on
+    its own (the window DOES contain "ethos mission").
+
+    Proved per the contract: temporarily added {Command: "ethos", Args:
+    ["mission"]} to templates.go. The command exits 0 (ethos mission
+    with no subcommand prints its own group usage and a command list)
+    and the path check passes (the window literally contains "ethos
+    mission"), but isLeafUsage correctly rejects it on the "[command]"
+    placeholder:
+
+      templates_test.go:292: registry entry "probe-nonrunnable-group":
+      ethos mission --help exited 0, but its usage window "Usage: ethos
+      mission [command]" names a subcommand placeholder ("[command]" or
+      "COMMAND") -- this is usually a non-runnable group's usage,
+      inviting a subcommand choice rather than naming one specific
+      command, but a LEAF command can legitimately print one of these
+      words too...
+
+    Reverted templates.go with git checkout; git diff --stat produced no
+    output (confirmed empty, checked separately from proof 1).
+
+    2. Documented in usageLine's doc comment why its window is
+    deliberately ONE line (or "Usage:" plus one joined line) and never
+    more, even though cobra prints TWO usage lines for a command that is
+    both runnable and a parent of subcommands
+    ("Usage:\n  x [flags]\n  x [command]"). Verified this shape exists
+    in the real ethos binary: `ethos identity --help` prints exactly
+    "Usage:\n  ethos identity [flags]\n  ethos identity [command]".
+    usageLine reading only the first line means the placeholder from the
+    second never reaches isLeafUsage, so a runnable parent is correctly
+    treated as a leaf; widening the join to read both lines would reject
+    every runnable-parent server's registry entry on the placeholder
+    alone, which this test must not do (a runnable parent is a real
+    server the entry is entitled to invoke).
+
+    3. The placeholder-check failure message previously asserted the
+    command WAS a parent's or root's usage. Corrected: it no longer
+    asserts a diagnosis the test cannot actually prove, since a LEAF
+    command can legitimately print "[command]" or "COMMAND" too (cobra's
+    own help command, a click metavar, clap's USAGE line) -- the message
+    now says a placeholder was found, that this usually means a group,
+    and flags the ambiguity loudly rather than silently assuming the
+    group case.
+
+    4. Corrected the false "unknown ROOT subcommand exits 2" claim,
+    which implied agreement across all three tools. Measured directly:
+    `beadle-email nosuch` exits 1, not 2 ("Error: unknown command
+    \"nosuch\" for \"beadle-email\"", exit 1); ethos and biff both still
+    exit 2. isLeafUsage's doc comment now states each tool's measured
+    exit code individually and is explicit that nothing in this test
+    enforces any of them -- the figures are cited only to explain why
+    isLeafUsage never needs to resolve a root-subcommand ambiguity for
+    these three tools (none of them exits 0 on an unknown root
+    subcommand, so there is no leaf-vs-non-leaf question to answer
+    there).
+
+    Both proof transcripts saved under
+    .tmp/missions/results/053-proof-{whitespace,nonrunnable-group}.txt
+    (not part of the commit). All scratch for this mission stayed under
+    the worktree's .tmp/, never /tmp.
+
+    go test ./internal/daemon/... -run
+    TestDefaultMCPRegistry_StdioCommandsAreReal -v (against the real,
+    unmodified registry, after both probes were reverted): all three
+    real subtests (ethos, beadle-email, biff) PASS. go test -race
+    -count=1 ./internal/daemon/ is green.
+
+    Worktree gate, run from
+    [REDACTED:path]/.claude/worktrees/mcp-serve,
+    branch fix/ethos-mcp-serve (building on b652336): make vet and
+    make staticcheck clean; make test green across every package
+    including internal/daemon (full race suite); make docs reports 0
+    issues in 34 files; make lint-strict reports 0 issues this run --
+    within the known artifact's bound of at most six spurious G204
+    lines whose location shifts between invocations -- confirmed none
+    in templates_test.go.
+
+    No push, no PR, no merge, no commit after this result submission.

@@ -1,0 +1,80 @@
+mission: m-2026-10-22-022
+round: 1
+created_at: "2026-10-22T17:52:32Z"
+author: bwk
+verdict: pass
+confidence: 1
+files_changed:
+    - path: internal/daemon/harness_test.go
+      added: 26
+      removed: 1
+evidence:
+    - name: go test ./internal/daemon/... -run TestOnNewMail_EndToEnd -v (green)
+      status: pass
+    - name: 'can-fail proof: Store: h.store removed from handler.go, test fails'
+      status: pass
+    - name: go test ./internal/daemon/... -race -count=1 (full package, green)
+      status: pass
+    - name: make vet
+      status: pass
+    - name: make staticcheck
+      status: pass
+    - name: make test (full suite, race)
+      status: pass
+    - name: make docs
+      status: pass
+    - name: make lint-strict (6 pre-existing gosec G204 only, none in harness_test.go)
+      status: pass
+prose: |
+    handler.go's OnNewMail builds its Executor with `Store: h.store`, but
+    TestOnNewMail_EndToEnd passed nil for the store argument to
+    NewMailHandler, so that field's effect was never asserted -- a
+    refactor dropping it would have left the suite green.
+
+    Changed the positive/negative table-driven test's shared body (all
+    three subtests share one NewMailHandler call site at line ~150) to
+    construct a real *daemon.PipelineStore on a t.TempDir() and pass it
+    instead of nil. After handler.Stop(), read the store directory:
+
+      - Positive case (all four gates pass): asserts exactly one
+        <id>.json file exists, unmarshals it, and asserts Status
+        "completed" and Email.From == "jim@punt-labs.com" -- the pattern
+        in persist_test.go's TestExecutor_Run_PersistsToDisk.
+      - Negative cases (gate 1: unsigned message; gate 2: rw- sender):
+        assert the store directory is EMPTY, so the persistence
+        assertion is tied to the pipeline having actually run and
+        cannot pass vacuously.
+
+    Can-fail proof (per the contract): temporarily removed the line
+    `Store:  h.store,` from the Executor literal in
+    internal/daemon/handler.go's OnNewMail (handler.go is NOT in this
+    mission's write set), ran the test, and confirmed the positive case
+    failed:
+
+      harness_test.go:172:
+          Error:      "[]" should have 1 item(s), but has 0
+          Test:       TestOnNewMail_EndToEnd/all_four_gates_pass:...
+          Messages:   exactly one pipeline record expected on disk
+
+    The two negative subtests still passed (they expect an empty
+    directory regardless), confirming the new assertion is specifically
+    tied to the positive case's pipeline run, not just checking "some
+    file exists anywhere."  Restored handler.go with
+    `git checkout -- internal/daemon/handler.go` and confirmed
+    `git status --short` showed it clean before committing. Re-ran the
+    test with handler.go restored: green again.
+
+    One commit, write-set only:
+      b6981f3 test(daemon): assert TestOnNewMail_EndToEnd persists a real pipeline record
+
+    Full worktree gate run from
+    [REDACTED:path]/.claude/worktrees/mcp-serve,
+    branch fix/ethos-mcp-serve (building on ebb6109, f232868, 201a5bc):
+    make vet and make staticcheck clean; make test green across every
+    package including internal/daemon (full race suite); make docs
+    reports 0 issues in 34 files; make lint-strict reports exactly 6
+    pre-existing gosec G204 findings (the known ../../.. worktree-path
+    artifact, scattered across internal/pgp and internal/secret this
+    run), confirmed zero in harness_test.go by grep -c.
+
+    No push, no PR, no merge performed.

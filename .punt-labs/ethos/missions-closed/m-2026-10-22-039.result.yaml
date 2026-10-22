@@ -1,0 +1,118 @@
+mission: m-2026-10-22-039
+round: 1
+created_at: "2026-10-22T20:28:04Z"
+author: adb
+verdict: pass
+confidence: 0.95
+files_changed:
+    - path: Makefile
+      added: 106
+      removed: 8
+evidence:
+    - name: make vet (worktree)
+      status: pass
+    - name: make staticcheck (worktree)
+      status: pass
+    - name: 'make lint-shell (worktree): test-shell-discovery PASS, shellcheck clean'
+      status: pass
+    - name: 'make docs (worktree): markdownlint-cli2, 0 issues in 34 files'
+      status: pass
+    - name: 'make test (worktree, normal PATH, host biff untouched): all 17 packages ok; tools-biff printed the ordinary skip line'
+      status: pass
+    - name: 'make vulncheck (worktree): 0 vulnerabilities'
+      status: pass
+    - name: 'make lint-strict (worktree): exactly 6 gosec G204 findings, all at the documented ../../../ worktree-artifact paths; none Makefile-related'
+      status: pass
+    - name: 'make -n test (worktree): the mkdir/go build/PATH= lines are byte-identical to 3735f61''s -- only tools-biff''s own body differs'
+      status: pass
+    - name: 'Row 1 (uv absent from PATH): "uv not found on PATH -- install uv ... to provision biff", exit 1, before any other uv call'
+      status: pass
+    - name: 'Row 2 failure (uv tool dir --bin exits nonzero): old-uv shim exits 2 with a realistic stderr message -- recipe printed "''uv tool dir --bin'' failed (exit 2):" followed by the captured stderr text verbatim, exit 1'
+      status: pass
+    - name: 'Row 2 extra probe -- stderr warning with valid stdout (exit 0, non-empty path on stdout, ALSO a warning on stderr): recipe proceeded normally using the stdout path, discarding the stderr warning entirely -- NOT misclassified as a failure. Demoed end to end: installed fresh into the isolated dir despite the warning'
+      status: pass
+    - name: 'Row 2 extra probe -- stderr-only, empty stdout (exit 0, nothing on stdout, a message on stderr): recipe printed "''uv tool dir --bin'' failed (exit 0):" followed by that exact stderr text, exit 1 -- the empty-stdout classification catches what exit-status alone would have missed'
+      status: pass
+    - name: 'Row 3 (skip decision, entrypoint + pin both present, uv tool list clean): "punt-biff v1.19.0 already installed, skipping", exit 0'
+      status: pass
+    - name: 'Row 4a (uv tool list fails): shimmed to exit 1 with stderr text -- "''uv tool list'' failed (exit 1): error: simulated uv tool list failure -- reinstalling anyway", then installed'
+      status: pass
+    - name: 'Row 4b (listed version differs from pin): shimmed `tool list` to report punt-biff v1.18.0 with a real entrypoint present, every other uv subcommand delegating to the real binary -- "installed punt-biff v1.18.0 differs from pin punt-biff v1.19.0; reinstalling", both versions named'
+      status: pass
+    - name: 'Row 4c (entrypoint missing, pin listed): removed only the biff entrypoint symlink after a fresh isolated install (pin still listed by uv) -- "biff entrypoint missing or not executable at <path> (pin punt-biff v1.19.0 is listed); reinstalling"'
+      status: pass
+    - name: 'Row 5 (install) and final skip reconfirmation: after every reinstall row above, re-ran tools-biff once more against the now-consistent isolated state and got the ordinary skip line back, confirming the install step itself (uv tool install --force) leaves the directory in the state check 3 expects'
+      status: pass
+    - name: 'stdout/stderr routing: captured separately for the stderr-only-empty-stdout case -- stdout empty, every tools-biff line (both the "failed" message and the quoted captured stderr) on stderr'
+      status: pass
+    - name: 'No 2>/dev/null anywhere in the recipe: grep -c "2>/dev/null" against the tools-biff recipe body returns 0; every uv call''s stderr is captured (mktemp file for check 2, 2>&1-merged variable for check 4''s `uv tool list`) rather than discarded'
+      status: pass
+    - name: 'mktemp cleanup: no leftover .tmp/tmp.* files from any of the above runs (verified via a timestamp-scoped find against .tmp/) -- the trap ... EXIT fires on every exit path, including exit 1'
+      status: pass
+prose: |
+    File hash (sha256) at submission: Makefile 8a88afe6b3949b52cbdf60646d5fe2bb926205d84020786ba82e92b60b08b2b9
+
+    One commit on fix/ethos-mcp-serve, building on 3735f61:
+
+    8f3873b chore(make): restructure tools-biff into enumerable checks
+    with an outcome table
+
+    Four rounds had each fixed the previous round's diagnostic wording
+    and opened a narrower one on the same two lines, because the
+    approach -- merging or discarding stdout/stderr ad hoc -- had no way
+    to represent "succeeded with a stderr warning" and "failed silently"
+    as genuinely distinct, enumerable cases. This round replaces that
+    with five numbered checks, documented in a comment table directly
+    above the recipe so a reviewer checks table rows rather than
+    re-deriving the shape from prose:
+
+    1. uv on PATH -- unchanged from prior rounds.
+    2. The bin directory is resolved FRESH at recipe time with
+       `bin=$(uv tool dir --bin 2>"$err")`, capturing stdout into a
+       variable and stderr into a mktemp file kept open only for this
+       recipe invocation (`trap 'rm -f "$err"' EXIT`). Classification is
+       exit status AND non-empty stdout together -- not either alone --
+       so a probe that warns on stderr but returns a real path on stdout
+       with exit 0 proceeds normally (the round-4 regression this round
+       fixes), while a probe that exits 0 with nothing on stdout still
+       fails and shows whatever it wrote to stderr (the gap merging
+       stdout+stderr previously papered over). This resolved value,
+       `$bin`, is used for every check below it in this recipe; the
+       parse-time `$(UVTOOL_BIN)` variable is no longer read inside
+       tools-biff at all (it is retained, unchanged, for the `test`
+       target's own PATH= line, which still needs a value computed once
+       at parse time for its PATH prefix).
+    3. The skip decision now also requires `uv tool list` to have
+       exited cleanly, in addition to the existing entrypoint-executable
+       and exact-pin-match conditions from round 2.
+    4. On reinstall, exactly one of three reason lines, in a fixed
+       evaluation order: list failure (quoting the captured list output
+       and its exit status) outranks version mismatch, which outranks
+       entrypoint-missing-with-pin-listed -- the same ordering fixed in
+       round 4 to avoid a from-scratch install falsely claiming the pin
+       was listed, now restated against the restructured capture.
+    5. Install remains the final command in the else branch, so its own
+       exit status is still the recipe's.
+
+    No `2>/dev/null` appears anywhere in tools-biff now (confirmed by
+    grep). The round-4 "re-run make" wording and its parse-time retry
+    are both gone: since check 2 now runs live at recipe time rather
+    than consulting a parse-time snapshot, a transient failure that
+    would have shown up at `make`'s parse step simply isn't visible to
+    this recipe at all -- whatever `uv tool dir --bin` returns when the
+    recipe actually executes IS the answer, with nothing stale to retry.
+
+    Demo: all isolated-directory fidelity work ran against
+    UV_TOOL_DIR/UV_TOOL_BIN_DIR under
+    [REDACTED:path]/.tmp/mission039-scratch/; the
+    host's real ~/.local/bin/biff install was never unlinked,
+    reinstalled, or otherwise touched -- confirmed both by inspection
+    and by the final `make test` against the normal host PATH still
+    showing the ordinary skip line. The version-mismatch shim (row 4b)
+    again used a synthetic `tool list` line (no second real biff release
+    reachable offline, as noted in round 4) while delegating every other
+    uv subcommand, including the real `tool install`, to the actual uv
+    binary. All shims and the isolated uv dirs removed after use;
+    `git status --short` clean before the commit and clean now. Did not
+    touch any file outside the Makefile write set. Not pushed; no PR or
+    merge touched; no further commit after this submission.

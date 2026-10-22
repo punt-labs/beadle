@@ -1,0 +1,55 @@
+mission_id: m-2026-10-22-029
+status: closed
+type: implement
+created_at: "2026-10-22T18:09:03Z"
+updated_at: "2026-10-22T18:29:15Z"
+closed_at: "2026-10-22T18:29:15Z"
+leader: claude
+worker: adb
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T18:09:03Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-f34m
+    files:
+        - Makefile
+        - .github/workflows/test.yml
+        - internal/daemon/templates_test.go
+        - docs/TESTING.md
+write_set:
+    - Makefile
+    - .github/workflows/test.yml
+    - docs/TESTING.md
+success_criteria:
+    - Makefile gains a tools-biff target that installs the pinned biff CLI (pin via a BIFF_VERSION variable next to ETHOS_VERSION; install with `uv tool install --force punt-biff==$(BIFF_VERSION)` from PyPI, or from the pinned git tag if the PyPI name is not published) and a tools-beadle-email target that self-builds ./cmd/beadle-email into $(GOINSTALL_BIN)/beadle-email with `go build -o`, so the binary under test is the branch's own code. `test` depends on tools-ethos tools-biff tools-beadle-email; every tool lands in a directory the existing PATH prefix on the test recipe already covers (extend GOINSTALL_BIN handling only if uv installs elsewhere; `uv tool dir --bin` prints its bin directory).
+    - .github/workflows/test.yml provisions the same three tools before its Test step using the same make targets (add astral-sh/setup-uv pinned to the SHA already used in .github/workflows/biff-notify.yml, then `make tools-biff tools-beadle-email` alongside the existing `make tools-ethos`), and adds the uv tool bin directory to GITHUB_PATH the same way GOPATH/bin is added, so `go test` on a clean runner finds ethos, biff, and beadle-email on PATH.
+    - docs/TESTING.md's "ethos is a required tool" bullet becomes a bullet covering all three required tools, naming the pinning variable and the target for each, and stating that TestDefaultMCPRegistry_StdioCommandsAreReal is the consumer.
+    - From the worktree, `make test` on a shell whose PATH has been scrubbed of ~/.local/bin and the uv tool bin dir (e.g. `env PATH=/usr/bin:/bin:$(go env GOROOT)/bin make test`) provisions all three tools and passes, including all three subtests of TestDefaultMCPRegistry_StdioCommandsAreReal; paste that run's tail. This is the demo that CI will not fail.
+    - make check passes (worktree note in context); `make lint-shell` and markdownlint on docs/TESTING.md are clean.
+    - Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes. Conventional Commits form, chore(make), chore(ci), docs(testing). Stage only write-set files with git add by name. Do not push, do not touch PRs or merge — the leader does that.
+budget:
+    rounds: 2
+    reflection_after_each: true
+current_round: 1
+context: |
+    Review finding on bead beadle-f34m (branch fix/ethos-mcp-serve): the new
+    TestDefaultMCPRegistry_StdioCommandsAreReal in internal/daemon runs
+    every stdio registry entry (ethos, beadle-email, biff) with --help and
+    t.Fatalf's on a missing binary, per docs/TESTING.md's no-t.Skip rule.
+    Only ethos is provisioned today: Makefile tools-ethos (a `test`
+    dependency) and test.yml's "Install ethos" step plus GOPATH/bin on
+    GITHUB_PATH. On a clean CI runner the beadle-email and biff subtests
+    fail with "not found on PATH". The fix is provisioning, not narrowing
+    the test. biff is a Python CLI (punt-biff, installed here via uv tool;
+    v1.19.0 on this host); beadle-email is this repo's own binary and
+    should be built from the branch under test. Do NOT touch
+    templates_test.go.
+
+    Worktree: [REDACTED:path]/.claude/worktrees/mcp-serve
+    Branch: fix/ethos-mcp-serve. Another mission (store wiring, harness_test.go)
+    may have just finished in this worktree; build on its HEAD. KNOWN
+    ARTIFACT: `make lint-strict` from any worktree reports six spurious
+    gosec G204 findings (../../.. path prefix); not real. Run vet,
+    staticcheck, test, docs, lint-shell from the worktree and lint-strict
+    expecting only those six lines; report verbatim.

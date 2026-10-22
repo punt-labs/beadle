@@ -1,0 +1,45 @@
+mission_id: m-2026-10-22-037
+status: closed
+type: implement
+created_at: "2026-10-22T19:48:15Z"
+updated_at: "2026-10-22T20:00:10Z"
+closed_at: "2026-10-22T20:00:10Z"
+leader: claude
+worker: adb
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T19:48:15Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-f34m
+    files:
+        - Makefile
+write_set:
+    - Makefile
+success_criteria:
+    - 'tools-biff''s skip check requires BOTH an executable entrypoint and the pinned env: `if test -x "$(UVTOOL_BIN)/biff" && uv tool list | grep -qFx "punt-biff v$(BIFF_VERSION)"; then skip; else install; fi`, so a missing entrypoint with the pin present reinstalls instead of printing "skipping" (the remedy the registry test names must be able to remedy). Use -F so the version dots are literal.'
+    - When UVTOOL_BIN is empty, the failure branch re-runs `uv tool dir --bin` UNSUPPRESSED before exit 1 so the real error prints (HOME unset, malformed UV_TOOL_BIN_DIR, config parse failure), and the message no longer asserts "too old" as the only cause. When `uv tool list` itself fails, the else branch prints one line saying the list failed before reinstalling, so the race guard's fall-through is visible.
+    - All tools-biff diagnostic echoes go to stderr (>&2), matching the LaTeX recipes at Makefile ~lines 110-113.
+    - The --force comment notes that an editable or path-installed punt-biff at the pinned version also satisfies the skip, so a developer's local checkout is preserved.
+    - 'Fidelity, with scratch copies under .tmp/ and isolated UV_TOOL_DIR/UV_TOOL_BIN_DIR so the host install is untouched: (a) pin present, entrypoint removed: tools-biff reinstalls (prints the install, not the skip); (b) UVTOOL_BIN empty via a shim: the real uv error text appears on stderr before the hint. Paste both.'
+    - make -n test shows the recipe unchanged except the tools-biff body; worktree gate as in context; one commit chore(make), staged by name. Do not push, do not touch PRs or merge — the leader does that. Do not commit after submitting.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 3 on provisioning (bead beadle-f34m), branch fix/ethos-mcp-serve,
+    worktree [REDACTED:path]/.claude/worktrees/mcp-serve,
+    build on HEAD (8e85152 or later). The round-2 silent-failure re-review
+    found three residuals in the Makefile: the skip check tests uv's env
+    list, not the executable the registry test needs, so a missing
+    entrypoint with the pin present produces "already installed, skipping"
+    from the very target the test's remedy names (MEDIUM); the "upgrade uv"
+    hint is asserted whenever UVTOOL_BIN is empty but the only evidence is a
+    suppressed shell call, so other causes get the wrong advice, and the
+    suppressed `uv tool list` hides why the race guard fell through
+    (MEDIUM); diagnostics go to stdout (LOW). KNOWN ARTIFACT: lint-strict
+    from a worktree reports six spurious G204 lines; not real. NEVER run
+    tools-biff against the real host dir during fidelity: the leader was
+    hit live by its unlink window twice today; use UV_TOOL_DIR and
+    UV_TOOL_BIN_DIR under .tmp/.
