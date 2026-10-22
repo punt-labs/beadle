@@ -345,15 +345,17 @@ func TestSetPollIntervalTool_DescriptionsListFullSet(t *testing.T) {
 }
 
 // cronExpr derives the expected CronCreate expression for a poll interval
-// value, used to prove inbox.md's cron table matches the real duration
-// rather than a hand-typed guess. t.Fatalf on any shape this derivation
-// does not cover, so a future interval value (e.g. a multi-hour-and-minute
-// duration) forces this function to be extended rather than silently
-// passing an unverified row.
+// value, used to prove inbox.md's cron table matches the duration
+// validPollIntervals actually maps value to — not the duration value's own
+// spelling would parse to, which could silently disagree if the map ever
+// mismapped a key. t.Fatalf on any shape this derivation does not cover, so
+// a future interval value (e.g. a multi-hour-and-minute duration) forces
+// this function to be extended rather than silently passing an unverified
+// row.
 func cronExpr(t *testing.T, value string) string {
 	t.Helper()
-	d, err := time.ParseDuration(value)
-	require.NoError(t, err, "interval %q does not parse as a duration", value)
+	d, ok := (&email.Config{PollInterval: value}).PollDuration()
+	require.True(t, ok, "interval %q is not in validPollIntervals", value)
 
 	switch {
 	case d < time.Hour && d%time.Minute == 0:
@@ -402,8 +404,9 @@ func cronTableRows(doc string) (keys []string, rows map[string]string) {
 // TestInboxDoc_ListsFullIntervalSet proves plugin/commands/inbox.md carries
 // the interval set in exactly its two intended places — the argument-hint
 // and the cron table — and that both are set-equal to email.PollIntervals()
-// in both directions, and that every cron row's expression is the one a
-// real time.ParseDuration of that value would produce. A per-value
+// in both directions, and that every cron row's expression is the one the
+// value's mapped validPollIntervals duration would produce (see cronExpr).
+// A per-value
 // substring check ("5m" inside "15m") cannot distinguish a present value
 // from an absent one sharing a suffix, so this uses exact token/row
 // parsing and assert.ElementsMatch instead.

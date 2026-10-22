@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -103,6 +104,28 @@ func TestValidPollInterval(t *testing.T) {
 	assert.True(t, ValidPollInterval("2h"))
 	assert.False(t, ValidPollInterval("4m"))
 	assert.False(t, ValidPollInterval("bogus"))
+}
+
+// TestValidPollIntervals_KeysMatchParsedDuration proves every key of
+// validPollIntervals maps to the time.Duration that time.ParseDuration
+// itself would compute from that key's spelling. Nothing in PollDuration or
+// ValidPollInterval checks this — a key could be mapped to any duration
+// and both would accept it — so downstream code deriving a duration from the
+// key's spelling (e.g. a cron expression) can silently disagree with the
+// mapped value this package actually uses. This test is the single place
+// that catches a key/duration mismatch at the source.
+func TestValidPollIntervals_KeysMatchParsedDuration(t *testing.T) {
+	for _, key := range PollIntervals() {
+		t.Run(key, func(t *testing.T) {
+			want, err := time.ParseDuration(key)
+			require.NoError(t, err, "interval key %q does not parse as a duration", key)
+
+			cfg := &Config{PollInterval: key}
+			got, ok := cfg.PollDuration()
+			require.True(t, ok)
+			assert.Equal(t, want, got, "validPollIntervals[%q] must equal time.ParseDuration(%q)", key, key)
+		})
+	}
 }
 
 func TestSaveConfig(t *testing.T) {
