@@ -58,24 +58,35 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 		messageSigned    bool // gate 1: false = unsigned RFC822 (negative case)
 		contactPerm      string
 		wantSpawnerCalls int
+		// wantRecordStatus is "" when no pipeline record is expected on
+		// disk at all (the message was rejected before Executor.Run), or
+		// the expected Pipeline.Status when one is. A record's presence
+		// tracks gates 1 and 2, NOT the spawner: Executor.Run (pipeline.go)
+		// saves a "running" record before planning or spawning, so a
+		// future gate-3/4 negative row (message accepted, spawner never
+		// called, pipeline ends "failed") would still produce a record.
+		wantRecordStatus string
 	}{
 		{
 			name:             "all four gates pass: pgp-verified rwx sender, signed command file, valid contract",
 			messageSigned:    true,
 			contactPerm:      "rwx",
 			wantSpawnerCalls: 1,
+			wantRecordStatus: "completed",
 		},
 		{
 			name:             "gate 1 negative: unsigned message from an rwx sender creates nothing",
 			messageSigned:    false,
 			contactPerm:      "rwx",
 			wantSpawnerCalls: 0,
+			wantRecordStatus: "",
 		},
 		{
 			name:             "gate 2 negative: pgp-signed message from an rw- sender creates nothing",
 			messageSigned:    true,
 			contactPerm:      "rw-",
 			wantSpawnerCalls: 0,
+			wantRecordStatus: "",
 		},
 	}
 
@@ -153,7 +164,7 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 			handler.Stop()
 
 			calls := spawner.Calls()
-			assert.Len(t, calls, tt.wantSpawnerCalls, "spawner call count")
+			require.Len(t, calls, tt.wantSpawnerCalls, "spawner call count")
 			if tt.wantSpawnerCalls > 0 {
 				// beadle-ivtd: the recipe's declared Tools must reach the
 				// spawned worker, end to end through the real pipeline --
@@ -162,23 +173,25 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 					"the fixture command's declared Tools must reach the spawner")
 			}
 
-			// beadle-fbhp: tie the persistence assertion to the pipeline
-			// actually having run, so it cannot pass vacuously -- a
-			// negative case (gate 1 or gate 2 rejects the message before
-			// any Executor.Run) must leave the store directory empty.
+			// Non-vacuous because storeDir is a fresh t.TempDir per subtest
+			// (never pre-populated) and the can-fail proof (beadle-fbhp:
+			// removing handler.go's Store: h.store wiring breaks this). A
+			// record's presence/Status is attributable to gate 1/2
+			// outcome, not the spawner: the negative rows prove a record
+			// would be written before either gate could fail them.
 			entries, err := os.ReadDir(storeDir)
 			require.NoError(t, err)
-			if tt.wantSpawnerCalls > 0 {
-				require.Len(t, entries, 1, "exactly one pipeline record expected on disk")
-				data, err := os.ReadFile(filepath.Join(storeDir, entries[0].Name()))
-				require.NoError(t, err)
-				var record daemon.Pipeline
-				require.NoError(t, json.Unmarshal(data, &record))
-				assert.Equal(t, "completed", record.Status)
-				assert.Equal(t, "jim@punt-labs.com", record.Email.From)
-			} else {
-				assert.Empty(t, entries, "store directory must stay empty when no pipeline ran")
+			if tt.wantRecordStatus == "" {
+				assert.Empty(t, entries, "store directory must stay empty: the message never reached Executor.Run")
+				return
 			}
+			require.Len(t, entries, 1, "exactly one pipeline record expected on disk")
+			recordData, err := os.ReadFile(filepath.Join(storeDir, entries[0].Name()))
+			require.NoError(t, err)
+			var record daemon.Pipeline
+			require.NoError(t, json.Unmarshal(recordData, &record))
+			assert.Equal(t, tt.wantRecordStatus, record.Status)
+			assert.Equal(t, "jim@punt-labs.com", record.Email.From)
 		})
 	}
 }
