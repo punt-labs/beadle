@@ -18,6 +18,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
 
       - name: Vet
         run: make vet
@@ -34,11 +37,13 @@ jobs:
       - name: ShellCheck
         run: make lint-shell
 
-      - name: Install ethos
-        run: make tools-ethos
+      - name: Install ethos, biff, and beadle-email
+        run: make tools-ethos tools-biff tools-beadle-email
 
-      - name: Add GOPATH/bin to PATH
-        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Add GOPATH/bin and the uv tool bin dir to PATH
+        run: |
+          printf '%s/bin\n' "$(go env GOPATH)" >> "$GITHUB_PATH"
+          uv tool dir --bin >> "$GITHUB_PATH"
 
       - name: Test
         run: go test -race -count=1 ./...
