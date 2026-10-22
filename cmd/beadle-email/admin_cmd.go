@@ -36,6 +36,7 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start MCP server",
 	Long:  "Start the beadle-email MCP server. Transport: stdio (default) or ws (WebSocket).",
+	Args:  cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		logWriter, logPath, logErr := openServeLogFile()
 		var w io.Writer = os.Stderr

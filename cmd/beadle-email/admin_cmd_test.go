@@ -330,3 +330,17 @@ func TestStatusCmd_FailsClosedOnCorruptIdentityConfig(t *testing.T) {
 	_, execErr := runRootCmd(t, "status")
 	assert.Error(t, execErr, "status must fail closed on a corrupt identity config, not report the fallback")
 }
+
+// TestServeCmd_RejectsStrayPositional proves `beadle-email serve bogus`
+// exits non-zero instead of silently starting the MCP server, matching
+// `ethos serve bogus` ("unknown command") and `biff mcp bogus` ("Got
+// unexpected extra argument(s)"). cobra.Command.execute calls
+// ValidateArgs (and therefore Args: cobra.NoArgs) before RunE, so driving
+// this through the real rootCmd.Execute() entry point never reaches
+// serveCmd's RunE -- no MCP server, no IMAP dial, no network I/O -- the
+// failure is pure argument validation.
+func TestServeCmd_RejectsStrayPositional(t *testing.T) {
+	_, execErr := runRootCmd(t, "serve", "bogus")
+	require.Error(t, execErr, "a stray positional to serve must be rejected, not silently start the server")
+	assert.Contains(t, execErr.Error(), "bogus")
+}
