@@ -126,7 +126,7 @@ tools-biff: ## Install the pinned biff CLI (needed by internal/daemon's MCP regi
 
 tools-beadle-email: ## Self-build this branch's beadle-email into GOINSTALL_BIN (same test)
 	mkdir -p $(GOINSTALL_BIN)
-	go build -o $(GOINSTALL_BIN)/beadle-email ./cmd/beadle-email/
+	go build -ldflags="$(LDFLAGS)" -o $(GOINSTALL_BIN)/beadle-email ./cmd/beadle-email/
 
 # go install places a binary in $GOBIN if set, else $GOPATH/bin -- neither is
 # guaranteed to already be on PATH. Without this, `make test` provisions
