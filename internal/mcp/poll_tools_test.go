@@ -287,6 +287,37 @@ func TestSetPollInterval_InvalidErrorListsFullSet(t *testing.T) {
 	assert.ElementsMatch(t, email.PollIntervals(), strings.Split(rest, ", "))
 }
 
+// listedTool is the subset of a tools/list entry this file inspects:
+// name, description, and per-property input-schema descriptions.
+type listedTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	InputSchema struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	} `json:"inputSchema"`
+}
+
+// findTool returns the tools/list entry named name, or fails the test.
+func findTool(t *testing.T, s *server.MCPServer, name string) listedTool {
+	t.Helper()
+	resp := callMCP(t, s, "tools/list", 99, nil)
+	var out struct {
+		Result struct {
+			Tools []listedTool `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resp, &out))
+	for _, tool := range out.Result.Tools {
+		if tool.Name == name {
+			return tool
+		}
+	}
+	t.Fatalf("%s not registered", name)
+	return listedTool{}
+}
+
 // TestSetPollIntervalTool_DescriptionsListFullSet proves both set_poll_interval
 // surface strings — the tool description and the "interval" parameter
 // description — list every element of email.PollIntervals(), so the MCP
@@ -295,38 +326,7 @@ func TestSetPollIntervalTool_DescriptionsListFullSet(t *testing.T) {
 	s, _ := newMarkerServer(t)
 	callMCP(t, s, "initialize", 0, initParams())
 
-	resp := callMCP(t, s, "tools/list", 99, nil)
-	var out struct {
-		Result struct {
-			Tools []struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-				InputSchema struct {
-					Properties map[string]struct {
-						Description string `json:"description"`
-					} `json:"properties"`
-				} `json:"inputSchema"`
-			} `json:"tools"`
-		} `json:"result"`
-	}
-	require.NoError(t, json.Unmarshal(resp, &out))
-
-	var tool *struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		InputSchema struct {
-			Properties map[string]struct {
-				Description string `json:"description"`
-			} `json:"properties"`
-		} `json:"inputSchema"`
-	}
-	for i := range out.Result.Tools {
-		if out.Result.Tools[i].Name == "set_poll_interval" {
-			tool = &out.Result.Tools[i]
-			break
-		}
-	}
-	require.NotNil(t, tool, "set_poll_interval not registered")
+	tool := findTool(t, s, "set_poll_interval")
 
 	intervalProp, ok := tool.InputSchema.Properties["interval"]
 	require.True(t, ok, "interval property not found")
