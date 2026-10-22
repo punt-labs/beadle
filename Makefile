@@ -212,8 +212,8 @@ tools-biff: ## Install the pinned biff CLI if missing, unreachable, or out of pi
 BEADLE_EMAIL_BIN := $(CURDIR)/.tmp/bin
 
 tools-beadle-email: ## Self-build this branch's beadle-email into BEADLE_EMAIL_BIN (same test)
-	mkdir -p $(BEADLE_EMAIL_BIN)
-	go build -ldflags="$(LDFLAGS)" -o $(BEADLE_EMAIL_BIN)/beadle-email ./cmd/beadle-email/
+	mkdir -p "$(BEADLE_EMAIL_BIN)"
+	go build -ldflags="$(LDFLAGS)" -o "$(BEADLE_EMAIL_BIN)/beadle-email" ./cmd/beadle-email/
 
 # go install places a binary in $GOBIN if set, else $GOPATH/bin -- neither is
 # guaranteed to already be on PATH. Without this, `make test` provisions
@@ -261,16 +261,35 @@ endif
 # status AND non-empty stdout, not either alone -- so a nonzero exit
 # with a stray path on stdout is treated the same way here as there:
 # a failure, not a usable bin dir.
-test: tools-ethos tools-biff tools-beadle-email ## Run tests with race detection
+#
+# TEST_PREREQS and TEST_RUN are the one shared copy of "provision ethos,
+# biff, and this branch's own beadle-email, then run go test with all
+# three on PATH" -- every target that runs ./... (test, test-integration,
+# cover) depends on TEST_PREREQS and calls TEST_RUN so there is exactly
+# one PATH= line and one provisioning prerequisite list in this file.
+# Before this consolidation, test-integration and cover ran `go test
+# ./...` with neither the tools-* prerequisites nor the PATH prefix,
+# so any package needing ethos/biff/beadle-email on PATH (e.g.
+# internal/daemon's MCP registry test) passed under `make test` and
+# failed under `make test-integration`/`make cover` on an otherwise
+# identical tree -- the same gap release.yml had, calling bare `go test`
+# with no provisioning step at all.
+TEST_PREREQS := tools-ethos tools-biff tools-beadle-email
+
+define TEST_RUN
 	uvbin=$$(uv tool dir --bin); uvbin_status=$$?; \
 	if [ $$uvbin_status -ne 0 ] || [ -z "$$uvbin" ]; then \
-		echo "test: 'uv tool dir --bin' failed (exit $$uvbin_status) or produced no output (stdout: $$uvbin) -- cannot build the PATH that carries biff" >&2; \
+		echo "$@: 'uv tool dir --bin' failed (exit $$uvbin_status) or produced no output (stdout: $$uvbin) -- cannot build the PATH that carries biff" >&2; \
 		exit 1; \
 	fi; \
-	PATH="$(BEADLE_EMAIL_BIN):$(GOINSTALL_BIN):$$uvbin:$$PATH" go test -race -count=1 ./...
+	PATH="$(BEADLE_EMAIL_BIN):$(GOINSTALL_BIN):$$uvbin:$$PATH" $(1)
+endef
 
-test-integration: ## Run integration tests (in-process IMAP/SMTP)
-	go test -race -count=1 -tags=integration ./...
+test: $(TEST_PREREQS) ## Run tests with race detection
+	$(call TEST_RUN,go test -race -count=1 ./...)
+
+test-integration: $(TEST_PREREQS) ## Run integration tests (in-process IMAP/SMTP)
+	$(call TEST_RUN,go test -race -count=1 -tags=integration ./...)
 
 check: lint lint-strict vulncheck docs test ## Run all quality gates
 
@@ -316,8 +335,8 @@ docker: ## Build Docker image
 docker-push: docker ## Push Docker image to ghcr.io
 	docker push ghcr.io/punt-labs/beadle-email:latest
 
-cover: ## Test with coverage report
-	go test -cover -coverprofile=coverage.out ./...
+cover: $(TEST_PREREQS) ## Test with coverage report
+	$(call TEST_RUN,go test -cover -coverprofile=coverage.out ./...)
 	go tool cover -func=coverage.out
 
 doctor: build ## Run beadle-email doctor
