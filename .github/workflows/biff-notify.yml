@@ -60,6 +60,6 @@ jobs:
         # this support again, the symptom is notifications routing to the
         # demo relay instead of BIFF_RELAY_URL.
         run: >-
-          uvx --from punt-biff==1.16.0 biff --user github-actions wall
+          uvx --from punt-biff==1.19.0 biff --user github-actions wall
           "CI failed: ${WORKFLOW_NAME} on ${BRANCH} — ${RUN_URL}"
           --duration 2h
