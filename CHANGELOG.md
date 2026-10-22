@@ -10,10 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **The push-guard `PreToolUse` hook (`no-push-to-main.sh`) is gone.**
   GitHub branch protection on `main`, with zero bypass actors, is the
-  real enforcement; the hook was a convenience layer that never added
-  protection of its own, no sibling repo carries one, and three rounds
-  of hardening it still left a 586-line shell parser that both
-  under- and over-denied (beadle-fc6o).
+  real enforcement; the hook was a 50-line convenience layer that never
+  added protection of its own, and no sibling repo carries one. An
+  attempt to fix its worktree false-deny grew it to a 586-line shell
+  parser over three review rounds on an unmerged branch, and each round
+  surfaced a new class of under- and over-deny, so the operator ruled
+  to remove it rather than merge that work (beadle-fc6o).
 
 ### Added
 
