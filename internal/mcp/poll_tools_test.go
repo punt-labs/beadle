@@ -431,9 +431,25 @@ func TestInboxDoc_ListsFullIntervalSet(t *testing.T) {
 	}
 }
 
+// intervalListBetweenParens extracts the comma-separated interval list that
+// follows the literal "polling interval (" in line, up to the next ")".
+// Both README rows for set_poll_interval and /inbox follow this shape.
+func intervalListBetweenParens(t *testing.T, line string) []string {
+	t.Helper()
+	_, rest, found := strings.Cut(line, "polling interval (")
+	require.True(t, found, "expected %q to contain %q", line, "polling interval (")
+	closeIdx := strings.Index(rest, ")")
+	require.True(t, closeIdx >= 0, "expected %q to contain a closing paren after the interval list", rest)
+	return strings.Split(rest[:closeIdx], ", ")
+}
+
 // TestReadmeDoc_ListsFullIntervalSet proves README.md's set_poll_interval
-// tool-table row and /inbox slash-command row both name every element of
-// email.PollIntervals(), so the README cannot drift from the Go set.
+// tool-table row and /inbox slash-command row are each set-equal to
+// email.PollIntervals(), so the README cannot drift from the Go set. A
+// per-value substring check ("5m" inside "15m") cannot distinguish a present
+// value from an absent one sharing a suffix, so this isolates the
+// parenthesized interval list on each row and compares with
+// assert.ElementsMatch instead.
 func TestReadmeDoc_ListsFullIntervalSet(t *testing.T) {
 	data, err := os.ReadFile("../../README.md")
 	if err != nil {
@@ -441,25 +457,22 @@ func TestReadmeDoc_ListsFullIntervalSet(t *testing.T) {
 	}
 	doc := string(data)
 
-	var toolRow string
-	var slashRows []string
+	var toolRow, slashRow string
 	for _, line := range strings.Split(doc, "\n") {
 		if strings.HasPrefix(line, "| `set_poll_interval` |") {
 			toolRow = line
 		}
-		if strings.HasPrefix(line, "| `/inbox ") {
-			slashRows = append(slashRows, line)
+		// Several "| `/inbox " rows exist (n, status, the interval example);
+		// find the one that actually lists the interval set, without
+		// hardcoding which row that is.
+		if strings.HasPrefix(line, "| `/inbox ") && strings.Contains(line, "polling interval (") {
+			slashRow = line
 		}
 	}
 	require.NotEmpty(t, toolRow, "README.md set_poll_interval tool-table row not found")
-	require.NotEmpty(t, slashRows, "README.md /inbox slash-command rows not found")
-	// Several "| `/inbox " rows exist (n, status, the interval example); only
-	// one carries the full set. Join them so the assertion targets whichever
-	// row actually lists the values, without hardcoding which row that is.
-	slashText := strings.Join(slashRows, "\n")
+	require.NotEmpty(t, slashRow, "README.md /inbox row listing the interval set not found")
 
-	for _, interval := range email.PollIntervals() {
-		assert.Contains(t, toolRow, interval, "README.md set_poll_interval row missing %q", interval)
-		assert.Contains(t, slashText, interval, "README.md /inbox rows missing %q", interval)
-	}
+	want := email.PollIntervals()
+	assert.ElementsMatch(t, want, intervalListBetweenParens(t, toolRow), "README.md set_poll_interval row interval list")
+	assert.ElementsMatch(t, want, intervalListBetweenParens(t, slashRow), "README.md /inbox row interval list")
 }
