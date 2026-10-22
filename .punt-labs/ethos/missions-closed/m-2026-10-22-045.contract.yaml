@@ -1,0 +1,53 @@
+mission_id: m-2026-10-22-045
+status: failed
+type: implement
+created_at: "2026-10-22T22:04:43Z"
+updated_at: "2026-10-22T22:16:30Z"
+closed_at: "2026-10-22T22:16:30Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T22:04:43Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-fbhp
+    files:
+        - internal/daemon/harness_test.go
+        - internal/daemon/templates_test.go
+        - internal/daemon/templates.go
+write_set:
+    - internal/daemon/harness_test.go
+    - internal/daemon/templates_test.go
+success_criteria:
+    - 'HIGH: in TestDefaultMCPRegistry_StdioCommandsAreReal the provisioning-story check runs UNCONDITIONALLY before exec.LookPath: `remedy, known := mcpCommandInstallRemedy(cfg.Command); require.True(t, known, ...)` as the first statement of the subtest, so a registry entry naming a binary with no tools-<cmd> target fails on every host, including one where that binary happens to be on PATH. Prove it: temporarily add a stdio entry {Command: "sh", Args: ["-c", "true"]} (sh is on every host''s PATH) to the registry in templates.go, run the test, paste the require.True failure, revert templates.go with git checkout, confirm git diff --stat empty.'
+    - 'MEDIUM: the doc comment on mcpCommandInstallRemedy and the comment block above the test no longer say "no default arm"; they say the default arm returns known=false, which is the property the test enforces. The commit message states the correction.'
+    - 'MEDIUM: harness_test.go''s non-vacuity comment states the ordering correctly: gates 1 and 2 run inside OnNewMail before Executor.Run exists, so a record is written only after both pass; the negative rows prove no record is written when either gate rejects. Keep it under 8 lines.'
+    - 'MEDIUM: the usage check''s expected string is the command PATH, not the argv: cfg.Command followed by the leading non-dash Args only (stop at the first Arg beginning with "-"). Add a table test for the helper that derives it, covering {serve}, {serve, --transport, stdio}, {mcp}, and {} (bare command). The comment above the test says "subcommand path" where it said "command line".'
+    - 'Note folded in: the WaitDelay comment says the delay starts at whichever comes first, context done or the direct child exiting, and that the verified scenario was the child-exit start.'
+    - go test -race -count=1 ./internal/daemon/ green; all three real subtests pass; worktree gate (vet, staticcheck, test, docs; lint-strict shows only the six G204 artifact lines in directories the exclusion already names). One commit per file, test(daemon), staged by name. Do not push, do not touch PRs or merge — the leader does that. Do not commit after submitting.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 2 on the harness/registry test work (bead beadle-fbhp), branch
+    fix/ethos-mcp-serve, worktree
+    [REDACTED:path]/.claude/worktrees/mcp-serve,
+    build on 950a5f3. The invariant-completeness review of e410aa1 and
+    950a5f3 confirmed the discriminator timing ("completed" is on disk
+    before Stop() returns), the gate-3/4 extensibility, the two-substring
+    usage check against the three real tools, and the WaitDelay error
+    routing. It found one HIGH: the provisioning-story check only runs in
+    the LookPath-failed branch, so an unprovisioned command that is on the
+    local PATH passes locally and fails only in CI, the exact gap commit
+    950a5f3 claimed to close. Three MEDIUMs: "no default arm" is false (the
+    default arm exists and returns known=false); the harness comment states
+    the gate/record ordering backwards; the usage check asserts the full
+    argv rather than the command path, which breaks on any entry whose Args
+    carry a flag. Fix all four plus the WaitDelay prose note. Not in scope:
+    the note that Stop() cancels ctx before the mission-close exec runs, so
+    close never executes in the positive row; that is a test-design
+    observation for a future row, not a defect in this diff. KNOWN
+    ARTIFACT: lint-strict from a worktree reports six spurious G204 lines
+    whose specific lines shift between runs; not real.

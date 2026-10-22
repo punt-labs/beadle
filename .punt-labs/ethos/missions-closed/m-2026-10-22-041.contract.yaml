@@ -1,0 +1,40 @@
+mission_id: m-2026-10-22-041
+status: closed
+type: implement
+created_at: "2026-10-22T21:04:42Z"
+updated_at: "2026-10-22T21:24:38Z"
+closed_at: "2026-10-22T21:24:38Z"
+leader: claude
+worker: adb
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T21:04:42Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-f34m
+    files:
+        - Makefile
+write_set:
+    - Makefile
+success_criteria:
+    - 'Row 2 success path passes uv''s stderr through: after the row-2 check''s closing fi and BEFORE the temp file is truncated by the list capture, `[ -s "$$err" ] && cat "$$err" >&2;` (or equivalent that cannot change the recipe''s exit status). The row-2 success row''s message column reads "(uv''s own stderr, if any, passed through)" and the preamble sentence "either shown ... or captured ... never discarded" is true for every uv call including this one.'
+    - 'The `test` recipe''s resolver mirrors tools-biff row 2 exactly: captures the exit status, fails on nonzero status OR empty stdout, and the message names both (`test: ''uv tool dir --bin'' failed (exit N) or produced no output -- cannot build the PATH that carries biff`). A nonzero exit with non-empty stdout no longer proceeds.'
+    - 'Fidelity, isolated UV_TOOL_DIR/UV_TOOL_BIN_DIR under .tmp/, never the host dirs: (a) a `uv tool dir --bin` shim that prints a warning to stderr and a valid path to stdout, exit 0: the warning appears on stderr and the recipe proceeds to the skip or reinstall row as before; (b) the same shim with exit 0 and empty stdout still fails as row 2; (c) in the test recipe, a shim returning a path on stdout with exit 3: the recipe fails with the exit-3 message and go test is never invoked (prove with an invocation log); (d) the same shim exit 0 with a path: go test runs. Paste all four.'
+    - make -n test unchanged outside the two edited recipe bodies versus 8c5e704; worktree gate; one commit chore(make), staged by name. Do not push, do not touch PRs or merge — the leader does that. Do not commit after submitting.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 7 on provisioning (bead beadle-f34m), branch fix/ethos-mcp-serve,
+    worktree [REDACTED:path]/.claude/worktrees/mcp-serve,
+    build on 8c5e704. The round-6 re-review verified all four round-5
+    closures and found two row-local MEDIUMs: (1) a uv warning on a
+    SUCCESSFUL `uv tool dir --bin` is captured into the temp file and
+    overwritten unseen by the list capture, contradicting the preamble;
+    (2) the `test` recipe's resolver checks only empty stdout, so a
+    nonzero exit with a path proceeds and an empty-stdout failure omits
+    the exit status that tools-biff row 2 reports for the same probe.
+    Both fixes are two or three lines; the table and preamble change to
+    match. KNOWN ARTIFACT: lint-strict from a worktree reports six
+    spurious G204 lines; not real.

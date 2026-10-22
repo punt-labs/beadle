@@ -105,13 +105,42 @@ including the real `ethos` CLI, runs for real inside a
   target — no build tag, no `-tags=integration`, no CI-only invocation. A
   developer's `make test`/`make check` and CI's `go test -race -count=1
   ./...` step run identically.
-- **`ethos` is a required tool**, pinned via `Makefile`'s `ETHOS_VERSION`
-  and installed automatically by the `tools-ethos` target, which `test`
-  depends on — a developer never runs `make tools-ethos` by hand except
-  implicitly, the first time `make test`/`make check` provisions it. CI
-  installs the same pinned binary via the same target before its `Test`
-  step and adds `$(go env GOPATH)/bin` to `$GITHUB_PATH` so
-  `exec.LookPath("ethos")` finds it.
+- **`ethos`, `beadle-email`, and `biff` are required tools**, each
+  installed automatically by a `test`-dependency target — a developer
+  never runs any of them by hand except implicitly, the first time
+  `make test`/`make check` provisions them.
+  `internal/daemon/templates_test.go`'s
+  `TestDefaultMCPRegistry_StdioCommandsAreReal` is the consumer: it runs
+  every stdio MCP registry entry's configured command with `--help` and
+  fails loudly, per the no-`t.Skip` rule above, if the binary is missing.
+  `ethos` is pinned via `Makefile`'s `ETHOS_VERSION` and installed by
+  `tools-ethos` (`go install`, into the host-global `$(go env GOPATH)/bin`
+  — safe to share across checkouts because the pin makes every concurrent
+  install write the same bytes); `biff` is pinned via `BIFF_VERSION` and
+  installed by `tools-biff` (`uv tool install`, into the host-global uv
+  tool bin dir, `uv tool dir --bin`, for the same reason — and only when
+  the pinned version is not already present, so a repeat `make test` on
+  an already-provisioned host installs nothing). `beadle-email` has no
+  version pin and is **not** installed into either shared directory —
+  `tools-beadle-email` self-builds this branch's own `./cmd/beadle-email`
+  with `go build -o` into `$(CURDIR)/.tmp/bin`, a directory scoped to
+  *this checkout*, so the binary under test is always the code under
+  review in the current branch or worktree, never a prior release and
+  never another checkout's in-flight build. The "runs identically" claim
+  above holds through `make test` (or `make check`) only: a bare `go test
+  ./...` has no `.tmp/bin` on `PATH` and resolves whatever `beadle-email`
+  is first on the shell's own `PATH` instead — a prior release, a stale
+  build from another branch, or nothing at all. CI installs the same
+  three tools via the same targets before its `Test` step and adds the
+  per-checkout `.tmp/bin` (an absolute path built from
+  `$GITHUB_WORKSPACE`), `$(go env GOPATH)/bin` (where `go install` places
+  `ethos`), and the uv tool bin directory (where `uv tool install` places
+  `biff`) to `$GITHUB_PATH` so `exec.LookPath` finds all three. Because
+  `tools-ethos` and `tools-biff` still write to host-global directories, a
+  version-pin bump racing against a concurrent `make test` on the same
+  host (e.g. two worktrees provisioning at once) can still interleave;
+  `tools-beadle-email`'s per-checkout directory is immune to this by
+  construction, since nothing else on the host ever writes there.
 
 ## Fastmail Test Config
 

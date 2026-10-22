@@ -1,0 +1,39 @@
+mission_id: m-2026-10-22-039
+status: closed
+type: implement
+created_at: "2026-10-22T20:20:00Z"
+updated_at: "2026-10-22T20:37:37Z"
+closed_at: "2026-10-22T20:37:37Z"
+leader: claude
+worker: adb
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T20:20:00Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-f34m
+    files:
+        - Makefile
+write_set:
+    - Makefile
+success_criteria:
+    - 'tools-biff is restructured as a fixed sequence of named checks, each with exactly one way to fail and one message, so a reviewer can enumerate every outcome. Required shape: (1) uv on PATH, else exit 1 with the install hint; (2) bin dir known: run `uv tool dir --bin` ONCE at recipe time (not the parse-time variable), capturing stdout and stderr SEPARATELY (stdout to a variable, stderr to a mktemp file); classify on exit status AND non-empty stdout; on failure print the stderr file under the error header and exit 1; on success use that stdout as the bin dir for the rest of the recipe, so the parse-time UVTOOL_BIN is no longer load-bearing inside tools-biff (the test recipe may still use it for PATH); (3) skip decision: executable entrypoint present AND `uv tool list` (captured with 2>&1, exit status kept) shows exactly the pin; (4) on reinstall print exactly one reason line: list failed (with the captured list output), listed version differs (both named, <none> allowed), or entrypoint missing with the pin listed; then install as the last command. No 2>/dev/null anywhere in tools-biff. All diagnostics to stderr. The "re-run make" wording is removed: a transient probe failure now simply succeeds on the recipe-time run.'
+    - A table in a Makefile comment above the recipe lists every outcome (check, condition, message, exit) so the next reviewer verifies against the table rather than rediscovering the shape.
+    - 'Fidelity, all in isolated UV_TOOL_DIR/UV_TOOL_BIN_DIR under .tmp/, never the host dirs, one run per table row plus: a probe that prints a warning to stderr and exits 0 with a valid path on stdout proceeds normally (not misclassified); a probe that prints only to stderr and exits 0 with EMPTY stdout fails with that stderr shown. Paste every row''s output.'
+    - make -n test unchanged outside the tools-biff body; worktree gate; one commit chore(make), staged by name. Do not push, do not touch PRs or merge — the leader does that. Do not commit after submitting.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 5 on provisioning (bead beadle-f34m), branch fix/ethos-mcp-serve,
+    worktree [REDACTED:path]/.claude/worktrees/mcp-serve,
+    build on 3735f61. Four rounds have each fixed the previous round's
+    diagnostics and opened a narrower one; the latest: merging stderr into
+    the retry capture misclassifies a stderr-only exit-0 probe as success
+    and tells the developer to re-run make forever (MEDIUM), and the new
+    2>/dev/null on the list capture hides why the list failed (MEDIUM).
+    This round stops chasing individual messages: restructure the recipe
+    into enumerable checks with a comment table, so review becomes "does
+    each row hold" rather than open-ended reading. KNOWN ARTIFACT:
+    lint-strict from a worktree reports six spurious G204 lines; not real.

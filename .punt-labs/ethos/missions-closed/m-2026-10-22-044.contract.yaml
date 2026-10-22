@@ -1,0 +1,53 @@
+mission_id: m-2026-10-22-044
+status: failed
+type: implement
+created_at: "2026-10-22T21:44:08Z"
+updated_at: "2026-10-22T22:04:37Z"
+closed_at: "2026-10-22T22:04:37Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T21:44:08Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-fbhp
+    files:
+        - internal/daemon/harness_test.go
+        - internal/daemon/pipeline.go
+        - internal/daemon/handler.go
+        - internal/daemon/templates_test.go
+write_set:
+    - internal/daemon/harness_test.go
+    - internal/daemon/templates_test.go
+success_criteria:
+    - 'TestOnNewMail_EndToEnd''s table gains a `wantRecordStatus string` column ("" = no record expected, otherwise the expected Pipeline.Status) and the on-disk assertion branches on it instead of on wantSpawnerCalls > 0: "" asserts an empty store dir; a non-empty value asserts exactly one record with that Status and the sender''s Email.From. Existing rows: positive = "completed", the two gate-1/2 negatives = "". The assertion message no longer says "when no pipeline ran"; it says the record is attributable to passing gates 1 and 2.'
+    - 'The positive row''s spawner check cannot panic: the `calls[0]` access is guarded by a require.Len (or an equivalent early return) so a spawner miss reports the persistence/spawner failure instead of an index-out-of-range.'
+    - 'The comment block above the disk assertion states the real reason it is non-vacuous (fresh t.TempDir per subtest plus the can-fail proof) and what the negative rows buy (attribution: a record persisted before the trust or permission gate would fail them). Keep it under 8 lines.'
+    - 'Separate commit, templates_test.go, three review findings on TestDefaultMCPRegistry_StdioCommandsAreReal: (a) mcpCommandInstallRemedy returns (string, bool) with NO default arm, and the test require.True''s the bool before LookPath so a registry entry naming a command with no provisioning story fails outright with a message telling the author to add a tools-<cmd> Makefile target, a CI step, and a remedy case; (b) the usage check requires the literal case-sensitive "Usage:" AND the configured command line (cfg.Command plus its Args joined by spaces) in the output, so a binary that prints root usage and exits 0 on an unknown subcommand, or a server whose startup log contains "usage", no longer passes; (c) the exec.Cmd sets WaitDelay = time.Second so a started server that forks a child holding the pipes cannot block CombinedOutput past the 5s deadline. Prove (b) with a fake binary that prints root "Usage:" without the subcommand and exits 0; prove (c) with a fake that forks `sleep 30` with inherited stdout and exits; paste both failures.'
+    - go test -race -count=1 -run TestOnNewMail_EndToEnd -v ./internal/daemon/ shows all three subtests PASS; worktree gate as in context.
+    - 'Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes. Two commits, both test(daemon): harness_test.go, then templates_test.go. Stage by name. Do not push, do not touch PRs or merge — the leader does that.'
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Invariant review of b6981f3 (bead beadle-fbhp): the persistence
+    assertion is genuinely enforced, but its discriminator is wrong in
+    prose and fragile in shape. Executor.Run (pipeline.go ~60-69) saves a
+    "running" record BEFORE planning or spawning, so a record on disk
+    means gates 1 and 2 passed, not that the spawner was called; a future
+    gate-3/4 negative row (zero spawner calls, "failed" record) would fail
+    the empty-dir assertion. Separately, line ~161's calls[0] after a
+    non-fatal assert.Len panics on a spawner miss. Make the table say what
+    it means.
+
+    Worktree: [REDACTED:path]/.claude/worktrees/mcp-serve
+    Branch: fix/ethos-mcp-serve; build on HEAD 23d283d, the end of
+    provisioning rounds 1-8 (missions 029 through 043: Makefile,
+    test.yml, TESTING.md), which landed the tools-beadle-email and
+    tools-biff targets the remedy text in templates_test.go names. A second
+    silent-failure pass on 80366ce found three more gaps in the registry
+    test, folded in here as the templates_test.go commit. KNOWN
+    ARTIFACT: `make lint-strict` from any worktree reports six spurious
+    gosec G204 findings (../../.. path prefix); not real.

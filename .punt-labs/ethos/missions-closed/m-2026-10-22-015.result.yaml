@@ -1,0 +1,71 @@
+mission: m-2026-10-22-015
+round: 1
+created_at: "2026-10-22T17:38:12Z"
+author: bwk
+verdict: pass
+confidence: 1
+files_changed:
+    - path: internal/daemon/templates.go
+      added: 1
+      removed: 1
+    - path: internal/daemon/templates_test.go
+      added: 49
+      removed: 1
+evidence:
+    - name: TestDefaultMCPRegistry_StdioCommandsAreReal red against Args mcp
+      status: pass
+    - name: go test ./internal/daemon/... -run TestDefaultMCPRegistry (green after fix)
+      status: pass
+    - name: make vet
+      status: pass
+    - name: make staticcheck
+      status: pass
+    - name: make test (full suite, race)
+      status: pass
+    - name: make docs
+      status: pass
+    - name: make lint-strict (6 pre-existing gosec G204 only, none new)
+      status: pass
+prose: |
+    internal/daemon/templates.go:83 wired the ethos MCP server as
+    `ethos mcp`, but installed ethos has no `mcp` subcommand -- the
+    stdio MCP server is `ethos serve`. beadle-email's and biff's
+    entries were already correct.
+
+    Test-first: added TestDefaultMCPRegistry_StdioCommandsAreReal to
+    templates_test.go, which resolves each stdio registry entry's
+    Command on PATH and invokes it with its Args plus --help under a
+    5s context timeout, asserting exit 0. Ran it before the fix and
+    confirmed it failed on the ethos entry:
+
+      templates_test.go:169: registry entry "ethos": ethos mcp --help
+      exited 2 (want 0):
+      ethos: unknown command "mcp" for "ethos"
+
+    Committed that failing test as ebb6109. Then flipped the registry
+    entry's Args to []string{"serve"} and updated
+    TestBuildMCPConfigContent's assertion to match, committed as
+    f232868. Re-ran the targeted tests and the full suite; all pass,
+    including the new test's ethos/beadle-email/biff subtests.
+
+    A Command not found on PATH fails the new test with t.Fatalf and
+    an install remedy, never t.Skip, per docs/TESTING.md. The test
+    reads no stdout text (version strings etc. can change); it asserts
+    only on exit status, via exec.CommandContext with a 5s timeout, so
+    it never starts a long-running server.
+
+    Full local gate run from the worktree
+    ([REDACTED:path]/.claude/worktrees/mcp-serve,
+    branch fix/ethos-mcp-serve): make vet, make staticcheck, make test
+    (full race suite, all packages green), make docs (0 issues in 34
+    files) all clean. make lint-strict reports exactly the six
+    pre-existing gosec G204 findings named as a known artifact in the
+    mission context (admin_cmd.go:210, mcpreg.go:320,
+    internal/testenv/gpg.go:59,78,110,117) -- confirmed none are in the
+    two write-set files or the new test.
+
+    Commits:
+      ebb6109 test(daemon): exercise MCP registry stdio commands against real binaries
+      f232868 fix(daemon): wire the ethos MCP server entry to the serve subcommand
+
+    No push, no PR, no merge performed.

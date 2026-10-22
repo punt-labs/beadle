@@ -1,0 +1,55 @@
+mission_id: m-2026-10-22-015
+status: closed
+type: implement
+created_at: "2026-10-22T17:20:39Z"
+updated_at: "2026-10-22T17:39:23Z"
+closed_at: "2026-10-22T17:39:23Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T17:20:39Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-f34m
+    files:
+        - internal/daemon/templates.go
+        - internal/daemon/templates_test.go
+        - Makefile
+        - .github/workflows/test.yml
+write_set:
+    - internal/daemon/templates.go
+    - internal/daemon/templates_test.go
+success_criteria:
+    - DefaultMCPRegistry's "ethos" entry has Args []string{"serve"}; TestBuildMCPConfigContent asserts "serve" for ethos.
+    - 'A new test asserts that, for every stdio entry in DefaultMCPRegistry whose Command is resolvable on PATH, invoking that command with its Args plus --help exits 0 within a short timeout, so a named subcommand that does not exist fails the test. The ethos binary is guaranteed on PATH by Makefile''s tools-ethos target (test depends on it; CI adds GOPATH/bin to PATH). For a Command NOT found on PATH the test must t.Fatalf with an install remedy, never t.Skip (docs/TESTING.md: no t.Skip on a missing dependency, ever). Verify the test can fail: with Args back at "mcp" it must fail with ethos''s own usage error in the message.'
+    - 'The new test must not start a long-running server: use --help (or an equivalent that exits), with a context timeout of a few seconds, and assert on the exit status, not on stdout text that may change between versions.'
+    - make check passes (run from the main checkout per the leader's instruction below).
+    - Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes. Conventional Commits form, fix(daemon). Stage only the two write-set files with git add by name. Do not push, do not touch PRs or merge — the leader does that.
+budget:
+    rounds: 2
+    reflection_after_each: true
+current_round: 1
+context: |
+    Bead beadle-f34m. internal/daemon/templates.go:83 wires the ethos MCP
+    server as `ethos mcp`; installed ethos v4.16.0 has no `mcp` subcommand,
+    the stdio MCP server is `ethos serve`. beadle-email's entry (`serve`)
+    and biff's entry (`mcp`, verified against `biff --help` 2026-10-22) are
+    correct. No shipped recipe declares ethos yet, so this is latent.
+
+    The bead asks for more than the one-word fix: a test that exercises the
+    configured command instead of asserting its shape, because this is the
+    third entry in this component that was asserted rather than run.
+
+    Worktree: [REDACTED:path]/.claude/worktrees/mcp-serve
+    Branch: fix/ethos-mcp-serve (created from main, checked out there).
+    Edit and commit in that worktree. KNOWN ARTIFACT: `make lint-strict`
+    run from any git worktree reports six spurious gosec G204 findings
+    because golangci-lint reports paths as ../../..; they are not real and
+    not yours to fix. For the authoritative gate run `make check` from the
+    main checkout is NOT possible while another branch is checked out
+    there, so run `make vet`, `make staticcheck`, `make test`, and
+    `make docs` from the worktree, and run `make lint-strict` from the
+    worktree expecting ONLY those six pre-existing G204 lines and nothing
+    else. Report that output verbatim. The leader runs the full gate from
+    the main checkout before the PR opens.

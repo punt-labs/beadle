@@ -1,0 +1,84 @@
+mission: m-2026-10-22-041
+round: 1
+created_at: "2026-10-22T21:12:35Z"
+author: adb
+verdict: pass
+confidence: 0.95
+files_changed:
+    - path: Makefile
+      added: 131
+      removed: 8
+evidence:
+    - name: make vet (worktree)
+      status: pass
+    - name: make staticcheck (worktree)
+      status: pass
+    - name: 'make lint-shell (worktree): test-shell-discovery PASS, shellcheck clean'
+      status: pass
+    - name: 'make docs (worktree): markdownlint-cli2, 0 issues in 34 files'
+      status: pass
+    - name: 'make test (worktree, normal PATH, host biff untouched): all 17 packages ok; tools-biff printed the ordinary skip line'
+      status: pass
+    - name: 'make vulncheck (worktree): 0 vulnerabilities'
+      status: pass
+    - name: 'make lint-strict (worktree): exactly 6 gosec G204 findings, all at the documented ../../../ worktree-artifact paths; none Makefile-related'
+      status: pass
+    - name: 'make -n test (worktree): the mkdir and go build lines are byte-identical to 8c5e704''s; only the two edited recipe bodies (tools-biff''s row 2, test''s resolver) differ'
+      status: pass
+    - name: 'Fidelity (a) -- uv tool dir --bin shim prints a warning to stderr and a valid path to stdout, exit 0: the warning appeared on stderr as the FIRST line of output (passed through before the list capture could overwrite it), and the recipe proceeded normally to the reinstall row (nothing was listed yet in this fresh isolated dir) -- exit 0, stdout empty throughout'
+      status: pass
+    - name: 'Fidelity (b) -- the same shim pattern but exit 0 with EMPTY stdout: still failed as row 2, printing "''uv tool dir --bin'' failed (exit 0):" followed by the captured stderr text, exit 1 -- unchanged from round 6, confirming the new passthrough line did not weaken the exit-0-empty-stdout failure case'
+      status: pass
+    - name: 'Fidelity (c) -- in the test recipe, a counter-based uv shim whose FIRST call (tools-biff''s own row-2 check) succeeds normally, and whose SECOND call (test''s own resolver) exits 3 while still printing a valid-looking path on stdout: make test failed with "test: ''uv tool dir --bin'' failed (exit 3) or produced no output -- cannot build the PATH that carries biff", exit 1. Proved with BOTH a uv invocation log (shows exactly two tool-dir-bin calls, the second one the failing one) and a go invocation log (shows env/install/build calls but NOT test -race -count=1 ./... -- go test genuinely never ran)'
+      status: pass
+    - name: 'Fidelity (d) -- the same shim pattern but the second (test-resolver) call exits 0 with a valid path, matching normal behavior: make test ran to completion, all 17 packages passed, and the go invocation log confirms test -race -count=1 ./... WAS invoked this time -- the positive control proving (c) failed because of the induced exit-3 condition specifically, not some unrelated breakage'
+      status: pass
+    - name: 'Baseline reconfirmations: the ordinary tools-biff skip path and the normal-PATH make test both still pass unchanged after both fixes, against the real host install'
+      status: pass
+prose: |
+    File hash (sha256) at submission: Makefile 3e3f397c88babbd4ad6b83bc96a232b28823f48b01940be2269795b293a7175c
+
+    One commit on fix/ethos-mcp-serve, building on 8c5e704:
+
+    06fb7a8 chore(make): pass through row 2's success-path stderr,
+    mirror its classification in test
+
+    Fix 1 (row 2 success-path stderr): added `[ -s "$$err" ] && cat
+    "$$err" >&2;` immediately after row 2's closing `fi` and before
+    `uv tool list`'s capture reuses the same temp file. The `[ -s ... ]`
+    test's own exit status is read by nothing -- the `&&`'s overall
+    truth value is discarded, and the next statement on the next line
+    (`listing=$$(...)`) sets its own `$$?` regardless -- so this line
+    cannot change the recipe's eventual exit status whether or not the
+    file happened to be empty. Verified no `set -e`/`SHELLFLAGS`/
+    `.POSIX` anywhere in this Makefile that could make a `&&`
+    short-circuit abort the recipe. Table row 2's success message
+    column now reads "(uv's own stderr, if any, passed through -- that
+    stdout becomes the bin dir for checks 3-4 below)", and the preamble
+    paragraph is rewritten so "either shown or captured ... never
+    discarded" is actually true of every uv call, success path included.
+
+    Fix 2 (test's resolver): `uvbin=$$(uv tool dir --bin); uvbin_status=$$?`
+    now captures the exit status alongside the stdout capture, and the
+    guard is `[ $$uvbin_status -ne 0 ] || [ -z "$$uvbin" ]` -- the exact
+    same two-part classification tools-biff's row 2 uses, with the
+    message naming both possible causes: "failed (exit N) or produced
+    no output." A new comment sentence above the recipe states this
+    mirrors row 2 exactly and why: a nonzero exit with a stray path on
+    stdout is a failure there, and must be treated as one here too,
+    since uv itself is the one saying the value isn't reliable.
+
+    Demo: fidelity (a) and (b) ran against isolated
+    UV_TOOL_DIR/UV_TOOL_BIN_DIR under
+    [REDACTED:path]/.tmp/mission041-scratch/; the
+    host's real ~/.local/bin/biff install was never touched, confirmed
+    by the final `make test` against the normal host PATH still showing
+    the ordinary skip line. Fidelity (c) and (d) used a counter-based uv
+    shim (first call real-delegates for tools-biff's own check, second
+    call is the one under test) plus a `go` shim logging every
+    invocation, giving direct proof that `go test -race -count=1 ./...`
+    was skipped in (c) and run in (d) -- not inferred from exit codes
+    alone. All shims and the isolated uv dir removed after use;
+    `git status --short` clean before the commit and clean now. Did not
+    touch any file outside the Makefile write set. Not pushed; no PR or
+    merge touched; no further commit after this submission.

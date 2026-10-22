@@ -1,0 +1,39 @@
+mission_id: m-2026-10-22-038
+status: closed
+type: implement
+created_at: "2026-10-22T20:00:30Z"
+updated_at: "2026-10-22T20:19:51Z"
+closed_at: "2026-10-22T20:19:51Z"
+leader: claude
+worker: adb
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T20:00:30Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-f34m
+    files:
+        - Makefile
+write_set:
+    - Makefile
+success_criteria:
+    - 'In tools-biff''s empty-UVTOOL_BIN branch, the unsuppressed retry of `uv tool dir --bin` is captured and branched on: if the retry succeeds, print one line saying the parse-time probe failed transiently and the retry returned <path>, so re-run make; otherwise print the captured error text under the existing "real error is" header and the HOME/UV_TOOL_BIN_DIR hint. Both paths still exit 1 (UVTOOL_BIN was captured empty at parse time and the recipe cannot be trusted). A valid path is never printed under an error header.'
+    - 'The reinstall branch states WHY it is reinstalling, one line to stderr, distinguishing: entrypoint missing or not executable; version in the listing differs from the pin (print both); `uv tool list` failed. The install itself remains the last command so its status is the recipe''s.'
+    - 'Fidelity in isolated UV_TOOL_DIR/UV_TOOL_BIN_DIR under .tmp/, never the host dirs: (a) a uv shim whose `tool dir --bin` fails once then succeeds (a counter file) produces the transient-failure line, not the error header; (b) the three reinstall reasons each print their own line (remove the entrypoint; install a different pinned version; shim `tool list` to fail). Paste all four.'
+    - make -n test is byte-identical to 717f046's; worktree gate as in context; one commit chore(make), staged by name. Do not push, do not touch PRs or merge — the leader does that. Do not commit after submitting.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 4 on provisioning (bead beadle-f34m), branch fix/ethos-mcp-serve,
+    worktree [REDACTED:path]/.claude/worktrees/mcp-serve,
+    build on 717f046. The round-3 silent-failure re-review confirmed all
+    three residuals closed and found one wording defect (MEDIUM): when the
+    unsuppressed retry of `uv tool dir --bin` succeeds after a transient
+    parse-time failure, the recipe prints a valid path under the "real
+    error is" header followed by a HOME hint that does not apply, then
+    exits 1. Fail-closed is right; the text is wrong. Plus a LOW: the
+    reinstall branch is reached for three reasons and names only one.
+    KNOWN ARTIFACT: lint-strict from a worktree reports six spurious G204
+    lines; not real. NEVER touch the host uv dirs during fidelity.

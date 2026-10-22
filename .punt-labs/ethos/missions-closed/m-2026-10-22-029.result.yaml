@@ -1,0 +1,79 @@
+mission: m-2026-10-22-029
+round: 1
+created_at: "2026-10-22T18:22:51Z"
+author: adb
+verdict: pass
+confidence: 0.95
+files_changed:
+    - path: Makefile
+      added: 22
+      removed: 3
+    - path: .github/workflows/test.yml
+      added: 9
+      removed: 4
+    - path: docs/TESTING.md
+      added: 18
+      removed: 7
+evidence:
+    - name: 'make test (worktree, normal PATH): all packages ok, including internal/daemon'
+      status: pass
+    - name: 'make test under scrubbed PATH (env PATH=/usr/bin:/bin:$(go env GOROOT)/bin plus a uv-only shim dir, no pre-existing ~/.local/bin or ~/go/bin entries): tools-ethos/tools-biff/tools-beadle-email provision, go test passes'
+      status: pass
+    - name: 'TestDefaultMCPRegistry_StdioCommandsAreReal -v under the same scrubbed PATH, with GOINSTALL_BIN/UVTOOL_BIN prefixed exactly as make test''s own PATH= line does: all three subtests (ethos, beadle-email, biff) PASS'
+      status: pass
+    - name: 'same test run WITHOUT the provisioning-derived PATH prefix: all three subtests fail with ''not found on PATH'' and the exact per-binary remedy text from mcpCommandInstallRemedy -- confirms the fix is load-bearing, not a no-op'
+      status: pass
+    - name: make vet (worktree)
+      status: pass
+    - name: make staticcheck (worktree)
+      status: pass
+    - name: 'make docs (worktree): markdownlint-cli2, 0 issues in 34 files'
+      status: pass
+    - name: 'make lint-shell (worktree): test-shell-discovery PASS, shellcheck clean'
+      status: pass
+    - name: 'make lint-strict (worktree): exactly 6 gosec G204 findings, all at ../../../ worktree-artifact paths in internal/pgp/probe.go and internal/testenv/gpg.go -- none in the three write-set files, diff touches no Go'
+      status: pass
+    - name: actionlint .github/workflows/test.yml -- zero findings (fixed a shellcheck SC2005 'useless echo' my own first draft introduced, by switching to printf/plain uv tool dir --bin)
+      status: pass
+prose: |
+    Three commits on fix/ethos-mcp-serve, building on 06115c9:
+
+    468bd71 chore(make): provision biff and beadle-email for make test
+      - BIFF_VERSION := 1.19.0 pinned next to ETHOS_VERSION
+      - tools-biff: uv tool install --force punt-biff==$(BIFF_VERSION)
+      - tools-beadle-email: self-builds ./cmd/beadle-email into
+        GOINSTALL_BIN (go build -o, not go install -- this repo's own
+        code under test, not a published release)
+      - UVTOOL_BIN := $(shell uv tool dir --bin) -- resolves to
+        ~/.local/bin on this host, distinct from GOINSTALL_BIN
+        (~/go/bin), so it needs its own PATH prefix
+      - test: tools-ethos tools-biff tools-beadle-email, PATH extended
+        with both GOINSTALL_BIN and UVTOOL_BIN
+
+    28186a4 chore(ci): provision biff and beadle-email before the Test step
+      - astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 #
+        v10.3.0, the exact SHA+tag biff-notify.yml already pins
+      - Install step runs all three make targets
+      - GITHUB_PATH gains both GOPATH/bin and `uv tool dir --bin`
+      - Fixed a shellcheck SC2005 finding (useless echo "$(cmd)") my
+        first draft introduced by switching to printf for the Go path
+        and a bare `uv tool dir --bin >> "$GITHUB_PATH"` for the uv one
+
+    5befda6 docs(testing): document the three required tools, not just ethos
+      - Expanded the single "ethos is a required tool" bullet to name
+        all three, their pinning/build mechanism, and
+        TestDefaultMCPRegistry_StdioCommandsAreReal as the consumer
+
+    Demo: ran make test under a PATH scrubbed to /usr/bin:/bin plus
+    GOROOT/bin plus a scratch directory containing only a symlink to the
+    real uv binary (uv itself lives in ~/.local/bin on this host, the
+    same directory `uv tool install` targets, so a shim was needed to
+    make uv invocable while still excluding any pre-existing ethos/
+    biff/beadle-email copies from the starting PATH). make test
+    provisioned all three tools and passed every package. Separately ran
+    TestDefaultMCPRegistry_StdioCommandsAreReal -v directly under the
+    same scrubbed PATH, both with and without the GOINSTALL_BIN/
+    UVTOOL_BIN prefix make test's PATH= line adds -- without it, all
+    three subtests fail with the exact per-binary remedy text; with it,
+    all three pass. Did not touch internal/daemon/templates_test.go.
+    Scratch shim directory removed after the demo. Not pushed.

@@ -58,24 +58,35 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 		messageSigned    bool // gate 1: false = unsigned RFC822 (negative case)
 		contactPerm      string
 		wantSpawnerCalls int
+		// wantRecordStatus is "" when no pipeline record is expected on
+		// disk at all (the message was rejected before Executor.Run), or
+		// the expected Pipeline.Status when one is. A record's presence
+		// tracks gates 1 and 2, NOT the spawner: Executor.Run (pipeline.go)
+		// saves a "running" record before planning or spawning, so a
+		// future gate-3/4 negative row (message accepted, spawner never
+		// called, pipeline ends "failed") would still produce a record.
+		wantRecordStatus string
 	}{
 		{
 			name:             "all four gates pass: pgp-verified rwx sender, signed command file, valid contract",
 			messageSigned:    true,
 			contactPerm:      "rwx",
 			wantSpawnerCalls: 1,
+			wantRecordStatus: "completed",
 		},
 		{
 			name:             "gate 1 negative: unsigned message from an rwx sender creates nothing",
 			messageSigned:    false,
 			contactPerm:      "rwx",
 			wantSpawnerCalls: 0,
+			wantRecordStatus: "",
 		},
 		{
 			name:             "gate 2 negative: pgp-signed message from an rw- sender creates nothing",
 			messageSigned:    true,
 			contactPerm:      "rw-",
 			wantSpawnerCalls: 0,
+			wantRecordStatus: "",
 		},
 	}
 
@@ -140,13 +151,20 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 			planner := &daemon.StubPlanner{Result: []daemon.CommandCall{{Command: "test-command", Args: map[string]any{}}}}
 			templates := &daemon.MissionTemplate{TmpDir: t.TempDir()}
 
+			// beadle-fbhp: a real store, not nil -- the production shape
+			// (main.go wires one in) -- so a refactor dropping handler.go's
+			// `Store: h.store` field leaves a record unwritten here instead
+			// of passing vacuously.
+			storeDir := t.TempDir()
+			store := &daemon.PipelineStore{Dir: storeDir, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+
 			handler := daemon.NewMailHandler(t.Context(), env.Resolver, dialer, nil, spawner, templates,
-				slog.New(slog.NewTextHandler(io.Discard, nil)), 0, planner, commands, nil)
+				slog.New(slog.NewTextHandler(io.Discard, nil)), 0, planner, commands, store)
 			handler.OnNewMail(1)
 			handler.Stop()
 
 			calls := spawner.Calls()
-			assert.Len(t, calls, tt.wantSpawnerCalls, "spawner call count")
+			require.Len(t, calls, tt.wantSpawnerCalls, "spawner call count")
 			if tt.wantSpawnerCalls > 0 {
 				// beadle-ivtd: the recipe's declared Tools must reach the
 				// spawned worker, end to end through the real pipeline --
@@ -154,6 +172,27 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 				assert.Equal(t, []string{"Read"}, calls[0].Tools,
 					"the fixture command's declared Tools must reach the spawner")
 			}
+
+			// Non-vacuous because storeDir is a fresh t.TempDir per subtest
+			// (never pre-populated) and the can-fail proof (beadle-fbhp:
+			// removing handler.go's Store: h.store wiring breaks this).
+			// Gates 1 and 2 run inside OnNewMail BEFORE Executor.Run (and
+			// therefore any record) exists, so a record appears only after
+			// both pass: the negative rows prove no record is written when
+			// either gate rejects the message first.
+			entries, err := os.ReadDir(storeDir)
+			require.NoError(t, err)
+			if tt.wantRecordStatus == "" {
+				assert.Empty(t, entries, "store directory must stay empty: the message never reached Executor.Run")
+				return
+			}
+			require.Len(t, entries, 1, "exactly one pipeline record expected on disk")
+			recordData, err := os.ReadFile(filepath.Join(storeDir, entries[0].Name()))
+			require.NoError(t, err)
+			var record daemon.Pipeline
+			require.NoError(t, json.Unmarshal(recordData, &record))
+			assert.Equal(t, tt.wantRecordStatus, record.Status)
+			assert.Equal(t, "jim@punt-labs.com", record.Email.From)
 		})
 	}
 }

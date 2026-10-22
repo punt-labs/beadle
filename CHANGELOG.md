@@ -130,6 +130,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The daemon's built-in `ethos` MCP server entry named a subcommand
+  ethos does not have.** `DefaultMCPRegistry` declared `ethos mcp`; the
+  installed CLI starts its stdio server with `ethos serve`. No shipped
+  recipe names the entry yet, so the defect was latent, and it would have
+  surfaced as a silent spawn failure the first time one did. The entry
+  now says `serve`, and a new test runs every stdio entry's real binary
+  with `--help` and requires exit 0, the literal `Usage:`, and the entry's
+  own subcommand path in the output, so a registry entry that names a
+  subcommand its binary lacks, or a binary with no provisioning story in
+  `make test`, fails on every host rather than only in CI (beadle-f34m).
+
+- **`beadle-email serve` rejects stray positional arguments.** It used
+  to start the MCP server on `beadle-email serve bogus` and exit 0 at
+  EOF; it now refuses the argument before any IMAP dial, matching
+  `ethos serve` and `biff mcp` (beadle-f34m).
+
+- **`TestOnNewMail_EndToEnd` asserts a pipeline record actually reaches
+  disk.** The daemon harness checked the spawner but never the store, so
+  the un-wired `Executor.Store` that the record above fixes was invisible
+  to it. The table now carries the expected on-disk status per row, and a
+  can-fail proof (removing the store wiring breaks only the positive row)
+  is recorded in the commit history (beadle-fbhp).
+
 - **A daemon command's `prompt` was silently truncated at 500 runes when it
   became a mission's `success_criteria`.**
   `internal/daemon.buildStageContract` escaped `cmd.Prompt` with

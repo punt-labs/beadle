@@ -1,0 +1,118 @@
+mission: m-2026-10-22-043
+round: 1
+created_at: "2026-10-22T21:33:57Z"
+author: adb
+verdict: pass
+confidence: 0.95
+files_changed:
+    - path: Makefile
+      added: 132
+      removed: 8
+evidence:
+    - name: make vet (worktree)
+      status: pass
+    - name: make staticcheck (worktree)
+      status: pass
+    - name: 'make lint-shell (worktree): test-shell-discovery PASS, shellcheck clean'
+      status: pass
+    - name: 'make docs (worktree): markdownlint-cli2, 0 issues in 34 files'
+      status: pass
+    - name: 'make test (worktree, normal PATH, host biff untouched): all 17 packages ok; tools-biff printed the ordinary skip line'
+      status: pass
+    - name: 'make vulncheck (worktree): 0 vulnerabilities'
+      status: pass
+    - name: 'make lint-strict (worktree): exactly 6 gosec G204 findings per run, all confined to internal/pgp and internal/secret (the documented worktree-artifact exclusion-regex miss); none Makefile-related. The specific six lines shifted slightly between two consecutive runs in this session -- still six, still entirely within the pre-excluded directories -- consistent with gosec''s own walk order, not a regression from this change'
+      status: pass
+    - name: 'make -n test (worktree): the mkdir and go build lines are byte-identical to 06fb7a8''s; only the two edited recipe bodies differ'
+      status: pass
+    - name: 'grep confirms the write-set invariant: `2>` appears exactly once in tools-biff, on the `command -v uv >/dev/null 2>&1` line (which invokes no uv process); zero occurrences of mktemp or trap'
+      status: pass
+    - name: 'Row 1 (uv absent): fails before any uv call, unchanged'
+      status: pass
+    - name: 'Row 2 failure (uv tool dir --bin exits nonzero, realistic stderr error): uv''s own error line appeared on the terminal directly, BEFORE this recipe''s own message quoting the (empty) captured stdout and pointing at "uv''s message above" -- exit 1'
+      status: pass
+    - name: 'Row 3 (skip, real host install): unchanged, exit 0'
+      status: pass
+    - name: 'Row 4a (uv tool list fails): uv''s own error line appeared on the terminal first, followed by this recipe''s message quoting the (empty) captured stdout and reinstalling anyway'
+      status: pass
+    - name: 'Row 4b (listed version differs): unchanged, both versions named'
+      status: pass
+    - name: 'Row 4c (entrypoint missing, pin listed): unchanged'
+      status: pass
+    - name: 'Row 5 (install) and final skip reconfirmation: demonstrated inline with 4a/4b/4c above; re-ran tools-biff once more afterward against the now-consistent isolated state and got the ordinary skip line back'
+      status: pass
+    - name: 'Fidelity (a) -- uv tool list shim warns on stderr ("benign uv listing warning") then lists cleanly (exit 0), entrypoint present: the warning appeared on the terminal AND the skip row printed -- both, as required, not one displacing the other'
+      status: pass
+    - name: 'Fidelity (b) -- the same shim with the entrypoint removed: the warning appeared on the terminal AND row 4c printed'
+      status: pass
+    - name: 'Fidelity (c) -- a `uv tool dir --bin` shim that warns on stderr with a valid path on stdout, exit 0: the warning appeared on the terminal and the recipe proceeded to the skip decision normally'
+      status: pass
+    - name: 'Fidelity (d) -- a `uv tool list` shim whose stderr warning contains the literal substring "punt-biff " while the entrypoint is removed: the warning appeared on the terminal, but classification still fell through to row 4c (entrypoint missing), never row 4b misreading the stderr text as the installed version -- confirming the stdout-only capture still holds with stderr unredirected rather than merely uncaptured'
+      status: pass
+    - name: 'stdout/stderr separation confirmed on every fidelity run above: stdout empty throughout (the recipe''s own PATH-relevant output is only ever the final `uv tool install` success/failure noise, which also lands on the terminal directly and was pasted in full for 4a/4b/4c); all uv diagnostics and this recipe''s own messages landed on stderr'
+      status: pass
+prose: |
+    File hash (sha256) at submission: Makefile 9f370a7507af2f88a9d42bb59d741be62aa9a7a5613769436c949c754a0d99e4
+
+    One commit on fix/ethos-mcp-serve, building on 06fb7a8:
+
+    23d283d chore(make): never redirect uv's stderr in tools-biff
+
+    Rounds 6 and 7 each found the same class of defect on a different
+    row: a uv call's stderr captured into a shared temp file and left
+    unread somewhere. A third passthrough line on round 7's surviving
+    row (`uv tool list`, rows 3/4b/4c) would have been the same move a
+    third time. This round removes the mechanism that made the class
+    possible rather than patching its next instance: tools-biff no
+    longer redirects stderr on any uv call. `bin=$$(uv tool dir --bin)`
+    and `listing=$$(uv tool list)` capture stdout only; uv's own
+    diagnostics reach the terminal directly, in the order uv wrote them,
+    always before this recipe's own message about the same call. The
+    temp file, the mktemp guard and its table row, the EXIT trap, and
+    the round-7 stderr-passthrough line are all deleted -- about ten
+    lines net, and a whole category of "has this row read the file yet"
+    question with them.
+
+    Row 2's and row 4a's failure messages now quote the captured STDOUT
+    (which can still be informative -- e.g. a stray partial path before
+    an error, or empty) and say "see uv's message above", pointing the
+    reader at the diagnostic uv already printed directly rather than
+    re-presenting a copy of it. Rows 3/4b/4c are unchanged in substance:
+    they classify on the captured stdout listing alone, never on
+    stderr, which is what actually prevents a uv warning mentioning
+    "punt-biff " from being misread as the installed version -- that
+    protection came from the stdout/stderr separation, which this
+    change keeps, not from the temp file, which it removes. Fidelity
+    (d) demonstrates this directly: a stderr warning containing
+    "punt-biff " still correctly falls through to row 4c, not 4b.
+
+    The preamble's old "never discarded" sentence required re-checking
+    against every row on every subsequent round (and was wrong twice).
+    It is replaced with the single invariant that makes the question
+    moot: stderr is never redirected in this recipe, so there is
+    nothing for any row to discard in the first place. The `test`
+    recipe's resolver keeps its round-6/7 shape (it already left stderr
+    unredirected -- there was never a bug there to fix for THIS class)
+    and now quotes its own captured stdout the same way row 2 does.
+
+    Demo: all fidelity work ran against isolated
+    UV_TOOL_DIR/UV_TOOL_BIN_DIR under
+    [REDACTED:path]/.tmp/mission043-scratch/; the
+    host's real ~/.local/bin/biff install was never touched, confirmed
+    by stdout/stderr captured separately on every run (host runs showed
+    only the ordinary skip line) and by the final `make test` against
+    the normal host PATH still showing it. All shims removed after use;
+    `git status --short` clean before the commit and clean now. Did not
+    touch any file outside the Makefile write set. Not pushed; no PR or
+    merge touched; no further commit after this submission.
+
+    Note on lint-strict: the known worktree artifact (six gosec G204
+    findings, confined to internal/pgp and internal/secret, caused by
+    the exclusion regex not matching the ../../../-prefixed paths
+    golangci-lint reports from inside a worktree) reproduced on every
+    run, but the SPECIFIC six lines shifted slightly between two
+    consecutive runs in this session -- always six, always within the
+    same two pre-excluded directories. This is new information about
+    the artifact's own non-determinism, not a regression this change
+    introduced; the Makefile touches no Go source and is not itself a
+    golangci-lint target.

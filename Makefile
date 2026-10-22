@@ -9,6 +9,7 @@ STATICCHECK_VERSION := v0.8.1
 GOLANGCI_LINT_VERSION := v2.12.2
 GOVULNCHECK_VERSION := v1.7.0
 ETHOS_VERSION := v4.16.0
+BIFF_VERSION := 1.19.0
 
 # Every shell script in the repo, discovered by shebang rather than by
 # extension or a hardcoded list: a script deployed under a literal binary
@@ -44,7 +45,7 @@ endef
 
 SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard -z 2>/dev/null | $(DISCOVER_SHELL_SCRIPTS))
 
-.PHONY: help lint lint-strict lint-shell test-shell-discovery vet staticcheck vulncheck docs tools-ethos test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
+.PHONY: help lint lint-strict lint-shell test-shell-discovery vet staticcheck vulncheck docs tools-ethos tools-biff tools-beadle-email test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -120,12 +121,117 @@ clean-tex: ## Remove LaTeX intermediate files
 tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4 tests)
 	go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
 
+# --force overrides any `biff` binary already in the uv tool bin dir that
+# uv did not install itself (e.g. a distro package or a manual copy); the
+# ==$(BIFF_VERSION) pin above, combined with the skip check in the recipe,
+# is what actually drives a reinstall on version drift -- --force covering
+# an unrelated existing install is the rare case it guards against. An
+# editable or path-installed punt-biff at the pinned version also
+# satisfies the skip check below (uv's env listing names the version
+# regardless of install source), so a developer's own editable checkout
+# of biff, pinned to this version, is left alone rather than clobbered.
+#
+# Outcome table -- every path this recipe can take. Review this table,
+# not the shell: the rows are not all mutually exclusive (a case can
+# satisfy more than one of 4a/4b/4c's conditions at once -- see below),
+# so the TIEBREAKER is the fixed check order the recipe implements: 4a
+# is tested before 4b, which is tested before 4c, and the first one that
+# matches is the one that prints. The recipe body implements exactly
+# these rows and no others.
+#
+# | #  | Check            | Condition                                      | Message                                                              | Exit          |
+# |----|------------------|-------------------------------------------------|----------------------------------------------------------------------|---------------|
+# | 1  | uv on PATH       | `command -v uv` fails                          | "uv not found on PATH -- install uv (...) to provision biff"         | 1             |
+# | 2  | bin dir known    | `uv tool dir --bin` exits nonzero, OR exits 0   | "'uv tool dir --bin' failed (exit N) or produced no output (stdout:  | 1             |
+# |    |                  | with empty stdout                               | <captured stdout>) -- see uv's message above"                        |               |
+# | 2  | bin dir known    | exits 0 with non-empty stdout                   | (none -- that stdout becomes the bin dir for checks 3-4 below)       | continues     |
+# | 3  | skip decision    | entrypoint executable AND `uv tool list` exits  | "punt-biff vX already installed, skipping"                           | 0             |
+# |    |                  | 0 AND shows exactly the pin                     |                                                                        |               |
+# | 4a | reinstall reason | `uv tool list` exits nonzero                    | "'uv tool list' failed (exit N) (stdout: <captured stdout>) -- see   | install's own |
+# |    |                  |                                                  | uv's message above; reinstalling anyway"                              |               |
+# | 4b | reinstall reason | list exits 0 but listed version != pin          | "installed <version|<none>> differs from pin <pin>; reinstalling"    | install's own |
+# | 4c | reinstall reason | list exits 0, pin IS listed, entrypoint missing | "biff entrypoint missing or not executable at <path> (pin <pin> is   | install's own |
+# |    |                  | or not executable                               | listed); reinstalling"                                               |               |
+# | 5  | install          | reached after any of 4a/4b/4c                   | `uv tool install`'s own output                                        | install's own |
+#
+# The invariant that replaces per-row stderr bookkeeping: stderr is
+# never redirected in this recipe (the one exception, `command -v uv
+# >/dev/null 2>&1`, discards nothing of uv's -- uv is never invoked on
+# that line). uv's own diagnostics reach the terminal directly, in the
+# order uv wrote them, always before this recipe's own message about
+# that same call -- so no row can discard them, and no row needs to
+# capture, quote, or pass them through either. Only STDOUT is captured
+# (`$$(...)`), so a uv warning can never be read as a listing: rows
+# 3/4b/4c classify on the captured stdout alone, and the `grep -F
+# 'punt-biff '` that extracts the installed line never sees anything
+# uv wrote to stderr. Rows 2 and 4a quote the captured stdout in their
+# own failure messages where it helps diagnose what uv returned, but
+# that stdout was never stderr to begin with. An earlier version of
+# this recipe captured stderr into a shared temp file so error messages
+# could quote it; that created a new question on every row (has this
+# row read the file yet?) and the file went unread on three separate
+# occasions across three rounds. Not redirecting stderr in the first
+# place removes the question instead of answering it a fourth time.
+# Check 2 runs `uv tool dir --bin` fresh at recipe time rather than
+# trusting a parse-time variable; the `test` target below does the same
+# independently, for the same reason -- a parse-time snapshot has no way
+# to recover from a transient failure, so nothing in this Makefile reads
+# one for the uv bin dir any more.
+tools-biff: ## Install the pinned biff CLI if missing, unreachable, or out of pin (needed by internal/daemon's MCP registry test)
+	@command -v uv >/dev/null 2>&1 || { echo "tools-biff: uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff" >&2; exit 1; }; \
+	bin=$$(uv tool dir --bin); bin_status=$$?; \
+	if [ $$bin_status -ne 0 ] || [ -z "$$bin" ]; then \
+		echo "tools-biff: 'uv tool dir --bin' failed (exit $$bin_status) or produced no output (stdout: $$bin) -- see uv's message above" >&2; \
+		exit 1; \
+	fi; \
+	listing=$$(uv tool list); list_status=$$?; \
+	if [ $$list_status -eq 0 ] && test -x "$$bin/biff" && printf '%s\n' "$$listing" | grep -qFx "punt-biff v$(BIFF_VERSION)"; then \
+		echo "tools-biff: punt-biff v$(BIFF_VERSION) already installed, skipping" >&2; \
+	else \
+		if [ $$list_status -ne 0 ]; then \
+			echo "tools-biff: 'uv tool list' failed (exit $$list_status) (stdout: $$listing) -- see uv's message above; reinstalling anyway" >&2; \
+		else \
+			installed=$$(printf '%s\n' "$$listing" | grep -F 'punt-biff ' | head -1); \
+			if [ "$$installed" != "punt-biff v$(BIFF_VERSION)" ]; then \
+				echo "tools-biff: installed $${installed:-<none>} differs from pin punt-biff v$(BIFF_VERSION); reinstalling" >&2; \
+			else \
+				echo "tools-biff: biff entrypoint missing or not executable at $$bin/biff (pin punt-biff v$(BIFF_VERSION) is listed); reinstalling" >&2; \
+			fi; \
+		fi; \
+		uv tool install --force punt-biff==$(BIFF_VERSION); \
+	fi
+
+# Per-checkout, not host-global: tools-beadle-email self-builds THIS
+# checkout's own branch content, so its output directory must not be
+# shared with any other checkout. $(CURDIR) (not a bare relative ".tmp/bin")
+# because `go test` runs each package's test binary chdir'd into that
+# package's own source directory, not the repo root -- a relative PATH
+# entry would resolve against the WRONG directory inside the test
+# subprocess. Gitignored already (.tmp/* in .gitignore); mkdir -p below
+# creates it on demand.
+BEADLE_EMAIL_BIN := $(CURDIR)/.tmp/bin
+
+tools-beadle-email: ## Self-build this branch's beadle-email into BEADLE_EMAIL_BIN (same test)
+	mkdir -p "$(BEADLE_EMAIL_BIN)"
+	go build -ldflags="$(LDFLAGS)" -o "$(BEADLE_EMAIL_BIN)/beadle-email" ./cmd/beadle-email/
+
 # go install places a binary in $GOBIN if set, else $GOPATH/bin -- neither is
 # guaranteed to already be on PATH. Without this, `make test` provisions
 # ethos successfully but exec.LookPath("ethos") still fails: tools-ethos
 # ran, the binary exists, and the remedy message points right back at the
 # command that was just run. Computed once, at parse time, so every `test`
 # invocation prepends the same directory `go install` actually used.
+# This directory IS host-global (shared by every checkout on the host),
+# which is safe only because ethos is pinned to the identical
+# $(ETHOS_VERSION) everywhere -- two concurrent `go install`s race to
+# write the same bytes, not different ones. beadle-email's self-build
+# does NOT share this directory (see BEADLE_EMAIL_BIN above): its content
+# is per-branch, so two checkouts building concurrently into one shared
+# directory would let either one silently run its tests against the
+# OTHER checkout's binary. An earlier version of this comment argued for
+# "exactly one PATH prefix" across both tools; that argument held only
+# while both built into the same host-global directory, and no longer
+# applies now that beadle-email has its own per-checkout one.
 #
 # GOPATH may be a colon-separated list (":"-joined on every GOOS, including
 # darwin and linux -- Go never uses the OS path-list separator here). `go
@@ -138,11 +244,52 @@ ifeq ($(GOINSTALL_BIN),)
 GOINSTALL_BIN := $(shell go env GOPATH | cut -d: -f1)/bin
 endif
 
-test: tools-ethos ## Run tests with race detection
-	PATH="$(GOINSTALL_BIN):$$PATH" go test -race -count=1 ./...
+# `uv tool install` places a binary in `uv tool dir --bin` -- on this host
+# ~/.local/bin, distinct from GOINSTALL_BIN above -- so biff needs its own
+# PATH prefix rather than reusing the Go one. Resolved HERE, at recipe
+# time, not as a parse-time variable: a parse-time `$(shell ...)` is
+# evaluated once when `make` reads this file, before tools-biff has run
+# and before any transient failure in `uv tool dir --bin` has a chance
+# to clear, so a value captured then can go stale by the time this
+# recipe actually executes -- exactly the class of bug the tools-biff
+# table above exists to rule out for biff's own provisioning. Resolving
+# it again here, independently, at the point this recipe runs (after
+# tools-biff has already succeeded, so uv is known reachable) means a
+# transient parse-time failure can no longer surface here as "biff not
+# found" the way it could when this line read a parse-time variable.
+# The classification below mirrors tools-biff's row 2 exactly -- exit
+# status AND non-empty stdout, not either alone -- so a nonzero exit
+# with a stray path on stdout is treated the same way here as there:
+# a failure, not a usable bin dir.
+#
+# TEST_PREREQS and TEST_RUN are the one shared copy of "provision ethos,
+# biff, and this branch's own beadle-email, then run go test with all
+# three on PATH" -- every target that runs ./... (test, test-integration,
+# cover) depends on TEST_PREREQS and calls TEST_RUN so there is exactly
+# one PATH= line and one provisioning prerequisite list in this file.
+# Before this consolidation, test-integration and cover ran `go test
+# ./...` with neither the tools-* prerequisites nor the PATH prefix,
+# so any package needing ethos/biff/beadle-email on PATH (e.g.
+# internal/daemon's MCP registry test) passed under `make test` and
+# failed under `make test-integration`/`make cover` on an otherwise
+# identical tree -- the same gap release.yml had, calling bare `go test`
+# with no provisioning step at all.
+TEST_PREREQS := tools-ethos tools-biff tools-beadle-email
 
-test-integration: ## Run integration tests (in-process IMAP/SMTP)
-	go test -race -count=1 -tags=integration ./...
+define TEST_RUN
+	uvbin=$$(uv tool dir --bin); uvbin_status=$$?; \
+	if [ $$uvbin_status -ne 0 ] || [ -z "$$uvbin" ]; then \
+		echo "$@: 'uv tool dir --bin' failed (exit $$uvbin_status) or produced no output (stdout: $$uvbin) -- cannot build the PATH that carries biff" >&2; \
+		exit 1; \
+	fi; \
+	PATH="$(BEADLE_EMAIL_BIN):$(GOINSTALL_BIN):$$uvbin:$$PATH" $(1)
+endef
+
+test: $(TEST_PREREQS) ## Run tests with race detection
+	$(call TEST_RUN,go test -race -count=1 ./...)
+
+test-integration: $(TEST_PREREQS) ## Run integration tests (in-process IMAP/SMTP)
+	$(call TEST_RUN,go test -race -count=1 -tags=integration ./...)
 
 check: lint lint-strict vulncheck docs test ## Run all quality gates
 
@@ -192,8 +339,8 @@ docker: ## Build Docker image
 docker-push: docker ## Push Docker image to ghcr.io
 	docker push ghcr.io/punt-labs/beadle-email:latest
 
-cover: ## Test with coverage report
-	go test -cover -coverprofile=coverage.out ./...
+cover: $(TEST_PREREQS) ## Test with coverage report
+	$(call TEST_RUN,go test -cover -coverprofile=coverage.out ./...)
 	go tool cover -func=coverage.out
 
 doctor: build ## Run beadle-email doctor

@@ -1,0 +1,42 @@
+mission_id: m-2026-10-22-043
+status: closed
+type: implement
+created_at: "2026-10-22T21:24:44Z"
+updated_at: "2026-10-22T21:43:55Z"
+closed_at: "2026-10-22T21:43:55Z"
+leader: claude
+worker: adb
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T21:24:44Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-f34m
+    files:
+        - Makefile
+write_set:
+    - Makefile
+success_criteria:
+    - 'tools-biff never redirects stderr of any uv call: `bin=$$(uv tool dir --bin)` and `listing=$$(uv tool list)` capture stdout only; uv''s stderr reaches the terminal directly and in order. The temp file, the mktemp guard and its table row, and the EXIT trap are removed because nothing quotes stderr any more. Row 2''s failure message is `''uv tool dir --bin'' failed (exit N) or produced no output (stdout: <captured stdout>) -- see uv''s message above`; row 4a''s is `''uv tool list'' failed (exit N) (stdout: <captured stdout>) -- see uv''s message above; reinstalling anyway`. Rows 3/4b/4c unchanged.'
+    - 'The preamble replaces the "never discarded" sentence with the single invariant: "stderr is never redirected in this recipe: uv''s own diagnostics reach the terminal directly, before this recipe''s message about the same call, so no row can discard them; only STDOUT is captured, so a uv warning can never be read as a listing." The table has no stderr passthrough wording per row because the invariant covers every row.'
+    - The `test` recipe keeps its current shape (it already leaves stderr unredirected) and its message gains the captured stdout the same way row 2 does.
+    - 'Fidelity, isolated UV_TOOL_DIR/UV_TOOL_BIN_DIR under .tmp/, never the host dirs, one run per table row plus: (a) a `uv tool list` shim that warns on stderr and lists cleanly, exit 0, with the entrypoint present: the warning appears on the terminal AND the skip row prints; (b) the same shim with the entrypoint removed: warning on the terminal, row 4c; (c) `uv tool dir --bin` warning on stderr with a valid path: warning on the terminal, recipe proceeds; (d) a listing that contains "punt-biff " only on stderr: rows classify on stdout alone, as before. Capture stdout and stderr separately in every run and paste both; stdout must be empty for the recipe''s own output.'
+    - 'grep: no `2>` anywhere in tools-biff except `command -v uv >/dev/null 2>&1`; no mktemp; no trap. make -n test unchanged outside the two recipe bodies versus 06fb7a8; worktree gate; one commit chore(make), staged by name. Do not push, do not touch PRs or merge — the leader does that. Do not commit after submitting.'
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 8 on provisioning (bead beadle-f34m), branch fix/ethos-mcp-serve,
+    worktree [REDACTED:path]/.claude/worktrees/mcp-serve,
+    build on 06fb7a8. Rounds 6 and 7 each found the same class of defect:
+    a uv call's stderr captured into the temp file and never read on some
+    rows. A third passthrough line would be the same move again. The class
+    exists only because the temp file exists: it was introduced so error
+    messages could quote stderr, and every row then has to decide whether
+    to read it. Drop the requirement instead: never redirect stderr, let
+    uv's diagnostics reach the terminal in order, quote captured STDOUT in
+    the failure messages where it helps, and delete the temp file, the
+    mktemp guard and row, and the trap. This removes about ten lines and a
+    whole category of outcome. KNOWN ARTIFACT: lint-strict from a worktree
+    reports six spurious G204 lines; not real.

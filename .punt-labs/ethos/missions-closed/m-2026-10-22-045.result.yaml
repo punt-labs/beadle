@@ -1,0 +1,157 @@
+mission: m-2026-10-22-045
+round: 1
+created_at: "2026-10-22T22:10:52Z"
+author: bwk
+verdict: pass
+confidence: 1
+files_changed:
+    - path: internal/daemon/harness_test.go
+      added: 41
+      removed: 2
+    - path: internal/daemon/templates_test.go
+      added: 181
+      removed: 1
+evidence:
+    - name: go test -race -count=1 -run TestOnNewMail_EndToEnd -v ./internal/daemon/ (3 subtests PASS, unchanged behavior, comment-only fix)
+      status: pass
+    - name: 'HIGH can-fail proof: temporary {Command: sh, Args: [-c, true]} entry in templates.go, require.True fails with the provisioning-gap message, even though sh resolves on PATH'
+      status: pass
+    - name: templates.go reverted with git checkout; git diff --stat empty, confirmed not in this mission's write set
+      status: pass
+    - name: go test ./internal/daemon/... -run TestDefaultMCPRegistry_StdioCommandsAreReal -v (3 subtests PASS against real binaries)
+      status: pass
+    - name: 'go test ./internal/daemon/... -run TestMCPCommandPath -v (4 table cases PASS: serve; serve+--transport+stdio; mcp; bare command)'
+      status: pass
+    - name: go test ./internal/daemon/... -race -count=1 (full package, green)
+      status: pass
+    - name: make vet
+      status: pass
+    - name: make staticcheck
+      status: pass
+    - name: make test (full suite, race)
+      status: pass
+    - name: make docs
+      status: pass
+    - name: make lint-strict (6 pre-existing gosec G204 only, in internal/pgp and internal/secret, none in the 2 write-set files)
+      status: pass
+prose: |
+    Round 2 on bead beadle-fbhp. 044 closed at its one-round cap with
+    an invariant-completeness review finding one HIGH and three
+    MEDIUMs. Two commits, one per file, in the order given.
+
+    Commit 1 (767244b, internal/daemon/harness_test.go): MEDIUM --
+    the non-vacuity comment above TestOnNewMail_EndToEnd's disk
+    assertion stated the gate/record ordering backwards, implying a
+    record exists and the gates act on it afterward. Corrected: gates
+    1 and 2 run inside OnNewMail BEFORE Executor.Run (and therefore
+    any record) exists at all, so a record appears only after both
+    pass; the negative rows prove no record is written when either
+    gate rejects first. Still 6 lines (under the 8-line limit).
+    Comment-only change; go test -race -count=1 -run
+    TestOnNewMail_EndToEnd -v ./internal/daemon/ shows all three
+    subtests PASS, unchanged from e410aa1/950a5f3.
+
+    Commit 2 (1b9d4a2, internal/daemon/templates_test.go): the HIGH
+    plus three MEDIUMs.
+
+    HIGH: the provisioning-story check
+    (`remedy, known := mcpCommandInstallRemedy(...); require.True(...)`)
+    previously ran only inside the `exec.LookPath` error branch, so a
+    registry entry naming a command with no tools-<cmd> target and no
+    CI step still passed on any host where that command happened to
+    already be on PATH -- the exact "passes locally, fails only in
+    CI" gap 950a5f3 claimed to close. Moved the check to the subtest's
+    first statement, unconditionally, before LookPath runs at all.
+
+    Proved it per the contract: temporarily added
+    `{Command: "sh", Args: ["-c", "true"]}` as a new stdio entry in
+    DefaultMCPRegistry (templates.go) -- sh is on every host's PATH,
+    so the old LookPath-gated check would never have fired. Ran the
+    test; the new unconditional check failed on exactly that entry:
+
+      templates_test.go:208:
+          Error:      Should be true
+          Test:       TestDefaultMCPRegistry_StdioCommandsAreReal/probe-unprovisioned-high
+          Messages:   command "sh" for registry entry "probe-unprovisioned-high"
+                      has no provisioning story in mcpCommandInstallRemedy --
+                      add a tools-sh Makefile target, wire it into CI, and
+                      add a case here naming the remedy
+
+    Reverted templates.go with `git checkout --
+    internal/daemon/templates.go`; `git diff --stat
+    internal/daemon/templates.go` produced no output (confirmed
+    empty) -- templates.go is not in this mission's write set and was
+    never committed.
+
+    MEDIUM: "mcpCommandInstallRemedy has no default arm" was false --
+    the default arm exists and returns known=false. Corrected both
+    the test's comment block and mcpCommandInstallRemedy's own doc
+    comment to say that is the property the test enforces, not that
+    the arm is absent.
+
+    MEDIUM: the usage check asserted the full argv-derived string
+    (cfg.Command + " " + strings.Join(cfg.Args, " ")), which breaks
+    on any entry whose Args carry a flag before the subcommand's own
+    text could match verbatim (e.g. a hypothetical
+    {"serve", "--transport", "stdio"}). Added mcpCommandPath(cmd,
+    args), which builds cmd plus the leading run of non-flag Args,
+    stopping at the first element starting with "-". Replaced the
+    check's expected string with this helper's output, and renamed
+    the local from commandLine to cmdPath. Added TestMCPCommandPath, a
+    table test over the helper covering exactly the four cases named
+    in the contract:
+
+      === RUN   TestMCPCommandPath
+      === RUN   TestMCPCommandPath/single_subcommand
+      === RUN   TestMCPCommandPath/subcommand_with_a_trailing_flag_and_value
+      === RUN   TestMCPCommandPath/single-word_subcommand
+      === RUN   TestMCPCommandPath/bare_command,_no_args
+      --- PASS: TestMCPCommandPath (0.00s)
+          --- PASS: TestMCPCommandPath/single_subcommand (0.00s)
+          --- PASS: TestMCPCommandPath/subcommand_with_a_trailing_flag_and_value (0.00s)
+          --- PASS: TestMCPCommandPath/single-word_subcommand (0.00s)
+          --- PASS: TestMCPCommandPath/bare_command,_no_args (0.00s)
+
+    The surrounding doc comment now says "subcommand path" everywhere
+    it said "command line".
+
+    Folded in the WaitDelay prose note: the comment now says the
+    countdown starts at whichever comes first -- the context's
+    deadline or the direct child exiting -- and names the verified
+    scenario as the child-exit start (a command that exits immediately
+    but leaves a lingering grandchild holding the pipes), rather than
+    implying it only starts once the context is done.
+
+    go test ./internal/daemon/... -run
+    TestDefaultMCPRegistry_StdioCommandsAreReal -v (against the real,
+    unmodified registry, after templates.go was reverted):
+
+      === RUN   TestDefaultMCPRegistry_StdioCommandsAreReal
+      === RUN   TestDefaultMCPRegistry_StdioCommandsAreReal/ethos
+      === RUN   TestDefaultMCPRegistry_StdioCommandsAreReal/beadle-email
+      === RUN   TestDefaultMCPRegistry_StdioCommandsAreReal/biff
+      --- PASS: TestDefaultMCPRegistry_StdioCommandsAreReal (0.61s)
+          --- PASS: TestDefaultMCPRegistry_StdioCommandsAreReal/ethos (0.00s)
+          --- PASS: TestDefaultMCPRegistry_StdioCommandsAreReal/beadle-email (0.01s)
+          --- PASS: TestDefaultMCPRegistry_StdioCommandsAreReal/biff (0.61s)
+      PASS
+
+    Combined run of all three relevant test functions, final state,
+    go test -race -count=1 ./internal/daemon/ -v -run
+    'TestOnNewMail_EndToEnd|TestDefaultMCPRegistry_StdioCommandsAreReal|TestMCPCommandPath':
+    all green, "ok github.com/punt-labs/beadle/internal/daemon 3.060s".
+
+    Worktree gate, run from
+    [REDACTED:path]/.claude/worktrees/mcp-serve,
+    branch fix/ethos-mcp-serve (building on 950a5f3): make vet and
+    make staticcheck clean; make test green across every package
+    including internal/daemon (full race suite); make docs reports 0
+    issues in 34 files; make lint-strict reports exactly 6
+    pre-existing gosec G204 findings, this run in
+    internal/pgp/{decrypt,probe,sign,verify}.go and
+    internal/secret/keychain_linux.go (the known ../../..
+    worktree-path artifact, landing in the directories the mission
+    context named), confirmed zero across the two write-set files by
+    grep -c.
+
+    No push, no PR, no merge, no commit after this result submission.

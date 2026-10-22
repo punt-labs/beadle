@@ -1,0 +1,103 @@
+mission: m-2026-10-22-040
+round: 1
+created_at: "2026-10-22T20:51:04Z"
+author: adb
+verdict: pass
+confidence: 0.95
+files_changed:
+    - path: Makefile
+      added: 122
+      removed: 8
+evidence:
+    - name: make vet (worktree)
+      status: pass
+    - name: make staticcheck (worktree)
+      status: pass
+    - name: 'make lint-shell (worktree): test-shell-discovery PASS, shellcheck clean'
+      status: pass
+    - name: 'make docs (worktree): markdownlint-cli2, 0 issues in 34 files'
+      status: pass
+    - name: 'make test (worktree, normal PATH, host biff untouched): all 17 packages ok; tools-biff printed the ordinary skip line'
+      status: pass
+    - name: 'make vulncheck (worktree): 0 vulnerabilities'
+      status: pass
+    - name: 'make lint-strict (worktree): exactly 6 gosec G204 findings, all at the documented ../../../ worktree-artifact paths; none Makefile-related'
+      status: pass
+    - name: 'make -n test (worktree): the mkdir/go build lines are byte-identical to 8f3873b''s; only the PATH construction line differs, now resolving uvbin at recipe time instead of reading the removed parse-time UVTOOL_BIN variable'
+      status: pass
+    - name: 'grep -n UVTOOL_BIN Makefile: zero matches -- the variable and its comment block are fully removed'
+      status: pass
+    - name: 'Fidelity (a) -- uv tool list shim prints "warning: Ignoring malformed tool `punt-biff`" to stderr before delegating to the real list call, with the biff entrypoint removed: recipe printed row 4c (entrypoint missing, pin listed), NOT row 4b misreading the stderr warning as the installed version. Reconfirmed with stdout/stderr captured separately: the warning never reached the stdout-only $$listing variable the classification reads'
+      status: pass
+    - name: 'Fidelity (b) -- TMPDIR pointed at a nonexistent directory, with a uv shim that logs every invocation to a file: tools-biff printed "mktemp failed (check TMPDIR)" and exited 1; the invocation log file never came into existence, proving uv was never called'
+      status: pass
+    - name: 'Fidelity (c) -- a uv shim whose FIRST `tool dir --bin` call fails (simulating the old parse-time snapshot) and every subsequent call succeeds (via a counter file): consumed the first call standalone (confirming it fails, exit 2), then ran `make test` under the same shim and a scrubbed PATH (/usr/local/go/bin:/usr/bin:/bin plus the shim dir only) -- all 17 packages passed, including internal/daemon. Also ran TestDefaultMCPRegistry_StdioCommandsAreReal -v directly afterward under the resolved PATH: all three subtests (ethos, beadle-email, biff) PASS, proving the test target''s PATH construction is independent of the earlier failed call'
+      status: pass
+    - name: 'Baseline reconfirmations: the ordinary skip path (make tools-biff against the real host install) and the normal-PATH make test both still pass unchanged after all three fixes'
+      status: pass
+prose: |
+    File hash (sha256) at submission: Makefile ccfb77e31f4699e4f43570e2560a45014a5907fb9b1645c2c22f15e32caacf4a
+
+    One commit on fix/ethos-mcp-serve, building on 8f3873b:
+
+    8c5e704 chore(make): fix tools-biff's list capture, mktemp failure,
+    and the test target's stale PATH
+
+    Fix 1 (list capture): `listing=$$(uv tool list 2>&1)` is now
+    `listing=$$(uv tool list 2>"$$err")`, reusing the same temp file
+    check 2 already created -- stdout alone feeds rows 3/4b/4c's
+    classification (the entrypoint check, the version-match check, the
+    `grep -F 'punt-biff '` that extracts the installed line), so a uv
+    warning on stderr that happens to contain the string "punt-biff "
+    can no longer be misread as the installed version. Row 4a, the one
+    row that reports on the list call's own failure, now quotes both
+    `$$listing` (stdout) and `$(cat "$$err")` (stderr) in its message,
+    matching the table's "<captured stdout and stderr>" text.
+
+    Fix 2 (mktemp failure): `err=$$(mktemp)` gained `|| { echo
+    "tools-biff: mktemp failed (check TMPDIR)" >&2; exit 1; }`, placed
+    BEFORE `trap ... EXIT` is set (nothing to clean up if mktemp itself
+    never created anything). A new table row documents this as its own
+    outcome, distinct from a uv failure.
+
+    Fix 3 (test target's stale PATH): the parse-time `UVTOOL_BIN :=
+    $(shell uv tool dir --bin 2>/dev/null)` variable is deleted along
+    with its comment block. `grep -n UVTOOL_BIN Makefile` confirms zero
+    remaining references. `test`'s own recipe now resolves the uv bin
+    dir itself, independently, at the point it runs: `uvbin=$$(uv tool
+    dir --bin)`, failing loudly with a specific message if that comes
+    back empty, rather than trusting a value `make` captured once when
+    it first read this file -- before tools-biff had even run, and with
+    no way to recover if that one-time call happened to fail
+    transiently. This was the actual mechanism behind the "re-run make"
+    case round 4 patched and round 5 removed: round 5 made tools-biff's
+    OWN bin-dir check recipe-time-fresh, but `test` was still reading
+    the OLD parse-time snapshot for its unrelated PATH-building purpose,
+    so the exact failure mode could still surface there, just
+    relabeled as "biff not found" in the registry test rather than a
+    tools-biff diagnostic.
+
+    Table-text fixes: the preamble no longer claims the rows are
+    mutually exclusive, since a state can satisfy both 4b's and 4c's
+    conditions at once (list exits 0, version happens to differ, AND
+    entrypoint happens to be missing) -- it now states the fixed
+    evaluation order (4a, then 4b, then 4c) as the tiebreaker, matching
+    what the if/elif chain already enforced. Row 3's condition gained
+    "AND `uv tool list` exits 0", which the shell already required but
+    the table previously omitted.
+
+    Demo: fidelity (a) and (b) ran against isolated
+    UV_TOOL_DIR/UV_TOOL_BIN_DIR under
+    [REDACTED:path]/.tmp/mission040-scratch/; the
+    host's real ~/.local/bin/biff install was never touched, confirmed
+    by the final `make test` against the normal host PATH still showing
+    the ordinary skip line. Fidelity (c) used a real scrubbed PATH
+    (/usr/local/go/bin:/usr/bin:/bin plus only the counter-shim
+    directory, via env -i) because the scenario is specifically about
+    `make test`'s own PATH-resolution step, not tools-biff's isolated
+    install state -- reusing the host's real uv/ethos/go-bin directories
+    for everything downstream of the simulated first failure. All shims
+    and the isolated uv dir removed after use; `git status --short`
+    clean before the commit and clean now. Did not touch any file
+    outside the Makefile write set. Not pushed; no PR or merge touched;
+    no further commit after this submission.

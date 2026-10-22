@@ -1,0 +1,47 @@
+mission_id: m-2026-10-22-022
+status: closed
+type: implement
+created_at: "2026-10-22T17:43:13Z"
+updated_at: "2026-10-22T17:53:11Z"
+closed_at: "2026-10-22T17:53:11Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T17:43:13Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-fbhp
+    files:
+        - internal/daemon/harness_test.go
+        - internal/daemon/handler.go
+        - internal/daemon/persist.go
+        - internal/daemon/persist_test.go
+write_set:
+    - internal/daemon/harness_test.go
+success_criteria:
+    - TestOnNewMail_EndToEnd's positive case constructs a real *daemon.PipelineStore on a t.TempDir() and passes it as the last argument to daemon.NewMailHandler instead of nil; after handler.Stop() it reads the pipeline record from that directory (one <id>.json file), unmarshals it, and asserts Status "completed" and Email.From equal to the sender, following the pattern in persist_test.go TestExecutor_Run_PersistsToDisk.
+    - The negative cases (unsigned message, rw- sender) assert the store directory is EMPTY after Stop, so the persistence assertion is tied to the pipeline actually running and cannot pass vacuously.
+    - 'Verify it can fail: temporarily delete the line `Store:  h.store,` from the Executor literal in handler.go OnNewMail, run the test, confirm it fails on the missing record, restore the line (handler.go is NOT in your write set; the edit is a scratch probe, reverted with git checkout -- internal/daemon/handler.go before any commit, and git status must show handler.go clean). Paste the failing output in the result.'
+    - make check passes (see the worktree note in context).
+    - Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes. One commit, test(daemon). Stage only harness_test.go with git add by name. Do not push, do not touch PRs or merge — the leader does that.
+budget:
+    rounds: 2
+    reflection_after_each: true
+current_round: 1
+context: |
+    Bead beadle-fbhp. handler.go OnNewMail builds an Executor with
+    `Store: h.store`; harness_test.go:143 passes nil for the store, so the
+    line executes with a nil store and its effect is never asserted. A
+    refactor dropping the field would leave the suite green. All the
+    fixtures the bead was waiting for exist (daemontest.FakeSpawner,
+    testenv.IsolateEthos); the remaining work is one real store and one
+    on-disk assertion.
+
+    Worktree: [REDACTED:path]/.claude/worktrees/mcp-serve
+    Branch: fix/ethos-mcp-serve (already carries the beadle-f34m commits
+    ebb6109, f232868, 201a5bc; build on top). KNOWN ARTIFACT: `make lint-strict` from any worktree
+    reports six spurious gosec G204 findings (../../.. path prefix); not
+    real. Run make vet, make staticcheck, make test, make docs from the
+    worktree and lint-strict expecting only those six lines; report
+    verbatim. The leader runs the full gate from the main checkout.
