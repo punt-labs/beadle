@@ -1,0 +1,41 @@
+mission_id: m-2026-10-22-018
+status: closed
+type: implement
+created_at: "2026-10-22T17:29:47Z"
+updated_at: "2026-10-22T17:35:21Z"
+closed_at: "2026-10-22T17:35:21Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T17:29:47Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-1ljl
+    files:
+        - internal/email/poller_test.go
+        - internal/mcp/handler_test.go
+        - internal/email/config.go
+write_set:
+    - internal/email/poller_test.go
+    - internal/mcp/handler_test.go
+success_criteria:
+    - internal/email/poller_test.go TestPoller_SetInterval_Invalid and internal/mcp/handler_test.go TestHandler_SetPollInterval_Invalid use "4m" (still invalid under the new validPollIntervals set) as their invalid-interval fixture instead of "3m"; no other assertion in either file changes.
+    - make check passes from [REDACTED:path] (the main checkout, branch fix/poll-intervals); paste the tail of its output.
+    - One commit, test(email,mcp) or two commits one per package, Conventional Commits form. Stage only the two write-set files with git add by name. Do not push, do not touch PRs or merge — the leader does that.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Successor to m-2026-10-22-014 (closed failed at the write-set
+    boundary, no fault of the worker). That mission landed three commits
+    on fix/poll-intervals (85b64dd, b26e928, 4b282bf) adding 2m and 3m to
+    every enumeration of the poll-interval set. Making 3m valid broke two
+    pre-existing tests that used "3m" as their canonical INVALID fixture;
+    both were outside the original write set. This mission is only that
+    mechanical swap. grep confirmed (worker, 2026-10-22) that "3m" occurs
+    nowhere else outside the original write set.
+
+    Branch: fix/poll-intervals, checked out in the main checkout at
+    [REDACTED:path]. Run every command there.

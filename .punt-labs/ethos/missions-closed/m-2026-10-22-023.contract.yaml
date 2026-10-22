@@ -1,0 +1,49 @@
+mission_id: m-2026-10-22-023
+status: closed
+type: implement
+created_at: "2026-10-22T17:46:21Z"
+updated_at: "2026-10-22T17:54:51Z"
+closed_at: "2026-10-22T17:54:51Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T17:46:21Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-1ljl
+    files:
+        - internal/email/poller.go
+        - internal/mcp/poll_tools.go
+        - internal/mcp/poll_tools_test.go
+        - plugin/commands/inbox.md
+write_set:
+    - internal/email/poller.go
+    - internal/email/poller_test.go
+    - internal/mcp/poll_tools.go
+    - internal/mcp/poll_tools_test.go
+success_criteria:
+    - internal/email/poller.go exports `func PollIntervals() []string` (the keys of validPollIntervals sorted ascending by duration, deterministic) and `func PollIntervalList() string` (strings.Join of that slice with ", "); the unexported validIntervalsList from 27cd08e is replaced by these, and both poller.go error strings build from PollIntervalList(). poller_test.go gains a test asserting PollIntervals() equals the explicit expected slice in order, and its two "2m"/"3m" literal assertions become loops over PollIntervals() asserting every element appears.
+    - The three hand-written interval lists in internal/mcp/poll_tools.go (tool description near line 34, the interval parameter description near line 38, the invalid-interval error near line 126) are built from email.PollIntervalList(); no literal enumeration of the set remains in poll_tools.go.
+    - TestSetPollInterval_3mSucceeds is replaced by a table-driven test that ranges over email.PollIntervals() and asserts set_poll_interval accepts each value (t.Run per value), so a value added to the set is automatically covered.
+    - TestSetPollInterval_InvalidErrorListsFullSet is rewritten to assert the error text contains every element of email.PollIntervals() plus "n", asserting on the text AFTER the echoed input (strip the leading invalid interval %q prefix, or choose a fixture such as "bogus" that is not a substring of any valid value) so the fixture alone cannot satisfy it.
+    - A new test reads set_poll_interval from tools/list (generalize pollStatusDesc to take a tool name, or add a sibling helper) and asserts both the tool description and the "interval" property description contain every element of email.PollIntervals().
+    - A new test reads ../../plugin/commands/inbox.md relative to the package directory and asserts, for every v in email.PollIntervals(), that the argument-hint line contains "| v |" and the body contains a cron row starting with the backquoted value followed by the arrow, so the skill doc cannot drift from the Go set; it must t.Fatalf (never t.Skip) if the file is missing.
+    - make check passes from [REDACTED:path] on branch fix/poll-intervals; paste the tail.
+    - One or two commits, Conventional Commits form fix(mcp) / test(mcp). Stage only the two write-set files with git add by name. Do not push, do not touch PRs or merge — the leader does that.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 4 on bead beadle-1ljl, branch fix/poll-intervals in the main
+    checkout at [REDACTED:path]; run every command
+    there. Three independent reviewers found that the set is hand-copied in
+    nine places and the two tests added in round 1 guard one literal each,
+    not the sync. Round 3 (m-2026-10-22-019, commit 27cd08e) added an
+    UNEXPORTED validIntervalsList() in internal/email/poller.go and rebuilt
+    that file's two error strings from it, but asserted the "2m"/"3m"
+    literals. This round exports that source, makes internal/mcp consume
+    it, and turns every test into a derivation over it. Commit per
+    package: fix(email) first, then fix(mcp). README.md, CHANGELOG.md, and DESIGN.md are dirty
+    in the working tree from the leader; leave them alone, do not stage.

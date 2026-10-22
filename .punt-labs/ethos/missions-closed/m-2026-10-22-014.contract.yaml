@@ -1,0 +1,57 @@
+mission_id: m-2026-10-22-014
+status: failed
+type: implement
+created_at: "2026-10-22T17:16:47Z"
+updated_at: "2026-10-22T17:29:40Z"
+closed_at: "2026-10-22T17:29:40Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T17:16:47Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-1ljl
+    files:
+        - internal/email/config.go
+        - internal/email/config_test.go
+        - internal/mcp/poll_tools.go
+        - internal/mcp/poll_tools_test.go
+        - plugin/commands/inbox.md
+write_set:
+    - internal/email/config.go
+    - internal/email/config_test.go
+    - internal/mcp/poll_tools.go
+    - internal/mcp/poll_tools_test.go
+    - plugin/commands/inbox.md
+success_criteria:
+    - validPollIntervals in internal/email/config.go accepts "2m" and "3m" (2 and 3 minutes) in addition to the existing set; the "Valid values" doc comment on ValidPollInterval lists the full set in ascending order.
+    - TestPollDuration and TestValidPollInterval cover "2m" and "3m" (positive) and still cover one invalid value (e.g. "4m") so the set is closed, not open-ended.
+    - The set_poll_interval tool description, its interval parameter description, and its invalid-interval error message in internal/mcp/poll_tools.go all list exactly the same set as validPollIntervals, with 2m and 3m included. Add one test in poll_tools_test.go that calls set_poll_interval with "3m" and asserts success, and one that asserts the error text for an invalid value names 2m and 3m, so the two surfaces cannot drift silently.
+    - plugin/commands/inbox.md argument-hint, the "Exactly one of" line, the section heading, and the cron-expression table include 2m (*/2 * * * *) and 3m (*/3 * * * *) in ascending order; make docs (markdownlint) passes on it.
+    - make check passes.
+    - Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes. Conventional Commits form, e.g. fix(email) and docs(plugin). Stage only files in the write set with git add by name. Do not push, do not touch PRs or merge — the leader does that.
+budget:
+    rounds: 2
+    reflection_after_each: true
+current_round: 1
+context: |
+    Bead beadle-1ljl. Operator feedback 2026-09-01: the agent mailbox must
+    poll no slower than every 3 minutes, and the allowed interval set has
+    nothing between 1m and 5m. Add 2m and 3m everywhere the set is
+    enumerated. There is no default in Go code (grep for "30m" finds only
+    README.md, which the leader updates separately); do not add one.
+
+    Four places enumerate the set today and must stay in sync:
+      internal/email/config.go:182 validPollIntervals (source of truth)
+      internal/email/config.go:203 doc comment
+      internal/mcp/poll_tools.go:34,38,126 tool/param description + error
+      plugin/commands/inbox.md:3,20,26,44 skill arg-hint and cron table
+
+    Do not change Poller's first-poll suppression or its minimum interval;
+    the bead is explicit that those are correct and out of scope.
+
+    Branch: fix/poll-intervals (already checked out in the main checkout
+    at [REDACTED:path]). Run every command there.
+    A background `make test` run may still be in progress when you start;
+    it is read-only and does not touch your files.

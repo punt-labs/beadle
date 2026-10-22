@@ -137,7 +137,7 @@ beadle-email v0.16.5 is ready!
 | `whoami` | Return the active identity (email, display name, ethos handle). |
 | `switch_identity` | Switch the active identity for this session. Pass an ethos handle or empty to reset. |
 | `enable` | Turn beadle's repo guidance on or off in this repo (`action`: `enable` or `disable`). Deposits the guide + `enabled` marker and adds the `@.punt-labs/beadle/CLAUDE.md` import, or removes them. Same marker as the CLI `enable`/`disable`. |
-| `set_poll_interval` | Set automatic inbox polling interval (1m, 5m, 10m, 15m, 30m, 1h, 2h) or disable (`n`). |
+| `set_poll_interval` | Set automatic inbox polling interval (1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h, 2h) or disable (`n`). |
 | `get_poll_status` | Return current polling configuration: interval, active state, last check time, unseen count. |
 
 ## Commands
@@ -147,7 +147,7 @@ Available when installed as a Claude Code plugin.
 | Command | What it does |
 |---------|-------------|
 | `/inbox` | Check beadle's email inbox. Optional natural language filter. |
-| `/inbox 5m` | Set inbox polling interval (1m, 5m, 10m, 15m, 30m, 1h, 2h). |
+| `/inbox 3m` | Set inbox polling interval (1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h, 2h). |
 | `/inbox n` | Disable automatic inbox polling. |
 | `/inbox status` | Show current polling configuration. |
 | `/mail` | Mail something to the owner or a specific recipient. |
@@ -246,7 +246,7 @@ cat > ~/.punt-labs/beadle/email.json << 'EOF'
   "smtp_port": 1025,
   "smtp_user": "you@example.com",
   "from_address": "you@example.com",
-  "poll_interval": "30m"
+  "poll_interval": "3m"
 }
 EOF
 ```
