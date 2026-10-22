@@ -57,6 +57,8 @@ func TestPoller_SetInterval_Invalid(t *testing.T) {
 	require.Error(t, err)
 	var ie *InvalidIntervalError
 	assert.ErrorAs(t, err, &ie)
+	assert.Contains(t, err.Error(), "2m")
+	assert.Contains(t, err.Error(), "3m")
 }
 
 func TestPoller_SetInterval_RunningRestart(t *testing.T) {
@@ -183,6 +185,26 @@ func TestPoller_LoadConfig_FallbackLoadFailureWrapped(t *testing.T) {
 	_, err := p.loadConfig()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "default config:")
+}
+
+// TestPoller_Start_InvalidPollIntervalNamesFullSet proves the config-
+// validation error Start returns for an invalid poll_interval names the
+// full accepted set, including 2m and 3m, so this string cannot drift from
+// validPollIntervals.
+func TestPoller_Start_InvalidPollIntervalNamesFullSet(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	beadleDir := filepath.Join(home, ".punt-labs", "beadle")
+	require.NoError(t, os.MkdirAll(beadleDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(beadleDir, "default-identity"), []byte("agent@test.com\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(beadleDir, "email.json"), []byte(`{"imap_user":"agent@test.com","poll_interval":"4m"}`), 0o600))
+	resolver := identity.NewResolver(t.TempDir(), beadleDir, t.TempDir())
+
+	p := &Poller{logger: discardLogger(), resolver: resolver}
+	err := p.Start()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "2m")
+	assert.Contains(t, err.Error(), "3m")
 }
 
 func TestPoller_RecordFailure(t *testing.T) {
