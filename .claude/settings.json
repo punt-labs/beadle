@@ -155,11 +155,6 @@
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/no-gh-watch.sh\"",
             "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/no-push-to-main.sh\"",
-            "timeout": 5
           }
         ]
       }

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **The push-guard `PreToolUse` hook (`no-push-to-main.sh`) is gone.**
+  GitHub branch protection on `main`, with zero bypass actors, is the
+  real enforcement; the hook was a 50-line convenience layer that never
+  added protection of its own, and no sibling repo carries one. An
+  attempt to fix its worktree false-deny grew it to a 586-line shell
+  parser over three review rounds on an unmerged branch, and each round
+  surfaced a new class of under- and over-deny, so the operator ruled
+  to remove it rather than merge that work (beadle-fc6o).
+
 ### Added
 
 - **`beadle-daemon` now actually persists pipeline records, and its crash
