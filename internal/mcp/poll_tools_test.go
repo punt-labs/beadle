@@ -245,3 +245,27 @@ func TestServerInstructions_Exposed(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp, &out))
 	assert.Equal(t, mcptools.ServerInstructions, out.Result.Instructions)
 }
+
+// TestSetPollInterval_3mSucceeds proves 3m is accepted as a valid polling
+// interval, keeping internal/mcp/poll_tools.go's accepted set in sync with
+// internal/email/config.go's validPollIntervals rather than drifting silently.
+func TestSetPollInterval_3mSucceeds(t *testing.T) {
+	s, _ := newMarkerServer(t)
+	callMCP(t, s, "initialize", 0, initParams())
+
+	result := callTool(t, s, "set_poll_interval", map[string]any{"interval": "3m"})
+	assert.False(t, result.IsError, "expected 3m to be accepted")
+}
+
+// TestSetPollInterval_InvalidErrorListsFullSet proves the error message for
+// an invalid interval names the full accepted set, including 2m and 3m — the
+// two surfaces (this error text and validPollIntervals) cannot drift silently.
+func TestSetPollInterval_InvalidErrorListsFullSet(t *testing.T) {
+	s, _ := newMarkerServer(t)
+	callMCP(t, s, "initialize", 0, initParams())
+
+	result := callTool(t, s, "set_poll_interval", map[string]any{"interval": "4m"})
+	require.True(t, result.IsError)
+	assert.Contains(t, result.text(), "2m")
+	assert.Contains(t, result.text(), "3m")
+}
