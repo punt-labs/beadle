@@ -132,11 +132,31 @@ tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4
 # of biff, pinned to this version, is left alone rather than clobbered.
 tools-biff: ## Install the pinned biff CLI if missing, unreachable, or out of pin (needed by internal/daemon's MCP registry test)
 	@command -v uv >/dev/null 2>&1 || { echo "tools-biff: uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff" >&2; exit 1; }
-	@test -n "$(UVTOOL_BIN)" || { echo "tools-biff: 'uv tool dir --bin' produced no output; the suppressed probe's real error is:" >&2; uv tool dir --bin >&2; echo "tools-biff: if the message above is empty too, check HOME and any UV_TOOL_BIN_DIR override" >&2; exit 1; }
+	@if [ -z "$(UVTOOL_BIN)" ]; then \
+		retry_out=$$(uv tool dir --bin 2>&1); retry_status=$$?; \
+		if [ $$retry_status -eq 0 ] && [ -n "$$retry_out" ]; then \
+			echo "tools-biff: 'uv tool dir --bin' failed transiently at parse time; the retry just now succeeded and returned: $$retry_out -- re-run make" >&2; \
+		else \
+			echo "tools-biff: 'uv tool dir --bin' produced no output; the retry's real error is:" >&2; \
+			echo "$$retry_out" >&2; \
+			echo "tools-biff: if the message above is empty too, check HOME and any UV_TOOL_BIN_DIR override" >&2; \
+		fi; \
+		exit 1; \
+	fi
 	@if test -x "$(UVTOOL_BIN)/biff" && uv tool list 2>/dev/null | grep -qFx "punt-biff v$(BIFF_VERSION)"; then \
 		echo "tools-biff: punt-biff v$(BIFF_VERSION) already installed, skipping" >&2; \
 	else \
-		uv tool list >/dev/null 2>&1 || echo "tools-biff: 'uv tool list' failed; reinstalling anyway" >&2; \
+		listing=$$(uv tool list 2>/dev/null); list_status=$$?; \
+		if [ $$list_status -ne 0 ]; then \
+			echo "tools-biff: 'uv tool list' failed; reinstalling anyway" >&2; \
+		else \
+			installed=$$(echo "$$listing" | grep -F 'punt-biff ' | head -1); \
+			if [ "$$installed" != "punt-biff v$(BIFF_VERSION)" ]; then \
+				echo "tools-biff: installed $${installed:-<none>} differs from pin punt-biff v$(BIFF_VERSION); reinstalling" >&2; \
+			else \
+				echo "tools-biff: biff entrypoint missing or not executable at $(UVTOOL_BIN)/biff (pin punt-biff v$(BIFF_VERSION) is listed); reinstalling" >&2; \
+			fi; \
+		fi; \
 		uv tool install --force punt-biff==$(BIFF_VERSION); \
 	fi
 
