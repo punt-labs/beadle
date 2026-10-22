@@ -57,8 +57,9 @@ func TestPoller_SetInterval_Invalid(t *testing.T) {
 	require.Error(t, err)
 	var ie *InvalidIntervalError
 	assert.ErrorAs(t, err, &ie)
-	assert.Contains(t, err.Error(), "2m")
-	assert.Contains(t, err.Error(), "3m")
+	for _, interval := range PollIntervals() {
+		assert.Contains(t, err.Error(), interval)
+	}
 }
 
 func TestPoller_SetInterval_RunningRestart(t *testing.T) {
@@ -189,8 +190,7 @@ func TestPoller_LoadConfig_FallbackLoadFailureWrapped(t *testing.T) {
 
 // TestPoller_Start_InvalidPollIntervalNamesFullSet proves the config-
 // validation error Start returns for an invalid poll_interval names the
-// full accepted set, including 2m and 3m, so this string cannot drift from
-// validPollIntervals.
+// full accepted set, so this string cannot drift from validPollIntervals.
 func TestPoller_Start_InvalidPollIntervalNamesFullSet(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -203,8 +203,17 @@ func TestPoller_Start_InvalidPollIntervalNamesFullSet(t *testing.T) {
 	p := &Poller{logger: discardLogger(), resolver: resolver}
 	err := p.Start()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "2m")
-	assert.Contains(t, err.Error(), "3m")
+	for _, interval := range PollIntervals() {
+		assert.Contains(t, err.Error(), interval)
+	}
+}
+
+// TestPollIntervals_SortedAscending proves PollIntervals returns the
+// validPollIntervals keys in ascending duration order, not map iteration
+// order, which Go leaves undefined.
+func TestPollIntervals_SortedAscending(t *testing.T) {
+	want := []string{"1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h", "2h"}
+	assert.Equal(t, want, PollIntervals())
 }
 
 func TestPoller_RecordFailure(t *testing.T) {
