@@ -125,13 +125,18 @@ tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4
 # uv did not install itself (e.g. a distro package or a manual copy); the
 # ==$(BIFF_VERSION) pin above, combined with the skip check in the recipe,
 # is what actually drives a reinstall on version drift -- --force covering
-# an unrelated existing install is the rare case it guards against.
-tools-biff: ## Install the pinned biff CLI if missing or out of pin (needed by internal/daemon's MCP registry test)
-	@command -v uv >/dev/null 2>&1 || { echo "tools-biff: uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff"; exit 1; }
-	@test -n "$(UVTOOL_BIN)" || { echo "tools-biff: 'uv tool dir --bin' produced no output -- your uv is too old to support --bin; upgrade uv"; exit 1; }
-	@if uv tool list 2>/dev/null | grep -qx "punt-biff v$(BIFF_VERSION)"; then \
-		echo "tools-biff: punt-biff v$(BIFF_VERSION) already installed, skipping"; \
+# an unrelated existing install is the rare case it guards against. An
+# editable or path-installed punt-biff at the pinned version also
+# satisfies the skip check below (uv's env listing names the version
+# regardless of install source), so a developer's own editable checkout
+# of biff, pinned to this version, is left alone rather than clobbered.
+tools-biff: ## Install the pinned biff CLI if missing, unreachable, or out of pin (needed by internal/daemon's MCP registry test)
+	@command -v uv >/dev/null 2>&1 || { echo "tools-biff: uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff" >&2; exit 1; }
+	@test -n "$(UVTOOL_BIN)" || { echo "tools-biff: 'uv tool dir --bin' produced no output; the suppressed probe's real error is:" >&2; uv tool dir --bin >&2; echo "tools-biff: if the message above is empty too, check HOME and any UV_TOOL_BIN_DIR override" >&2; exit 1; }
+	@if test -x "$(UVTOOL_BIN)/biff" && uv tool list 2>/dev/null | grep -qFx "punt-biff v$(BIFF_VERSION)"; then \
+		echo "tools-biff: punt-biff v$(BIFF_VERSION) already installed, skipping" >&2; \
 	else \
+		uv tool list >/dev/null 2>&1 || echo "tools-biff: 'uv tool list' failed; reinstalling anyway" >&2; \
 		uv tool install --force punt-biff==$(BIFF_VERSION); \
 	fi
 
