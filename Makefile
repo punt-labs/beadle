@@ -130,31 +130,55 @@ tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4
 # satisfies the skip check below (uv's env listing names the version
 # regardless of install source), so a developer's own editable checkout
 # of biff, pinned to this version, is left alone rather than clobbered.
+#
+# Outcome table -- every path this recipe can take. Review this table,
+# not the shell: each row is independent and mutually exclusive, and the
+# recipe body implements exactly these rows and no others.
+#
+# | # | Check           | Condition                                     | Message (stderr)                                                    | Exit          |
+# |---|-----------------|------------------------------------------------|----------------------------------------------------------------------|---------------|
+# | 1 | uv on PATH      | `command -v uv` fails                          | "uv not found on PATH -- install uv (...) to provision biff"         | 1             |
+# | 2 | bin dir known   | `uv tool dir --bin` exits nonzero, OR exits 0   | "'uv tool dir --bin' failed (exit N): <captured stderr>"             | 1             |
+# |   |                 | with empty stdout                               |                                                                        |               |
+# | 2 | bin dir known   | exits 0 with non-empty stdout                   | (none -- that stdout becomes the bin dir for checks 3-4 below)       | continues     |
+# | 3 | skip decision   | entrypoint executable AND `uv tool list` shows  | "punt-biff vX already installed, skipping"                           | 0             |
+# |   |                 | exactly the pin                                 |                                                                        |               |
+# | 4a| reinstall reason| `uv tool list` exits nonzero                    | "'uv tool list' failed (exit N): <captured output> -- reinstalling"  | install's own |
+# | 4b| reinstall reason| list exits 0 but listed version != pin          | "installed <version|<none>> differs from pin <pin>; reinstalling"    | install's own |
+# | 4c| reinstall reason| list exits 0, pin IS listed, entrypoint missing | "biff entrypoint missing or not executable at <path> (pin <pin> is   | install's own |
+# |   |                 | or not executable                               | listed); reinstalling"                                               |               |
+# | 5 | install         | reached after any of 4a/4b/4c                   | `uv tool install`'s own output                                        | install's own |
+#
+# No `2>/dev/null` anywhere below: every uv call's stderr is either shown
+# (check 2's failure) or captured into a variable the reinstall-reason
+# messages can quote (check 4's `uv tool list`), never discarded. Check 2
+# runs `uv tool dir --bin` fresh at recipe time rather than trusting the
+# parse-time $(UVTOOL_BIN) variable below, which can be stale or wrong
+# for reasons the parse-time computation can't diagnose (a transient
+# failure at `make` startup, a later export of UV_TOOL_BIN_DIR); a
+# transient failure that now succeeds at recipe time simply proceeds --
+# there is nothing left to tell the developer to re-run.
 tools-biff: ## Install the pinned biff CLI if missing, unreachable, or out of pin (needed by internal/daemon's MCP registry test)
-	@command -v uv >/dev/null 2>&1 || { echo "tools-biff: uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff" >&2; exit 1; }
-	@if [ -z "$(UVTOOL_BIN)" ]; then \
-		retry_out=$$(uv tool dir --bin 2>&1); retry_status=$$?; \
-		if [ $$retry_status -eq 0 ] && [ -n "$$retry_out" ]; then \
-			echo "tools-biff: 'uv tool dir --bin' failed transiently at parse time; the retry just now succeeded and returned: $$retry_out -- re-run make" >&2; \
-		else \
-			echo "tools-biff: 'uv tool dir --bin' produced no output; the retry's real error is:" >&2; \
-			echo "$$retry_out" >&2; \
-			echo "tools-biff: if the message above is empty too, check HOME and any UV_TOOL_BIN_DIR override" >&2; \
-		fi; \
+	@command -v uv >/dev/null 2>&1 || { echo "tools-biff: uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff" >&2; exit 1; }; \
+	err=$$(mktemp); trap 'rm -f "$$err"' EXIT; \
+	bin=$$(uv tool dir --bin 2>"$$err"); bin_status=$$?; \
+	if [ $$bin_status -ne 0 ] || [ -z "$$bin" ]; then \
+		echo "tools-biff: 'uv tool dir --bin' failed (exit $$bin_status):" >&2; \
+		cat "$$err" >&2; \
 		exit 1; \
-	fi
-	@if test -x "$(UVTOOL_BIN)/biff" && uv tool list 2>/dev/null | grep -qFx "punt-biff v$(BIFF_VERSION)"; then \
+	fi; \
+	listing=$$(uv tool list 2>&1); list_status=$$?; \
+	if [ $$list_status -eq 0 ] && test -x "$$bin/biff" && printf '%s\n' "$$listing" | grep -qFx "punt-biff v$(BIFF_VERSION)"; then \
 		echo "tools-biff: punt-biff v$(BIFF_VERSION) already installed, skipping" >&2; \
 	else \
-		listing=$$(uv tool list 2>/dev/null); list_status=$$?; \
 		if [ $$list_status -ne 0 ]; then \
-			echo "tools-biff: 'uv tool list' failed; reinstalling anyway" >&2; \
+			echo "tools-biff: 'uv tool list' failed (exit $$list_status): $$listing -- reinstalling anyway" >&2; \
 		else \
-			installed=$$(echo "$$listing" | grep -F 'punt-biff ' | head -1); \
+			installed=$$(printf '%s\n' "$$listing" | grep -F 'punt-biff ' | head -1); \
 			if [ "$$installed" != "punt-biff v$(BIFF_VERSION)" ]; then \
 				echo "tools-biff: installed $${installed:-<none>} differs from pin punt-biff v$(BIFF_VERSION); reinstalling" >&2; \
 			else \
-				echo "tools-biff: biff entrypoint missing or not executable at $(UVTOOL_BIN)/biff (pin punt-biff v$(BIFF_VERSION) is listed); reinstalling" >&2; \
+				echo "tools-biff: biff entrypoint missing or not executable at $$bin/biff (pin punt-biff v$(BIFF_VERSION) is listed); reinstalling" >&2; \
 			fi; \
 		fi; \
 		uv tool install --force punt-biff==$(BIFF_VERSION); \
