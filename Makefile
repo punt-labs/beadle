@@ -139,56 +139,57 @@ tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4
 # matches is the one that prints. The recipe body implements exactly
 # these rows and no others.
 #
-# | #  | Check            | Condition                                      | Message (stderr)                                                    | Exit          |
+# | #  | Check            | Condition                                      | Message                                                              | Exit          |
 # |----|------------------|-------------------------------------------------|----------------------------------------------------------------------|---------------|
 # | 1  | uv on PATH       | `command -v uv` fails                          | "uv not found on PATH -- install uv (...) to provision biff"         | 1             |
-# | 2  | bin dir known    | `mktemp` fails                                  | "mktemp failed (check TMPDIR)"                                       | 1             |
-# | 2  | bin dir known    | `uv tool dir --bin` exits nonzero, OR exits 0   | "'uv tool dir --bin' failed (exit N): <captured stderr>"             | 1             |
-# |    |                  | with empty stdout                               |                                                                        |               |
-# | 2  | bin dir known    | exits 0 with non-empty stdout                   | (uv's own stderr, if any, passed through -- that stdout becomes      | continues     |
-# |    |                  |                                                  | the bin dir for checks 3-4 below)                                     |               |
+# | 2  | bin dir known    | `uv tool dir --bin` exits nonzero, OR exits 0   | "'uv tool dir --bin' failed (exit N) or produced no output (stdout:  | 1             |
+# |    |                  | with empty stdout                               | <captured stdout>) -- see uv's message above"                        |               |
+# | 2  | bin dir known    | exits 0 with non-empty stdout                   | (none -- that stdout becomes the bin dir for checks 3-4 below)       | continues     |
 # | 3  | skip decision    | entrypoint executable AND `uv tool list` exits  | "punt-biff vX already installed, skipping"                           | 0             |
 # |    |                  | 0 AND shows exactly the pin                     |                                                                        |               |
-# | 4a | reinstall reason | `uv tool list` exits nonzero                    | "'uv tool list' failed (exit N): <captured stdout and stderr> --     | install's own |
-# |    |                  |                                                  | reinstalling anyway"                                                  |               |
+# | 4a | reinstall reason | `uv tool list` exits nonzero                    | "'uv tool list' failed (exit N) (stdout: <captured stdout>) -- see   | install's own |
+# |    |                  |                                                  | uv's message above; reinstalling anyway"                              |               |
 # | 4b | reinstall reason | list exits 0 but listed version != pin          | "installed <version|<none>> differs from pin <pin>; reinstalling"    | install's own |
 # | 4c | reinstall reason | list exits 0, pin IS listed, entrypoint missing | "biff entrypoint missing or not executable at <path> (pin <pin> is   | install's own |
 # |    |                  | or not executable                               | listed); reinstalling"                                               |               |
 # | 5  | install          | reached after any of 4a/4b/4c                   | `uv tool install`'s own output                                        | install's own |
 #
-# No `2>/dev/null` anywhere below: every uv call's stderr is either shown
-# or captured into the shared temp file, never discarded -- check 2's
-# failure shows it directly; check 2's SUCCESS also passes it through
-# (uv can print a warning and still exit 0 with a valid path, and that
-# warning is still worth seeing); check 4's `uv tool list` captures it
-# into the same temp file so the reinstall-reason messages can quote it.
-# `uv tool list`'s STDOUT is captured separately from its stderr (not
-# merged with 2>&1): a uv warning that happens to mention "punt-biff "
-# on stderr must never be readable as the installed version by rows
-# 3/4b/4c, which classify on the stdout listing alone; row 4a is the
-# only one that also quotes the captured stderr. Check 2 runs `uv tool
-# dir --bin` fresh at recipe time rather than trusting a parse-time
-# variable; the `test` target below does the same independently, for
-# the same reason -- a parse-time snapshot has no way to recover from a
-# transient failure, so nothing in this Makefile reads one for the uv
-# bin dir any more.
+# The invariant that replaces per-row stderr bookkeeping: stderr is
+# never redirected in this recipe (the one exception, `command -v uv
+# >/dev/null 2>&1`, discards nothing of uv's -- uv is never invoked on
+# that line). uv's own diagnostics reach the terminal directly, in the
+# order uv wrote them, always before this recipe's own message about
+# that same call -- so no row can discard them, and no row needs to
+# capture, quote, or pass them through either. Only STDOUT is captured
+# (`$$(...)`), so a uv warning can never be read as a listing: rows
+# 3/4b/4c classify on the captured stdout alone, and the `grep -F
+# 'punt-biff '` that extracts the installed line never sees anything
+# uv wrote to stderr. Rows 2 and 4a quote the captured stdout in their
+# own failure messages where it helps diagnose what uv returned, but
+# that stdout was never stderr to begin with. An earlier version of
+# this recipe captured stderr into a shared temp file so error messages
+# could quote it; that created a new question on every row (has this
+# row read the file yet?) and the file went unread on three separate
+# occasions across three rounds. Not redirecting stderr in the first
+# place removes the question instead of answering it a fourth time.
+# Check 2 runs `uv tool dir --bin` fresh at recipe time rather than
+# trusting a parse-time variable; the `test` target below does the same
+# independently, for the same reason -- a parse-time snapshot has no way
+# to recover from a transient failure, so nothing in this Makefile reads
+# one for the uv bin dir any more.
 tools-biff: ## Install the pinned biff CLI if missing, unreachable, or out of pin (needed by internal/daemon's MCP registry test)
 	@command -v uv >/dev/null 2>&1 || { echo "tools-biff: uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff" >&2; exit 1; }; \
-	err=$$(mktemp) || { echo "tools-biff: mktemp failed (check TMPDIR)" >&2; exit 1; }; \
-	trap 'rm -f "$$err"' EXIT; \
-	bin=$$(uv tool dir --bin 2>"$$err"); bin_status=$$?; \
+	bin=$$(uv tool dir --bin); bin_status=$$?; \
 	if [ $$bin_status -ne 0 ] || [ -z "$$bin" ]; then \
-		echo "tools-biff: 'uv tool dir --bin' failed (exit $$bin_status):" >&2; \
-		cat "$$err" >&2; \
+		echo "tools-biff: 'uv tool dir --bin' failed (exit $$bin_status) or produced no output (stdout: $$bin) -- see uv's message above" >&2; \
 		exit 1; \
 	fi; \
-	[ -s "$$err" ] && cat "$$err" >&2; \
-	listing=$$(uv tool list 2>"$$err"); list_status=$$?; \
+	listing=$$(uv tool list); list_status=$$?; \
 	if [ $$list_status -eq 0 ] && test -x "$$bin/biff" && printf '%s\n' "$$listing" | grep -qFx "punt-biff v$(BIFF_VERSION)"; then \
 		echo "tools-biff: punt-biff v$(BIFF_VERSION) already installed, skipping" >&2; \
 	else \
 		if [ $$list_status -ne 0 ]; then \
-			echo "tools-biff: 'uv tool list' failed (exit $$list_status): stdout=$$listing stderr=$$(cat "$$err") -- reinstalling anyway" >&2; \
+			echo "tools-biff: 'uv tool list' failed (exit $$list_status) (stdout: $$listing) -- see uv's message above; reinstalling anyway" >&2; \
 		else \
 			installed=$$(printf '%s\n' "$$listing" | grep -F 'punt-biff ' | head -1); \
 			if [ "$$installed" != "punt-biff v$(BIFF_VERSION)" ]; then \
@@ -263,7 +264,7 @@ endif
 test: tools-ethos tools-biff tools-beadle-email ## Run tests with race detection
 	uvbin=$$(uv tool dir --bin); uvbin_status=$$?; \
 	if [ $$uvbin_status -ne 0 ] || [ -z "$$uvbin" ]; then \
-		echo "test: 'uv tool dir --bin' failed (exit $$uvbin_status) or produced no output -- cannot build the PATH that carries biff" >&2; \
+		echo "test: 'uv tool dir --bin' failed (exit $$uvbin_status) or produced no output (stdout: $$uvbin) -- cannot build the PATH that carries biff" >&2; \
 		exit 1; \
 	fi; \
 	PATH="$(BEADLE_EMAIL_BIN):$(GOINSTALL_BIN):$$uvbin:$$PATH" go test -race -count=1 ./...
