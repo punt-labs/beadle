@@ -139,33 +139,49 @@ func TestDefaultMCPRegistry(t *testing.T) {
 // running it: the ethos entry's Args named a "mcp" subcommand ethos has
 // never had, and nothing caught it. Invoking the configured command with
 // its args plus --help and requiring exit 0, the literal "Usage:" AND the
-// configured subcommand path itself in the output catches that class of
-// defect two ways over: exit 0 alone is not enough, because a server that
-// swallows --help and starts also exits 0 on stdin EOF (measured on this
-// host for both ethos serve and beadle-email serve -- --help is not
-// special-cased by either binary's RunE, so cobra parses the flag, falls
-// through to the command body, and the body itself returns nil once its
-// stdin pipe reaches EOF, which CombinedOutput's pipe always eventually
-// does); and a bare "usage" substring is not enough either, because a CLI
-// that falls back to its ROOT usage on an unrecognized subcommand also
-// prints that word and exits 0 without ever reaching the named entry's own
-// help text -- requiring the subcommand path (cfg.Command plus its leading
-// non-dash Args, derived by mcpCommandPath; a flag argument such as
-// "--transport" carries no subcommand identity and would make the check
-// too strict on an entry that passes one) in the output ties the pass to
-// the SPECIFIC subcommand this entry names, not just "some usage text
-// appeared somewhere." A command that blocks past the 5s deadline is
-// reported as a timeout, not misread as a crash via *exec.ExitError's -1
-// "signal: killed" exit code -- ctx.Err() is checked first, since the same
-// CombinedOutput error wraps both cases and only ctx.Err() tells them
-// apart. The child's Cmd sets WaitDelay to 1s so a server that forks a
-// child holding the pipes open (common for a daemon's double-fork) cannot
-// block CombinedOutput indefinitely: WaitDelay starts its own countdown at
-// whichever comes first, the context's deadline or the direct child
-// exiting (the scenario actually verified here is the latter -- a command
-// that exits immediately but leaves a lingering grandchild holding the
-// pipes), and Wait returns once that countdown elapses rather than
-// blocking on a descendant that never exits.
+// configured subcommand path itself ON THE USAGE LINE catches that class
+// of defect several ways over: exit 0 alone is not enough, because a
+// server that swallows --help and starts also exits 0 on stdin EOF
+// (measured on this host for both ethos serve and beadle-email serve --
+// --help is not special-cased by either binary's RunE, so cobra parses the
+// flag, falls through to the command body, and the body itself returns nil
+// once its stdin pipe reaches EOF, which CombinedOutput's pipe always
+// eventually does); a bare "usage" substring is not enough either, because
+// a CLI that falls back to its ROOT usage on an unrecognized subcommand
+// also prints that word and exits 0 without ever reaching the named
+// entry's own help text -- requiring the subcommand path (cfg.Command plus
+// its leading non-dash Args, derived by mcpCommandPath) ties the pass to
+// the SPECIFIC subcommand this entry names; and matching that path
+// anywhere in the whole output is STILL not enough, because a CLI's root
+// usage can mention a real subcommand name in its description prose below
+// the usage block (e.g. "Available Commands:\n  serve  Start the ...
+// serve server") while never having run that subcommand's own help --
+// usageLine anchors the check to the "Usage:" line itself (cobra prints
+// the path on the following line, click on the same line; the helper
+// joins the two so either shape matches) so a path that appears only in
+// prose further down does not satisfy it. A command that blocks past the
+// 5s deadline is reported as a timeout, not misread as a crash via
+// *exec.ExitError's -1 "signal: killed" exit code -- ctx.Err() is checked
+// first, since the same CombinedOutput error wraps both cases and only
+// ctx.Err() tells them apart. The child's Cmd sets WaitDelay to 1s so a
+// server that forks a child holding the pipes open (common for a daemon's
+// double-fork) cannot block CombinedOutput indefinitely: WaitDelay starts
+// its own countdown at whichever comes first, the context's deadline or
+// the direct child exiting, and Wait returns once that countdown elapses
+// rather than blocking on a descendant that never exits. (Verified during
+// review with a fake binary that exits immediately after forking a
+// lingering grandchild holding the pipes -- not a committed test.)
+//
+// A registry entry must lead with its subcommand, not a persistent flag:
+// `require.False` on a leading-dash Args[0] runs before any of this,
+// because cobra and click both accept a flag before the subcommand (e.g.
+// `ethos --json serve`), and mcpCommandPath's stop-at-first-dash rule
+// would then return the bare command, silently degrading the usage check
+// to "Usage:" plus the binary name -- exactly what a root usage line
+// satisfies. Refusing the shape structurally, rather than teaching
+// mcpCommandPath to parse around a leading flag, keeps the helper's
+// contract simple and pins the failure to the registry entry, not the
+// derivation.
 //
 // Entries with no Command (an http entry such as context7) are skipped,
 // but only after cfg.Validate() has confirmed that is really what they
@@ -208,6 +224,10 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 			require.True(t, known, "command %q for registry entry %q has no provisioning story in mcpCommandInstallRemedy -- add a tools-%s Makefile target, wire it into CI, and add a case here naming the remedy",
 				cfg.Command, name, cfg.Command)
 
+			require.False(t, len(cfg.Args) > 0 && strings.HasPrefix(cfg.Args[0], "-"),
+				"registry entry %q: Args %v leads with a flag -- stdio entries must lead with the subcommand, with any flags following it (both cobra and click accept that order)",
+				name, cfg.Args)
+
 			resolved, err := exec.LookPath(cfg.Command)
 			if err != nil {
 				t.Fatalf("command %q for registry entry %q not found on PATH: %v (%s)",
@@ -234,13 +254,14 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 					name, cfg.Command, strings.Join(args, " "), err, out)
 			}
 			cmdPath := mcpCommandPath(cfg.Command, cfg.Args)
-			if !strings.Contains(string(out), "Usage:") {
-				t.Fatalf("registry entry %q: %s %s exited 0 but printed no \"Usage:\" text -- a server that swallows --help and starts also exits 0 on stdin EOF:\n%s",
+			line := usageLine(string(out))
+			if line == "" {
+				t.Fatalf("registry entry %q: %s %s exited 0 but printed no \"Usage:\" line -- a server that swallows --help and starts also exits 0 on stdin EOF:\n%s",
 					name, cfg.Command, strings.Join(args, " "), out)
 			}
-			if !strings.Contains(string(out), cmdPath) {
-				t.Fatalf("registry entry %q: %s %s exited 0 with usage text, but it did not mention %q -- this may be ROOT usage from an unrecognized subcommand, not help for the entry's own command:\n%s",
-					name, cfg.Command, strings.Join(args, " "), cmdPath, out)
+			if !strings.Contains(line, cmdPath) {
+				t.Fatalf("registry entry %q: %s %s exited 0, but its usage line %q did not mention %q -- this may be ROOT usage from an unrecognized subcommand (the full output may still mention %q in description prose further down, which does not count):\n%s",
+					name, cfg.Command, strings.Join(args, " "), line, cmdPath, cmdPath, out)
 			}
 		})
 	}
@@ -252,7 +273,10 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 // stopping at the first element beginning with "-". A flag (e.g.
 // "--transport" in {"serve", "--transport", "stdio"}) carries no
 // subcommand identity of its own and must not be required in a --help
-// usage check -- only "serve" does.
+// usage check -- only "serve" does. A LEADING flag (Args[0] itself
+// beginning with "-") degenerates this to the bare command -- that shape
+// is refused structurally by TestDefaultMCPRegistry_StdioCommandsAreReal
+// before this helper is ever called with it, not handled here.
 func mcpCommandPath(cmd string, args []string) string {
 	path := cmd
 	for _, a := range args {
@@ -262,6 +286,34 @@ func mcpCommandPath(cmd string, args []string) string {
 		path += " " + a
 	}
 	return path
+}
+
+// usageLine returns the first line of out containing "Usage:" joined with
+// the next non-blank line that follows it, or "" if no line contains
+// "Usage:" at all. cobra prints the usage line and the subcommand path on
+// separate lines ("Usage:\n  ethos serve [flags]"); click prints them on
+// one line ("Usage: biff mcp [OPTIONS]"). Joining the usage line with the
+// next non-blank line covers both shapes without reading past them: a
+// subcommand path that appears only in description prose further down the
+// output -- outside this two-line window -- is not returned, and so
+// cannot satisfy a caller's Contains check against it.
+func usageLine(out string) string {
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "Usage:") {
+			continue
+		}
+		result := line
+		for _, next := range lines[i+1:] {
+			if strings.TrimSpace(next) == "" {
+				continue
+			}
+			result += " " + next
+			break
+		}
+		return result
+	}
+	return ""
 }
 
 // mcpCommandInstallRemedy returns the Makefile target that provisions cmd
@@ -288,7 +340,10 @@ func mcpCommandInstallRemedy(cmd string) (remedy string, known bool) {
 
 // TestMCPCommandPath covers mcpCommandPath directly: the leading run of
 // non-flag Args forms the subcommand path, and the first flag argument
-// ends it, whatever follows.
+// ends it, whatever follows -- including a flag at Args[0], which
+// mcpCommandPath degenerates to the bare command by design (that shape is
+// refused upstream, in TestDefaultMCPRegistry_StdioCommandsAreReal, before
+// this helper is ever called with it).
 func TestMCPCommandPath(t *testing.T) {
 	tests := []struct {
 		name string
@@ -300,10 +355,51 @@ func TestMCPCommandPath(t *testing.T) {
 		{name: "subcommand with a trailing flag and value", cmd: "beadle-email", args: []string{"serve", "--transport", "stdio"}, want: "beadle-email serve"},
 		{name: "single-word subcommand", cmd: "biff", args: []string{"mcp"}, want: "biff mcp"},
 		{name: "bare command, no args", cmd: "sh", args: []string{}, want: "sh"},
+		{name: "leading flag degenerates to the bare command", cmd: "ethos", args: []string{"--json", "serve"}, want: "ethos"},
+		{name: "two-element subcommand path", cmd: "ethos", args: []string{"mission", "show"}, want: "ethos mission show"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, mcpCommandPath(tt.cmd, tt.args))
+		})
+	}
+}
+
+// TestUsageLine covers usageLine directly: a cobra-shaped sample (the path
+// on the line after "Usage:"), a click-shaped sample (the path on the same
+// line as "Usage:"), and a sample where the path appears only in
+// description prose below the usage block -- which usageLine must not
+// return, since that prose sits outside the two-line window the helper
+// reads.
+func TestUsageLine(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		want string
+	}{
+		{
+			name: "cobra-shaped: path on the line after Usage:",
+			out:  "Start MCP server (stdio transport)\n\nUsage:\n  ethos serve [flags]\n\nFlags:\n  -h, --help   help for serve\n",
+			want: "Usage:   ethos serve [flags]",
+		},
+		{
+			// The path is already on the Usage: line itself for click, so
+			// the join (always performed, regardless of shape) appends the
+			// next non-blank line on top of it -- harmless here since the
+			// path-bearing text is already present before the join.
+			name: "click-shaped: path on the same line as Usage:",
+			out:  "Usage: biff mcp [OPTIONS]\n\n Start the biff MCP server (stdio transport).\n",
+			want: "Usage: biff mcp [OPTIONS]  Start the biff MCP server (stdio transport).",
+		},
+		{
+			name: "path only in description prose below the usage block must not be returned",
+			out:  "Usage:\n  fakeroot [command]\n\nAvailable Commands:\n  serve  Start the fakeroot serve server\n",
+			want: "Usage:   fakeroot [command]",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, usageLine(tt.out))
 		})
 	}
 }
