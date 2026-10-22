@@ -202,7 +202,8 @@ func (c *Config) PollDuration() (time.Duration, bool) {
 }
 
 // ValidPollInterval reports whether s is a valid poll_interval value.
-// Valid values: "1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "n", "".
+// Valid values are the keys of validPollIntervals (see PollIntervals for the
+// sorted list), plus "n" and "" (both meaning disabled).
 func ValidPollInterval(s string) bool {
 	if s == "" || s == "n" {
 		return true
