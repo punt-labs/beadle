@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,9 +58,12 @@ func TestPoller_SetInterval_Invalid(t *testing.T) {
 	require.Error(t, err)
 	var ie *InvalidIntervalError
 	assert.ErrorAs(t, err, &ie)
-	for _, interval := range PollIntervals() {
-		assert.Contains(t, err.Error(), interval)
-	}
+
+	_, rest, found := strings.Cut(err.Error(), ": must be ")
+	require.True(t, found, "expected %q to contain the %q separator", err.Error(), ": must be ")
+	rest, found = strings.CutSuffix(rest, ", or n")
+	require.True(t, found, "expected %q to end with %q", err.Error(), ", or n")
+	assert.ElementsMatch(t, PollIntervals(), strings.Split(rest, ", "))
 }
 
 func TestPoller_SetInterval_RunningRestart(t *testing.T) {
@@ -203,9 +207,12 @@ func TestPoller_Start_InvalidPollIntervalNamesFullSet(t *testing.T) {
 	p := &Poller{logger: discardLogger(), resolver: resolver}
 	err := p.Start()
 	require.Error(t, err)
-	for _, interval := range PollIntervals() {
-		assert.Contains(t, err.Error(), interval)
-	}
+
+	_, rest, found := strings.Cut(err.Error(), "(valid: ")
+	require.True(t, found, "expected %q to contain the %q separator", err.Error(), "(valid: ")
+	rest, found = strings.CutSuffix(rest, ", n=disable)")
+	require.True(t, found, "expected %q to end with %q", err.Error(), ", n=disable)")
+	assert.ElementsMatch(t, PollIntervals(), strings.Split(rest, ", "))
 }
 
 // TestPollIntervals_SortedAscending proves PollIntervals returns the
