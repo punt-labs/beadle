@@ -151,22 +151,25 @@ func TestDefaultMCPRegistry(t *testing.T) {
 //     the command body, and the body itself returns nil once its stdin
 //     pipe reaches EOF, which CombinedOutput's pipe always eventually
 //     does).
-//   - matching the path anywhere in the whole output is not enough: a
-//     CLI's parent or root usage can mention a real subcommand name in
-//     its "Available Commands" prose without ever having run that
-//     subcommand's own help. For these three tools an unknown ROOT
-//     subcommand exits 2 (`ethos nosuch`, `biff nosuch`) -- the exit-0
-//     case that actually matters here is a cobra PARENT printing its own
-//     usage on an unknown NESTED subcommand (`ethos mission nosuch`
-//     exits 0 and prints "Usage:\n  ethos mission [command]"; so does
-//     `ethos mission --json nosuch`, a flag planted between path
-//     elements -- the parent usage is identical either way).
-//     isLeafUsage excludes both shapes by STRUCTURE, not by what
-//     subcommand names a tool's own prose happens to mention: cobra
-//     marks a non-leaf usage with the "[command]" placeholder and click
-//     marks its root's with "COMMAND" -- either one present means the
+//   - matching the path anywhere in the whole output is not enough: with
+//     flags banned from Args (below), a registry entry whose path is a
+//     non-runnable GROUP -- e.g. {ethos, ["mission"]}, naming a cobra
+//     command that only groups subcommands and never runs on its own --
+//     exits 0 and its usage ("Usage:\n  ethos mission [command]") does
+//     contain the path "ethos mission". The path check alone cannot
+//     reject this: the window really does mention the configured path.
+//     isLeafUsage is what catches it, by STRUCTURE rather than content:
+//     cobra marks a non-leaf usage with the "[command]" placeholder and
+//     click marks its root's with "COMMAND" -- either present means the
 //     printed usage is an invitation to pick a subcommand, not help for
-//     a specific one.
+//     one specific command, whatever subcommand names happen to appear
+//     in its path or its "Available Commands" prose. (A registry entry
+//     naming an unknown NESTED subcommand under a real leaf, e.g.
+//     {ethos, ["mission", "nosuch"]}, is instead rejected by the path
+//     check alone once flags are banned: `ethos mission nosuch --help`
+//     prints the SAME parent usage, "Usage:\n  ethos mission [command]",
+//     which does not contain the configured path "ethos mission
+//     nosuch" -- isLeafUsage plays no role in that particular case.)
 //   - matching the path anywhere in the whole output is STILL not enough
 //     even once the leaf check passes: usageLine anchors the match to
 //     the usage window itself -- the line whose trimmed form starts with
@@ -249,8 +252,8 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 				cfg.Command, name, cfg.Command)
 
 			for _, a := range cfg.Args {
-				require.True(t, a != "" && !strings.HasPrefix(a, "-"),
-					"registry entry %q: Args %v contains %q -- Args is the subcommand path only, no flags and no empty elements (a flag value is indistinguishable by shape from a path element, so no positional rule can single one out correctly)",
+				require.True(t, a != "" && a == strings.TrimSpace(a) && !strings.HasPrefix(a, "-"),
+					"registry entry %q: Args %v contains %q -- Args is the subcommand path only, no flags and no empty or whitespace-only elements (a flag value is indistinguishable by shape from a path element, so no positional rule can single one out correctly)",
 					name, cfg.Args, a)
 			}
 
@@ -286,7 +289,7 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 					name, cfg.Command, strings.Join(args, " "), out)
 			}
 			if !isLeafUsage(window) {
-				t.Fatalf("registry entry %q: %s %s exited 0, but its usage window %q names a subcommand placeholder (\"[command]\" or \"COMMAND\") -- this is a PARENT's or ROOT's usage on an unrecognized subcommand, not help for the entry's own leaf command:\n%s",
+				t.Fatalf("registry entry %q: %s %s exited 0, but its usage window %q names a subcommand placeholder (\"[command]\" or \"COMMAND\") -- this is usually a non-runnable group's usage, inviting a subcommand choice rather than naming one specific command, but a LEAF command can legitimately print one of these words too (cobra's own \"help\" command, a click metavar, clap's USAGE line) -- if that is what failed here, the registry entry or this check needs a closer look, loudly, rather than this test silently assuming it is always the group case:\n%s",
 					name, cfg.Command, strings.Join(args, " "), window, out)
 			}
 			if !strings.Contains(window, cmdPath) {
@@ -299,13 +302,20 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 }
 
 // mcpCommandPath returns the subcommand path a registry entry names: cmd
-// followed by every element of args, space-joined. There is no flag to
-// stop at and no empty element to skip -- TestDefaultMCPRegistry_StdioCommandsAreReal
-// requires every element of Args to be non-empty and free of a leading
-// "-" before this helper is ever called, so args here is guaranteed to be
-// pure subcommand path.
+// followed by every element of args, space-joined, with NO trimming of
+// its own. There is no flag to stop at, no empty element to skip, and no
+// whitespace-only element to collapse -- TestDefaultMCPRegistry_StdioCommandsAreReal
+// requires every element of Args to be non-empty, not whitespace-only,
+// and free of a leading "-" before this helper is ever called, so args
+// here is guaranteed to be pure subcommand path. A TrimSpace in this
+// helper (an earlier version had one) would mask exactly the whitespace-
+// only element that check exists to catch: {"serve", " "} would collapse
+// to the same string "ethos serve" the real leaf {"serve"} produces, even
+// though `ethos serve " "` is a different, failing invocation at runtime
+// (exits 2, "unknown command"). The guard upstream is what must reject
+// that shape; this helper must not quietly repair it.
 func mcpCommandPath(cmd string, args []string) string {
-	return strings.TrimSpace(cmd + " " + strings.Join(args, " "))
+	return strings.Join(append([]string{cmd}, args...), " ")
 }
 
 // usageLine returns the usage window of out: the first line whose TRIMMED
@@ -332,6 +342,21 @@ func mcpCommandPath(cmd string, args []string) string {
 // the next non-blank line after a click line that already has everything
 // it needs -- pulling prose into the window and defeating the anchoring
 // this helper exists to provide.
+//
+// The window is deliberately ONE line (or the "Usage:" line plus exactly
+// one joined line) and never more, even though cobra prints TWO usage
+// lines for a command that is both runnable AND a parent of
+// subcommands -- "Usage:\n  x [flags]\n  x [command]". usageLine returns
+// only the first ("x [flags]"), so the window never carries the
+// "[command]" placeholder from the second line, and isLeafUsage treats
+// such an entry as a leaf. That is deliberate, not an oversight: a
+// runnable parent is a real server the registry entry is entitled to
+// invoke, and an unknown word appended under it (e.g. a nested subcommand
+// that does not exist) is still caught by the path check -- the parent's
+// own usage, runnable or not, never contains a path with an extra unknown
+// word appended. Widening this join to read a second usage line would
+// reject every runnable-parent server's registry entry on the "[command]"
+// placeholder alone, which is the opposite of what this test should do.
 func usageLine(out string) string {
 	lines := strings.Split(out, "\n")
 	for i, line := range lines {
@@ -362,11 +387,25 @@ func usageLine(out string) string {
 // "Usage:\n  ethos mission [command]"); click marks its root's with
 // "COMMAND" (e.g. "Usage: biff [OPTIONS] COMMAND [ARGS]..."). Either
 // placeholder present means the printed usage is structurally a menu, not
-// help for one subcommand -- this is what excludes a parent's or root's
-// usage, not merely that the configured path string happens not to appear
-// in it (a parent's "Available Commands" prose can and does mention a
-// real subcommand name without ever having run that subcommand's own
-// help).
+// help for one subcommand.
+//
+// This is NOT what excludes an unknown nested subcommand under a real
+// leaf (e.g. {ethos, ["mission", "nosuch"]}): once Args is banned from
+// carrying flags, that case is already rejected by the path check alone,
+// since the parent's usage window contains "ethos mission" but not the
+// configured "ethos mission nosuch". What isLeafUsage uniquely catches is
+// a registry entry whose configured path IS itself a non-runnable group
+// -- e.g. {ethos, ["mission"]} -- where the path check cannot help,
+// because the parent's own usage window genuinely does contain "ethos
+// mission".
+//
+// An unknown ROOT subcommand is a different case again, and is not what
+// this function is for: for these three tools it never produces a leaf
+// vs. non-leaf ambiguity to resolve, because none of them exits 0 on
+// one. Measured directly: ethos and biff both exit 2 (`ethos nosuch`,
+// `biff nosuch`); beadle-email exits 1 (`beadle-email nosuch`). Nothing
+// in this test enforces any particular exit code for that case -- it is
+// cited here only to say what isLeafUsage does not need to handle.
 func isLeafUsage(window string) bool {
 	return !strings.Contains(window, "[command]") && !strings.Contains(window, "COMMAND")
 }
@@ -408,6 +447,7 @@ func TestMCPCommandPath(t *testing.T) {
 		{name: "single subcommand", cmd: "ethos", args: []string{"serve"}, want: "ethos serve"},
 		{name: "two-element subcommand path", cmd: "ethos", args: []string{"mission", "show"}, want: "ethos mission show"},
 		{name: "bare command, no args", cmd: "sh", args: []string{}, want: "sh"},
+		{name: "a whitespace-only element is NOT trimmed away", cmd: "ethos", args: []string{"serve", " "}, want: "ethos serve  "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
