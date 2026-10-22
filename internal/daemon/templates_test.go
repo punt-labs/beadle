@@ -138,24 +138,48 @@ func TestDefaultMCPRegistry(t *testing.T) {
 // component's correctness was checked only by assertion rather than by
 // running it: the ethos entry's Args named a "mcp" subcommand ethos has
 // never had, and nothing caught it. Invoking the configured command with
-// its args plus --help exits quickly without starting a long-running
-// server, so a named subcommand that does not exist fails here the same
-// way it would fail for a real caller.
+// its args plus --help and requiring both exit 0 AND a usage line in the
+// output catches that class of defect: exit 0 alone is not enough, because
+// a server that swallows --help and starts also exits 0 on stdin EOF
+// (measured on this host for both ethos serve and beadle-email serve --
+// --help is not special-cased by either binary's RunE, so cobra parses the
+// flag, falls through to the command body, and the body itself returns nil
+// once its stdin pipe reaches EOF, which CombinedOutput's pipe always
+// eventually does). A command that blocks past the 5s deadline is reported
+// as a timeout, not misread as a crash via *exec.ExitError's -1 "signal:
+// killed" exit code -- ctx.Err() is checked first, since the same
+// CombinedOutput error wraps both cases and only ctx.Err() tells them
+// apart.
 //
-// A Command not found on PATH fails the test with an install remedy --
-// per docs/TESTING.md, no t.Skip on a missing dependency, ever. The ethos
-// binary is guaranteed present by the Makefile's tools-ethos target, which
-// `test` depends on; CI adds GOPATH/bin to PATH after installing it.
+// Entries with no Command (an http entry such as context7) are skipped,
+// but only after cfg.Validate() has confirmed that is really what they
+// are: a typo'd registry entry with nothing set at all also has an empty
+// Command, and Validate (not the empty string alone) is what distinguishes
+// "deliberately http" from "malformed." The loop also counts how many
+// stdio entries it actually exercised and requires at least one, so an
+// all-http or emptied-out registry cannot pass this test vacuously.
+//
+// A Command not found on PATH fails the test with a remedy specific to
+// that binary -- per docs/TESTING.md, no t.Skip on a missing dependency,
+// ever. All three of today's stdio entries are provisioned by `make test`:
+// ethos via the tools-ethos target, beadle-email via the tools-beadle-email
+// target (a self-build of ./cmd/beadle-email), and biff via the
+// tools-biff target; CI adds GOPATH/bin (where `go install` places ethos
+// and biff) and the build output directory to PATH after installing them.
 func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 	reg := DefaultMCPRegistry()
+	exercised := 0
 	for name, cfg := range reg {
+		require.NoError(t, cfg.Validate(), "registry entry %q has an invalid shape", name)
 		if cfg.Command == "" {
-			continue // http entry (e.g. context7): nothing to exec
+			continue // http entry (e.g. context7): Validate above confirmed this is a deliberate http shape, not a malformed stdio entry
 		}
+		exercised++
 		t.Run(name, func(t *testing.T) {
 			resolved, err := exec.LookPath(cfg.Command)
 			if err != nil {
-				t.Fatalf("command %q for registry entry %q not found on PATH: %v (install it, or run via `make test`, which provisions ethos through the tools-ethos target)", cfg.Command, name, err)
+				t.Fatalf("command %q for registry entry %q not found on PATH: %v (%s)",
+					cfg.Command, name, err, mcpCommandInstallRemedy(cfg.Command))
 			}
 
 			args := append(append([]string{}, cfg.Args...), "--help")
@@ -163,6 +187,10 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 			defer cancel()
 
 			out, err := exec.CommandContext(ctx, resolved, args...).CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("registry entry %q: %s %s did not exit within the 5s deadline -- --help may have started the server instead of printing usage and exiting:\n%s",
+					name, cfg.Command, strings.Join(args, " "), out)
+			}
 			if err != nil {
 				if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 					t.Fatalf("registry entry %q: %s %s exited %d (want 0):\n%s",
@@ -171,7 +199,31 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 				t.Fatalf("registry entry %q: running %s %s: %v\n%s",
 					name, cfg.Command, strings.Join(args, " "), err, out)
 			}
+			if !strings.Contains(strings.ToLower(string(out)), "usage") {
+				t.Fatalf("registry entry %q: %s %s exited 0 but printed no usage text -- a server that swallows --help and starts also exits 0 on stdin EOF:\n%s",
+					name, cfg.Command, strings.Join(args, " "), out)
+			}
 		})
+	}
+	require.Greater(t, exercised, 0, "no stdio entries were exercised -- an all-http or empty registry must not pass this test vacuously")
+}
+
+// mcpCommandInstallRemedy returns the Makefile target that provisions cmd
+// on this host, for TestDefaultMCPRegistry_StdioCommandsAreReal's failure
+// message when a registry entry's Command is missing from PATH. Naming the
+// one target that happens to cover today's first entry (ethos) regardless
+// of which command actually failed would send a caller chasing the wrong
+// fix for a missing beadle-email or biff binary.
+func mcpCommandInstallRemedy(cmd string) string {
+	switch cmd {
+	case "ethos":
+		return "install it via `make tools-ethos`"
+	case "beadle-email":
+		return "install it via `make tools-beadle-email` (a self-build of ./cmd/beadle-email)"
+	case "biff":
+		return "install it via `make tools-biff`"
+	default:
+		return "install it"
 	}
 }
 
