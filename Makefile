@@ -132,47 +132,58 @@ tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4
 # of biff, pinned to this version, is left alone rather than clobbered.
 #
 # Outcome table -- every path this recipe can take. Review this table,
-# not the shell: each row is independent and mutually exclusive, and the
-# recipe body implements exactly these rows and no others.
+# not the shell: the rows are not all mutually exclusive (a case can
+# satisfy more than one of 4a/4b/4c's conditions at once -- see below),
+# so the TIEBREAKER is the fixed check order the recipe implements: 4a
+# is tested before 4b, which is tested before 4c, and the first one that
+# matches is the one that prints. The recipe body implements exactly
+# these rows and no others.
 #
-# | # | Check           | Condition                                     | Message (stderr)                                                    | Exit          |
-# |---|-----------------|------------------------------------------------|----------------------------------------------------------------------|---------------|
-# | 1 | uv on PATH      | `command -v uv` fails                          | "uv not found on PATH -- install uv (...) to provision biff"         | 1             |
-# | 2 | bin dir known   | `uv tool dir --bin` exits nonzero, OR exits 0   | "'uv tool dir --bin' failed (exit N): <captured stderr>"             | 1             |
-# |   |                 | with empty stdout                               |                                                                        |               |
-# | 2 | bin dir known   | exits 0 with non-empty stdout                   | (none -- that stdout becomes the bin dir for checks 3-4 below)       | continues     |
-# | 3 | skip decision   | entrypoint executable AND `uv tool list` shows  | "punt-biff vX already installed, skipping"                           | 0             |
-# |   |                 | exactly the pin                                 |                                                                        |               |
-# | 4a| reinstall reason| `uv tool list` exits nonzero                    | "'uv tool list' failed (exit N): <captured output> -- reinstalling"  | install's own |
-# | 4b| reinstall reason| list exits 0 but listed version != pin          | "installed <version|<none>> differs from pin <pin>; reinstalling"    | install's own |
-# | 4c| reinstall reason| list exits 0, pin IS listed, entrypoint missing | "biff entrypoint missing or not executable at <path> (pin <pin> is   | install's own |
-# |   |                 | or not executable                               | listed); reinstalling"                                               |               |
-# | 5 | install         | reached after any of 4a/4b/4c                   | `uv tool install`'s own output                                        | install's own |
+# | #  | Check            | Condition                                      | Message (stderr)                                                    | Exit          |
+# |----|------------------|-------------------------------------------------|----------------------------------------------------------------------|---------------|
+# | 1  | uv on PATH       | `command -v uv` fails                          | "uv not found on PATH -- install uv (...) to provision biff"         | 1             |
+# | 2  | bin dir known    | `mktemp` fails                                  | "mktemp failed (check TMPDIR)"                                       | 1             |
+# | 2  | bin dir known    | `uv tool dir --bin` exits nonzero, OR exits 0   | "'uv tool dir --bin' failed (exit N): <captured stderr>"             | 1             |
+# |    |                  | with empty stdout                               |                                                                        |               |
+# | 2  | bin dir known    | exits 0 with non-empty stdout                   | (none -- that stdout becomes the bin dir for checks 3-4 below)       | continues     |
+# | 3  | skip decision    | entrypoint executable AND `uv tool list` exits  | "punt-biff vX already installed, skipping"                           | 0             |
+# |    |                  | 0 AND shows exactly the pin                     |                                                                        |               |
+# | 4a | reinstall reason | `uv tool list` exits nonzero                    | "'uv tool list' failed (exit N): <captured stdout and stderr> --     | install's own |
+# |    |                  |                                                  | reinstalling anyway"                                                  |               |
+# | 4b | reinstall reason | list exits 0 but listed version != pin          | "installed <version|<none>> differs from pin <pin>; reinstalling"    | install's own |
+# | 4c | reinstall reason | list exits 0, pin IS listed, entrypoint missing | "biff entrypoint missing or not executable at <path> (pin <pin> is   | install's own |
+# |    |                  | or not executable                               | listed); reinstalling"                                               |               |
+# | 5  | install          | reached after any of 4a/4b/4c                   | `uv tool install`'s own output                                        | install's own |
 #
 # No `2>/dev/null` anywhere below: every uv call's stderr is either shown
-# (check 2's failure) or captured into a variable the reinstall-reason
-# messages can quote (check 4's `uv tool list`), never discarded. Check 2
-# runs `uv tool dir --bin` fresh at recipe time rather than trusting the
-# parse-time $(UVTOOL_BIN) variable below, which can be stale or wrong
-# for reasons the parse-time computation can't diagnose (a transient
-# failure at `make` startup, a later export of UV_TOOL_BIN_DIR); a
-# transient failure that now succeeds at recipe time simply proceeds --
-# there is nothing left to tell the developer to re-run.
+# (check 2's failure) or captured into the shared temp file so the
+# reinstall-reason messages can quote it (check 4's `uv tool list`),
+# never discarded. `uv tool list`'s STDOUT is captured separately from
+# its stderr (not merged with 2>&1): a uv warning that happens to
+# mention "punt-biff " on stderr must never be readable as the installed
+# version by rows 3/4b/4c, which classify on the stdout listing alone;
+# row 4a is the only one that also quotes the captured stderr. Check 2
+# runs `uv tool dir --bin` fresh at recipe time rather than trusting a
+# parse-time variable; the `test` target below does the same
+# independently, for the same reason -- a parse-time snapshot has no way
+# to recover from a transient failure, so nothing in this Makefile reads
+# one for the uv bin dir any more.
 tools-biff: ## Install the pinned biff CLI if missing, unreachable, or out of pin (needed by internal/daemon's MCP registry test)
 	@command -v uv >/dev/null 2>&1 || { echo "tools-biff: uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff" >&2; exit 1; }; \
-	err=$$(mktemp); trap 'rm -f "$$err"' EXIT; \
+	err=$$(mktemp) || { echo "tools-biff: mktemp failed (check TMPDIR)" >&2; exit 1; }; \
+	trap 'rm -f "$$err"' EXIT; \
 	bin=$$(uv tool dir --bin 2>"$$err"); bin_status=$$?; \
 	if [ $$bin_status -ne 0 ] || [ -z "$$bin" ]; then \
 		echo "tools-biff: 'uv tool dir --bin' failed (exit $$bin_status):" >&2; \
 		cat "$$err" >&2; \
 		exit 1; \
 	fi; \
-	listing=$$(uv tool list 2>&1); list_status=$$?; \
+	listing=$$(uv tool list 2>"$$err"); list_status=$$?; \
 	if [ $$list_status -eq 0 ] && test -x "$$bin/biff" && printf '%s\n' "$$listing" | grep -qFx "punt-biff v$(BIFF_VERSION)"; then \
 		echo "tools-biff: punt-biff v$(BIFF_VERSION) already installed, skipping" >&2; \
 	else \
 		if [ $$list_status -ne 0 ]; then \
-			echo "tools-biff: 'uv tool list' failed (exit $$list_status): $$listing -- reinstalling anyway" >&2; \
+			echo "tools-biff: 'uv tool list' failed (exit $$list_status): stdout=$$listing stderr=$$(cat "$$err") -- reinstalling anyway" >&2; \
 		else \
 			installed=$$(printf '%s\n' "$$listing" | grep -F 'punt-biff ' | head -1); \
 			if [ "$$installed" != "punt-biff v$(BIFF_VERSION)" ]; then \
@@ -229,19 +240,24 @@ endif
 
 # `uv tool install` places a binary in `uv tool dir --bin` -- on this host
 # ~/.local/bin, distinct from GOINSTALL_BIN above -- so biff needs its own
-# PATH prefix rather than reusing the Go one. Computed once, at parse time,
-# same as GOINSTALL_BIN, so every `test` invocation prepends the directory
-# `uv tool install` actually used. tools-biff's own recipe (above) now
-# fails loudly before `test` ever constructs this PATH if the directory
-# can't be determined, so by the time this is read a non-empty value means
-# a real directory; the $(if ...) below is defense in depth so a direct
-# `make test` invocation that skipped its prerequisites never inserts an
-# empty PATH component (which both the shell and Go's exec.LookPath treat
-# as the current directory).
-UVTOOL_BIN := $(shell uv tool dir --bin 2>/dev/null)
-
+# PATH prefix rather than reusing the Go one. Resolved HERE, at recipe
+# time, not as a parse-time variable: a parse-time `$(shell ...)` is
+# evaluated once when `make` reads this file, before tools-biff has run
+# and before any transient failure in `uv tool dir --bin` has a chance
+# to clear, so a value captured then can go stale by the time this
+# recipe actually executes -- exactly the class of bug the tools-biff
+# table above exists to rule out for biff's own provisioning. Resolving
+# it again here, independently, at the point this recipe runs (after
+# tools-biff has already succeeded, so uv is known reachable) means a
+# transient parse-time failure can no longer surface here as "biff not
+# found" the way it could when this line read a parse-time variable.
 test: tools-ethos tools-biff tools-beadle-email ## Run tests with race detection
-	PATH="$(BEADLE_EMAIL_BIN):$(GOINSTALL_BIN):$(if $(UVTOOL_BIN),$(UVTOOL_BIN):,)$$PATH" go test -race -count=1 ./...
+	uvbin=$$(uv tool dir --bin); \
+	if [ -z "$$uvbin" ]; then \
+		echo "test: 'uv tool dir --bin' produced no output at recipe time -- cannot locate biff" >&2; \
+		exit 1; \
+	fi; \
+	PATH="$(BEADLE_EMAIL_BIN):$(GOINSTALL_BIN):$$uvbin:$$PATH" go test -race -count=1 ./...
 
 test-integration: ## Run integration tests (in-process IMAP/SMTP)
 	go test -race -count=1 -tags=integration ./...
