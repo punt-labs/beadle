@@ -1,10 +1,14 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -124,6 +128,50 @@ func TestDefaultMCPRegistry(t *testing.T) {
 	for name, cfg := range reg {
 		t.Run(name, func(t *testing.T) {
 			assert.NoError(t, cfg.Validate(), "registry entry %q has an invalid shape", name)
+		})
+	}
+}
+
+// TestDefaultMCPRegistry_StdioCommandsAreReal exercises every stdio entry's
+// configured Command and Args against the real binary on PATH, rather than
+// asserting the registry's shape in isolation. This is the third time this
+// component's correctness was checked only by assertion rather than by
+// running it: the ethos entry's Args named a "mcp" subcommand ethos has
+// never had, and nothing caught it. Invoking the configured command with
+// its args plus --help exits quickly without starting a long-running
+// server, so a named subcommand that does not exist fails here the same
+// way it would fail for a real caller.
+//
+// A Command not found on PATH fails the test with an install remedy --
+// per docs/TESTING.md, no t.Skip on a missing dependency, ever. The ethos
+// binary is guaranteed present by the Makefile's tools-ethos target, which
+// `test` depends on; CI adds GOPATH/bin to PATH after installing it.
+func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
+	reg := DefaultMCPRegistry()
+	for name, cfg := range reg {
+		if cfg.Command == "" {
+			continue // http entry (e.g. context7): nothing to exec
+		}
+		t.Run(name, func(t *testing.T) {
+			resolved, err := exec.LookPath(cfg.Command)
+			if err != nil {
+				t.Fatalf("command %q for registry entry %q not found on PATH: %v (install it, or run via `make test`, which provisions ethos through the tools-ethos target)", cfg.Command, name, err)
+			}
+
+			args := append(append([]string{}, cfg.Args...), "--help")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			out, err := exec.CommandContext(ctx, resolved, args...).CombinedOutput()
+			if err != nil {
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					t.Fatalf("registry entry %q: %s %s exited %d (want 0):\n%s",
+						name, cfg.Command, strings.Join(args, " "), exitErr.ExitCode(), out)
+				}
+				t.Fatalf("registry entry %q: running %s %s: %v\n%s",
+					name, cfg.Command, strings.Join(args, " "), err, out)
+			}
 		})
 	}
 }
