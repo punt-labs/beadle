@@ -40,10 +40,13 @@ jobs:
       - name: Install ethos, biff, and beadle-email
         run: make tools-ethos tools-biff tools-beadle-email
 
-      - name: Add GOPATH/bin and the uv tool bin dir to PATH
+      - name: Add the per-checkout bin dir, GOPATH/bin, and the uv tool bin dir to PATH
         run: |
-          printf '%s/bin\n' "$(go env GOPATH)" >> "$GITHUB_PATH"
-          uv tool dir --bin >> "$GITHUB_PATH"
+          {
+            printf '%s/.tmp/bin\n' "$GITHUB_WORKSPACE"
+            printf '%s/bin\n' "$(go env GOPATH)"
+            uv tool dir --bin
+          } >> "$GITHUB_PATH"
 
       - name: Test
         run: go test -race -count=1 ./...
