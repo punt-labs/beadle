@@ -1,0 +1,49 @@
+mission_id: m-2026-10-22-013
+status: closed
+type: implement
+created_at: "2026-10-22T15:36:28Z"
+updated_at: "2026-10-22T15:56:59Z"
+closed_at: "2026-10-22T15:56:59Z"
+leader: claude
+worker: adb
+evaluator:
+    handle: djb
+    pinned_at: "2026-10-22T15:36:28Z"
+    hash: 85800c9c7277e2fd9745f65041596879e461bdb130c9bc4252a6ff78f79a479c
+inputs:
+    ticket: beadle-fc6o
+    files:
+        - .claude/hooks/no-push-to-main.sh
+        - .claude/settings.json
+write_set:
+    - .claude/hooks/no-push-to-main.sh
+    - .claude/settings.json
+    - CHANGELOG.md
+success_criteria:
+    - .claude/hooks/no-push-to-main.sh is removed with `git rm`, not a plain rm, so the deletion is staged in the same commit.
+    - The single PreToolUse entry for no-push-to-main.sh is removed from .claude/settings.json; the entries for no-edit-on-main.sh and no-gh-watch.sh are byte-identical to main. settings.json remains valid JSON (verify with python3 -I -c 'import json;json.load(open(".claude/settings.json"))').
+    - CHANGELOG.md gets a Removed entry under Unreleased stating that the push-guard PreToolUse hook is gone, that GitHub branch protection is the mechanism, and one sentence on why (redundant convenience that required a shell parser to behave). Keep the entry under 10 lines.
+    - 'shellcheck still passes on the remaining hooks: make lint-shell is green.'
+    - make check passes.
+    - 'One commit: chore(hooks): remove the push-guard PreToolUse hook (beadle-fc6o). Stage only the three files in the write set with git add by name. Do not push, do not touch PRs; the leader does that.'
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Operator ruling 2026-10-22 on beadle-fc6o: remove the push-guard hook
+    entirely. GitHub branch protection on main (zero bypass actors) is the
+    enforcement mechanism; the hook was a convenience layered on top that
+    never added protection, no sibling repo carries one, and three missions
+    of hardening it produced a 586-line shell parser that still under- and
+    over-denied. The hardening branch fix/push-guard-worktree is abandoned
+    unmerged; this mission starts from main, where the hook is its original
+    50-line form and is referenced from exactly one settings.json line.
+
+    Worktree: [REDACTED:path]/.claude/worktrees/rm-push-guard
+    Branch: chore/remove-push-guard-hook (already created from main)
+    Run every command from that worktree.
+
+    Verified on main: no Makefile target, no test file, no doc other than
+    CHANGELOG mentions the hook. The other two PreToolUse hooks
+    (no-edit-on-main.sh, no-gh-watch.sh) stay untouched.

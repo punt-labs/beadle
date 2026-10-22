@@ -1,0 +1,52 @@
+mission: m-2026-10-22-013
+round: 1
+created_at: "2026-10-22T15:46:09Z"
+author: adb
+verdict: pass
+confidence: 0.98
+files_changed:
+    - path: .claude/hooks/no-push-to-main.sh
+      added: 0
+      removed: 50
+    - path: .claude/settings.json
+      added: 0
+      removed: 5
+    - path: CHANGELOG.md
+      added: 9
+      removed: 0
+evidence:
+    - name: git rm .claude/hooks/no-push-to-main.sh
+      status: pass
+    - name: diff of .claude/settings.json against main is exactly the one removed PreToolUse entry (no-edit-on-main.sh and no-gh-watch.sh entries byte-identical to main, confirmed by diff)
+      status: pass
+    - name: python3 -I -c 'import json;json.load(open(".claude/settings.json"))'
+      status: pass
+    - name: make lint-shell (shellcheck on remaining hooks, no-push-to-main.sh absent from discovered scripts)
+      status: pass
+    - name: make lint (shellcheck + go vet + staticcheck)
+      status: pass
+    - name: make vulncheck (govulncheck)
+      status: pass
+    - name: make docs (markdownlint-cli2, 0 issues)
+      status: pass
+    - name: make test (go test -race -count=1 ./..., all packages ok)
+      status: pass
+    - name: make lint-strict (golangci-lint run ./...) reports 6 gosec G204 findings, all with a ../../../ path prefix and in files this mission's diff never touches (internal/pgp, internal/daemon, cmd/beadle-email); the same pinned golangci-lint version run from the main checkout (not nested under .claude/worktrees/) reports 0 issues on the identical source tree -- a known nested-worktree artifact that breaks the .golangci.yml G204 path-anchored exclusion regex, not a regression from this change
+      status: fail
+open_questions:
+    - 'lint-strict (gosec via golangci-lint) cannot be made green from inside this nested worktree: the path-anchored exclusion in .golangci.yml only matches when golangci-lint is run with the repo root as cwd, and .claude/worktrees/rm-push-guard sits three levels below the main checkout''s root, so every finding is reported with a ../../../ prefix that never matches. The leader''s independent verification from the main checkout (not nested) should confirm 0 issues there before merge.'
+prose: |
+    Removed the push-guard PreToolUse hook per operator ruling on
+    beadle-fc6o: deleted .claude/hooks/no-push-to-main.sh with git rm,
+    removed its one registration entry from .claude/settings.json
+    (verified byte-identical to main elsewhere), and added a CHANGELOG
+    Removed entry under Unreleased citing GitHub branch protection as the
+    real enforcement mechanism. One commit, 51cd4141a668676cf37cb251341373bd149c25f0,
+    staging exactly the three write-set files.
+
+    make lint, make vulncheck, make docs, and make test are all green.
+    make lint-strict reports 6 gosec G204 findings, all pre-existing and
+    unrelated to this diff -- confirmed by the ../../../ path prefix on
+    every finding (this worktree is nested three levels under the main
+    checkout) and by running the identical pinned golangci-lint version
+    from the main checkout, which reports 0 issues on the same source.
