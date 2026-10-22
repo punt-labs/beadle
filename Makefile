@@ -121,12 +121,33 @@ clean-tex: ## Remove LaTeX intermediate files
 tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4 tests)
 	go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
 
-tools-biff: ## Install the pinned biff CLI (needed by internal/daemon's MCP registry test)
-	uv tool install --force punt-biff==$(BIFF_VERSION)
+# --force overrides any `biff` binary already in the uv tool bin dir that
+# uv did not install itself (e.g. a distro package or a manual copy); the
+# ==$(BIFF_VERSION) pin above, combined with the skip check in the recipe,
+# is what actually drives a reinstall on version drift -- --force covering
+# an unrelated existing install is the rare case it guards against.
+tools-biff: ## Install the pinned biff CLI if missing or out of pin (needed by internal/daemon's MCP registry test)
+	@command -v uv >/dev/null 2>&1 || { echo "tools-biff: uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff"; exit 1; }
+	@test -n "$(UVTOOL_BIN)" || { echo "tools-biff: 'uv tool dir --bin' produced no output -- your uv is too old to support --bin; upgrade uv"; exit 1; }
+	@if uv tool list 2>/dev/null | grep -qx "punt-biff v$(BIFF_VERSION)"; then \
+		echo "tools-biff: punt-biff v$(BIFF_VERSION) already installed, skipping"; \
+	else \
+		uv tool install --force punt-biff==$(BIFF_VERSION); \
+	fi
 
-tools-beadle-email: ## Self-build this branch's beadle-email into GOINSTALL_BIN (same test)
-	mkdir -p $(GOINSTALL_BIN)
-	go build -ldflags="$(LDFLAGS)" -o $(GOINSTALL_BIN)/beadle-email ./cmd/beadle-email/
+# Per-checkout, not host-global: tools-beadle-email self-builds THIS
+# checkout's own branch content, so its output directory must not be
+# shared with any other checkout. $(CURDIR) (not a bare relative ".tmp/bin")
+# because `go test` runs each package's test binary chdir'd into that
+# package's own source directory, not the repo root -- a relative PATH
+# entry would resolve against the WRONG directory inside the test
+# subprocess. Gitignored already (.tmp/* in .gitignore); mkdir -p below
+# creates it on demand.
+BEADLE_EMAIL_BIN := $(CURDIR)/.tmp/bin
+
+tools-beadle-email: ## Self-build this branch's beadle-email into BEADLE_EMAIL_BIN (same test)
+	mkdir -p $(BEADLE_EMAIL_BIN)
+	go build -ldflags="$(LDFLAGS)" -o $(BEADLE_EMAIL_BIN)/beadle-email ./cmd/beadle-email/
 
 # go install places a binary in $GOBIN if set, else $GOPATH/bin -- neither is
 # guaranteed to already be on PATH. Without this, `make test` provisions
@@ -134,10 +155,17 @@ tools-beadle-email: ## Self-build this branch's beadle-email into GOINSTALL_BIN 
 # ran, the binary exists, and the remedy message points right back at the
 # command that was just run. Computed once, at parse time, so every `test`
 # invocation prepends the same directory `go install` actually used.
-# tools-beadle-email's self-build deliberately targets this same directory
-# rather than its own: the registry test needs exactly one PATH prefix to
-# find both, and building the branch's own binary here (rather than the
-# uv tool bin dir, which this repo does not control) keeps it so.
+# This directory IS host-global (shared by every checkout on the host),
+# which is safe only because ethos is pinned to the identical
+# $(ETHOS_VERSION) everywhere -- two concurrent `go install`s race to
+# write the same bytes, not different ones. beadle-email's self-build
+# does NOT share this directory (see BEADLE_EMAIL_BIN above): its content
+# is per-branch, so two checkouts building concurrently into one shared
+# directory would let either one silently run its tests against the
+# OTHER checkout's binary. An earlier version of this comment argued for
+# "exactly one PATH prefix" across both tools; that argument held only
+# while both built into the same host-global directory, and no longer
+# applies now that beadle-email has its own per-checkout one.
 #
 # GOPATH may be a colon-separated list (":"-joined on every GOOS, including
 # darwin and linux -- Go never uses the OS path-list separator here). `go
@@ -154,11 +182,17 @@ endif
 # ~/.local/bin, distinct from GOINSTALL_BIN above -- so biff needs its own
 # PATH prefix rather than reusing the Go one. Computed once, at parse time,
 # same as GOINSTALL_BIN, so every `test` invocation prepends the directory
-# `uv tool install` actually used.
+# `uv tool install` actually used. tools-biff's own recipe (above) now
+# fails loudly before `test` ever constructs this PATH if the directory
+# can't be determined, so by the time this is read a non-empty value means
+# a real directory; the $(if ...) below is defense in depth so a direct
+# `make test` invocation that skipped its prerequisites never inserts an
+# empty PATH component (which both the shell and Go's exec.LookPath treat
+# as the current directory).
 UVTOOL_BIN := $(shell uv tool dir --bin 2>/dev/null)
 
 test: tools-ethos tools-biff tools-beadle-email ## Run tests with race detection
-	PATH="$(GOINSTALL_BIN):$(UVTOOL_BIN):$$PATH" go test -race -count=1 ./...
+	PATH="$(BEADLE_EMAIL_BIN):$(GOINSTALL_BIN):$(if $(UVTOOL_BIN),$(UVTOOL_BIN):,)$$PATH" go test -race -count=1 ./...
 
 test-integration: ## Run integration tests (in-process IMAP/SMTP)
 	go test -race -count=1 -tags=integration ./...
