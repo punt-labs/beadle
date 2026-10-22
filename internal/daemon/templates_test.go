@@ -139,7 +139,7 @@ func TestDefaultMCPRegistry(t *testing.T) {
 // running it: the ethos entry's Args named a "mcp" subcommand ethos has
 // never had, and nothing caught it. Invoking the configured command with
 // its args plus --help and requiring exit 0, the literal "Usage:" AND the
-// configured command line itself in the output catches that class of
+// configured subcommand path itself in the output catches that class of
 // defect two ways over: exit 0 alone is not enough, because a server that
 // swallows --help and starts also exits 0 on stdin EOF (measured on this
 // host for both ethos serve and beadle-email serve -- --help is not
@@ -149,19 +149,23 @@ func TestDefaultMCPRegistry(t *testing.T) {
 // does); and a bare "usage" substring is not enough either, because a CLI
 // that falls back to its ROOT usage on an unrecognized subcommand also
 // prints that word and exits 0 without ever reaching the named entry's own
-// help text -- requiring the command line itself (cfg.Command plus its
-// Args, space-joined) in the output ties the pass to the SPECIFIC
-// subcommand this entry names, not just "some usage text appeared
-// somewhere." A command that blocks past the 5s deadline is reported as a
-// timeout, not misread as a crash via *exec.ExitError's -1 "signal:
-// killed" exit code -- ctx.Err() is checked first, since the same
+// help text -- requiring the subcommand path (cfg.Command plus its leading
+// non-dash Args, derived by mcpCommandPath; a flag argument such as
+// "--transport" carries no subcommand identity and would make the check
+// too strict on an entry that passes one) in the output ties the pass to
+// the SPECIFIC subcommand this entry names, not just "some usage text
+// appeared somewhere." A command that blocks past the 5s deadline is
+// reported as a timeout, not misread as a crash via *exec.ExitError's -1
+// "signal: killed" exit code -- ctx.Err() is checked first, since the same
 // CombinedOutput error wraps both cases and only ctx.Err() tells them
 // apart. The child's Cmd sets WaitDelay to 1s so a server that forks a
 // child holding the pipes open (common for a daemon's double-fork) cannot
-// block CombinedOutput past the context deadline: WaitDelay bounds how
-// long Wait keeps reading after the context is done, closing the pipes and
-// returning once it elapses rather than waiting on a descendant that never
-// exits.
+// block CombinedOutput indefinitely: WaitDelay starts its own countdown at
+// whichever comes first, the context's deadline or the direct child
+// exiting (the scenario actually verified here is the latter -- a command
+// that exits immediately but leaves a lingering grandchild holding the
+// pipes), and Wait returns once that countdown elapses rather than
+// blocking on a descendant that never exits.
 //
 // Entries with no Command (an http entry such as context7) are skipped,
 // but only after cfg.Validate() has confirmed that is really what they
@@ -171,12 +175,20 @@ func TestDefaultMCPRegistry(t *testing.T) {
 // stdio entries it actually exercised and requires at least one, so an
 // all-http or emptied-out registry cannot pass this test vacuously.
 //
-// A Command not found on PATH fails the test with a remedy specific to
-// that binary -- per docs/TESTING.md, no t.Skip on a missing dependency,
-// ever. mcpCommandInstallRemedy has no default arm: a registry entry
-// naming a command with no provisioning story fails outright, naming the
-// gap in the test itself rather than silently printing a generic "install
-// it" that teaches the reader nothing. All three of today's stdio entries
+// The provisioning-story check (mcpCommandInstallRemedy's known return)
+// runs UNCONDITIONALLY, as the subtest's first statement, before
+// exec.LookPath -- not only when LookPath fails. A registry entry naming a
+// binary with no tools-<cmd> Makefile target and no CI step must fail
+// every time this test runs, including on a host where that binary
+// happens to already be on PATH for an unrelated reason: provisioning is a
+// property of the registry entry, not of today's incidental PATH
+// contents, and gating the check on a LookPath failure would let it pass
+// silently on exactly the machine where the gap is invisible, then fail
+// only on the first CI host without that accident. Per docs/TESTING.md,
+// no t.Skip on a missing dependency, ever. mcpCommandInstallRemedy's
+// default arm returns known=false for a command it has never heard of --
+// the test fails on that, naming the gap, rather than silently degrading
+// to a generic "install it" message. All three of today's stdio entries
 // are provisioned by `make test`: ethos via the tools-ethos target,
 // beadle-email via the tools-beadle-email target (a self-build of
 // ./cmd/beadle-email), and biff via the tools-biff target; CI adds
@@ -192,11 +204,12 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 		}
 		exercised++
 		t.Run(name, func(t *testing.T) {
+			remedy, known := mcpCommandInstallRemedy(cfg.Command)
+			require.True(t, known, "command %q for registry entry %q has no provisioning story in mcpCommandInstallRemedy -- add a tools-%s Makefile target, wire it into CI, and add a case here naming the remedy",
+				cfg.Command, name, cfg.Command)
+
 			resolved, err := exec.LookPath(cfg.Command)
 			if err != nil {
-				remedy, known := mcpCommandInstallRemedy(cfg.Command)
-				require.True(t, known, "command %q for registry entry %q has no provisioning story in mcpCommandInstallRemedy -- add a tools-%s Makefile target, wire it into CI, and add a case here naming the remedy",
-					cfg.Command, name, cfg.Command)
 				t.Fatalf("command %q for registry entry %q not found on PATH: %v (%s)",
 					cfg.Command, name, err, remedy)
 			}
@@ -220,29 +233,46 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 				t.Fatalf("registry entry %q: running %s %s: %v\n%s",
 					name, cfg.Command, strings.Join(args, " "), err, out)
 			}
-			commandLine := cfg.Command + " " + strings.Join(cfg.Args, " ")
+			cmdPath := mcpCommandPath(cfg.Command, cfg.Args)
 			if !strings.Contains(string(out), "Usage:") {
 				t.Fatalf("registry entry %q: %s %s exited 0 but printed no \"Usage:\" text -- a server that swallows --help and starts also exits 0 on stdin EOF:\n%s",
 					name, cfg.Command, strings.Join(args, " "), out)
 			}
-			if !strings.Contains(string(out), commandLine) {
+			if !strings.Contains(string(out), cmdPath) {
 				t.Fatalf("registry entry %q: %s %s exited 0 with usage text, but it did not mention %q -- this may be ROOT usage from an unrecognized subcommand, not help for the entry's own command:\n%s",
-					name, cfg.Command, strings.Join(args, " "), commandLine, out)
+					name, cfg.Command, strings.Join(args, " "), cmdPath, out)
 			}
 		})
 	}
 	require.Greater(t, exercised, 0, "no stdio entries were exercised -- an all-http or empty registry must not pass this test vacuously")
 }
 
+// mcpCommandPath returns the subcommand path a registry entry names: cmd
+// followed by args' leading run of non-flag elements, space-joined,
+// stopping at the first element beginning with "-". A flag (e.g.
+// "--transport" in {"serve", "--transport", "stdio"}) carries no
+// subcommand identity of its own and must not be required in a --help
+// usage check -- only "serve" does.
+func mcpCommandPath(cmd string, args []string) string {
+	path := cmd
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			break
+		}
+		path += " " + a
+	}
+	return path
+}
+
 // mcpCommandInstallRemedy returns the Makefile target that provisions cmd
 // on this host, for TestDefaultMCPRegistry_StdioCommandsAreReal's failure
 // message when a registry entry's Command is missing from PATH, and
-// whether cmd is known at all. There is deliberately no default arm: a
-// registry entry naming a command this function has never heard of must
-// fail the test outright, naming the exact gap (no tools-<cmd> target, no
-// CI step, no remedy case) rather than silently returning a generic
-// "install it" that would pass the require.True check and teach the
-// reader nothing about what to actually do.
+// whether cmd is known at all. The default arm returns known=false for a
+// command this function has never heard of, and the test requires true on
+// that result as its very first check -- a registry entry naming a
+// command with no tools-<cmd> target, no CI step, and no case here fails
+// outright, naming the exact gap, rather than the default arm silently
+// returning a generic "install it" that would teach the reader nothing.
 func mcpCommandInstallRemedy(cmd string) (remedy string, known bool) {
 	switch cmd {
 	case "ethos":
@@ -253,6 +283,28 @@ func mcpCommandInstallRemedy(cmd string) (remedy string, known bool) {
 		return "install it via `make tools-biff`", true
 	default:
 		return "", false
+	}
+}
+
+// TestMCPCommandPath covers mcpCommandPath directly: the leading run of
+// non-flag Args forms the subcommand path, and the first flag argument
+// ends it, whatever follows.
+func TestMCPCommandPath(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		args []string
+		want string
+	}{
+		{name: "single subcommand", cmd: "ethos", args: []string{"serve"}, want: "ethos serve"},
+		{name: "subcommand with a trailing flag and value", cmd: "beadle-email", args: []string{"serve", "--transport", "stdio"}, want: "beadle-email serve"},
+		{name: "single-word subcommand", cmd: "biff", args: []string{"mcp"}, want: "biff mcp"},
+		{name: "bare command, no args", cmd: "sh", args: []string{}, want: "sh"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, mcpCommandPath(tt.cmd, tt.args))
+		})
 	}
 }
 
