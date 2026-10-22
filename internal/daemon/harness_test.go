@@ -140,8 +140,15 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 			planner := &daemon.StubPlanner{Result: []daemon.CommandCall{{Command: "test-command", Args: map[string]any{}}}}
 			templates := &daemon.MissionTemplate{TmpDir: t.TempDir()}
 
+			// beadle-fbhp: a real store, not nil -- the production shape
+			// (main.go wires one in) -- so a refactor dropping handler.go's
+			// `Store: h.store` field leaves a record unwritten here instead
+			// of passing vacuously.
+			storeDir := t.TempDir()
+			store := &daemon.PipelineStore{Dir: storeDir, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+
 			handler := daemon.NewMailHandler(t.Context(), env.Resolver, dialer, nil, spawner, templates,
-				slog.New(slog.NewTextHandler(io.Discard, nil)), 0, planner, commands, nil)
+				slog.New(slog.NewTextHandler(io.Discard, nil)), 0, planner, commands, store)
 			handler.OnNewMail(1)
 			handler.Stop()
 
@@ -153,6 +160,24 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 				// not just WorkerSpawner.Run in isolation (spawner_test.go).
 				assert.Equal(t, []string{"Read"}, calls[0].Tools,
 					"the fixture command's declared Tools must reach the spawner")
+			}
+
+			// beadle-fbhp: tie the persistence assertion to the pipeline
+			// actually having run, so it cannot pass vacuously -- a
+			// negative case (gate 1 or gate 2 rejects the message before
+			// any Executor.Run) must leave the store directory empty.
+			entries, err := os.ReadDir(storeDir)
+			require.NoError(t, err)
+			if tt.wantSpawnerCalls > 0 {
+				require.Len(t, entries, 1, "exactly one pipeline record expected on disk")
+				data, err := os.ReadFile(filepath.Join(storeDir, entries[0].Name()))
+				require.NoError(t, err)
+				var record daemon.Pipeline
+				require.NoError(t, json.Unmarshal(data, &record))
+				assert.Equal(t, "completed", record.Status)
+				assert.Equal(t, "jim@punt-labs.com", record.Email.From)
+			} else {
+				assert.Empty(t, entries, "store directory must stay empty when no pipeline ran")
 			}
 		})
 	}
