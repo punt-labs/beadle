@@ -27,11 +27,12 @@ jobs:
             os="${pair%/*}"
             arch="${pair#*/}"
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "dist/beadle-email-${os}-${arch}" ./cmd/beadle-email/
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "dist/beadle-daemon-${os}-${arch}" ./cmd/beadle-daemon/
           done
 
       - name: Generate checksums
         working-directory: dist
-        run: sha256sum beadle-email-* > checksums.txt
+        run: sha256sum beadle-email-* beadle-daemon-* > checksums.txt
 
       - name: Create release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
@@ -39,4 +40,5 @@ jobs:
           generate_release_notes: true
           files: |
             dist/beadle-email-*
+            dist/beadle-daemon-*
             dist/checksums.txt
