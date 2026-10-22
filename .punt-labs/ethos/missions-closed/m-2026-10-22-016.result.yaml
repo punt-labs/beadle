@@ -1,0 +1,54 @@
+mission: m-2026-10-22-016
+round: 1
+created_at: "2026-10-22T17:38:13Z"
+author: adb
+verdict: pass
+confidence: 0.95
+files_changed:
+    - path: .github/workflows/release.yml
+      added: 3
+      removed: 1
+    - path: Makefile
+      added: 5
+      removed: 1
+    - path: CHANGELOG.md
+      added: 3
+      removed: 0
+evidence:
+    - name: make dist (worktree) completes; ls dist shows 8 binaries + checksums.txt
+      status: pass
+    - name: make vet (worktree)
+      status: pass
+    - name: 'make test (worktree): go test -race -count=1 ./... -- all packages ok'
+      status: pass
+    - name: 'make docs (worktree): markdownlint-cli2, 0 issues in 34 files'
+      status: pass
+    - name: 'make lint-shell (worktree): test-shell-discovery PASS, shellcheck clean'
+      status: pass
+    - name: 'make lint-strict (worktree): exactly the 6 known-artifact G204 gosec findings (admin_cmd.go:210, mcpreg.go:320, gpg.go:59,78,110,117), no new findings'
+      status: pass
+    - name: actionlint .github/workflows/release.yml -- zero findings
+      status: pass
+    - name: git status --short after make dist -- dist/ untracked, nothing staged by the build
+      status: pass
+prose: |
+    Mirrored the existing beadle-email build/checksum/upload loop in both
+    .github/workflows/release.yml and the Makefile's dist target for
+    cmd/beadle-daemon, naming the binaries dist/beadle-daemon-<os>-<arch>
+    per the four os/arch pairs already iterated. checksums.txt and the
+    release files glob now cover both binary sets. clean still removes
+    both local binaries (beadle-email beadle-daemon) and dist/, unchanged.
+    No action pins touched, no workflow restructuring, install.sh and
+    README untouched per the mission's scope boundary.
+
+    Added a 2-line CHANGELOG entry under Unreleased > Added.
+
+    Two commits: 4caba80 (release.yml + Makefile) and f249efd (CHANGELOG).
+    Ran make vet, make test, make docs, make lint-shell, and make
+    lint-strict individually from the worktree per the contract's known-
+    artifact note (make lint-strict reports gosec findings at paths
+    prefixed ../../../ because golangci-lint resolves them relative to the
+    worktree rather than the main checkout; this diff touches no Go code
+    and the 6 findings are the pre-existing ones named in the mission
+    context, verified by file:line match). Left dist/ in place for the
+    leader; did not run rm -rf dist, did not push, did not touch PRs.

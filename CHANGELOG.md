@@ -49,6 +49,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   policy; if beadle mail ever carries regulated content it needs a policy
   owner rather than a default.
 
+- Release assets now include `beadle-daemon` for all four platforms,
+  matching `beadle-email`'s existing build/upload loop (beadle-5ma).
+
 ### Changed
 
 - **BREAKING: `beadle-daemon` now loads zero commands when `daemon.json` is
