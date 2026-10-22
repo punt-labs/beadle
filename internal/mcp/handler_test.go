@@ -1102,7 +1102,7 @@ func TestHandler_SetPollInterval_Disable(t *testing.T) {
 func TestHandler_SetPollInterval_Invalid(t *testing.T) {
 	s, _, _ := setupHandlerWithPoller(t)
 
-	r := callTool(t, s, "set_poll_interval", map[string]any{"interval": "3m"})
+	r := callTool(t, s, "set_poll_interval", map[string]any{"interval": "4m"})
 	assert.True(t, r.IsError)
 	assert.Contains(t, r.text(), "invalid")
 }

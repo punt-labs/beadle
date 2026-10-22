@@ -1,0 +1,81 @@
+mission: m-2026-10-22-027
+round: 1
+created_at: "2026-10-22T18:13:06Z"
+author: bwk
+verdict: pass
+confidence: 1
+files_changed:
+    - path: internal/email/poller_test.go
+      added: 39
+      removed: 1
+    - path: internal/mcp/poll_tools_test.go
+      added: 218
+      removed: 0
+    - path: plugin/commands/inbox.md
+      added: 6
+      removed: 4
+evidence:
+    - name: go test -race -count=1 ./internal/email/... -run 'TestPoller_SetInterval_Invalid|TestPoller_Start_InvalidPollIntervalNamesFullSet' -v
+      status: pass
+    - name: go test -race -count=1 ./internal/mcp/... -run 'TestSetPollInterval_InvalidErrorListsFullSet|TestSetPollIntervalTool_DescriptionsListFullSet|TestInboxDoc_ListsFullIntervalSet|TestReadmeDoc_ListsFullIntervalSet' -v
+      status: pass
+    - name: 'fidelity (a): .tmp/ scratch copy, 15m cron row changed to */5 * * * * -> TestInboxDoc_ListsFullIntervalSet fails: Not equal: expected "`15m` -> `*/15 * * * *`" actual "`15m` -> `*/5 * * * *`" (cron row for "15m")'
+      status: pass
+    - name: 'fidelity (b): .tmp/ scratch copy, "15m" removed from validPollIntervals -> TestInboxDoc_ListsFullIntervalSet fails on cron-table-keys ElementsMatch: cron-table keys must equal email.PollIntervals() (listA has 8 elements missing 15m, listB has 9 elements including 15m)'
+      status: pass
+    - name: 'fidelity (c): .tmp/ scratch copy, "15m" deleted from inbox.md argument-hint only, cron table left intact -> TestInboxDoc_ListsFullIntervalSet fails on argument-hint-values ElementsMatch: argument-hint values must equal email.PollIntervals()'
+      status: pass
+    - name: make check
+      status: pass
+prose: |
+    Closed the four gaps the invariant reviewer's mutation testing found
+    in round 4's guards.
+
+    plugin/commands/inbox.md now carries the interval set in exactly two
+    places: the argument-hint and the cron table. The routing rule
+    ("- Exactly one of ...") and the section heading
+    ("### Polling interval (...)") were rewritten to point at the cron
+    table rather than restating the set, so a value added to the hint
+    and table but not the (now-nonexistent) routing-rule copy can no
+    longer route a poll-interval argument as a filter query.
+
+    internal/mcp/poll_tools_test.go's TestInboxDoc_ListsFullIntervalSet
+    was rewritten to parse the argument-hint tokens and the cron-table
+    rows exactly (argumentHintValues, cronTableRows) and
+    assert.ElementsMatch each against email.PollIntervals() in BOTH
+    directions, closing the map-subset-of-doc gap (a removed value no
+    longer passes silently). Each cron row's full text is compared
+    against an expression this test derives independently via
+    time.ParseDuration (cronExpr: whole minutes under 60 ->
+    */N * * * *, exactly one hour -> 0 * * * *, N whole hours ->
+    0 */N * * *; t.Fatalf on any other shape), closing the
+    wrong-cron-expression gap. Added TestReadmeDoc_ListsFullIntervalSet,
+    guarding README.md's set_poll_interval tool-table row and /inbox
+    slash-command rows (joined across the several "| `/inbox ` rows,
+    since n/status/the-example each start a distinct row) the same way.
+
+    The five derived Contains-per-value loops across both test files
+    (poller_test.go's TestPoller_SetInterval_Invalid and
+    TestPoller_Start_InvalidPollIntervalNamesFullSet; poll_tools_test.go's
+    TestSetPollInterval_InvalidErrorListsFullSet and
+    TestSetPollIntervalTool_DescriptionsListFullSet, which is two loops)
+    were replaced: each now isolates the enumerated-list substring at its
+    fixed delimiters (strings.Cut/CutSuffix) and compares with
+    assert.ElementsMatch against PollIntervals()/email.PollIntervals(),
+    closing the "5m" matches-inside-"15m" gap — a list missing "15m" but
+    present "5m" no longer passes a check meant to prove "15m" appears.
+
+    Fidelity: ran the reviewer's three mutations in a scratch copy of
+    internal/ and plugin/ under .tmp/fidelity-m027 (cp -r, never edited
+    in the tracked tree), confirmed each failed the relevant new/rewritten
+    test with the expected message (full text in evidence above), then
+    deleted the scratch directory. git status on the tracked tree showed
+    only this mission's three write-set files throughout.
+
+    Two commits per the contract: 55829a8 docs(plugin) for inbox.md,
+    06c9234 test(email,mcp) for the test rewrites. Staged by name in
+    each. Full make check from the main checkout on fix/poll-intervals
+    passes: golangci-lint 0 issues (including a revive var-naming fix for
+    an underscore-suffixed local caught mid-work), govulncheck 0
+    vulnerabilities in code, markdownlint 0 issues in 36 files, and
+    go test -race -count=1 ./... green across every package.

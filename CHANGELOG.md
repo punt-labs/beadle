@@ -54,6 +54,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Inbox polling accepts `2m` and `3m`.** The allowed interval set had
+  nothing between `1m` and `5m`, so the only way to poll an agent mailbox
+  at least every three minutes was the one-minute floor. The set is now
+  `1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h, 2h`; the `set_poll_interval` MCP
+  tool, the `/inbox` skill, and every error message list the same set,
+  and the README example config uses `3m` instead of `30m`. Poller
+  first-poll suppression and its minimum interval are unchanged
+  (beadle-1ljl).
 - **BREAKING: `beadle-daemon` now loads zero commands when `daemon.json` is
   absent, instead of loading every command file unsigned.** DES-035
   (previous entry below) preserved a legacy fallback for a genuinely

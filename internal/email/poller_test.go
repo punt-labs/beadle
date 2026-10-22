@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,10 +54,16 @@ func TestPoller_SetInterval_Disable(t *testing.T) {
 
 func TestPoller_SetInterval_Invalid(t *testing.T) {
 	p := testPoller()
-	err := p.SetInterval("3m")
+	err := p.SetInterval("4m")
 	require.Error(t, err)
 	var ie *InvalidIntervalError
 	assert.ErrorAs(t, err, &ie)
+
+	_, rest, found := strings.Cut(err.Error(), ": must be ")
+	require.True(t, found, "expected %q to contain the %q separator", err.Error(), ": must be ")
+	rest, found = strings.CutSuffix(rest, ", or n")
+	require.True(t, found, "expected %q to end with %q", err.Error(), ", or n")
+	assert.ElementsMatch(t, PollIntervals(), strings.Split(rest, ", "))
 }
 
 func TestPoller_SetInterval_RunningRestart(t *testing.T) {
@@ -183,6 +190,37 @@ func TestPoller_LoadConfig_FallbackLoadFailureWrapped(t *testing.T) {
 	_, err := p.loadConfig()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "default config:")
+}
+
+// TestPoller_Start_InvalidPollIntervalNamesFullSet proves the config-
+// validation error Start returns for an invalid poll_interval names the
+// full accepted set, so this string cannot drift from validPollIntervals.
+func TestPoller_Start_InvalidPollIntervalNamesFullSet(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	beadleDir := filepath.Join(home, ".punt-labs", "beadle")
+	require.NoError(t, os.MkdirAll(beadleDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(beadleDir, "default-identity"), []byte("agent@test.com\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(beadleDir, "email.json"), []byte(`{"imap_user":"agent@test.com","poll_interval":"4m"}`), 0o600))
+	resolver := identity.NewResolver(t.TempDir(), beadleDir, t.TempDir())
+
+	p := &Poller{logger: discardLogger(), resolver: resolver}
+	err := p.Start()
+	require.Error(t, err)
+
+	_, rest, found := strings.Cut(err.Error(), "(valid: ")
+	require.True(t, found, "expected %q to contain the %q separator", err.Error(), "(valid: ")
+	rest, found = strings.CutSuffix(rest, ", n=disable)")
+	require.True(t, found, "expected %q to end with %q", err.Error(), ", n=disable)")
+	assert.ElementsMatch(t, PollIntervals(), strings.Split(rest, ", "))
+}
+
+// TestPollIntervals_SortedAscending proves PollIntervals returns the
+// validPollIntervals keys in ascending duration order, not map iteration
+// order, which Go leaves undefined.
+func TestPollIntervals_SortedAscending(t *testing.T) {
+	want := []string{"1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h", "2h"}
+	assert.Equal(t, want, PollIntervals())
 }
 
 func TestPoller_RecordFailure(t *testing.T) {

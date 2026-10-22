@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +17,38 @@ import (
 // NewMailFunc is called when the poller detects new messages.
 // newCount is the number of new unseen messages since the last poll.
 type NewMailFunc func(newCount uint32)
+
+// PollIntervals returns the keys of validPollIntervals
+// (internal/email/config.go), sorted ascending by duration rather than by
+// map iteration order, which Go leaves undefined. Exported so other
+// packages — internal/mcp's set_poll_interval tool, in particular — can
+// build their own interval-set text from the same source instead of
+// hand-maintaining a parallel copy, which is exactly how this set drifted
+// before.
+func PollIntervals() []string {
+	type entry struct {
+		name string
+		d    time.Duration
+	}
+	entries := make([]entry, 0, len(validPollIntervals))
+	for name, d := range validPollIntervals {
+		entries = append(entries, entry{name, d})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].d < entries[j].d })
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.name
+	}
+	return names
+}
+
+// PollIntervalList renders PollIntervals as a single comma-separated
+// string. Both config-validation error paths in this file build their
+// "valid: ..." text from this one function, so adding a value to
+// validPollIntervals can never leave either string stale.
+func PollIntervalList() string {
+	return strings.Join(PollIntervals(), ", ")
+}
 
 // PollStatus is the current state of the background poller.
 type PollStatus struct {
@@ -101,7 +135,7 @@ func (p *Poller) Start() error {
 	d, ok := cfg.PollDuration()
 	if !ok {
 		if cfg.PollInterval != "" && cfg.PollInterval != "n" {
-			return fmt.Errorf("invalid poll_interval %q in config (valid: 1m, 5m, 10m, 15m, 30m, 1h, 2h, n=disable)", cfg.PollInterval)
+			return fmt.Errorf("invalid poll_interval %q in config (valid: %s, n=disable)", cfg.PollInterval, PollIntervalList())
 		}
 		return nil // disabled, not an error
 	}
@@ -313,5 +347,5 @@ type InvalidIntervalError struct {
 }
 
 func (e *InvalidIntervalError) Error() string {
-	return "invalid poll interval " + e.Value + ": must be 1m, 5m, 10m, 15m, 30m, 1h, 2h, or n"
+	return "invalid poll interval " + e.Value + ": must be " + PollIntervalList() + ", or n"
 }

@@ -1,0 +1,49 @@
+mission_id: m-2026-10-22-027
+status: closed
+type: implement
+created_at: "2026-10-22T18:01:59Z"
+updated_at: "2026-10-22T18:14:14Z"
+closed_at: "2026-10-22T18:14:14Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T18:01:59Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-1ljl
+    files:
+        - internal/mcp/poll_tools_test.go
+        - internal/email/poller_test.go
+        - plugin/commands/inbox.md
+        - internal/email/config.go
+write_set:
+    - internal/mcp/poll_tools_test.go
+    - internal/email/poller_test.go
+    - plugin/commands/inbox.md
+success_criteria:
+    - 'plugin/commands/inbox.md carries the interval set in exactly two places, the argument-hint (line 3) and the cron table under step 3: the routing rule line ("- Exactly one of ...") and the section heading ("### Polling interval (...)") are reworded to refer to the cron table instead of listing values, so the two places the test checks are the only two copies. Routing behaviour is unchanged: an argument that matches a cron-table key sets the interval; anything else is a filter.'
+    - 'TestInboxDoc_ListsFullIntervalSet asserts SET EQUALITY in both directions: it parses the argument-hint tokens between "[" and "]" (split on " | ", dropping "<filter text>", "n", "status") and the cron-table keys (the backquoted value before the arrow on each row), and assert.ElementsMatch each against email.PollIntervals(). It also asserts each cron row''s full text equals "`v` → `expr`" where expr is derived in the test from time.ParseDuration(v) (every current value parses): whole minutes under 60 give "*/N * * * *", exactly one hour gives "0 * * * *", N whole hours give "0 */N * * *"; t.Fatalf on any value outside those shapes so a future value forces the derivation to be extended rather than silently skipped.'
+    - The same test reads ../../README.md and asserts every element of email.PollIntervals() appears in BOTH the set_poll_interval tool-table row and the /inbox slash-command row (identify the rows by their leading "| `set_poll_interval` |" and "| `/inbox " prefixes).
+    - 'The five derived Contains loops (poller_test.go TestPoller_SetInterval_Invalid and TestPoller_Start_InvalidPollIntervalNamesFullSet; poll_tools_test.go TestSetPollInterval_InvalidErrorListsFullSet and TestSetPollIntervalTool_DescriptionsListFullSet) no longer use assert.Contains per value (where "5m" matches inside "15m"): each isolates the enumerated list (text after ": must be " up to ", or n"; text after "Valid intervals: " up to ". Use ''n''"; text after "Polling interval: " up to ", or n"), splits on ", ", and assert.ElementsMatch against email.PollIntervals().'
+    - 'Fidelity: for each of the three mutations the reviewer ran, confirm the new tests FAIL and paste the failing line: (a) in a scratch copy change the 15m cron row to */5 * * * *; (b) in a scratch copy remove "15m" from validPollIntervals; (c) in a scratch copy delete one value from the inbox.md argument-hint only. Use cp -r of the module into .tmp/ for scratch, never edit the tree in place; confirm git status --short shows only your write-set files.'
+    - make check passes from [REDACTED:path] on branch fix/poll-intervals; paste the tail.
+    - 'Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes. Two commits: docs(plugin) for inbox.md, test(email,mcp) for the tests. Stage by name. Do not push, do not touch PRs or merge — the leader does that. Do not commit after submitting the result.'
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 5 on bead beadle-1ljl, branch fix/poll-intervals in the main
+    checkout at [REDACTED:path]. The invariant
+    reviewer mutation-tested round 4 and found: inbox.md carries the set
+    FOUR times (hint, routing rule line 20, heading line 26, cron table)
+    and the test checks two, so a value added to hint+table but not the
+    routing rule routes `/inbox 20m` as a filter query (confirmed by
+    mutation); the test asserts map-subset-of-doc only, so removing a
+    value from the map leaves the doc advertising it (confirmed); a wrong
+    cron expression passes (confirmed); and "5m" inside "15m" masks the
+    per-value Contains loops. README.md:140 and :150 are unguarded. The
+    in-binary derivation itself is confirmed complete. The leader owns
+    README.md, DESIGN.md, and the config.go comment and will fix those
+    separately; do not edit them.

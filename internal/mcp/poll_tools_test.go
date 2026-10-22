@@ -3,8 +3,11 @@ package mcp_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -244,4 +247,242 @@ func TestServerInstructions_Exposed(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(resp, &out))
 	assert.Equal(t, mcptools.ServerInstructions, out.Result.Instructions)
+}
+
+// TestSetPollInterval_AcceptsEveryValidInterval proves set_poll_interval
+// accepts every value in email.PollIntervals(), so a value added to that
+// slice is automatically covered here without touching this test again. Uses
+// setupHandlerWithPoller rather than newMarkerServer: set_poll_interval
+// actually starts the poller's background goroutine, and only
+// setupHandlerWithPoller registers t.Cleanup(poller.Stop) to stop it before
+// the subtest's IMAP fixture tears down — newMarkerServer's poller is never
+// started by the other tests in this file, so it has never needed that.
+func TestSetPollInterval_AcceptsEveryValidInterval(t *testing.T) {
+	for _, interval := range email.PollIntervals() {
+		t.Run(interval, func(t *testing.T) {
+			s, _, _ := setupHandlerWithPoller(t)
+
+			result := callTool(t, s, "set_poll_interval", map[string]any{"interval": interval})
+			assert.False(t, result.IsError, "expected %q to be accepted", interval)
+		})
+	}
+}
+
+// TestSetPollInterval_InvalidErrorListsFullSet proves the error message for
+// an invalid interval names exactly the set in email.PollIntervals() — the
+// two surfaces (this error text and validPollIntervals) cannot drift
+// silently. The fixture "bogus" is not a substring of any valid interval,
+// so a match here cannot be satisfied by the echoed input alone. The
+// enumerated list is isolated (text after ": must be " up to ", or n") and
+// split on ", ", then compared with assert.ElementsMatch rather than
+// per-value Contains, since Contains("5m") would wrongly pass against a
+// list that only contains "15m".
+func TestSetPollInterval_InvalidErrorListsFullSet(t *testing.T) {
+	s, _ := newMarkerServer(t)
+	callMCP(t, s, "initialize", 0, initParams())
+
+	result := callTool(t, s, "set_poll_interval", map[string]any{"interval": "bogus"})
+	require.True(t, result.IsError)
+	text := result.text()
+	_, rest, found := strings.Cut(text, ": must be ")
+	require.True(t, found, "expected %q to contain the %q separator", text, ": must be ")
+	rest, found = strings.CutSuffix(rest, ", or n")
+	require.True(t, found, "expected %q to end with %q", text, ", or n")
+	assert.ElementsMatch(t, email.PollIntervals(), strings.Split(rest, ", "))
+}
+
+// listedTool is the subset of a tools/list entry this file inspects:
+// name, description, and per-property input-schema descriptions.
+type listedTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	InputSchema struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	} `json:"inputSchema"`
+}
+
+// findTool returns the tools/list entry named name, or fails the test.
+func findTool(t *testing.T, s *server.MCPServer, name string) listedTool {
+	t.Helper()
+	resp := callMCP(t, s, "tools/list", 99, nil)
+	var out struct {
+		Result struct {
+			Tools []listedTool `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(resp, &out))
+	for _, tool := range out.Result.Tools {
+		if tool.Name == name {
+			return tool
+		}
+	}
+	t.Fatalf("%s not registered", name)
+	return listedTool{}
+}
+
+// TestSetPollIntervalTool_DescriptionsListFullSet proves both set_poll_interval
+// surface strings — the tool description and the "interval" parameter
+// description — list every element of email.PollIntervals(), so the MCP
+// client-facing text cannot drift from the Go set.
+func TestSetPollIntervalTool_DescriptionsListFullSet(t *testing.T) {
+	s, _ := newMarkerServer(t)
+	callMCP(t, s, "initialize", 0, initParams())
+
+	tool := findTool(t, s, "set_poll_interval")
+
+	intervalProp, ok := tool.InputSchema.Properties["interval"]
+	require.True(t, ok, "interval property not found")
+
+	_, descRest, found := strings.Cut(tool.Description, "Valid intervals: ")
+	require.True(t, found, "expected tool description %q to contain %q", tool.Description, "Valid intervals: ")
+	descRest, found = strings.CutSuffix(descRest, ". Use 'n' to disable.")
+	require.True(t, found, "expected tool description %q to end with %q", tool.Description, ". Use 'n' to disable.")
+	assert.ElementsMatch(t, email.PollIntervals(), strings.Split(descRest, ", "))
+
+	_, propRest, found := strings.Cut(intervalProp.Description, "Polling interval: ")
+	require.True(t, found, "expected interval property description %q to contain %q", intervalProp.Description, "Polling interval: ")
+	propRest, found = strings.CutSuffix(propRest, ", or n (disable)")
+	require.True(t, found, "expected interval property description %q to end with %q", intervalProp.Description, ", or n (disable)")
+	assert.ElementsMatch(t, email.PollIntervals(), strings.Split(propRest, ", "))
+}
+
+// cronExpr derives the expected CronCreate expression for a poll interval
+// value, used to prove inbox.md's cron table matches the duration
+// validPollIntervals actually maps value to — not the duration value's own
+// spelling would parse to, which could silently disagree if the map ever
+// mismapped a key. The "*/N * * * *" form only repeats every N minutes when N
+// divides 60 (e.g. */45 fires at :00 and :45, 45 minutes apart only once an
+// hour, not every 45 minutes), so that case requires 60%N == 0 and falls
+// through to the default otherwise. t.Fatalf on any shape this derivation
+// does not cover, so a future interval value (e.g. a multi-hour-and-minute
+// duration, or a sub-hour value that does not divide 60) forces this
+// function to be extended rather than silently passing an unverified row.
+func cronExpr(t *testing.T, value string) string {
+	t.Helper()
+	d, ok := (&email.Config{PollInterval: value}).PollDuration()
+	require.True(t, ok, "interval %q is not in validPollIntervals", value)
+
+	switch {
+	case d < time.Hour && d%time.Minute == 0 && 60%int(d/time.Minute) == 0:
+		return fmt.Sprintf("*/%d * * * *", int(d/time.Minute))
+	case d == time.Hour:
+		return "0 * * * *"
+	case d > time.Hour && d%time.Hour == 0:
+		return fmt.Sprintf("0 */%d * * *", int(d/time.Hour))
+	default:
+		t.Fatalf("interval %q (%s) has no known cron-expression shape; extend cronExpr", value, d)
+		return ""
+	}
+}
+
+// argumentHintValues parses the argument-hint tokens between "[" and "]",
+// dropping the non-interval tokens "<filter text>", "n", and "status".
+func argumentHintValues(t *testing.T, doc string) []string {
+	t.Helper()
+	openIdx := strings.Index(doc, "[")
+	closeIdx := strings.Index(doc, "]")
+	require.True(t, openIdx >= 0 && closeIdx > openIdx, "argument-hint brackets not found in inbox.md")
+	raw := strings.Split(doc[openIdx+1:closeIdx], " | ")
+	var values []string
+	for _, tok := range raw {
+		if tok == "<filter text>" || tok == "n" || tok == "status" {
+			continue
+		}
+		values = append(values, tok)
+	}
+	return values
+}
+
+// cronTableRows parses the cron-expression table lines: each row is
+// "`value` → `expr`". Returns the keys found and a map to the full rendered
+// row text, keyed by value, for exact-row comparison against cronExpr.
+func cronTableRows(doc string) (keys []string, rows map[string]string) {
+	rows = make(map[string]string)
+	cronLine := regexp.MustCompile("`([a-z0-9]+)` → `([^`]+)`")
+	for _, m := range cronLine.FindAllStringSubmatch(doc, -1) {
+		keys = append(keys, m[1])
+		rows[m[1]] = fmt.Sprintf("`%s` → `%s`", m[1], m[2])
+	}
+	return keys, rows
+}
+
+// TestInboxDoc_ListsFullIntervalSet proves plugin/commands/inbox.md carries
+// the interval set in exactly its two intended places — the argument-hint
+// and the cron table — and that both are set-equal to email.PollIntervals()
+// in both directions, and that every cron row's expression is the one the
+// value's mapped validPollIntervals duration would produce (see cronExpr).
+// A per-value
+// substring check ("5m" inside "15m") cannot distinguish a present value
+// from an absent one sharing a suffix, so this uses exact token/row
+// parsing and assert.ElementsMatch instead.
+func TestInboxDoc_ListsFullIntervalSet(t *testing.T) {
+	data, err := os.ReadFile("../../plugin/commands/inbox.md")
+	if err != nil {
+		t.Fatalf("reading plugin/commands/inbox.md: %v", err)
+	}
+	doc := string(data)
+	want := email.PollIntervals()
+
+	hintValues := argumentHintValues(t, doc)
+	assert.ElementsMatch(t, want, hintValues, "argument-hint values must equal email.PollIntervals()")
+
+	cronKeys, cronRows := cronTableRows(doc)
+	assert.ElementsMatch(t, want, cronKeys, "cron-table keys must equal email.PollIntervals()")
+
+	for _, interval := range want {
+		wantRow := fmt.Sprintf("`%s` → `%s`", interval, cronExpr(t, interval))
+		gotRow, ok := cronRows[interval]
+		if !ok {
+			t.Fatalf("inbox.md cron table missing a row for %q", interval)
+		}
+		assert.Equal(t, wantRow, gotRow, "cron row for %q", interval)
+	}
+}
+
+// intervalListBetweenParens extracts the comma-separated interval list that
+// follows the literal "polling interval (" in line, up to the next ")".
+// Both README rows for set_poll_interval and /inbox follow this shape.
+func intervalListBetweenParens(t *testing.T, line string) []string {
+	t.Helper()
+	_, rest, found := strings.Cut(line, "polling interval (")
+	require.True(t, found, "expected %q to contain %q", line, "polling interval (")
+	closeIdx := strings.Index(rest, ")")
+	require.True(t, closeIdx >= 0, "expected %q to contain a closing paren after the interval list", rest)
+	return strings.Split(rest[:closeIdx], ", ")
+}
+
+// TestReadmeDoc_ListsFullIntervalSet proves README.md's set_poll_interval
+// tool-table row and /inbox slash-command row are each set-equal to
+// email.PollIntervals(), so the README cannot drift from the Go set. A
+// per-value substring check ("5m" inside "15m") cannot distinguish a present
+// value from an absent one sharing a suffix, so this isolates the
+// parenthesized interval list on each row and compares with
+// assert.ElementsMatch instead.
+func TestReadmeDoc_ListsFullIntervalSet(t *testing.T) {
+	data, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatalf("reading README.md: %v", err)
+	}
+	doc := string(data)
+
+	var toolRow, slashRow string
+	for _, line := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(line, "| `set_poll_interval` |") {
+			toolRow = line
+		}
+		// Several "| `/inbox " rows exist (n, status, the interval example);
+		// find the one that actually lists the interval set, without
+		// hardcoding which row that is.
+		if strings.HasPrefix(line, "| `/inbox ") && strings.Contains(line, "polling interval (") {
+			slashRow = line
+		}
+	}
+	require.NotEmpty(t, toolRow, "README.md set_poll_interval tool-table row not found")
+	require.NotEmpty(t, slashRow, "README.md /inbox row listing the interval set not found")
+
+	want := email.PollIntervals()
+	assert.ElementsMatch(t, want, intervalListBetweenParens(t, toolRow), "README.md set_poll_interval row interval list")
+	assert.ElementsMatch(t, want, intervalListBetweenParens(t, slashRow), "README.md /inbox row interval list")
 }

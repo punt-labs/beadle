@@ -1,0 +1,42 @@
+mission_id: m-2026-10-22-019
+status: closed
+type: implement
+created_at: "2026-10-22T17:35:22Z"
+updated_at: "2026-10-22T17:45:54Z"
+closed_at: "2026-10-22T17:45:54Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: rsc
+    pinned_at: "2026-10-22T17:35:22Z"
+    hash: 010f8751d3600952c16fe6934fefbad31e70f15e3226029caaaa2610dbcec9c0
+inputs:
+    ticket: beadle-1ljl
+    files:
+        - internal/email/poller.go
+        - internal/email/poller_test.go
+        - internal/email/config.go
+write_set:
+    - internal/email/poller.go
+    - internal/email/poller_test.go
+success_criteria:
+    - 'Both enumerations of the interval set in internal/email/poller.go (the config-validation error near line 104 and InvalidIntervalError.Error near line 316) are replaced by ONE shared source: a package-level function or constant in poller.go (or built from validPollIntervals in config.go sorted ascending by duration) so that adding a value to validPollIntervals can never leave these strings stale. The resulting text lists 1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h, 2h in ascending order.'
+    - TestPoller_SetInterval_Invalid (poller_test.go) additionally asserts the error text contains "2m" and "3m", and a new test asserts the config-validation error path for an invalid poll_interval in a config file names the full set too, so both strings are pinned by tests.
+    - Rendering the list from validPollIntervals must be deterministic (sorted by duration, not map iteration order); the test must pass under go test -race -count=3.
+    - make check passes from [REDACTED:path] on branch fix/poll-intervals; paste the tail.
+    - One or two commits, Conventional Commits form fix(email). Stage only the two write-set files with git add by name. Do not push, do not touch PRs or merge — the leader does that.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 3 on bead beadle-1ljl, branch fix/poll-intervals (main checkout at
+    [REDACTED:path]; run every command there). The
+    leader's full-diff review found two enumerations of the interval set the
+    earlier contracts missed, both in internal/email/poller.go: the
+    config-validation error (around line 104, "valid: 1m, 5m, ...") and
+    InvalidIntervalError.Error (around line 316, "must be 1m, 5m, ..."). A
+    third hand-maintained copy of the list is exactly how this drift
+    happened; do not add a fourth. The leader has also edited README.md and
+    CHANGELOG.md in the working tree; leave those files alone and do not
+    stage them.
