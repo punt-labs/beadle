@@ -53,7 +53,7 @@ func TestPoller_SetInterval_Disable(t *testing.T) {
 
 func TestPoller_SetInterval_Invalid(t *testing.T) {
 	p := testPoller()
-	err := p.SetInterval("3m")
+	err := p.SetInterval("4m")
 	require.Error(t, err)
 	var ie *InvalidIntervalError
 	assert.ErrorAs(t, err, &ie)
