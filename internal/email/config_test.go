@@ -69,13 +69,15 @@ func TestPollDuration(t *testing.T) {
 		{"", false, 0},
 		{"n", false, 0},
 		{"1m", true, 1},
+		{"2m", true, 2},
+		{"3m", true, 3},
 		{"5m", true, 5},
 		{"10m", true, 10},
 		{"15m", true, 15},
 		{"30m", true, 30},
 		{"1h", true, 60},
 		{"2h", true, 120},
-		{"3m", false, 0},
+		{"4m", false, 0},
 		{"1d", false, 0},
 		{"invalid", false, 0},
 	}
@@ -95,9 +97,11 @@ func TestValidPollInterval(t *testing.T) {
 	assert.True(t, ValidPollInterval(""))
 	assert.True(t, ValidPollInterval("n"))
 	assert.True(t, ValidPollInterval("1m"))
+	assert.True(t, ValidPollInterval("2m"))
+	assert.True(t, ValidPollInterval("3m"))
 	assert.True(t, ValidPollInterval("5m"))
 	assert.True(t, ValidPollInterval("2h"))
-	assert.False(t, ValidPollInterval("3m"))
+	assert.False(t, ValidPollInterval("4m"))
 	assert.False(t, ValidPollInterval("bogus"))
 }
 
