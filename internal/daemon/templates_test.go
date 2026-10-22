@@ -108,7 +108,7 @@ func TestBuildMCPConfigContent(t *testing.T) {
 
 	ethos := doc.MCPServers["ethos"]
 	assert.Equal(t, "ethos", ethos.Command)
-	assert.Equal(t, []string{"mcp"}, ethos.Args)
+	assert.Equal(t, []string{"serve"}, ethos.Args)
 
 	beadle := doc.MCPServers["beadle-email"]
 	assert.Equal(t, "beadle-email", beadle.Command)

@@ -80,7 +80,7 @@ func (c MCPServerConfig) Validate() error {
 // or a log line.
 func DefaultMCPRegistry() map[string]MCPServerConfig {
 	return map[string]MCPServerConfig{
-		"ethos":        {Command: "ethos", Args: []string{"mcp"}},
+		"ethos":        {Command: "ethos", Args: []string{"serve"}},
 		"beadle-email": {Command: "beadle-email", Args: []string{"serve"}},
 		"biff":         {Command: "biff", Args: []string{"mcp"}},
 		"context7": {
