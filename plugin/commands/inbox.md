@@ -17,13 +17,14 @@ Check beadle's email inbox. You are the beadle — this is your inbox, not the u
 
 First, check if the argument matches a **polling config** command:
 
-- Exactly one of `1m`, `2m`, `3m`, `5m`, `10m`, `15m`, `30m`, `1h`, `2h` → set polling interval
+- Exactly one of the interval values in the cron-expression table below (step 3 of "Polling
+  interval") → set polling interval
 - Exactly `n` → disable polling
 - Exactly `status` → show polling config
 
 If none of the above match, treat the argument as a **filter** (existing behavior).
 
-### Polling interval (`1m`, `2m`, `3m`, `5m`, `10m`, `15m`, `30m`, `1h`, `2h`)
+### Polling interval (see the cron-expression table in step 3 below)
 
 1. Call `set_poll_interval` with the interval value. If it returns an error, report the error and
    stop — do not touch the cron job.
