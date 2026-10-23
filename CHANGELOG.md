@@ -130,6 +130,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Mission workers can reach their MCP servers on a provisioned host.**
+  The daemon handed each worker an MCP config naming `ethos`,
+  `beadle-email`, and `biff` by bare command, which Claude Code resolved
+  against the worker's deliberately restricted PATH; none of the three
+  provisioning targets install into that PATH, so every worker on a
+  correctly provisioned host started unable to connect to its own
+  servers. `BuildMCPConfig` now resolves each selected server's command
+  to an absolute path in the daemon's own environment and writes that
+  into the per-spawn config; the worker's PATH is unchanged and plays no
+  part. A binary missing at spawn time fails the pipeline stage before
+  any worker starts, naming the entry and command, the same preflight
+  path declared env vars already use. Found by Qodo on PR #280; design
+  in `docs/worker-mcp-path.md`, DES-037 (beadle-tsku).
+
 - **The daemon's built-in `ethos` MCP server entry named a subcommand
   ethos does not have.** `DefaultMCPRegistry` declared `ethos mcp`; the
   installed CLI starts its stdio server with `ethos serve`. No shipped

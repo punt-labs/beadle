@@ -1,0 +1,75 @@
+mission: m-2026-10-23-002
+round: 1
+created_at: "2026-10-23T01:08:58Z"
+author: bwk
+verdict: pass
+confidence: 0.92
+files_changed:
+    - path: internal/daemon/templates.go
+      added: 30
+      removed: 1
+    - path: internal/daemon/templates_test.go
+      added: 74
+      removed: 4
+    - path: internal/daemon/spawner.go
+      added: 7
+      removed: 0
+    - path: docs/ARCHITECTURE.md
+      added: 1
+      removed: 0
+evidence:
+    - name: go build ./...
+      status: pass
+    - name: go vet ./...
+      status: pass
+    - name: go test -race -count=1 ./internal/daemon/...
+      status: pass
+    - name: make lint docs test (full suite, from the worktree)
+      status: pass
+    - name: make lint-strict shows exactly the documented 6 spurious G204 worktree-artifact lines (internal/pgp x4, internal/secret x2), no new findings
+      status: pass
+    - name: npx markdownlint-cli2 docs/ARCHITECTURE.md
+      status: pass
+    - name: 'can-fail proof: reverted the exec.LookPath resolution in BuildMCPConfig, ran TestBuildMCPConfig_StdioEmission/TestBuildMCPConfig_ResolvesStdioCommand/TestBuildMCPConfigContent, all failed naming the bare-name-vs-absolute-path mismatch and the missing fail-closed error, then restored and re-confirmed green'
+      status: pass
+prose: |
+    Implements the ratified design (docs/worker-mcp-path.md, DES-037) for
+    beadle-tsku. Two commits on fix/worker-mcp-path, built on e161dce:
+
+    f12ac44 fix(daemon): resolve MCP server binaries at spawn time, not via
+    worker PATH -- BuildMCPConfig now resolves each selected stdio entry's
+    Command with exec.LookPath in the daemon's own environment and writes
+    the absolute path into the per-spawn mcp-config.json; http entries and
+    the registry map are untouched. A LookPath failure returns an error
+    naming the registry entry and the unresolved command before any temp
+    file is written, and one slog.Info line on success names the server,
+    the declared command, and the resolved path, matching the existing
+    stage-mission log shape. New test TestBuildMCPConfig_ResolvesStdioCommand
+    proves both the success and fail-closed cases with a scratch PATH and a
+    fake binary, never touching the host PATH, GOPATH/bin, or uv dirs (t.Setenv
+    auto-restores). TestBuildMCPConfig_StdioEmission and TestBuildMCPConfigContent
+    updated to assert the resolved absolute path (via exec.LookPath in the
+    test process) rather than the bare registry name, since they exercise
+    DefaultMCPRegistry's real entries directly. TestDefaultMCPRegistry_StdioCommandsAreReal
+    is unchanged -- it proves the registry's own Command/Args are real and
+    well-behaved on the test process's PATH, a concern orthogonal to where
+    spawn-time resolution happens in BuildMCPConfig.
+
+    95432ad docs(daemon): document the spawn-time MCP resolution invariant --
+    spawner.go's workerPATH comment states MCP binaries no longer depend on
+    it, since BuildMCPConfig resolves them before the worker starts; no code
+    change. ARCHITECTURE.md's Design Invariants gains one bullet naming the
+    invariant, citing the existing ethos/gpg bare-name exec precedent for
+    the daemon-PATH-as-trusted-input framing, and pointing at
+    docs/worker-mcp-path.md (DES-037) for the full design and rejected
+    alternatives.
+
+    Can-fail proof (reverted, ran, pasted, restored): with the
+    exec.LookPath call removed from BuildMCPConfig, TestBuildMCPConfig_StdioEmission's
+    three subtests failed asserting the written command equaled the
+    resolved absolute path but got the bare name instead (e.g.
+    "[REDACTED:path]/ethos" vs "ethos"); TestBuildMCPConfig_ResolvesStdioCommand's
+    first subtest failed the same way against the fake binary's absolute
+    path, and its second subtest failed asserting an error was returned for
+    the absent-binary case but got nil. Restored, re-ran go build and the
+    full internal/daemon suite, both clean.

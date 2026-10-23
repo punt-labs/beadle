@@ -1,0 +1,84 @@
+mission: m-2026-10-23-003
+round: 1
+created_at: "2026-10-23T01:36:53Z"
+author: bwk
+verdict: pass
+confidence: 0.9
+files_changed:
+    - path: cmd/beadle-daemon/main.go
+      added: 1
+      removed: 0
+    - path: internal/daemon/templates.go
+      added: 50
+      removed: 1
+    - path: internal/daemon/templates_test.go
+      added: 139
+      removed: 4
+    - path: internal/daemon/runner.go
+      added: 16
+      removed: 11
+    - path: internal/daemon/runner_test.go
+      added: 63
+      removed: 0
+    - path: internal/daemon/pipeline.go
+      added: 6
+      removed: 1
+evidence:
+    - name: go build ./...
+      status: pass
+    - name: go vet ./...
+      status: pass
+    - name: go test -race -count=1 ./internal/daemon/... ./cmd/beadle-daemon/...
+      status: pass
+    - name: make lint vulncheck docs test (full suite, from the worktree)
+      status: pass
+    - name: make lint-strict shows exactly the documented 6 spurious G204 worktree-artifact lines, no new findings
+      status: pass
+    - name: TestDefaultMCPRegistry_StdioCommandsAreReal unmodified in the diff and still passing
+      status: pass
+    - name: 'can-fail proof (fix 2): reverted the filepath.IsAbs check, ran TestBuildMCPConfig_ResolvesStdioCommand/relative_command_is_rejected_even_when_it_resolves, failed as expected, restored'
+      status: pass
+    - name: 'can-fail proof (fix 3): reverted the BuildMCPConfig-before-createMissionFromContract ordering, ran TestClaudeRunner_MissingMCPBinaryCreatesNoMission, observed a real orphan mission (m-2026-10-23-001) created in the isolated ethos store, test failed naming it, restored'
+      status: pass
+prose: |
+    Round 2 of beadle-tsku, fixing four findings from the silent-failure
+    review of mission m-2026-10-23-002. Four commits on fix/worker-mcp-path,
+    built on 95432ad:
+
+    221400a fix(daemon): pass the daemon logger into MissionTemplate -- fix
+    1/4 (HIGH): main.go now constructs MissionTemplate with Logger: logger,
+    so BuildMCPConfig's "resolved mcp server command" line reaches
+    beadle-daemon.log instead of slog.Default()'s stderr.
+
+    4540aa6 fix(daemon): enforce absolute paths in BuildMCPConfig's
+    resolution -- fix 2/4 (MEDIUM) and fix 4/4 (LOW): BuildMCPConfig now
+    rejects a resolved Command that is not absolute (exec.LookPath returns
+    a separator-bearing command like "./fake" verbatim once it confirms the
+    file exists, never resolving it), naming the entry and the non-absolute
+    result; the resolution-failure error text also now says whose PATH and
+    what to do, matching runner.go's env-var style. Two new tests: a
+    "./fake" case proven via t.Chdir (not a PATH change, so LookPath
+    genuinely resolves it and only the new absolute-path check can reject
+    it), and a two-entry registry (resolvable first, absent second) proving
+    selected is built fully, with no file written, before any entry's
+    resolution can fail partway through.
+
+    3d44342 fix(daemon): build the MCP config before creating the stage
+    mission, plus 204f4e9 docs(daemon): fold the MCP-ordering rationale into
+    the existing comment -- fix 3/4 (MEDIUM): BuildMCPConfig now runs before
+    createMissionFromContract in ClaudeRunner.Run, since it depends only on
+    cmd.MCPServers and r.Registry; the existing comment above the env-var
+    check (not a new block) was extended by one sentence to state this.
+    fireElse's final reply-send failure (pipeline.go) is now logged at
+    Error, matching its sibling permanent-failure lines a few lines above.
+    TestClaudeRunner_MissingMCPBinaryCreatesNoMission proves the ordering
+    against the real ethos CLI in an isolated $HOME/$ETHOS_REPO_ROOT: a
+    stage with an unprovisioned MCP binary fails, and `ethos mission list
+    --status all` in that isolated store is empty afterward. The test's
+    Command carries a valid write_set/prompt/budget specifically so a
+    regressed ordering would actually succeed in creating a real, listable
+    mission -- verified by temporarily reverting the ordering and observing
+    the test catch a real orphan mission before restoring.
+
+    No fifth fix was folded in: no code-reviewer findings on round 1
+    arrived before this submission.

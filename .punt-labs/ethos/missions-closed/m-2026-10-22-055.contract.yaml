@@ -1,0 +1,47 @@
+mission_id: m-2026-10-22-055
+status: closed
+type: implement
+created_at: "2026-10-22T23:50:06Z"
+updated_at: "2026-10-23T00:11:05Z"
+closed_at: "2026-10-23T00:11:05Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: djb
+    pinned_at: "2026-10-22T23:50:06Z"
+    hash: 85800c9c7277e2fd9745f65041596879e461bdb130c9bc4252a6ff78f79a479c
+inputs:
+    ticket: beadle-tsku
+    files:
+        - internal/daemon/spawner.go
+        - internal/daemon/templates.go
+        - internal/daemon/runner.go
+        - docs/ARCHITECTURE.md
+write_set:
+    - docs/worker-mcp-path.md
+success_criteria:
+    - 'docs/worker-mcp-path.md exists and answers three questions in order: what this change alters (the worker cannot resolve a registry stdio Command because WorkerSpawner.Run hands it <claude dir>:/usr/bin:/usr/local/bin while tools-ethos installs to GOPATH/bin and tools-biff to uv''s bin dir); how it leaves the system better (the worker''s executable set is decided by the daemon''s resolution at spawn time, not by whatever the worker''s environment happens to contain, which is a tighter trust boundary than today''s, not a looser one); and which approach is chosen and why, with the rejected alternatives named.'
+    - 'The approaches compared are at least: (A) resolve each selected stdio entry''s Command with exec.LookPath in the daemon''s environment inside BuildMCPConfig and write the absolute path into the per-spawn mcp-config, leaving the worker PATH unchanged; (B) extend the worker PATH with the directories the provisioning targets use; (C) a daemon-config allowlist of absolute paths per registry entry. For each: what the worker can execute, what a compromised worker gains, what happens when the binary is absent at spawn time, and what the daemon logs. The doc recommends one and states why the others lose on the trust boundary, not on convenience.'
+    - 'The doc states the failure behavior for an absent binary: the spawn fails BEFORE Claude starts, with an error naming the registry entry and the Command, and the pipeline record is marked failed with that reason; it does not start a worker that will fail on first MCP use.'
+    - 'The doc names the implementation write set (expected: internal/daemon/templates.go, templates_test.go, spawner.go if the PATH comment changes, and the ARCHITECTURE.md invariant paragraph on the worker environment) and the test that proves it: a test that builds an mcp-config from the registry with a scratch PATH containing a fake binary, asserts the written Command is the absolute path, then asserts the same config fails to build when the binary is absent. It also says whether TestDefaultMCPRegistry_StdioCommandsAreReal changes.'
+    - The doc ends with a drafted DESIGN.md ADR entry (title, context, decision, consequences, rejected alternatives) ready to paste at merge time, and a section "Decisions for the operator" listing any point where the author chose between options that change the trust model, each with a recommendation.
+    - npx markdownlint-cli2 docs/worker-mcp-path.md is clean from the worktree. One commit, docs(daemon), staged by name. Do not push, do not touch PRs or merge — the leader does that. Do not commit after submitting.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Design mission for bead beadle-tsku (P2 bug, found by Qodo on PR #280),
+    branch fix/worker-mcp-path, worktree
+    [REDACTED:path]/.claude/worktrees/worker-path,
+    on main d88368e. Read internal/daemon/spawner.go (the workerPATH line
+    and the env map), templates.go (DefaultMCPRegistry and BuildMCPConfig,
+    which already copies selected entries into a per-spawn file),
+    runner.go (how the spawner is invoked), and docs/ARCHITECTURE.md's
+    Design Invariants before writing. This is a trust-boundary change: the
+    daemon's zero-agent-authority invariant and the restricted worker
+    environment both bear on it, and the operator ratifies the design
+    before any implementation contract exists. Write the design, not the
+    code. No test binaries are run in this mission. KNOWN ARTIFACT:
+    lint-strict from a worktree reports six spurious G204 lines; not
+    relevant to a docs-only mission.

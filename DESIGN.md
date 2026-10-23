@@ -2730,3 +2730,46 @@ this work were tests that were green and could not fail — a tautological
 assertion, a clock-injection test that rotted by calendar into passing under
 both clocks, and a CI check comparing a binary to itself. Passing is not
 evidence; failing on demand is.
+
+## DES-037: MCP server binaries resolved at spawn time, not via worker PATH
+
+**Decision:** `BuildMCPConfig` (`internal/daemon/templates.go`) resolves
+each selected stdio MCP server's `Command` with `exec.LookPath` run in the
+daemon's own environment, and writes the resolved absolute path into the
+per-spawn `mcp-config.json`. The worker subprocess's restricted `PATH`
+(`spawner.go`'s `workerPATH`) is unchanged and plays no role in locating
+MCP server binaries.
+
+**Why:** `DefaultMCPRegistry()` names `ethos`, `beadle-email`, and `biff`
+by bare command name, relying on the worker's own `PATH` to resolve them
+at MCP-connect time. The worker's `PATH` is `<claude dir>:/usr/bin:/usr/local/bin`
+(`spawner.go`) — none of which matches where this repo's own provisioning
+targets (`tools-ethos`, `tools-biff`, `tools-beadle-email`) install those
+binaries. Every `claude`-runner pipeline stage therefore started a worker
+that could not reach its own MCP servers on any correctly provisioned
+host (found by Qodo on PR #280; tracked as `beadle-tsku`).
+
+**Alternatives considered:**
+
+- Widen `workerPATH` with the provisioning targets' install directories.
+  Rejected: grants the worker an entire searchable directory rather than
+  one resolved binary path, is a strictly larger reachable-execution
+  surface for a compromised worker, and degrades silently (the worker
+  starts, then fails deep inside its own turn loop on first MCP use)
+  rather than failing the pipeline stage before any subprocess starts.
+- An explicit `daemon.json` allowlist mapping registry entries to absolute
+  paths. Rejected for now: adds a new required, hand-maintained onboarding
+  step with no onboarding flow to carry it (`beadle-7gm` tracks the
+  general gap), and goes stale independently of wherever `make tools-*`
+  actually installed a binary — a maintenance cost (A) avoids by
+  re-resolving from the daemon's live environment on every spawn.
+
+**Consequences:** An MCP server binary absent from the daemon's own `PATH`
+at spawn time now fails the pipeline stage immediately, with the registry
+entry and command named in the pipeline's error and the sender's reply —
+before any worker process starts, matching the existing preflight-failure
+pattern `resolveEnvVars` established for declared env vars
+(`internal/daemon/runner.go`). The worker's execution surface for MCP
+server binaries is now a daemon-computed, written-once, per-spawn absolute
+path rather than anything resolvable at runtime from inside the worker
+process.
