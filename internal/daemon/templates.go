@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/exec"
 	"slices"
 )
 
@@ -96,10 +98,28 @@ func DefaultMCPRegistry() map[string]MCPServerConfig {
 // MissionTemplate generates temporary config and prompt files for worker sessions.
 type MissionTemplate struct {
 	TmpDir string
+	Logger *slog.Logger
+}
+
+func (t *MissionTemplate) logger() *slog.Logger {
+	if t.Logger != nil {
+		return t.Logger
+	}
+	return slog.Default()
 }
 
 // BuildMCPConfig writes a temporary MCP server configuration file containing
-// only the named servers and returns its path. Each name must exist in registry.
+// only the named servers and returns its path. Each name must exist in
+// registry. For a stdio entry (Command != ""), the Command written to the
+// file is the absolute path exec.LookPath resolves in the daemon's own
+// environment -- never the bare name registry carries -- so the worker's
+// own (deliberately restricted) PATH plays no role in locating the MCP
+// server binary; see docs/worker-mcp-path.md (DES-037) for why resolving
+// here, rather than widening the worker's PATH, is the chosen trust
+// boundary. An http entry (Command == "") is written through unchanged:
+// Validate already confirmed its shape, and there is no Command to
+// resolve. registry itself is never mutated -- selected is a fresh map
+// whose stdio entries carry the resolved path, built before any write.
 // The caller must os.Remove the file after use.
 func (t *MissionTemplate) BuildMCPConfig(servers []string, registry map[string]MCPServerConfig) (string, error) {
 	if err := os.MkdirAll(t.TmpDir, 0o700); err != nil {
@@ -114,6 +134,15 @@ func (t *MissionTemplate) BuildMCPConfig(servers []string, registry map[string]M
 		}
 		if err := cfg.Validate(); err != nil {
 			return "", fmt.Errorf("mcp server %q: %w", name, err)
+		}
+		if cfg.Command != "" {
+			resolved, err := exec.LookPath(cfg.Command)
+			if err != nil {
+				return "", fmt.Errorf("mcp server %q: resolve command %q: %w", name, cfg.Command, err)
+			}
+			t.logger().Info("resolved mcp server command",
+				"server", name, "command", cfg.Command, "resolved", resolved)
+			cfg.Command = resolved
 		}
 		selected[name] = cfg
 	}
