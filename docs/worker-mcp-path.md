@@ -87,6 +87,15 @@ Fixing it at the config-write step removes that dependency entirely:
 widening the worker's `PATH` tomorrow, for an unrelated reason, no longer
 has any bearing on which `ethos` binary a worker's MCP client invokes.
 
+This is also a narrower change than it might first appear against the
+zero-agent-authority invariant (`ARCHITECTURE.md`'s Design Invariants):
+*which* MCP servers a stage grants (`cmd.MCPServers`, the registry names)
+is signed command-file content already governed by that invariant —
+nothing here changes what a command file can name. This change concerns
+only *how* a name already authorized by a signed command file resolves to
+an executable path, a mechanical step downstream of that authorization,
+not a new grant of authority.
+
 ## Approaches compared
 
 ### (A) — Resolve at config-build time, write the absolute path
@@ -110,7 +119,24 @@ the *daemon's* own environment (i.e., the daemon process's inherited
   that stage; this approach does not expand or contract that grant, it
   only removes the one path by which an *accidental* `PATH` change
   (widening `/usr/bin` with a symlink, say) could have altered what those
-  names resolve to.
+  names resolve to. This approach does mean the **daemon's own** `PATH`
+  becomes the sole arbiter of which binary each registry name resolves
+  to — a writable directory placed ahead of the real binary on the
+  daemon's `PATH` (classic `PATH` poisoning) would let the daemon itself
+  resolve `ethos` to an attacker-controlled binary before a worker is
+  ever spawned. That route is not new here: the daemon already resolves
+  three other bare command names against its own inherited `PATH` with
+  no additional check — `internal/daemon/mission.go:147`
+  (`exec.Command("ethos", "mission", "create", ...)`), `internal/daemon/runner.go:95`
+  (`exec.CommandContext(ctx, "ethos", "mission", "close", missionID)`),
+  and `cmd/beadle-daemon/main.go:125`'s `gpgBinary = "gpg"`, which
+  `internal/daemon/signature.go` then execs for the owner-key
+  verification that gates every signed command file — the single check
+  the zero-agent-authority invariant rests on. The daemon's own
+  environment, `PATH` included, is already an operator-trusted input
+  outside the worker-sandbox threat model this document is otherwise
+  concerned with; approach (A) extends that existing assumption to MCP
+  server resolution rather than introducing a new one.
 - **What happens when the binary is absent at spawn time.** `exec.LookPath`
   fails in `BuildMCPConfig`, which already returns `(string, error)` for
   exactly this family of failure (`unknown MCP server`, `cfg.Validate()`
