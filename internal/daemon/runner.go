@@ -48,7 +48,12 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	// pipeline.go) already marks the pipeline failed and replies to the
 	// sender via fireElse on any error this returns, so a missing key now
 	// actually reaches the sender instead of silently degrading to model
-	// recall.
+	// recall. The same reasoning is why BuildMCPConfig, below, also runs
+	// before createMissionFromContract: a missing MCP server binary
+	// (docs/worker-mcp-path.md, DES-037) is just as permanent a
+	// misconfiguration, and checking it first means a daemon with no
+	// provisioned MCP binaries never creates an orphaned ethos mission for
+	// it to discover later.
 	envOverrides, missingEnv := resolveEnvVars(cmd.EnvVars)
 	if len(missingEnv) > 0 {
 		return "", fmt.Errorf("command %q declares env var(s) %v, absent from the "+
@@ -57,13 +62,6 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 			"command", cmd.Name, missingEnv)
 	}
 
-	// BuildMCPConfig depends only on servers and r.Registry -- never on a
-	// mission ID -- so it runs before createMissionFromContract, for the
-	// same reason the env-var check above runs before either: a missing
-	// MCP server binary (docs/worker-mcp-path.md, DES-037) is exactly as
-	// permanent a misconfiguration as a missing env var, and failing here
-	// first means a daemon with no provisioned MCP binaries never creates
-	// a single orphaned ethos mission for it to discover later.
 	servers := cmd.MCPServers
 	if servers == nil {
 		servers = []string{"ethos", "beadle-email"}
