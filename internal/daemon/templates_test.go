@@ -750,6 +750,71 @@ func TestBuildMCPConfig_ResolvesStdioCommand(t *testing.T) {
 		require.NoError(t, readErr)
 		assert.Empty(t, entries, "BuildMCPConfig must not write a config file when resolution fails")
 	})
+
+	// A command naming a path separator ("./fake") is never searched by
+	// exec.LookPath -- only checked for existence and executability at
+	// the literal path -- so it is returned verbatim, relative, once that
+	// check passes. BuildMCPConfig must reject this itself: writing a
+	// relative Command into mcp-config.json would make its meaning depend
+	// on the worker subprocess's own working directory at exec time,
+	// exactly the environment-dependent resolution this change exists to
+	// remove. t.Chdir (not t.Setenv("PATH", ...)) makes "./fake" resolve
+	// to a file that exists, so the only thing that can still fail this
+	// case is the absolute-path check, never a LookPath miss.
+	t.Run("relative command is rejected even when it resolves", func(t *testing.T) {
+		cwd := t.TempDir()
+		relBinPath := filepath.Join(cwd, "fake")
+		require.NoError(t, os.WriteFile(relBinPath, []byte("#!/bin/sh\necho ok\n"), 0o755))
+		t.Chdir(cwd)
+
+		relRegistry := map[string]MCPServerConfig{
+			"fake": {Command: "./fake"},
+		}
+		dest := &MissionTemplate{TmpDir: t.TempDir()}
+		path, err := dest.BuildMCPConfig([]string{"fake"}, relRegistry)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `"fake"`)
+		assert.Contains(t, err.Error(), "./fake")
+		assert.Contains(t, err.Error(), "non-absolute")
+		assert.Empty(t, path)
+
+		entries, readErr := os.ReadDir(dest.TmpDir)
+		require.NoError(t, readErr)
+		assert.Empty(t, entries, "BuildMCPConfig must not write a config file when the resolved command is not absolute")
+	})
+}
+
+// TestBuildMCPConfig_SelectedBuiltBeforeAnyWrite proves selected is fully
+// constructed -- every entry validated and resolved -- before BuildMCPConfig
+// writes anything, by naming a resolvable entry FIRST and an absent one
+// SECOND: if resolution happened lazily during the write (e.g. inside the
+// JSON marshal or the file write loop), the first entry's temp file could
+// already exist by the time the second entry's LookPath fails. Asserting
+// the destination directory is empty after the call rules that out
+// regardless of map iteration order, since Go map iteration order is
+// itself unspecified -- the invariant this test proves must hold whichever
+// entry a given run happens to process first.
+func TestBuildMCPConfig_SelectedBuiltBeforeAnyWrite(t *testing.T) {
+	binDir := t.TempDir()
+	const resolvableName = "fake-resolvable"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, resolvableName), []byte("#!/bin/sh\necho ok\n"), 0o755))
+	t.Setenv("PATH", binDir)
+
+	registry := map[string]MCPServerConfig{
+		"resolvable": {Command: resolvableName},
+		"absent":     {Command: "fake-absent-binary"},
+	}
+
+	dest := &MissionTemplate{TmpDir: t.TempDir()}
+	path, err := dest.BuildMCPConfig([]string{"resolvable", "absent"}, registry)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"absent"`)
+	assert.Empty(t, path)
+
+	entries, readErr := os.ReadDir(dest.TmpDir)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries,
+		"BuildMCPConfig must not write a config file for any entry when a later entry fails to resolve")
 }
 
 // TestBuildMCPConfig_HTTPServerEmission proves the http shape: only

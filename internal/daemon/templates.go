@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 )
 
@@ -138,7 +139,26 @@ func (t *MissionTemplate) BuildMCPConfig(servers []string, registry map[string]M
 		if cfg.Command != "" {
 			resolved, err := exec.LookPath(cfg.Command)
 			if err != nil {
-				return "", fmt.Errorf("mcp server %q: resolve command %q: %w", name, cfg.Command, err)
+				return "", fmt.Errorf("mcp server %q: command %q not found on the daemon's "+
+					"PATH; install it or add its directory to PATH in the unit/plist that "+
+					"starts beadle-daemon: %w", name, cfg.Command, err)
+			}
+			// exec.LookPath returns a Command containing a path separator
+			// (e.g. "./fake" or "../fake") verbatim once it confirms the
+			// file is executable, without resolving it against PATH or
+			// against the daemon's working directory -- it is never
+			// searched for in that case, only checked. A relative Command
+			// would therefore write a path into mcp-config.json whose
+			// meaning depends on the worker subprocess's own working
+			// directory at exec time, reintroducing exactly the kind of
+			// environment-dependent resolution this change exists to
+			// remove (see docs/worker-mcp-path.md, DES-037). Every
+			// resolved Command this function writes must be absolute.
+			if !filepath.IsAbs(resolved) {
+				return "", fmt.Errorf("mcp server %q: command %q resolved to the "+
+					"non-absolute path %q; a bare command name is required so the "+
+					"result is independent of the daemon's working directory",
+					name, cfg.Command, resolved)
 			}
 			t.logger().Info("resolved mcp server command",
 				"server", name, "command", cfg.Command, "resolved", resolved)
