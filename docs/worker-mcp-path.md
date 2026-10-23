@@ -258,13 +258,17 @@ unresolved `Command` string. `ClaudeRunner.Run` propagates that error
 immediately — **no `claude` process is ever started** for that stage.
 `Executor.Run` (`pipeline.go`) treats this exactly like every other
 stage-runner error already handled at that call site: it sets `p.Error`
-to the wrapped message, calls `e.fireElse(p)`, which marks the pipeline
-record failed and sends the configured reply to the email's sender. This
-mirrors `runner.go`'s existing `resolveEnvVars` check line for line: both
-are preflight checks against a declared dependency, both fail the stage
-before any subprocess work happens, and both produce a pipeline record
-whose `Error` field names exactly what was missing — never a worker that
-starts, consumes its turn budget, and fails opaquely on first MCP use.
+to the wrapped message, naming the registry entry and the unresolved
+command, and calls `e.fireElse(p)`, which marks the pipeline record
+failed and sends a reply to the email's sender. That reply is the
+daemon's fixed, generic "could not be completed" text, by design — the
+registry entry and command land in `p.Error` and the daemon log, never
+in the sender's inbox. This mirrors `runner.go`'s existing
+`resolveEnvVars` check line for line: both are preflight checks against
+a declared dependency, both fail the stage before any subprocess work
+happens, and both produce a pipeline record whose `Error` field names
+exactly what was missing — never a worker that starts, consumes its
+turn budget, and fails opaquely on first MCP use.
 
 ## Implementation write set (for the follow-up implementation mission)
 
@@ -387,17 +391,23 @@ host (found by Qodo on PR #280; tracked as `beadle-tsku`).
 
 **Consequences:** An MCP server binary absent from the daemon's own `PATH`
 at spawn time now fails the pipeline stage immediately, with the registry
-entry and command named in the pipeline's error and the sender's reply —
+entry and command named in the pipeline's error and the daemon log —
 before any worker process starts, matching the existing preflight-failure
 pattern `resolveEnvVars` established for declared env vars
-(`internal/daemon/runner.go`). Which binary a given MCP server name resolves
-to is now daemon-computed and written once per spawn, rather than resolved
-at runtime from inside the worker process. This is **not** a sandbox and
-claims no broader execution boundary: it fixes what Claude Code's MCP
-client execs for the servers a stage is granted, not what the worker
-process itself can run. `WorkerSpawner`'s restricted `PATH` and `--tools`
-grant are the (pre-existing, unchanged) controls on the worker's own
-execution surface; a worker holding `Bash`, or one compromised via prompt
-injection, can still invoke any binary it can reach by an absolute path or
-a directory already on its restricted `PATH`, independent of this change.
+(`internal/daemon/runner.go`). `Executor.fireElse` (`pipeline.go`) sends
+the sender only a fixed, generic "could not be completed" reply by design
+(the daemon's try/else error-handling policy never puts internal details
+— exit codes, command names, registry entries — in an email reply, to
+avoid giving an attacker an oracle); the registry entry and command are
+the operator's to find in the daemon log, not the sender's to see. Which
+binary a given MCP server name resolves to is now daemon-computed and
+written once per spawn, rather than resolved at runtime from inside the
+worker process. This is **not** a sandbox and claims no broader execution
+boundary: it fixes what Claude Code's MCP client execs for the servers a
+stage is granted, not what the worker process itself can run.
+`WorkerSpawner`'s restricted `PATH` and `--tools` grant are the
+(pre-existing, unchanged) controls on the worker's own execution surface;
+a worker holding `Bash`, or one compromised via prompt injection, can
+still invoke any binary it can reach by an absolute path or a directory
+already on its restricted `PATH`, independent of this change.
 ```

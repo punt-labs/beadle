@@ -2766,16 +2766,22 @@ host (found by Qodo on PR #280; tracked as `beadle-tsku`).
 
 **Consequences:** An MCP server binary absent from the daemon's own `PATH`
 at spawn time now fails the pipeline stage immediately, with the registry
-entry and command named in the pipeline's error and the sender's reply —
+entry and command named in the pipeline's error and the daemon log —
 before any worker process starts, matching the existing preflight-failure
 pattern `resolveEnvVars` established for declared env vars
-(`internal/daemon/runner.go`). Which binary a given MCP server name resolves
-to is now daemon-computed and written once per spawn, rather than resolved
-at runtime from inside the worker process. This is **not** a sandbox and
-claims no broader execution boundary: it fixes what Claude Code's MCP
-client execs for the servers a stage is granted, not what the worker
-process itself can run. `WorkerSpawner`'s restricted `PATH` and `--tools`
-grant are the (pre-existing, unchanged) controls on the worker's own
-execution surface; a worker holding `Bash`, or one compromised via prompt
-injection, can still invoke any binary it can reach by an absolute path or
-a directory already on its restricted `PATH`, independent of this change.
+(`internal/daemon/runner.go`). `Executor.fireElse` (`pipeline.go`) sends
+the sender only a fixed, generic "could not be completed" reply by design
+(the daemon's try/else error-handling policy never puts internal details
+— exit codes, command names, registry entries — in an email reply, to
+avoid giving an attacker an oracle); the registry entry and command are
+the operator's to find in the daemon log, not the sender's to see. Which
+binary a given MCP server name resolves to is now daemon-computed and
+written once per spawn, rather than resolved at runtime from inside the
+worker process. This is **not** a sandbox and claims no broader execution
+boundary: it fixes what Claude Code's MCP client execs for the servers a
+stage is granted, not what the worker process itself can run.
+`WorkerSpawner`'s restricted `PATH` and `--tools` grant are the
+(pre-existing, unchanged) controls on the worker's own execution surface;
+a worker holding `Bash`, or one compromised via prompt injection, can
+still invoke any binary it can reach by an absolute path or a directory
+already on its restricted `PATH`, independent of this change.
