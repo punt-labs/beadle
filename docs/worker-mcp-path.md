@@ -107,13 +107,22 @@ the *daemon's* own environment (i.e., the daemon process's inherited
 `MCPServerConfig.Command` in the per-spawn JSON. The worker's `PATH`
 (`spawner.go`'s `workerPATH`) is untouched.
 
-- **What the worker can execute.** Exactly the fixed absolute paths the
-  daemon resolved at spawn time, for the fixed set of MCP servers that
-  spawn's `cmd.MCPServers` named — nothing else, regardless of what the
-  worker's own `PATH` contains. A worker cannot widen its own MCP-server
-  surface by manipulating `PATH`, because the config no longer does a
-  `PATH` search at spawn time at all; Claude Code execs the literal path
-  string.
+- **What the worker can execute.** This fixes what Claude Code's MCP
+  client execs for the servers `cmd.MCPServers` grants — exactly the
+  fixed absolute paths the daemon resolved at spawn time, regardless of
+  what the worker's own `PATH` contains, because the config no longer
+  does a `PATH` search at MCP-connect time at all; Claude Code execs the
+  literal path string. It is **not** an allowlist of what the worker
+  *process* can execute, and this design claims no such sandbox:
+  `WorkerSpawner`'s restricted `PATH` and `--tools` grant bound the
+  worker's own built-in tool surface (`spawner.go`), not OS-level
+  execution, so a worker holding `Bash` — or a worker compromised via
+  prompt injection — can still invoke any binary it can reach by an
+  absolute path or a directory already on its restricted `PATH`,
+  independent of anything this change resolves. This approach narrows
+  one specific resolution step (which binary a given MCP server name
+  means) to a value the daemon fixed in advance; it narrows nothing
+  about what the worker process itself is able to run.
 - **What a compromised worker gains.** Nothing new. A compromised worker
   already inherits whatever `cmd.MCPServers` + the registry grant it for
   that stage; this approach does not expand or contract that grant, it
@@ -381,8 +390,14 @@ at spawn time now fails the pipeline stage immediately, with the registry
 entry and command named in the pipeline's error and the sender's reply —
 before any worker process starts, matching the existing preflight-failure
 pattern `resolveEnvVars` established for declared env vars
-(`internal/daemon/runner.go`). The worker's execution surface for MCP
-server binaries is now a daemon-computed, written-once, per-spawn absolute
-path rather than anything resolvable at runtime from inside the worker
-process.
+(`internal/daemon/runner.go`). Which binary a given MCP server name resolves
+to is now daemon-computed and written once per spawn, rather than resolved
+at runtime from inside the worker process. This is **not** a sandbox and
+claims no broader execution boundary: it fixes what Claude Code's MCP
+client execs for the servers a stage is granted, not what the worker
+process itself can run. `WorkerSpawner`'s restricted `PATH` and `--tools`
+grant are the (pre-existing, unchanged) controls on the worker's own
+execution surface; a worker holding `Bash`, or one compromised via prompt
+injection, can still invoke any binary it can reach by an absolute path or
+a directory already on its restricted `PATH`, independent of this change.
 ```

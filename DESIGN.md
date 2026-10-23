@@ -2769,7 +2769,13 @@ at spawn time now fails the pipeline stage immediately, with the registry
 entry and command named in the pipeline's error and the sender's reply —
 before any worker process starts, matching the existing preflight-failure
 pattern `resolveEnvVars` established for declared env vars
-(`internal/daemon/runner.go`). The worker's execution surface for MCP
-server binaries is now a daemon-computed, written-once, per-spawn absolute
-path rather than anything resolvable at runtime from inside the worker
-process.
+(`internal/daemon/runner.go`). Which binary a given MCP server name resolves
+to is now daemon-computed and written once per spawn, rather than resolved
+at runtime from inside the worker process. This is **not** a sandbox and
+claims no broader execution boundary: it fixes what Claude Code's MCP
+client execs for the servers a stage is granted, not what the worker
+process itself can run. `WorkerSpawner`'s restricted `PATH` and `--tools`
+grant are the (pre-existing, unchanged) controls on the worker's own
+execution surface; a worker holding `Bash`, or one compromised via prompt
+injection, can still invoke any binary it can reach by an absolute path or
+a directory already on its restricted `PATH`, independent of this change.
