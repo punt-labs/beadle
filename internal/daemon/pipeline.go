@@ -419,6 +419,11 @@ func (e *Executor) fireElse(p *Pipeline) {
 	ctx := context.Background()
 	_, err := runner.Run(ctx, e, p, -1, replyCmd, replyCall, elsePipe)
 	if err != nil {
-		e.Logger.Warn("else reply failed", "pipeline", p.ID, "error", err)
+		// The pipeline is already terminally failed by the time fireElse
+		// runs -- this is the last chance to tell the sender why, not a
+		// transient hiccup -- so this is logged at the same level as the
+		// sibling permanent-failure lines above ("auto-reply args
+		// invalid", "auto-reply runner not registered"), not Warn.
+		e.Logger.Error("else reply failed", "pipeline", p.ID, "error", err)
 	}
 }

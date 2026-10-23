@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 )
 
@@ -96,10 +99,28 @@ func DefaultMCPRegistry() map[string]MCPServerConfig {
 // MissionTemplate generates temporary config and prompt files for worker sessions.
 type MissionTemplate struct {
 	TmpDir string
+	Logger *slog.Logger
+}
+
+func (t *MissionTemplate) logger() *slog.Logger {
+	if t.Logger != nil {
+		return t.Logger
+	}
+	return slog.Default()
 }
 
 // BuildMCPConfig writes a temporary MCP server configuration file containing
-// only the named servers and returns its path. Each name must exist in registry.
+// only the named servers and returns its path. Each name must exist in
+// registry. For a stdio entry (Command != ""), the Command written to the
+// file is the absolute path exec.LookPath resolves in the daemon's own
+// environment -- never the bare name registry carries -- so the worker's
+// own (deliberately restricted) PATH plays no role in locating the MCP
+// server binary; see docs/worker-mcp-path.md (DES-037) for why resolving
+// here, rather than widening the worker's PATH, is the chosen trust
+// boundary. An http entry (Command == "") is written through unchanged:
+// Validate already confirmed its shape, and there is no Command to
+// resolve. registry itself is never mutated -- selected is a fresh map
+// whose stdio entries carry the resolved path, built before any write.
 // The caller must os.Remove the file after use.
 func (t *MissionTemplate) BuildMCPConfig(servers []string, registry map[string]MCPServerConfig) (string, error) {
 	if err := os.MkdirAll(t.TmpDir, 0o700); err != nil {
@@ -114,6 +135,34 @@ func (t *MissionTemplate) BuildMCPConfig(servers []string, registry map[string]M
 		}
 		if err := cfg.Validate(); err != nil {
 			return "", fmt.Errorf("mcp server %q: %w", name, err)
+		}
+		if cfg.Command != "" {
+			resolved, err := exec.LookPath(cfg.Command)
+			if err != nil {
+				return "", fmt.Errorf("mcp server %q: command %q not found on the daemon's "+
+					"PATH; install it or add its directory to PATH in the unit/plist that "+
+					"starts beadle-daemon: %w", name, cfg.Command, err)
+			}
+			// exec.LookPath returns a Command containing a path separator
+			// (e.g. "./fake" or "../fake") verbatim once it confirms the
+			// file is executable, without resolving it against PATH or
+			// against the daemon's working directory -- it is never
+			// searched for in that case, only checked. A relative Command
+			// would therefore write a path into mcp-config.json whose
+			// meaning depends on the worker subprocess's own working
+			// directory at exec time, reintroducing exactly the kind of
+			// environment-dependent resolution this change exists to
+			// remove (see docs/worker-mcp-path.md, DES-037). Every
+			// resolved Command this function writes must be absolute.
+			if !filepath.IsAbs(resolved) {
+				return "", fmt.Errorf("mcp server %q: command %q resolved to the "+
+					"non-absolute path %q; a bare command name is required so the "+
+					"result is independent of the daemon's working directory",
+					name, cfg.Command, resolved)
+			}
+			t.logger().Info("resolved mcp server command",
+				"server", name, "command", cfg.Command, "resolved", resolved)
+			cfg.Command = resolved
 		}
 		selected[name] = cfg
 	}

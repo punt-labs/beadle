@@ -124,6 +124,13 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 	workerHome := os.Getenv("HOME")
 
 	// Restricted PATH: claude binary dir + /usr/bin (git, basic tools).
+	// MCP server binaries (ethos, beadle-email, biff) do not depend on this
+	// PATH at all: BuildMCPConfig (templates.go) resolves each one's Command
+	// in the daemon's own environment at config-build time and writes the
+	// absolute path into the per-spawn mcp-config, before this worker ever
+	// starts. Widening workerPATH is therefore never the right fix for an
+	// MCP server a worker cannot reach -- see docs/worker-mcp-path.md
+	// (DES-037).
 	workerPATH := filepath.Dir(claudePath) + ":/usr/bin:/usr/local/bin"
 
 	s.logger().Info("spawner",

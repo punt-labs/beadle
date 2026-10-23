@@ -1,0 +1,54 @@
+mission_id: m-2026-10-23-003
+status: closed
+type: implement
+created_at: "2026-10-23T01:16:08Z"
+updated_at: "2026-10-23T01:45:10Z"
+closed_at: "2026-10-23T01:45:10Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: djb
+    pinned_at: "2026-10-23T01:16:08Z"
+    hash: 85800c9c7277e2fd9745f65041596879e461bdb130c9bc4252a6ff78f79a479c
+inputs:
+    ticket: beadle-tsku
+    files:
+        - internal/daemon/templates.go
+        - internal/daemon/templates_test.go
+        - internal/daemon/runner.go
+        - internal/daemon/pipeline.go
+        - cmd/beadle-daemon/main.go
+        - docs/ARCHITECTURE.md
+write_set:
+    - internal/daemon/templates.go
+    - internal/daemon/templates_test.go
+    - internal/daemon/runner.go
+    - internal/daemon/runner_test.go
+    - internal/daemon/pipeline.go
+    - cmd/beadle-daemon/main.go
+success_criteria:
+    - 'HIGH: cmd/beadle-daemon/main.go constructs MissionTemplate with Logger: logger, so the "resolved mcp server command" line reaches the daemon log file like the spawner lines do. Prove by reading: the one production construction site carries the field.'
+    - 'MEDIUM: BuildMCPConfig enforces the absolute-path invariant: after exec.LookPath, `if !filepath.IsAbs(resolved)` returns an error naming the entry and the non-absolute result. Test case: a Command of "./fake" with the fake present in the test CWD-equivalent must error, proving a separator-bearing command cannot write a relative path.'
+    - 'MEDIUM: the resolution error says whose PATH and what to do, matching runner.go''s env-var style: "...not found on the daemon''s PATH; install it or add its directory to PATH in the unit/plist that starts beadle-daemon". In runner.go, BuildMCPConfig is called BEFORE createMissionFromContract (it depends only on servers and registry), so a missing binary leaves no orphan ethos mission; the comment above the env-var check already argues this ordering, extend it one sentence. The reply-recipe failure Warn at pipeline.go (fireElse, ~422) becomes Error, matching the sibling permanent-failure lines at ~191 and ~196.'
+    - 'LOW: templates_test.go gains a two-entry case (resolvable fake first, absent second, selected in that order) asserting error plus empty TmpDir, proving selected is built fully before any write.'
+    - 'A runner_test.go case (or extension of an existing one) proves the ordering: with a registry whose binary is absent, ClaudeRunner.Run fails and NO ethos mission was created (assert via the test''s mission-creation fake or the missions dir being empty).'
+    - go test -race -count=1 ./internal/daemon/ ./cmd/beadle-daemon/ green; make check from the worktree green except the six G204 artifact lines; TestDefaultMCPRegistry_StdioCommandsAreReal unchanged. Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes. Stage by name. Do not push, do not touch PRs or merge — the leader does that. Do not commit after submitting.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Round 2 on the worker-PATH implementation (bead beadle-tsku), branch
+    fix/worker-mcp-path, worktree
+    [REDACTED:path]/.claude/worktrees/worker-path,
+    build on 95432ad. The silent-failure review of round 1 found: the
+    daemon's main.go never passes its logger into MissionTemplate, so the
+    new Info line goes to the stdlib default handler (stderr) and never to
+    beadle-daemon.log; the "always absolute" invariant is unenforced since
+    exec.LookPath returns a separator-bearing Command verbatim after a CWD
+    check; the error text does not say whose PATH; BuildMCPConfig runs
+    after createMissionFromContract so a missing binary orphans an ethos
+    mission; the reply-recipe failure is logged at Warn though it is
+    permanent. Write set widened to main.go, runner.go, runner_test.go,
+    pipeline.go for those. KNOWN ARTIFACT: lint-strict from a worktree
+    reports six spurious G204 lines; not real.

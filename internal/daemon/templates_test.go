@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -107,12 +108,16 @@ func TestBuildMCPConfigContent(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(data, &doc))
 
+	wantEthos, err := exec.LookPath("ethos")
+	require.NoError(t, err)
 	ethos := doc.MCPServers["ethos"]
-	assert.Equal(t, "ethos", ethos.Command)
+	assert.Equal(t, wantEthos, ethos.Command)
 	assert.Equal(t, []string{"serve"}, ethos.Args)
 
+	wantBeadle, err := exec.LookPath("beadle-email")
+	require.NoError(t, err)
 	beadle := doc.MCPServers["beadle-email"]
-	assert.Equal(t, "beadle-email", beadle.Command)
+	assert.Equal(t, wantBeadle, beadle.Command)
 	assert.Equal(t, []string{"serve"}, beadle.Args)
 }
 
@@ -639,7 +644,11 @@ func TestBuildMCPConfig_UnknownShapeRefused(t *testing.T) {
 // TestBuildMCPConfig_StdioEmission proves each stdio server's config
 // marshals to exactly {"command":..., "args":[...]} (or {"command":...}
 // when Args is empty) -- omitempty on the http-only fields means none of
-// them ever appear. Table-driven over every stdio entry in
+// them ever appear -- with "command" holding the absolute path
+// exec.LookPath resolves on this test process's own PATH, not the bare
+// name the registry declares (see TestBuildMCPConfig_ResolvesStdioCommand
+// for a scratch-PATH proof that the resolution step itself runs, rather
+// than assuming it). Table-driven over every stdio entry in
 // DefaultMCPRegistry, deriving the expected JSON from the entry's own
 // fields rather than a hand-picked string, so coverage grows automatically
 // when an entry is added, and an entry with no Args (a shape this repo's
@@ -659,6 +668,9 @@ func TestBuildMCPConfig_StdioEmission(t *testing.T) {
 			continue // http server, covered by TestBuildMCPConfig_HTTPServerEmission
 		}
 		t.Run(name, func(t *testing.T) {
+			resolved, err := exec.LookPath(cfg.Command)
+			require.NoError(t, err, "test process PATH must carry %q for this assertion to mean anything", cfg.Command)
+
 			path, err := tmpl.BuildMCPConfig([]string{name}, registry)
 			require.NoError(t, err)
 			defer os.Remove(path)
@@ -671,7 +683,7 @@ func TestBuildMCPConfig_StdioEmission(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(data, &doc))
 
-			want := map[string]any{"command": cfg.Command}
+			want := map[string]any{"command": resolved}
 			if len(cfg.Args) > 0 {
 				want["args"] = cfg.Args
 			}
@@ -680,6 +692,129 @@ func TestBuildMCPConfig_StdioEmission(t *testing.T) {
 			assert.JSONEq(t, string(wantJSON), string(doc.MCPServers[name]))
 		})
 	}
+}
+
+// TestBuildMCPConfig_ResolvesStdioCommand proves BuildMCPConfig itself does
+// the PATH resolution, by constructing a scratch PATH containing nothing
+// but a fake binary and confirming the written command is that binary's
+// absolute path, not its bare registry name. The registry it builds from
+// is a one-entry map pointing at that fake binary -- not DefaultMCPRegistry,
+// so this test asserts nothing about the shipped registry's entries and
+// never shares a test subject with TestBuildMCPConfig_StdioEmission above.
+// This test never reads or restores the host's real PATH, GOPATH/bin, or
+// any uv tool dir: t.Setenv replaces PATH outright for the duration of the
+// subtest and the testing package restores the prior value automatically
+// when it returns, so the host environment is never touched.
+func TestBuildMCPConfig_ResolvesStdioCommand(t *testing.T) {
+	binDir := t.TempDir()
+	const binName = "fake-mcp-server"
+	binPath := filepath.Join(binDir, binName)
+	require.NoError(t, os.WriteFile(binPath, []byte("#!/bin/sh\necho ok\n"), 0o755))
+
+	registry := map[string]MCPServerConfig{
+		"fake": {Command: binName, Args: []string{"serve"}},
+	}
+
+	t.Run("resolves to the absolute path", func(t *testing.T) {
+		t.Setenv("PATH", binDir)
+
+		tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+		path, err := tmpl.BuildMCPConfig([]string{"fake"}, registry)
+		require.NoError(t, err)
+		defer os.Remove(path)
+
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+
+		var doc struct {
+			MCPServers map[string]MCPServerConfig `json:"mcpServers"`
+		}
+		require.NoError(t, json.Unmarshal(data, &doc))
+
+		assert.Equal(t, binPath, doc.MCPServers["fake"].Command)
+		assert.NotEqual(t, binName, doc.MCPServers["fake"].Command,
+			"the bare registry name must not reach the written config")
+	})
+
+	t.Run("absent binary fails before any file is written", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir()) // empty: binName is nowhere on it
+
+		dest := &MissionTemplate{TmpDir: t.TempDir()}
+		path, err := dest.BuildMCPConfig([]string{"fake"}, registry)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `"fake"`)
+		assert.Contains(t, err.Error(), binName)
+		assert.Empty(t, path)
+
+		entries, readErr := os.ReadDir(dest.TmpDir)
+		require.NoError(t, readErr)
+		assert.Empty(t, entries, "BuildMCPConfig must not write a config file when resolution fails")
+	})
+
+	// A command naming a path separator ("./fake") is never searched by
+	// exec.LookPath -- only checked for existence and executability at
+	// the literal path -- so it is returned verbatim, relative, once that
+	// check passes. BuildMCPConfig must reject this itself: writing a
+	// relative Command into mcp-config.json would make its meaning depend
+	// on the worker subprocess's own working directory at exec time,
+	// exactly the environment-dependent resolution this change exists to
+	// remove. t.Chdir (not t.Setenv("PATH", ...)) makes "./fake" resolve
+	// to a file that exists, so the only thing that can still fail this
+	// case is the absolute-path check, never a LookPath miss.
+	t.Run("relative command is rejected even when it resolves", func(t *testing.T) {
+		cwd := t.TempDir()
+		relBinPath := filepath.Join(cwd, "fake")
+		require.NoError(t, os.WriteFile(relBinPath, []byte("#!/bin/sh\necho ok\n"), 0o755))
+		t.Chdir(cwd)
+
+		relRegistry := map[string]MCPServerConfig{
+			"fake": {Command: "./fake"},
+		}
+		dest := &MissionTemplate{TmpDir: t.TempDir()}
+		path, err := dest.BuildMCPConfig([]string{"fake"}, relRegistry)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `"fake"`)
+		assert.Contains(t, err.Error(), "./fake")
+		assert.Contains(t, err.Error(), "non-absolute")
+		assert.Empty(t, path)
+
+		entries, readErr := os.ReadDir(dest.TmpDir)
+		require.NoError(t, readErr)
+		assert.Empty(t, entries, "BuildMCPConfig must not write a config file when the resolved command is not absolute")
+	})
+}
+
+// TestBuildMCPConfig_SelectedBuiltBeforeAnyWrite proves selected is fully
+// constructed -- every entry validated and resolved -- before BuildMCPConfig
+// writes anything, by naming a resolvable entry FIRST and an absent one
+// SECOND: if resolution happened lazily during the write (e.g. inside the
+// JSON marshal or the file write loop), the first entry's temp file could
+// already exist by the time the second entry's LookPath fails. Asserting
+// the destination directory is empty after the call rules that out
+// regardless of map iteration order, since Go map iteration order is
+// itself unspecified -- the invariant this test proves must hold whichever
+// entry a given run happens to process first.
+func TestBuildMCPConfig_SelectedBuiltBeforeAnyWrite(t *testing.T) {
+	binDir := t.TempDir()
+	const resolvableName = "fake-resolvable"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, resolvableName), []byte("#!/bin/sh\necho ok\n"), 0o755))
+	t.Setenv("PATH", binDir)
+
+	registry := map[string]MCPServerConfig{
+		"resolvable": {Command: resolvableName},
+		"absent":     {Command: "fake-absent-binary"},
+	}
+
+	dest := &MissionTemplate{TmpDir: t.TempDir()}
+	path, err := dest.BuildMCPConfig([]string{"resolvable", "absent"}, registry)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"absent"`)
+	assert.Empty(t, path)
+
+	entries, readErr := os.ReadDir(dest.TmpDir)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries,
+		"BuildMCPConfig must not write a config file for any entry when a later entry fails to resolve")
 }
 
 // TestBuildMCPConfig_HTTPServerEmission proves the http shape: only

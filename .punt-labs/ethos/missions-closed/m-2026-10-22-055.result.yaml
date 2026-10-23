@@ -1,0 +1,42 @@
+mission: m-2026-10-22-055
+round: 1
+created_at: "2026-10-22T23:57:56Z"
+author: bwk
+verdict: pass
+confidence: 0.9
+files_changed:
+    - path: docs/worker-mcp-path.md
+      added: 362
+      removed: 0
+evidence:
+    - name: npx markdownlint-cli2 docs/worker-mcp-path.md
+      status: pass
+    - name: Read internal/daemon/spawner.go, templates.go, runner.go, docs/ARCHITECTURE.md before writing
+      status: pass
+    - name: Doc answers what/why-better/approach-chosen in order, compares three approaches by trust-boundary criteria, specifies preflight failure behavior, names implementation write set and proving test, ends with a drafted DES-037 ADR entry and a Decisions for the operator section
+      status: pass
+prose: |
+    Design mission for beadle-tsku (worker PATH cannot reach the MCP server
+    binaries tools-ethos/tools-biff/tools-beadle-email install into).
+    Recommends resolving each registry entry's Command via exec.LookPath in
+    the daemon's own environment inside BuildMCPConfig, writing the resolved
+    absolute path into the per-spawn mcp-config.json, leaving the worker's
+    restricted PATH untouched. Rejects widening the worker PATH (grants a
+    searchable directory, larger compromised-worker surface, fails silently
+    on first MCP use) and a daemon.json allowlist (new required onboarding
+    step with no onboarding flow, goes stale independently of where
+    make tools-* actually installs). Specifies the preflight failure behavior
+    (BuildMCPConfig errors before any claude process starts; Executor.Run's
+    existing fireElse path marks the pipeline failed and replies to the
+    sender, mirroring runner.go's resolveEnvVars precedent), the
+    implementation write set (templates.go, templates_test.go, a comment
+    update in spawner.go, and the ARCHITECTURE.md invariant paragraph), and
+    the proving test (scratch PATH with a fake binary; asserts the written
+    Command is an absolute path; asserts the same config fails closed when
+    the binary is absent). States TestDefaultMCPRegistry_StdioCommandsAreReal
+    does not need to change, since it proves registry entries are real
+    commands on the test process's own PATH, a concern orthogonal to where
+    spawn-time resolution happens. Ends with a drafted DES-037 ADR entry and
+    three operator decisions (resolution approach A vs C; whether to also
+    shrink workerPATH's remaining two entries, out of scope here; whether
+    the new failure needs a structured pipeline field, recommend no).

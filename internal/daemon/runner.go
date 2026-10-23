@@ -48,7 +48,12 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	// pipeline.go) already marks the pipeline failed and replies to the
 	// sender via fireElse on any error this returns, so a missing key now
 	// actually reaches the sender instead of silently degrading to model
-	// recall.
+	// recall. The same reasoning is why BuildMCPConfig, below, also runs
+	// before createMissionFromContract: a missing MCP server binary
+	// (docs/worker-mcp-path.md, DES-037) is just as permanent a
+	// misconfiguration, and checking it first means a daemon with no
+	// provisioned MCP binaries never creates an orphaned ethos mission for
+	// it to discover later.
 	envOverrides, missingEnv := resolveEnvVars(cmd.EnvVars)
 	if len(missingEnv) > 0 {
 		return "", fmt.Errorf("command %q declares env var(s) %v, absent from the "+
@@ -56,6 +61,16 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 			"beadle-daemon; running without them would silently degrade this "+
 			"command", cmd.Name, missingEnv)
 	}
+
+	servers := cmd.MCPServers
+	if servers == nil {
+		servers = []string{"ethos", "beadle-email"}
+	}
+	mcpPath, err := r.Templates.BuildMCPConfig(servers, r.Registry)
+	if err != nil {
+		return "", fmt.Errorf("build mcp config: %w", err)
+	}
+	defer func() { _ = os.Remove(mcpPath) }()
 
 	contract := buildStageContract(p.Email, cmd, call, pipe, p.Body)
 
@@ -67,16 +82,6 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	e.Logger.Info("stage mission created",
 		"pipeline", p.ID, "stage", idx,
 		"command", call.Command, "mission", missionID)
-
-	servers := cmd.MCPServers
-	if servers == nil {
-		servers = []string{"ethos", "beadle-email"}
-	}
-	mcpPath, err := r.Templates.BuildMCPConfig(servers, r.Registry)
-	if err != nil {
-		return "", fmt.Errorf("build mcp config: %w", err)
-	}
-	defer func() { _ = os.Remove(mcpPath) }()
 
 	promptPath, err := r.Templates.BuildSystemPromptForTools(missionID, cmd.Tools)
 	if err != nil {

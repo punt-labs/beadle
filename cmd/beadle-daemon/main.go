@@ -110,6 +110,7 @@ var runCmd = &cobra.Command{
 			}
 			templates = &daemon.MissionTemplate{
 				TmpDir: missionsTmpDir,
+				Logger: logger,
 			}
 			logger.Info("worker spawning enabled", "source", apiSource)
 		} else if secretErr == nil || errors.Is(secretErr, secret.ErrNotFound) {
