@@ -3,15 +3,20 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/punt-labs/beadle/internal/testenv"
 )
 
 // setupWhitelist creates a temp dir with symlinks to real system binaries.
@@ -536,6 +541,64 @@ func TestClaudeRunner_MissingDeclaredEnvVarFailsStage(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BEADLE_K1G_DEFINITELY_UNSET_VAR")
 	assert.Contains(t, err.Error(), "docs-ask")
+}
+
+// TestClaudeRunner_MissingMCPBinaryCreatesNoMission is the ordering
+// regression test for round 2 of beadle-tsku: BuildMCPConfig must run
+// BEFORE createMissionFromContract in ClaudeRunner.Run, so a daemon with
+// an unprovisioned MCP server binary fails the stage without ever
+// invoking `ethos mission create` for it. Proving this requires the real
+// ethos CLI (a fake MissionCreator would prove only that the fake wasn't
+// called, not that no OS-level mission was created) run against an
+// isolated $HOME/$ETHOS_REPO_ROOT (testenv.IsolateEthos) so this assertion
+// -- the isolated mission store has zero missions after the failing call
+// -- cannot pass merely because some unrelated concurrent session's
+// missions happen to be present.
+//
+// cmd carries a valid WriteSet, Prompt, and Budget -- the shape
+// TestBuildStageContract_ValidatesAgainstRealEthosCLI proves the real CLI
+// accepts -- specifically so that IF the ordering regressed (BuildMCPConfig
+// moved back below createMissionFromContract), `ethos mission create` would
+// actually succeed and leave a real, listable mission behind for this
+// test's final assertion to catch; a contract the CLI would reject for an
+// unrelated reason (e.g. an empty write_set) would make this pass for the
+// wrong reason regardless of which statement ran first.
+func TestClaudeRunner_MissingMCPBinaryCreatesNoMission(t *testing.T) {
+	ethosPath := testenv.EthosOrFatal(t)
+	testenv.IsolateEthos(t)
+
+	runner := &ClaudeRunner{
+		Templates: &MissionTemplate{TmpDir: t.TempDir()},
+		Registry: map[string]MCPServerConfig{
+			"ethos": {Command: "beadle-tsku-nonexistent-binary"},
+		},
+	}
+	logger, _ := testLoggerCapture()
+
+	cmd := &Command{
+		Name:       "test-missing-mcp-binary",
+		Runner:     "claude",
+		MCPServers: []string{"ethos"},
+		Prompt:     "Reply to the sender",
+		WriteSet:   []string{fmt.Sprintf("internal/daemon/testdata/mission-regression-fixture-tsku-%s.txt", uuid.New().String())},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds" json:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
+		}{Rounds: 1, ReflectionAfterEach: false},
+	}
+	call := CommandCall{Command: "test-missing-mcp-binary", Args: map[string]any{}}
+	p := testPipeline()
+
+	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ethos")
+	assert.Contains(t, err.Error(), "beadle-tsku-nonexistent-binary")
+
+	listCmd := exec.Command(ethosPath, "mission", "list", "--status", "all", "--json")
+	out, listErr := listCmd.CombinedOutput()
+	require.NoError(t, listErr, "ethos mission list: %s", string(out))
+	assert.JSONEq(t, "[]", strings.TrimSpace(string(out)),
+		"a missing MCP server binary must fail before any ethos mission is created, leaving the isolated mission store empty")
 }
 
 // TestCLIRunner_ArgsFromPipe_MalformedJSON is the regression test for

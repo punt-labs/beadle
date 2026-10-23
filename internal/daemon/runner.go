@@ -57,6 +57,23 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 			"command", cmd.Name, missingEnv)
 	}
 
+	// BuildMCPConfig depends only on servers and r.Registry -- never on a
+	// mission ID -- so it runs before createMissionFromContract, for the
+	// same reason the env-var check above runs before either: a missing
+	// MCP server binary (docs/worker-mcp-path.md, DES-037) is exactly as
+	// permanent a misconfiguration as a missing env var, and failing here
+	// first means a daemon with no provisioned MCP binaries never creates
+	// a single orphaned ethos mission for it to discover later.
+	servers := cmd.MCPServers
+	if servers == nil {
+		servers = []string{"ethos", "beadle-email"}
+	}
+	mcpPath, err := r.Templates.BuildMCPConfig(servers, r.Registry)
+	if err != nil {
+		return "", fmt.Errorf("build mcp config: %w", err)
+	}
+	defer func() { _ = os.Remove(mcpPath) }()
+
 	contract := buildStageContract(p.Email, cmd, call, pipe, p.Body)
 
 	missionID, err := createMissionFromContract(r.Templates.TmpDir, contract)
@@ -67,16 +84,6 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	e.Logger.Info("stage mission created",
 		"pipeline", p.ID, "stage", idx,
 		"command", call.Command, "mission", missionID)
-
-	servers := cmd.MCPServers
-	if servers == nil {
-		servers = []string{"ethos", "beadle-email"}
-	}
-	mcpPath, err := r.Templates.BuildMCPConfig(servers, r.Registry)
-	if err != nil {
-		return "", fmt.Errorf("build mcp config: %w", err)
-	}
-	defer func() { _ = os.Remove(mcpPath) }()
 
 	promptPath, err := r.Templates.BuildSystemPromptForTools(missionID, cmd.Tools)
 	if err != nil {
