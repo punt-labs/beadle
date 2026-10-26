@@ -1,13 +1,12 @@
 package enable
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
+	"github.com/punt-labs/beadle/internal/permissions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -142,21 +141,19 @@ func TestProgressfNilIsSafe(t *testing.T) {
 	assert.NotPanics(t, func() { p.printf("anything %d\n", 1) })
 }
 
-func TestEnableReportsRefusedSettingsAndStillEnables(t *testing.T) {
+func TestRefusedSettingsFailEnableAndDisableWithNothingChanged(t *testing.T) {
 	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude"), 0o750))
+	require.NoError(t, Enable(root, nil))
 	settings := filepath.Join(root, ".claude", "settings.json")
 	require.NoError(t, os.WriteFile(settings, []byte("{not json"), 0o600))
-	var lines []string
-	progress := func(format string, a ...any) { lines = append(lines, fmt.Sprintf(format, a...)) }
 
-	require.NoError(t, Enable(root, progress))
-	assert.True(t, exists(t, markerPath(root)))
-	assert.Equal(t, "{not json", read(t, settings))
-	assert.Contains(t, strings.Join(lines, ""), "permissions not changed")
+	require.ErrorIs(t, Disable(root, false, nil), permissions.ErrRefused)
+	assert.True(t, exists(t, markerPath(root)), "a refused revoke leaves the repo enabled")
 
-	lines = nil
-	require.NoError(t, Disable(root, false, progress))
-	assert.False(t, exists(t, markerPath(root)))
-	assert.Contains(t, strings.Join(lines, ""), "permissions not changed")
+	fresh := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(fresh, ".claude"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(fresh, ".claude", "settings.json"), []byte("{not json"), 0o600))
+	require.ErrorIs(t, Enable(fresh, nil), permissions.ErrRefused)
+	assert.False(t, exists(t, markerPath(fresh)))
+	assert.False(t, exists(t, filepath.Join(fresh, "CLAUDE.md")), "a refused grant writes nothing else")
 }
