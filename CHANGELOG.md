@@ -54,6 +54,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Permission rules are repo-level, granted by `beadle-email enable`.** The
+  SessionStart hook used to create `~/.claude/settings.json` if needed and add
+  `mcp__plugin_beadle_email__*` (or the `-dev` glob), `mcp__beadle-email__*`
+  and four `Skill(...)` rules to it in every session. Now `beadle-email
+  enable` (and the MCP `enable` tool) adds beadle's rules to the repo's
+  `.claude/settings.json`, prints each one, and `disable` removes exactly
+  those. It refuses a malformed or symlinked settings file and the home
+  directory, and never grants the `beadle-dev` rules. `beadle-email
+  uninstall` no longer edits `~/.claude/settings.json`; delete rules earlier
+  versions wrote there by hand
+  ([punt-kit#396](https://github.com/punt-labs/punt-kit/pull/396)).
 - **Inbox polling accepts `2m` and `3m`.** The allowed interval set had
   nothing between `1m` and `5m`, so the only way to poll an agent mailbox
   at least every three minutes was the one-minute floor. The set is now
