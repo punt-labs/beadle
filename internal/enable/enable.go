@@ -96,12 +96,13 @@ func enableLocked(root string, progress Progressf) error {
 		progress.printf("%s already imports beadle\n", hostPath)
 	}
 
-	// Grant beadle's allow rules in this repo only; enable is the consent.
+	// Grant beadle's allow rules in this repo only; enable is the consent. A
+	// refusal (malformed or symlinked settings, a home-directory repo) is
+	// reported, not fatal: the guidance is enabled and tools still prompt.
 	added, err := permissions.Grant(root)
 	if err != nil {
-		return fmt.Errorf("granting permissions in .claude/settings.json: %w", err)
-	}
-	if len(added) > 0 {
+		progress.printf("permissions not changed in .claude/settings.json: %v\n", err)
+	} else if len(added) > 0 {
 		progress.printf("allowed in .claude/settings.json: %s\n", strings.Join(added, ", "))
 	}
 
@@ -169,9 +170,8 @@ func disableLocked(root string, purge bool, progress Progressf) error {
 
 	revoked, err := permissions.Revoke(root)
 	if err != nil {
-		return fmt.Errorf("removing permissions from .claude/settings.json: %w", err)
-	}
-	if len(revoked) > 0 {
+		progress.printf("permissions not changed in .claude/settings.json: %v\n", err)
+	} else if len(revoked) > 0 {
 		progress.printf("removed from .claude/settings.json: %s\n", strings.Join(revoked, ", "))
 	}
 

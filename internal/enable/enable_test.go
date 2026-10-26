@@ -1,8 +1,10 @@
 package enable
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -138,4 +140,23 @@ func TestProgressfNilIsSafe(t *testing.T) {
 	// A nil Progressf discards output; the MCP surface relies on this.
 	var p Progressf
 	assert.NotPanics(t, func() { p.printf("anything %d\n", 1) })
+}
+
+func TestEnableReportsRefusedSettingsAndStillEnables(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude"), 0o750))
+	settings := filepath.Join(root, ".claude", "settings.json")
+	require.NoError(t, os.WriteFile(settings, []byte("{not json"), 0o600))
+	var lines []string
+	progress := func(format string, a ...any) { lines = append(lines, fmt.Sprintf(format, a...)) }
+
+	require.NoError(t, Enable(root, progress))
+	assert.True(t, exists(t, markerPath(root)))
+	assert.Equal(t, "{not json", read(t, settings))
+	assert.Contains(t, strings.Join(lines, ""), "permissions not changed")
+
+	lines = nil
+	require.NoError(t, Disable(root, false, progress))
+	assert.False(t, exists(t, markerPath(root)))
+	assert.Contains(t, strings.Join(lines, ""), "permissions not changed")
 }
