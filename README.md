@@ -153,7 +153,7 @@ Available when installed as a Claude Code plugin.
 | `/mail` | Mail something to the owner or a specific recipient. |
 | `/send` | Send via any channel (email today, Signal later). |
 | `/contacts` | Manage address book (list, add with permissions, remove, find). |
-| `/beadle enable` / `/beadle disable` | Turn beadle's repo guidance on or off in this repo (writes the `enabled` marker + `CLAUDE.md` import, and allows beadle's tools in `.claude/settings.json`). Commit the change via a PR. |
+| `/beadle enable` / `/beadle disable` | Turn beadle's repo guidance on or off in this repo (writes the `enabled` marker + `CLAUDE.md` import, and allows the `beadle-email` CLI, beadle's MCP tools and commands in `.claude/settings.json`). Commit the change via a PR. |
 
 ## Setup
 

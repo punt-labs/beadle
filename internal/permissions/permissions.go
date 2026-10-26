@@ -24,6 +24,7 @@ import (
 var Rules = []string{
 	"mcp__plugin_beadle_email__*",
 	"mcp__beadle-email__*",
+	"Bash(beadle-email:*)",
 	"Skill(beadle)",
 	"Skill(contacts)",
 	"Skill(inbox)",

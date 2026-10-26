@@ -58,7 +58,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   SessionStart hook used to create `~/.claude/settings.json` if needed and add
   `mcp__plugin_beadle_email__*` (or the `-dev` glob), `mcp__beadle-email__*`
   and four `Skill(...)` rules to it in every session. Now `beadle-email
-  enable` (and the MCP `enable` tool) adds beadle's rules to the repo's
+  enable` (and the MCP `enable` tool) adds beadle's rules
+  (`Bash(beadle-email:*)`, the MCP wildcards and the `Skill(...)` rules) to the repo's
   `.claude/settings.json`, prints each one, and `disable` removes exactly
   those. It refuses a malformed or symlinked settings file and the home
   directory, and never grants the `beadle-dev` rules. `beadle-email
