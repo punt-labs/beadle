@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/punt-labs/beadle/internal/permissions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -138,4 +139,21 @@ func TestProgressfNilIsSafe(t *testing.T) {
 	// A nil Progressf discards output; the MCP surface relies on this.
 	var p Progressf
 	assert.NotPanics(t, func() { p.printf("anything %d\n", 1) })
+}
+
+func TestRefusedSettingsFailEnableAndDisableWithNothingChanged(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, Enable(root, nil))
+	settings := filepath.Join(root, ".claude", "settings.json")
+	require.NoError(t, os.WriteFile(settings, []byte("{not json"), 0o600))
+
+	require.ErrorIs(t, Disable(root, false, nil), permissions.ErrRefused)
+	assert.True(t, exists(t, markerPath(root)), "a refused revoke leaves the repo enabled")
+
+	fresh := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(fresh, ".claude"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(fresh, ".claude", "settings.json"), []byte("{not json"), 0o600))
+	require.ErrorIs(t, Enable(fresh, nil), permissions.ErrRefused)
+	assert.False(t, exists(t, markerPath(fresh)))
+	assert.False(t, exists(t, filepath.Join(fresh, "CLAUDE.md")), "a refused grant writes nothing else")
 }

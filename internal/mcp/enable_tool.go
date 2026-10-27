@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 
@@ -30,7 +31,8 @@ func enableTool() mcplib.Tool {
 			"Enable or disable beadle guidance in the current repo. "+
 				"action=\"enable\" deposits the beadle user guide into .punt-labs/beadle/, "+
 				"marks the repo enabled, and adds the @.punt-labs/beadle/CLAUDE.md import to "+
-				"the repo CLAUDE.md. action=\"disable\" removes that import and the enabled "+
+				"the repo CLAUDE.md, and allows beadle's tools in the repo's .claude/settings.json. "+
+				"action=\"disable\" removes that import, those rules and the enabled "+
 				"marker, leaving the directory dormant. Writes working-tree files only — it "+
 				"does not run git, so commit the change through a PR.",
 		),
@@ -63,14 +65,33 @@ func (h *handler) enable(_ context.Context, req mcplib.CallToolRequest) (*mcplib
 	}
 
 	// nil progress: the MCP surface reports through the tool result, not stderr.
+	var report progressLog
 	if act == actionEnable {
-		if err := enable.Enable(root, nil); err != nil {
+		if err := enable.Enable(root, report.printf); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("enable: %v", err)), nil
 		}
-		return textResult(fmt.Sprintf("beadle enabled in %s\ncommit the .punt-labs/beadle/ marker and the CLAUDE.md import through a PR", root))
+		return textResult(fmt.Sprintf("%sbeadle enabled in %s\ncommit the .punt-labs/beadle/ marker, the CLAUDE.md import and .claude/settings.json through a PR", report.permissions(), root))
 	}
-	if err := enable.Disable(root, false, nil); err != nil {
+	if err := enable.Disable(root, false, report.printf); err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("disable: %v", err)), nil
 	}
-	return textResult(fmt.Sprintf("beadle disabled in %s\ncommit the removed marker and import through a PR", root))
+	return textResult(fmt.Sprintf("%sbeadle disabled in %s\ncommit the removed marker, import and permission rules through a PR", report.permissions(), root))
+}
+
+// progressLog collects enable/disable progress so the tool result can repeat
+// the permission rules changed, which the CLI prints to stderr.
+type progressLog struct{ lines []string }
+
+func (l *progressLog) printf(format string, a ...any) {
+	l.lines = append(l.lines, fmt.Sprintf(format, a...))
+}
+
+func (l *progressLog) permissions() string {
+	var b strings.Builder
+	for _, line := range l.lines {
+		if strings.Contains(line, ".claude/settings.json") {
+			b.WriteString(line)
+		}
+	}
+	return b.String()
 }

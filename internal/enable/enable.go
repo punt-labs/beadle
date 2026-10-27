@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/punt-labs/beadle/internal/claudemd"
+	"github.com/punt-labs/beadle/internal/permissions"
 )
 
 // ImportLine is the canonical @-import a repo CLAUDE.md carries when beadle is
@@ -50,7 +51,8 @@ func RepoRoot() (string, error) {
 }
 
 // Enable deposits the beadle user guide into <root>/.punt-labs/beadle/, writes
-// the enabled marker, and registers the import in <root>/CLAUDE.md. It is
+// the enabled marker, registers the import in <root>/CLAUDE.md, and allows
+// beadle's MCP tools and commands in <root>/.claude/settings.json. It is
 // idempotent, so re-running upgrades in place. The whole operation holds an
 // exclusive per-repo lock so a concurrent enable and disable cannot interleave
 // into the §2.11-incorrect "marker without import" state; the nested CLAUDE.md
@@ -65,6 +67,17 @@ func Enable(root string, progress Progressf) error {
 
 func enableLocked(root string, progress Progressf) error {
 	dir := filepath.Join(root, ".punt-labs", "beadle")
+	// Grant beadle's allow rules in this repo only; enable is the consent. It
+	// runs before any other write, so a refusal (malformed or symlinked
+	// settings, a home-directory repo) fails enable with nothing changed.
+	added, err := permissions.Grant(root)
+	if err != nil {
+		return fmt.Errorf("granting permissions in .claude/settings.json: %w", err)
+	}
+	if len(added) > 0 {
+		progress.printf("allowed in .claude/settings.json: %s\n", strings.Join(added, ", "))
+	}
+
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
@@ -103,8 +116,8 @@ func enableLocked(root string, progress Progressf) error {
 	return nil
 }
 
-// Disable removes the import from <root>/CLAUDE.md and deletes the enabled
-// marker, leaving the rest of .punt-labs/beadle/ dormant. When purge is set it
+// Disable removes the import from <root>/CLAUDE.md, beadle's allow rules from
+// <root>/.claude/settings.json, and deletes the enabled marker, leaving the rest of .punt-labs/beadle/ dormant. When purge is set it
 // removes the whole directory instead.
 //
 // The order mirrors Enable in reverse. Enable adds the import then the marker,
@@ -125,6 +138,16 @@ func Disable(root string, purge bool, progress Progressf) error {
 
 func disableLocked(root string, purge bool, progress Progressf) error {
 	dir := filepath.Join(root, ".punt-labs", "beadle")
+
+	// Revoke beadle's allow rules before any other change, so a refusal fails
+	// disable with the repo still enabled rather than disabled with grants left.
+	revoked, err := permissions.Revoke(root)
+	if err != nil {
+		return fmt.Errorf("removing permissions from .claude/settings.json: %w", err)
+	}
+	if len(revoked) > 0 {
+		progress.printf("removed from .claude/settings.json: %s\n", strings.Join(revoked, ", "))
+	}
 
 	// Clear the enabled signal first. Under --purge the whole directory (which
 	// contains the marker) goes now, for the same reason.
