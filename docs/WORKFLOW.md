@@ -302,7 +302,9 @@ function pr_loop(unit):
 #   skipped(pr)  = the PR author is a bot ([github_app] ignore_bot_pr in
 #                  .pr_agent.toml); no title or label lets an author skip
 #   reviewed_head = the newest commit covered by a Qodo review, the outage
-#                  fallback, or the local delta review below; a skipped
+#                  fallback, or the local delta review below — the delta
+#                  review covers a commit only once it has completed and
+#                  every finding it raised is answered(f); a skipped
 #                  (bot-authored) PR has none until the local delta review
 #                  has covered its whole diff
 #   bugbot_open  = a Cursor Bugbot check run on the head whose status is not
@@ -363,7 +365,8 @@ function poll_tick(pr):
             reviewed_head is unset (a bot-authored PR), else on the
             reviewed_head..head delta; its findings are findings like any
             other; set reviewed_head to the head once the review has
-            completed                      # bounded rounds, but no
+            completed and every finding it raised is answered(f)
+                                           # bounded rounds, but no
                                            #   unreviewed merge
     if not demo_ok(pr) and nothing was pushed this tick:
         re-run the verification gate on the head and ask the operator to
