@@ -1,0 +1,38 @@
+# Qodo v2 review config, from punt-kit's pr_agent.toml template. One review on open,
+# no per-push re-review, only High findings inline (they become blocking threads).
+# Only bot-authored PRs are skipped; no title or label lets an author opt out.
+[github_app]
+ignore_bot_pr = true
+pr_commands = ["/agentic_describe", "/agentic_review"]
+handle_push_trigger = false
+
+[review_agent]
+enable_incremental_review = true
+# comments_routing below is authoritative; the threshold restates it (High only inline).
+inline_comments_severity_threshold = 3
+issues_user_guidelines = """
+beadle is a Go module: beadle-email (CLI and MCP server for agent email over Proton Bridge with a four-level PGP trust model) and beadle-daemon (mail-triggered mission pipeline), plus bash plugin hooks and install scripts.
+Targets: darwin/arm64, darwin/amd64, linux/arm64, linux/amd64 as static binaries (CGO_ENABLED=0). Nothing else.
+Report every finding in this one pass; do not hold findings back for a later pass.
+Flag only defects reachable by a real caller of the changed code: logic errors, nil paths, security, API contract breaks, concurrency, resource leaks.
+Do not flag hypothetical environments (exotic env vars such as CDPATH or GIT_TRACE, control bytes in paths, tests run as root).
+Do not flag what CI enforces: gofmt -s, gofumpt, goimports, go vet, staticcheck, golangci-lint (errcheck, gosec, revive, misspell, bodyclose, errorlint), govulncheck, shellcheck, markdownlint, go test -race.
+Do not flag lines the PR did not change.
+Never suggest //nolint directives, discarding errors with _ =, panics in library code, any or interface{}, a pkg/ directory, or global mutable state; go.md bans each of them.
+"""
+compliance_user_guidelines = """
+Apply code rules only: correctness, typing, error handling, security, and the coding standards for the changed files.
+Do not grade PR titles, PR descriptions, commit messages, or CHANGELOG wording.
+Do not grade agent process rules from CLAUDE.md, AGENTS.md, or WORKFLOW.md (missions, beads, review cycles, delegation).
+"""
+smart_router_extra_instructions = """
+High risk: internal/pgp/ (signing, verification, decryption, key-expiry checks), internal/secret/ (credential resolution),
+internal/email/trust.go (trust classification), internal/contacts/ (per-contact rwx grants), internal/daemon/ (command-file signature check in signature.go, mail-triggered mission creation in handler.go),
+internal/mcp/ (tool handlers that enforce permissions), plugin/hooks/*.sh, scripts/, install.sh, entrypoint.sh, and Dockerfile.
+Low risk: docs-only diffs (*.md, docs/, prfaq.tex, examples/) and test-only diffs (*_test.go, internal/testenv/, internal/testserver/, internal/daemontest/).
+"""
+
+[review_agent.comments_routing]
+action_required = "both"
+remediation_recommended = "summary"
+informational = "drop"
