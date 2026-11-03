@@ -6,12 +6,15 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
-	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
+
+// validArgName is the allowlist for CommandArg.Name.
+var validArgName = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 // CommandArg describes a single typed argument in a command definition.
 // Values carries json:",omitempty" for the same nil-vs-empty-slice reason
@@ -322,18 +325,14 @@ func ValidateCommand(cmd *Command) error {
 			return fmt.Errorf("arg[%d]: missing name", i)
 		}
 		// An arg name becomes "stage arg <name>" in a fenceField begin/end
-		// line (stagePayloadText, pipeline.go). A name containing any
-		// unicode.IsSpace rune -- a plain space makes the field name
-		// itself ambiguous ("stage arg foo bar"); a newline or other
-		// line-break rune (\r, \v, \f, U+2028/U+2029) actually splits the
-		// one fence line in two, so the nonce stamped on the intended line
-		// no longer covers both halves -- the same fence-forgery gap the
-		// nonce exists to close (see fenceField's doc comment). Reject both
-		// cases at validation time rather than let either reach a fence.
-		for _, r := range a.Name {
-			if unicode.IsSpace(r) {
-				return fmt.Errorf("arg %q: name must not contain whitespace (would split a fenced stage-input line)", a.Name)
-			}
+		// line (stagePayloadText, pipeline.go). Anything outside a strict
+		// allowlist -- whitespace, a line-break rune that would split the
+		// fence line and leave half of it outside the nonce's coverage,
+		// control characters, bidi overrides, zero-width characters -- could
+		// forge or disguise a fence line (see fenceField's doc comment), so
+		// reject it at validation time rather than let it reach a fence.
+		if !validArgName.MatchString(a.Name) {
+			return fmt.Errorf("arg %q: name must match %s (it is rendered into a fenced stage-input line)", a.Name, validArgName)
 		}
 		if !validArgTypes[a.Type] {
 			return fmt.Errorf("arg %q: unrecognized type %q", a.Name, a.Type)

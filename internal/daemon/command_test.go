@@ -507,7 +507,8 @@ func TestValidateCommand_Tools(t *testing.T) {
 }
 
 // TestValidateCommand_ArgNameWhitespace is the regression test for the
-// finding that an arg name containing a unicode.IsSpace rune splits the one
+// finding that an arg name outside the allowlist (whitespace, control,
+// bidi, zero-width) can split or disguise the one
 // "stage arg <name>" fence line stagePayloadText (pipeline.go) generates
 // into two -- a newline in the name breaks the begin/end fence into two
 // lines, so the nonce stamped on the intended line no longer covers both
@@ -536,6 +537,14 @@ func TestValidateCommand_ArgNameWhitespace(t *testing.T) {
 		{"name with embedded newline rejected", "arg\nname", true},
 		{"name with carriage return rejected", "arg\rname", true},
 		{"name with tab rejected", "arg\tname", true},
+		{"dotted dashed underscored name is valid", "my-arg_v2.x", false},
+		{"name with NUL control character rejected", "arg\x00name", true},
+		{"name with escape control character rejected", "arg\x1bname", true},
+		{"name with bidi override rejected", "arg\u202ename", true},
+		{"name with bidi isolate rejected", "arg\u2066name", true},
+		{"name with zero-width space rejected", "arg\u200bname", true},
+		{"name with line separator rejected", "arg\u2028name", true},
+		{"non-ASCII letter rejected", "arg\u00e9", true},
 	}
 
 	for _, tt := range tests {
@@ -545,7 +554,7 @@ func TestValidateCommand_ArgNameWhitespace(t *testing.T) {
 			err := ValidateCommand(cmd)
 			if tt.wantErr {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "must not contain whitespace")
+				assert.Contains(t, err.Error(), "name must match")
 			} else {
 				require.NoError(t, err)
 			}
