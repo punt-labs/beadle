@@ -42,7 +42,7 @@ type mockRunnerCall struct {
 	Args          map[string]any
 }
 
-func (m *mockClaudeRunner) Run(_ context.Context, _ *Executor, _ *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated bool) (string, bool, error) {
+func (m *mockClaudeRunner) Run(_ context.Context, _ *Executor, _ *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated, _ bool) (string, bool, error) {
 	m.calls = append(m.calls, mockRunnerCall{Idx: idx, Cmd: cmd.Name, Pipe: pipe, PipeTruncated: pipeTruncated, Args: call.Args})
 	i := m.idx
 	m.idx++
@@ -165,11 +165,13 @@ func testRunners(runner *mockClaudeRunner) map[string]Runner {
 // for one.
 func capCommand(outputSchema any) *Command {
 	return &Command{
-		Name:         "cap",
-		Runner:       "cli",
-		Mode:         "process",
-		Binary:       "dd",
-		FixedArgs:    []string{"if=/dev/zero", "bs=1048577", "count=1"},
+		Name:   "cap",
+		Runner: "cli",
+		Mode:   "process",
+		Steps: []Step{
+			{Binary: "dd", FixedArgs: []string{"if=/dev/zero", "bs=1048577", "count=1"}},
+			{Binary: "tr", FixedArgs: []string{"\\000", "x"}, Stdin: "stdout"},
+		},
 		OutputSchema: outputSchema,
 		Timeout:      "5s",
 	}
@@ -185,7 +187,7 @@ func capCommand(outputSchema any) *Command {
 // shared Pipeline field before the only reader saw it; with state carried
 // as a local alongside pipe, there is no reset to race.
 func TestExecutor_TruncatedPipeReachesNextStage(t *testing.T) {
-	_, wl := setupWhitelist(t, "dd")
+	_, wl := setupWhitelist(t, "dd", "tr")
 	claude := &mockClaudeRunner{results: []WorkerResult{{Output: "ok"}, {Output: "reply sent"}}}
 
 	cmds := testCommands()
@@ -220,7 +222,7 @@ func TestExecutor_TruncatedPipeReachesNextStage(t *testing.T) {
 // was doing. Before this mission's fix, a shared Pipeline field left true
 // by the cap stage would have leaked into this unrelated reply.
 func TestExecutor_FireElseDoesNotInheritStaleTruncation(t *testing.T) {
-	_, wl := setupWhitelist(t, "dd")
+	_, wl := setupWhitelist(t, "dd", "tr")
 	claude := &mockClaudeRunner{}
 
 	cmds := testCommands()
@@ -251,7 +253,7 @@ func TestExecutor_FireElseDoesNotInheritStaleTruncation(t *testing.T) {
 // the stage BEFORE the passthrough one left it as, not this stage's own
 // return value.
 func TestExecutor_PassthroughStageDoesNotChangeTruncationState(t *testing.T) {
-	_, wl := setupWhitelist(t, "dd", "cat")
+	_, wl := setupWhitelist(t, "dd", "tr", "cat")
 	claude := &mockClaudeRunner{results: []WorkerResult{{Output: "ok"}, {Output: "reply sent"}}}
 
 	cmds := testCommands()

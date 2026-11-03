@@ -247,6 +247,7 @@ type StagePayload struct {
 	Args                    []StageArg
 	PipelineOutput          string
 	PipelineOutputTruncated bool
+	PipelineOutputSanitized bool
 	EmailBody               string
 	EmailBodyTruncated      bool
 	EmailBodySanitized      bool

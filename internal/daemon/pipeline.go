@@ -201,6 +201,9 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 	// there is no field left to reset on a schedule that can get out of
 	// sync with the value it describes.
 	pipeTruncated := false
+	// pipeSanitized travels with them for the same reason. The seeded pipe is
+	// the daemon-built email-meta JSON, so its flag is false by construction.
+	pipeSanitized := false
 
 	// Execute sequentially.
 	for i, call := range calls {
@@ -216,7 +219,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			e.fireElse(p)
 			return p, fmt.Errorf("pipeline %s stage %d (%s): unknown runner %q", p.ID, i, call.Command, cmd.Runner)
 		}
-		result, resultTruncated, err := runner.Run(ctx, e, p, i, cmd, call, pipe, pipeTruncated)
+		result, resultTruncated, err := runner.Run(ctx, e, p, i, cmd, call, pipe, pipeTruncated, pipeSanitized)
 		if err != nil {
 			p.Status = "failed"
 			p.Error = fmt.Sprintf("stage %d (%s): %v", i, call.Command, err)
@@ -239,8 +242,15 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 				e.fireElse(p)
 				return p, fmt.Errorf("pipeline %s stage %d (%s): output validation: %w", p.ID, i, call.Command, err)
 			}
-			pipe = result
+			// Decided once, here, where the pipe is assigned; no content in the log.
+			sanitizedResult, resultSanitized := sanitizeText(result)
+			if resultSanitized {
+				e.Logger.Warn("stage output sanitized before stage input",
+					"pipeline", p.ID, "stage", i)
+			}
+			pipe = sanitizedResult
 			pipeTruncated = resultTruncated
+			pipeSanitized = resultSanitized
 		}
 		// passthrough: pipe (and its truncation state) unchanged, result
 		// recorded like any other stage
@@ -270,7 +280,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			// The auto-reply reads the FINAL pipe value and its carried
 			// truncation state -- whatever the last "process" stage left
 			// them as -- never a flag reset on its own schedule.
-			replyResult, _, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe, pipeTruncated)
+			replyResult, _, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe, pipeTruncated, pipeSanitized)
 			if err != nil {
 				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
 				p.Error = fmt.Sprintf("auto-reply failed: %v", err)
@@ -390,8 +400,9 @@ func stageContextReference(pipelineID string, stageIdx int) string {
 // output and email body carry their states the same way in payload
 // (PipelineOutputTruncated, EmailBodyTruncated, EmailBodySanitized): all
 // three were already sanitized and/or capped upstream (ClaudeRunner.Run for
-// args, CLIRunner.Run/runOutput/runCompound for the pipe, Executor.Run for
-// the body), and re-deriving "truncated" from "capped != value" down here
+// args, CLIRunner.Run/runOutput/runCompound for the pipe's cap and
+// Executor.Run for its sanitization, Executor.Run for the body), and
+// re-deriving "truncated" from "capped != value" down here
 // would read false even when the ORIGINAL value needed truncating, since an
 // already-capped value is never over length a second time.
 func stagePayloadText(payload StagePayload, nonce string) string {
@@ -408,7 +419,7 @@ func stagePayloadText(payload StagePayload, nonce string) string {
 	}
 
 	if payload.PipelineOutput != "" {
-		parts = append(parts, fenceField(nonce, "pipeline output", payload.PipelineOutput, payload.PipelineOutputTruncated, false))
+		parts = append(parts, fenceField(nonce, "pipeline output", payload.PipelineOutput, payload.PipelineOutputTruncated, payload.PipelineOutputSanitized))
 	} else {
 		parts = append(parts, emptyMarker(nonce, "pipeline output"))
 	}
@@ -600,7 +611,7 @@ func (e *Executor) fireElse(p *Pipeline) {
 	ctx := context.Background()
 	// elsePipe is a fixed, daemon-authored string -- never truncated,
 	// regardless of what the failed stage's own pipe value was doing.
-	_, _, err := runner.Run(ctx, e, p, -1, replyCmd, replyCall, elsePipe, false)
+	_, _, err := runner.Run(ctx, e, p, -1, replyCmd, replyCall, elsePipe, false, false)
 	if err != nil {
 		// The pipeline is already terminally failed by the time fireElse
 		// runs -- this is the last chance to tell the sender why, not a
