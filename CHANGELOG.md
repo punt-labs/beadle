@@ -146,8 +146,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is sanitized and capped exactly once with its truncation and
   sanitization state stated in the fence header, and a CLI stage's 1MB
   output cap is reported with the value it describes instead of a marker
-  spliced into the bytes. A pipeline record now persists `body_truncated`
-  and `body_sanitized`. DES-038, `docs/email-payload-handoff.md`
+  spliced into the bytes passed between stages. The auto-reply, which the
+  sender reads, additionally gets a fixed daemon-authored
+  `[output truncated at 1MB]` notice. The stage output stays raw between
+  stages and is sanitized only where it is rendered into the fence. A
+  pipeline record now persists `body_truncated` and `body_sanitized`. DES-038, `docs/email-payload-handoff.md`
   (beadle-4gm1).
 
 - **Mission workers can reach their MCP servers on a provisioned host.**

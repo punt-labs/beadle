@@ -2858,4 +2858,9 @@ STAGE INPUT block is rendered unconditionally, with an explicit
 nonce-stamped `--- <nonce> <field>: (none) ---` marker per empty field, so
 a stage with no body, no args and no prior output still sees an empty
 hand-off rather than a missing one, and every daemon-emitted line in the
-block carries the render's nonce.
+block carries the render's nonce. The pipe between stages stays raw: it
+is the next CLI stage's stdin, so it is never sanitized in the executor.
+`ClaudeRunner.Run` sanitizes it only when rendering the fence and sets
+`PipelineOutputSanitized` there. When the final pipe was capped at 1MB,
+`Executor.Run` appends a fixed `[output truncated at 1MB]` notice to the
+auto-reply's input only, so the sender is not handed a silently cut reply.
