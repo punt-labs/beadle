@@ -267,3 +267,4 @@ meetings/
 
 # ethos runtime (never track) — DES-058 live zone + mission locks
 .punt-labs/**/*.ethos-tmp*
+.punt-labs/ethos/sessions/
