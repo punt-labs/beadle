@@ -212,9 +212,6 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 	// there is no field left to reset on a schedule that can get out of
 	// sync with the value it describes.
 	pipeTruncated := false
-	// pipeSanitized travels with them for the same reason. The seeded pipe is
-	// the daemon-built email-meta JSON, so its flag is false by construction.
-	pipeSanitized := false
 
 	// Execute sequentially.
 	for i, call := range calls {
@@ -230,7 +227,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			e.fireElse(p)
 			return p, fmt.Errorf("pipeline %s stage %d (%s): unknown runner %q", p.ID, i, call.Command, cmd.Runner)
 		}
-		result, resultTruncated, err := runner.Run(ctx, e, p, i, cmd, call, pipe, pipeTruncated, pipeSanitized)
+		result, resultTruncated, err := runner.Run(ctx, e, p, i, cmd, call, pipe, pipeTruncated)
 		if err != nil {
 			p.Status = "failed"
 			p.Error = fmt.Sprintf("stage %d (%s): %v", i, call.Command, err)
@@ -257,15 +254,10 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 				e.fireElse(p)
 				return p, fmt.Errorf("pipeline %s stage %d (%s): output validation: %s", p.ID, i, call.Command, msg)
 			}
-			// Decided once, here, where the pipe is assigned; no content in the log.
-			sanitizedResult, resultSanitized := sanitizeText(result)
-			if resultSanitized {
-				e.Logger.Warn("stage output sanitized before stage input",
-					"pipeline", p.ID, "stage", i)
-			}
-			pipe = sanitizedResult
+			// The pipe stays RAW so a CLI stage downstream reads exactly the
+			// bytes this one wrote; ClaudeRunner sanitizes at the fence.
+			pipe = result
 			pipeTruncated = resultTruncated
-			pipeSanitized = resultSanitized
 		}
 		// passthrough: pipe (and its truncation state) unchanged, result
 		// recorded like any other stage
@@ -295,7 +287,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			// The auto-reply reads the FINAL pipe value and its carried
 			// truncation state -- whatever the last "process" stage left
 			// them as -- never a flag reset on its own schedule.
-			replyResult, _, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe, pipeTruncated, pipeSanitized)
+			replyResult, _, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe, pipeTruncated)
 			if err != nil {
 				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
 				p.Error = fmt.Sprintf("auto-reply failed: %v", err)
@@ -626,7 +618,7 @@ func (e *Executor) fireElse(p *Pipeline) {
 	ctx := context.Background()
 	// elsePipe is a fixed, daemon-authored string -- never truncated,
 	// regardless of what the failed stage's own pipe value was doing.
-	_, _, err := runner.Run(ctx, e, p, -1, replyCmd, replyCall, elsePipe, false, false)
+	_, _, err := runner.Run(ctx, e, p, -1, replyCmd, replyCall, elsePipe, false)
 	if err != nil {
 		// The pipeline is already terminally failed by the time fireElse
 		// runs -- this is the last chance to tell the sender why, not a

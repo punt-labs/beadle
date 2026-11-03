@@ -155,7 +155,7 @@ func TestCLIRunner_Echo(t *testing.T) {
 	call := CommandCall{Command: "test-echo", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "hello\n", result)
 }
@@ -175,7 +175,7 @@ func TestCLIRunner_CatStdin(t *testing.T) {
 	call := CommandCall{Command: "test-cat", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "pipe data", false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "pipe data", false)
 	require.NoError(t, err)
 	assert.Equal(t, "pipe data", result)
 }
@@ -195,7 +195,7 @@ func TestCLIRunner_NonzeroExit(t *testing.T) {
 	call := CommandCall{Command: "test-false", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cli false")
 }
@@ -214,7 +214,7 @@ func TestCLIRunner_BinaryNotInWhitelist(t *testing.T) {
 	call := CommandCall{Command: "test-nope", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found in whitelist")
 }
@@ -248,7 +248,7 @@ func TestCLIRunner_ArgAssembly(t *testing.T) {
 	}
 	p := testPipeline()
 
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	// echo -n --flag=val A B
 	assert.Equal(t, "--flag=val A B", result)
@@ -271,7 +271,7 @@ func TestCLIRunner_Timeout(t *testing.T) {
 	p := testPipeline()
 
 	start := time.Now()
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
@@ -306,7 +306,7 @@ func TestCLIRunner_OutputCap(t *testing.T) {
 	call := CommandCall{Command: "test-cap", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, truncated, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	result, truncated, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	assert.Equal(t, 1<<20, len(result), "the returned string itself is capped at exactly 1MB -- no marker appended")
 	assert.NotContains(t, result, "…[truncated]", "no truncation marker must reach the returned string; the truncated return value is the sole statement of truncation")
@@ -334,7 +334,7 @@ func TestCLIRunner_OutputCap_LogsTruncation(t *testing.T) {
 	call := CommandCall{Command: "test-cap-logged", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 
 	line := logLineContaining(t, buf, "cli command stdout truncated")
@@ -489,7 +489,7 @@ func TestCLIRunner_InvalidTimeoutLogged(t *testing.T) {
 	call := CommandCall{Command: "test-bad-timeout", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "hi\n", result)
 
@@ -520,7 +520,7 @@ func TestCLIRunner_CompoundInvalidTimeoutLogged(t *testing.T) {
 	call := CommandCall{Command: "test-compound-bad-timeout", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", result)
 
@@ -561,7 +561,7 @@ func TestCLIRunner_MissingDeclaredEnvVarFailsStage(t *testing.T) {
 	call := CommandCall{Command: "test-missing-env", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BEADLE_K1G_DEFINITELY_UNSET_VAR")
 	assert.Contains(t, err.Error(), "test-missing-env")
@@ -589,7 +589,7 @@ func TestCLIRunner_CompoundMissingDeclaredEnvVarFailsStage(t *testing.T) {
 	call := CommandCall{Command: "test-compound-missing-env", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BEADLE_K1G_DEFINITELY_UNSET_VAR")
 	assert.Contains(t, err.Error(), "test-compound-missing-env")
@@ -613,7 +613,7 @@ func TestClaudeRunner_MissingDeclaredEnvVarFailsStage(t *testing.T) {
 	call := CommandCall{Command: "docs-ask", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BEADLE_K1G_DEFINITELY_UNSET_VAR")
 	assert.Contains(t, err.Error(), "docs-ask")
@@ -665,7 +665,7 @@ func TestClaudeRunner_MissingMCPBinaryCreatesNoMission(t *testing.T) {
 	call := CommandCall{Command: "test-missing-mcp-binary", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ethos")
 	assert.Contains(t, err.Error(), "beadle-tsku-nonexistent-binary")
@@ -721,7 +721,7 @@ func TestClaudeRunner_PayloadReachesSystemPrompt(t *testing.T) {
 	p := testPipeline()
 	p.Body = "please handle this stage"
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, `{"prior":"stage output"}`, false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, `{"prior":"stage output"}`, false)
 	require.NoError(t, err)
 
 	require.NotEmpty(t, spawner.systemPromptContent, "system prompt file must have been captured")
@@ -767,7 +767,7 @@ func TestClaudeRunner_LogsFailedTempFileRemoval(t *testing.T) {
 	call := CommandCall{Command: "test-temp-file-removal", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 
 	mcpLine := logLineContaining(t, buf, "remove mcp config temp file")
@@ -841,7 +841,7 @@ func TestClaudeRunner_ContractCarriesNoPayload(t *testing.T) {
 	meta := EmailMeta{MessageID: "77", From: "alice@example.com", Subject: "Hi"}
 	p := &Pipeline{ID: "test-pipe-contract", Email: meta, Body: body}
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, pipeValue, false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, pipeValue, false)
 	require.NoError(t, err)
 	require.NotEmpty(t, spawner.missionID, "ClaudeRunner.Run must have created a mission")
 
@@ -995,7 +995,7 @@ func TestCLIRunner_ArgsFromPipe_MalformedJSON(t *testing.T) {
 			logger, buf := testLoggerCapture()
 			p := testPipeline()
 
-			result, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, pipe, tt.pipeTruncated, false)
+			result, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, pipe, tt.pipeTruncated)
 			require.NoError(t, err)
 			assert.Empty(t, result) // no args filled: title was never resolved
 
@@ -1148,7 +1148,7 @@ func TestCLIRunner_CompoundOutputCap(t *testing.T) {
 	call := CommandCall{Command: "test-compound-cap", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, truncated, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "input data", false, false)
+	result, truncated, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "input data", false)
 	require.NoError(t, err)
 	assert.Equal(t, 1<<20, len(result), "the returned string itself is capped at exactly 1MB -- no marker appended")
 	assert.NotContains(t, result, "…[truncated]", "no truncation marker must reach the returned string; the truncated return value is the sole statement of truncation")
@@ -1180,7 +1180,7 @@ func TestCLIRunner_CompoundTwoSteps(t *testing.T) {
 	call := CommandCall{Command: "test-compound", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "input data", false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "input data", false)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", result)
 }
@@ -1204,7 +1204,7 @@ func TestCLIRunner_CompoundThreeSteps(t *testing.T) {
 	call := CommandCall{Command: "test-three", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "HELLO WORLD", result)
 }
@@ -1227,7 +1227,7 @@ func TestCLIRunner_CompoundFirstStepFails(t *testing.T) {
 	call := CommandCall{Command: "test-fail-first", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "step[0]")
 }
@@ -1250,7 +1250,7 @@ func TestCLIRunner_CompoundLastStepFails(t *testing.T) {
 	call := CommandCall{Command: "test-fail-last", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "step[1]")
 }
@@ -1274,7 +1274,7 @@ func TestCLIRunner_CompoundTimeout(t *testing.T) {
 	p := testPipeline()
 
 	start := time.Now()
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
@@ -1299,7 +1299,7 @@ func TestCLIRunner_EnvIsolation(t *testing.T) {
 	call := CommandCall{Command: "test-env", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 
 	assert.NotContains(t, result, "BEADLE_TEST_SENTINEL", "subprocess must not inherit daemon env")
@@ -1328,7 +1328,7 @@ func TestCLIRunner_EnvDeclaredVars(t *testing.T) {
 	call := CommandCall{Command: "test-env-declared", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 
 	assert.Contains(t, result, "BEADLE_ALLOWED_VAR=included", "declared var must be present")
@@ -1354,7 +1354,7 @@ func TestCLIRunner_CompoundPipeStdin(t *testing.T) {
 	call := CommandCall{Command: "test-pipe-stdin", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "pipe data", false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "pipe data", false)
 	require.NoError(t, err)
 	assert.Equal(t, "PIPE DATA", result)
 }
@@ -1380,7 +1380,7 @@ func TestCLIRunner_ArgsFromPipe(t *testing.T) {
 	p := testPipeline()
 
 	pipe := `{"title": "Fix auth", "type": "task"}`
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe, false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe, false)
 	require.NoError(t, err)
 	assert.Contains(t, result, "--title=Fix auth")
 	assert.Contains(t, result, "--type=task")
@@ -1409,7 +1409,7 @@ func TestCLIRunner_ArgsPlannerOverridesPipe(t *testing.T) {
 	p := testPipeline()
 
 	pipe := `{"title": "From pipe"}`
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe, false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe, false)
 	require.NoError(t, err)
 	assert.Contains(t, result, "--title=Override")
 	assert.NotContains(t, result, "From pipe")
@@ -1439,7 +1439,7 @@ func TestCLIRunner_ArgsFromPipe_InvalidJSON(t *testing.T) {
 
 	// Pipe is not valid JSON — should not crash, args from call.Args only.
 	pipe := "this is not json"
-	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe, false, false)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe, false)
 	require.NoError(t, err)
 	assert.Contains(t, result, "--title=FromArgs")
 }
@@ -1523,7 +1523,7 @@ func TestClaudeRunner_WorkerErrorOutputIsCapped(t *testing.T) {
 	cmd.MCPServers = []string{}
 	call := CommandCall{Command: "greet", Args: map[string]any{}}
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, testPipeline(), 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, testPipeline(), 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "worker error (exit 2)")
 	assert.Contains(t, err.Error(), strings.Repeat("w", 500)+"...")

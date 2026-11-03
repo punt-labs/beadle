@@ -295,7 +295,7 @@ func TestCLIRunner_CompoundMidChainFailure(t *testing.T) {
 	call := CommandCall{Command: "test-mid-fail", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "step[1]")
 	assert.Contains(t, err.Error(), "false")
@@ -329,7 +329,7 @@ func TestCLIRunner_WhitelistDeletedBinary(t *testing.T) {
 	call := CommandCall{Command: "test-deleted", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err = runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	_, _, err = runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found in whitelist")
 }
@@ -641,7 +641,7 @@ func TestCLIRunner_CompoundResolveFailure(t *testing.T) {
 	call := CommandCall{Command: "test-resolve-fail", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false, false)
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "step[1]")
 	assert.Contains(t, err.Error(), "not found in whitelist")

@@ -42,7 +42,7 @@ type mockRunnerCall struct {
 	Args          map[string]any
 }
 
-func (m *mockClaudeRunner) Run(_ context.Context, _ *Executor, _ *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated, _ bool) (string, bool, error) {
+func (m *mockClaudeRunner) Run(_ context.Context, _ *Executor, _ *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated bool) (string, bool, error) {
 	m.calls = append(m.calls, mockRunnerCall{Idx: idx, Cmd: cmd.Name, Pipe: pipe, PipeTruncated: pipeTruncated, Args: call.Args})
 	i := m.idx
 	m.idx++
@@ -1649,4 +1649,50 @@ func TestStageContextReference(t *testing.T) {
 			}
 		})
 	}
+}
+
+// recordingRunner delegates to inner and records the pipe each call received.
+type recordingRunner struct {
+	inner Runner
+	pipes []string
+}
+
+func (r *recordingRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated bool) (string, bool, error) {
+	r.pipes = append(r.pipes, pipe)
+	return r.inner.Run(ctx, e, p, idx, cmd, call, pipe, pipeTruncated)
+}
+
+// TestExecutor_RawPipeReachesNextCLIStage proves the executor carries the
+// stage output unchanged: NUL and invalid UTF-8 written by one CLI stage are
+// the exact bytes the next CLI stage reads on stdin.
+func TestExecutor_RawPipeReachesNextCLIStage(t *testing.T) {
+	_, wl := setupWhitelist(t, "printf", "cat")
+	cli := &recordingRunner{inner: &CLIRunner{Whitelist: wl}}
+	claude := &mockClaudeRunner{results: []WorkerResult{{Output: "reply sent"}}}
+
+	cmds := testCommands()
+	cmds["dirty"] = &Command{
+		Name: "dirty", Runner: "cli", Mode: "process", Binary: "printf",
+		FixedArgs: []string{`a\000b\377c`}, OutputSchema: "text", Timeout: "5s",
+	}
+	cmds["echo"] = &Command{
+		Name: "echo", Runner: "cli", Mode: "passthrough", Binary: "cat",
+		OutputSchema: "text", Timeout: "5s",
+	}
+
+	exec := &Executor{
+		Planner: &StubPlanner{Result: []CommandCall{
+			{Command: "dirty", Args: map[string]any{}},
+			{Command: "echo", Args: map[string]any{}},
+		}},
+		Commands: cmds,
+		Runners:  map[string]Runner{"cli": cli, "claude": claude},
+		Logger:   testLogger(),
+	}
+
+	p, err := exec.Run(context.Background(), EmailMeta{MessageID: "1", From: "[EMAIL]", Subject: "T"}, "body")
+	require.NoError(t, err)
+	require.Equal(t, "completed", p.Status)
+	require.Len(t, cli.pipes, 2)
+	assert.Equal(t, "a\x00b\xffc", cli.pipes[1])
 }

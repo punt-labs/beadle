@@ -36,7 +36,7 @@ import (
 // StagePayload independently of this return value and are unaffected by
 // this parameter.
 type Runner interface {
-	Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated, pipeSanitized bool) (output string, truncated bool, err error)
+	Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated bool) (output string, truncated bool, err error)
 }
 
 // ClaudeRunner executes a command via a Claude Code worker session.
@@ -51,7 +51,7 @@ type ClaudeRunner struct {
 // and returns the output. truncated is always false: a Claude worker's
 // output has no cap of its own to report (WorkerSpawner.Run), unlike
 // CLIRunner's 1MB stdout cap.
-func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated, pipeSanitized bool) (string, bool, error) {
+func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated bool) (string, bool, error) {
 	// Checked first, before any mission or config file is built: a
 	// permanent deployment misconfiguration (the var was never set in the
 	// unit/plist that starts beadle-daemon) fails identically on every
@@ -109,9 +109,16 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 		"pipeline", p.ID, "stage", idx,
 		"command", call.Command, "mission", missionID)
 
+	// The fence shows sanitized text; the pipe itself stays raw. Decided here,
+	// at the one place the pipe is rendered.
+	fencedPipe, pipeSanitized := sanitizeText(pipe)
+	if pipeSanitized {
+		e.Logger.Warn("stage output sanitized before stage input",
+			"pipeline", p.ID, "stage", idx)
+	}
 	payload := StagePayload{
 		Args:                    buildStageArgs(e, p, idx, cmd.Name, call.Args),
-		PipelineOutput:          pipe,
+		PipelineOutput:          fencedPipe,
 		PipelineOutputTruncated: pipeTruncated,
 		PipelineOutputSanitized: pipeSanitized,
 		EmailBody:               p.Body,
@@ -268,7 +275,7 @@ type CLIRunner struct {
 // reads and might be steered by -- there is no prompt-injection surface
 // here for sanitizing or capping to close, and the binary's own argument
 // parsing already bounds what it accepts.
-func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated, _ bool) (string, bool, error) {
+func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated bool) (string, bool, error) {
 	if len(cmd.Steps) > 0 {
 		return r.runCompound(ctx, e, p, idx, cmd, pipe)
 	}
