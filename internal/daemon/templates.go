@@ -347,12 +347,20 @@ contract and note the conflict in your result.
 
 	if _, err := f.WriteString(prompt); err != nil {
 		_ = f.Close()
-		_ = os.Remove(path)
-		return "", fmt.Errorf("write system prompt to %s: %w", path, err)
+		return "", removeAfterFailure(path, fmt.Errorf("write system prompt to %s: %w", path, err))
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
-		return "", fmt.Errorf("close system prompt %s: %w", path, err)
+		return "", removeAfterFailure(path, fmt.Errorf("close system prompt %s: %w", path, err))
 	}
 	return path, nil
+}
+
+// removeAfterFailure removes path and returns cause joined with any removal
+// error. The file may hold sender content, so a failed removal must leave a
+// trace in the returned error rather than vanish.
+func removeAfterFailure(path string, cause error) error {
+	if rmErr := os.Remove(path); rmErr != nil {
+		return errors.Join(cause, fmt.Errorf("remove %s: %w", path, rmErr))
+	}
+	return cause
 }

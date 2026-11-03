@@ -1091,3 +1091,28 @@ func extractStatedNonce(t *testing.T, content string) string {
 	require.NotEqual(t, -1, end, "stated nonce must be closed by a quote: %q", rest)
 	return rest[:end]
 }
+
+func TestRemoveAfterFailure(t *testing.T) {
+	cause := errors.New("disk full")
+
+	t.Run("removes the file and returns the cause alone", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "prompt.txt")
+		require.NoError(t, os.WriteFile(path, []byte("sender content"), 0o600))
+
+		err := removeAfterFailure(path, cause)
+		assert.Equal(t, cause, err)
+		assert.NoFileExists(t, path)
+	})
+
+	t.Run("joins the removal error when removal fails", func(t *testing.T) {
+		// A non-empty directory cannot be removed by os.Remove.
+		dir := filepath.Join(t.TempDir(), "stuck")
+		require.NoError(t, os.Mkdir(dir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "f"), nil, 0o600))
+
+		err := removeAfterFailure(dir, cause)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, cause)
+		assert.Contains(t, err.Error(), "remove "+dir)
+	})
+}
