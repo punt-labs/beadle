@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -754,4 +755,46 @@ func TestExecutor_MultiplePassthroughStages(t *testing.T) {
 		assert.Equal(t, initialPipe, runner.calls[i].Pipe,
 			"call %d pipe should equal initial pipe", i)
 	}
+}
+
+// TestExecutor_SchemaValidationErrorIsCapped: a validator message can quote
+// the offending (email-derived) value, so what is logged and stored is capped.
+func TestExecutor_SchemaValidationErrorIsCapped(t *testing.T) {
+	runner := &mockClaudeRunner{
+		results: []WorkerResult{
+			{Output: `{"` + strings.Repeat("k", 5000) + `":1}`},
+			{Output: "else reply sent"},
+		},
+	}
+	cmds := map[string]*Command{
+		"strict": {
+			Name:   "strict",
+			Runner: "claude",
+			Mode:   "process",
+			Prompt: "Strict schema",
+			OutputSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+			},
+			Budget: struct {
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
+			}{Rounds: 1},
+		},
+		"reply": testCommands()["reply"],
+	}
+	logger, buf := testLoggerCapture()
+	exec := &Executor{
+		Planner:  &StubPlanner{Result: []CommandCall{{Command: "strict", Args: map[string]any{}}}},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	p, err := exec.Run(context.Background(), EmailMeta{MessageID: "c1", From: "[EMAIL]", Subject: "S"}, "body")
+	require.Error(t, err)
+	assert.Contains(t, p.Error, "output validation")
+	assert.Less(t, len(p.Error), 400)
+	assert.Less(t, len(err.Error()), 400)
+	assert.NotContains(t, buf.String(), strings.Repeat("k", 300))
 }

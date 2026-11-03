@@ -230,17 +230,21 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 
 		if cmd.Mode == "process" {
 			if err := ValidateOutput(schemas[call.Command], result); err != nil {
+				// The validator can quote the offending value, which is stage
+				// output derived from the email: cap it before it is logged or
+				// stored.
+				msg := truncateLog(err.Error(), 200)
 				if resultTruncated {
-					err = fmt.Errorf("output truncated at the 1MB cap, then output validation: %w", err)
+					msg = "output truncated at the 1MB cap, then output validation: " + msg
 				}
 				e.Logger.Warn("output schema validation failed",
 					"pipeline", p.ID, "stage", i,
-					"command", call.Command, "error", err, "truncated", resultTruncated)
+					"command", call.Command, "error", msg, "truncated", resultTruncated)
 				p.Status = "failed"
-				p.Error = fmt.Sprintf("stage %d (%s): output validation: %v", i, call.Command, err)
+				p.Error = fmt.Sprintf("stage %d (%s): output validation: %s", i, call.Command, msg)
 				e.save(p)
 				e.fireElse(p)
-				return p, fmt.Errorf("pipeline %s stage %d (%s): output validation: %w", p.ID, i, call.Command, err)
+				return p, fmt.Errorf("pipeline %s stage %d (%s): output validation: %s", p.ID, i, call.Command, msg)
 			}
 			// Decided once, here, where the pipe is assigned; no content in the log.
 			sanitizedResult, resultSanitized := sanitizeText(result)

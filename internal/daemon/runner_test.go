@@ -1492,3 +1492,40 @@ func TestExecutor_SanitizedPipeReachesClaudeStagePayload(t *testing.T) {
 	assert.Contains(t, content, "\nab�c\n")
 	assert.NotContains(t, content, "\x00")
 }
+
+func TestRunOutput_StderrLogIsCapped(t *testing.T) {
+	logger, buf := testLoggerCapture()
+	stderrBuf := &cappedWriter{max: 1 << 20}
+	_, writeErr := stderrBuf.Write([]byte(strings.Repeat("e", 5000)))
+	require.NoError(t, writeErr)
+
+	e := &Executor{Logger: logger}
+	cmd := &Command{Name: "test-stderr-cap", Binary: "true"}
+
+	_, _, err := runOutput(strings.NewReader(""), func() error { return nil }, stderrBuf, e, cmd, nil, 0)
+	require.NoError(t, err)
+
+	line := logLineContaining(t, buf, "cli command stderr")
+	assert.Contains(t, line, strings.Repeat("e", 500)+"...")
+	assert.NotContains(t, line, strings.Repeat("e", 501))
+}
+
+func TestClaudeRunner_WorkerErrorOutputIsCapped(t *testing.T) {
+	testenv.EthosOrFatal(t)
+	testenv.IsolateEthos(t)
+
+	spawner := &capturingSpawner{result: WorkerResult{IsError: true, ExitCode: 2, Output: strings.Repeat("w", 5000)}}
+	runner := &ClaudeRunner{
+		Templates: &MissionTemplate{TmpDir: t.TempDir()},
+		Spawner:   spawner,
+	}
+	cmd := testCommands()["greet"]
+	cmd.MCPServers = []string{}
+	call := CommandCall{Command: "greet", Args: map[string]any{}}
+
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, testPipeline(), 0, cmd, call, "", false, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "worker error (exit 2)")
+	assert.Contains(t, err.Error(), strings.Repeat("w", 500)+"...")
+	assert.NotContains(t, err.Error(), strings.Repeat("w", 501))
+}

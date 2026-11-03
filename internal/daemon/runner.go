@@ -137,7 +137,9 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 		return "", false, fmt.Errorf("spawn worker: %w", err)
 	}
 	if wr.IsError {
-		return "", false, fmt.Errorf("worker error (exit %d): %s", wr.ExitCode, wr.Output)
+		// wr.Output is model output derived from the email-borne stage input:
+		// untrusted, and this error is logged and persisted, so cap it.
+		return "", false, fmt.Errorf("worker error (exit %d): %s", wr.ExitCode, truncateLog(wr.Output, 500))
 	}
 
 	closeOut, closeErr := exec.CommandContext(ctx, "ethos", "mission", "close", missionID).CombinedOutput()
@@ -384,7 +386,7 @@ func runOutput(stdoutPipe io.Reader, wait func() error, stderrBuf *cappedWriter,
 
 	if stderrBuf.buf.Len() > 0 {
 		e.Logger.Info("cli command stderr",
-			append(pipelineLogArgs(p, idx), "command", cmd.Name, "stderr", stderrBuf.buf.String())...)
+			append(pipelineLogArgs(p, idx), "command", cmd.Name, "stderr", truncateLog(stderrBuf.buf.String(), 500))...)
 	}
 
 	if waitErr != nil {
