@@ -82,15 +82,22 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 	// A whitespace-only body (e.g. "\r\n" -- the trailing MIME boundary
 	// CRLF ParseMIME returns for a multipart/signed message whose signed
 	// part carries no real text) is normalized to "" here, the one place
-	// that decides it: stagePayloadText (and before it, handler.go's own
-	// comment) used to assume an empty and a whitespace-only body "render
-	// the same way downstream," but stagePayloadText only ever tests
+	// that decides it: stagePayloadText used to assume an empty and a
+	// whitespace-only body "render the same way downstream," but it only tests
 	// EmailBody != "" -- "\r\n" is not "", so it rendered as a 2-rune
 	// fence instead of the "(none)" marker the comment claimed. Deciding
 	// it here, before sanitize/cap, means a trimmed-to-empty body also
 	// carries no truncation or sanitization state: there is nothing left
 	// to have truncated or sanitized once the decision is "no body text."
-	if strings.TrimSpace(body) == "" {
+	//
+	// Not an error: a subject-only email, or a multipart/signed message
+	// whose signed part is nothing but the MIME boundary's CRLF, simply has
+	// no body text. It is logged below (once p.ID exists) so the daemon log
+	// explains why this pipeline's system prompt renders "email body: (none)"
+	// -- without the line, that render looks like a bug to anyone reading the
+	// log without also reading the source message.
+	bodyEmpty := strings.TrimSpace(body) == ""
+	if bodyEmpty {
 		body = ""
 	}
 	sanitizedBody, bodySanitized := sanitizeText(body)
@@ -107,6 +114,10 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 		Status:        "running",
 	}
 	e.save(p)
+
+	if bodyEmpty {
+		e.Logger.Warn("email body empty or whitespace-only", "pipeline", p.ID)
+	}
 
 	// Logged once, right after the one place that decided it, so the
 	// decision has a record independent of whatever a later stage renders

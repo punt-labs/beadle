@@ -798,3 +798,38 @@ func TestExecutor_SchemaValidationErrorIsCapped(t *testing.T) {
 	assert.Less(t, len(err.Error()), 400)
 	assert.NotContains(t, buf.String(), strings.Repeat("k", 300))
 }
+
+// TestExecutor_EmptyBodyLogsWarn: Run is where a whitespace-only body is
+// normalized to "", so Run logs it, for every caller.
+func TestExecutor_EmptyBodyLogsWarn(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		body     string
+		wantWarn bool
+	}{
+		{"empty", "", true},
+		{"whitespace only", "\r\n", true},
+		{"real body", "hello", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, buf := testLoggerCapture()
+			exec := &Executor{
+				Planner:  &StubPlanner{Result: []CommandCall{{Command: "greet", Args: map[string]any{}}}},
+				Commands: testCommands(),
+				Runners:  testRunners(&mockClaudeRunner{}),
+				Logger:   logger,
+			}
+			p, err := exec.Run(context.Background(), EmailMeta{MessageID: "1", From: "[EMAIL]", Subject: "S"}, tt.body)
+			require.NoError(t, err)
+
+			if !tt.wantWarn {
+				assert.NotContains(t, buf.String(), "email body empty or whitespace-only")
+				return
+			}
+			line := logLineContaining(t, buf, "email body empty or whitespace-only")
+			assert.Contains(t, line, "level=WARN")
+			assert.Contains(t, line, "pipeline="+p.ID)
+			assert.Empty(t, p.Body)
+		})
+	}
+}

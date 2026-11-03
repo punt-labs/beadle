@@ -247,9 +247,9 @@ func TestOnNewMail_EmptyBodyLogsWarn(t *testing.T) {
 	handler.OnNewMail(1)
 	handler.Stop()
 
-	line := logLineContaining(t, buf, "message has no body text")
+	line := logLineContaining(t, buf, "email body empty or whitespace-only")
 	assert.Contains(t, line, "level=WARN")
-	assert.Contains(t, line, "jim@punt-labs.com")
+	assert.Contains(t, line, "pipeline=")
 }
 
 // TestOnNewMail_NonEmptyBodyDoesNotLogWarn is the negative half: a message
@@ -276,7 +276,7 @@ func TestOnNewMail_NonEmptyBodyDoesNotLogWarn(t *testing.T) {
 	handler.OnNewMail(1)
 	handler.Stop()
 
-	assert.NotContains(t, buf.String(), "message has no body text")
+	assert.NotContains(t, buf.String(), "email body empty or whitespace-only")
 }
 
 // TestVerifyTrust_RejectsProtonHeadersOnNonLocalIMAPHost guards
