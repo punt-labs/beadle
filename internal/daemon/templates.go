@@ -232,7 +232,10 @@ type StageArg struct {
 // BodySanitized for the body (Executor.Run, pipeline.go), and the
 // pipeTruncated local Executor.Run carries alongside pipe for the pipe value
 // (set by whichever Runner.Run call produced it; see Runner's doc comment,
-// runner.go). stagePayloadText must never re-derive these from the string
+// runner.go). PipelineOutputSanitized is the exception: the executor's pipe
+// stays raw, and ClaudeRunner.Run derives it from sanitizeText(pipe) at
+// render time. The auto-reply's input may also end with the fixed truncation
+// notice Executor.Run appends. stagePayloadText must never re-derive these from the string
 // itself: a value that was already capped upstream is never over length
 // again downstream, so a naive "capped != value" check there would silently
 // read false even when the ORIGINAL content needed truncating (round 3 of

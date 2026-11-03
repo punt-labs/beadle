@@ -1493,6 +1493,62 @@ func TestExecutor_SanitizedPipeReachesClaudeStagePayload(t *testing.T) {
 	assert.NotContains(t, content, "\x00")
 }
 
+// TestClaudeRunner_PipeSanitizedAtFence proves ClaudeRunner.Run, not the
+// executor, decides the pipe's sanitized state at render time: a dirty pipe
+// reaches the fence as sanitized text under a "sanitized" header and is
+// logged once without its content; a clean pipe does neither.
+func TestClaudeRunner_PipeSanitizedAtFence(t *testing.T) {
+	const warn = "stage output sanitized before stage input"
+	tests := []struct {
+		name string
+		pipe string
+		want bool
+	}{
+		{"dirty pipe", "a\x00b\xffc", true},
+		{"clean pipe", "abc", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Per-subtest store: both cases share greet's write set, which
+			// ethos refuses to open twice.
+			testenv.EthosOrFatal(t)
+			testenv.IsolateEthos(t)
+
+			spawner := &capturingSpawner{result: WorkerResult{Output: "done"}}
+			runner := &ClaudeRunner{
+				Templates: &MissionTemplate{TmpDir: t.TempDir()},
+				Spawner:   spawner,
+			}
+			logger, buf := testLoggerCapture()
+			cmd := testCommands()["greet"]
+			cmd.MCPServers = []string{}
+			call := CommandCall{Command: "greet", Args: map[string]any{}}
+
+			_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, testPipeline(), 0, cmd, call, tt.pipe, false)
+			require.NoError(t, err)
+
+			content := string(spawner.systemPromptContent)
+			require.NotEmpty(t, content)
+			assert.NotContains(t, content, "\x00")
+			if !tt.want {
+				assert.Contains(t, content, "\nabc\n")
+				assert.NotContains(t, content, "pipeline output: 3 runes, sanitized")
+				assert.NotContains(t, buf.String(), warn)
+				return
+			}
+			assert.Contains(t, content, "\nab�c\n")
+			assert.Contains(t, content, "pipeline output: 4 runes, sanitized ---")
+			line := logLineContaining(t, buf, warn)
+			assert.Contains(t, line, "level=WARN")
+			assert.Contains(t, line, "pipeline=test-pipe")
+			assert.Contains(t, line, "stage=0")
+			assert.NotContains(t, line, `\x00`)
+			assert.NotContains(t, line, `\xff`)
+			assert.NotContains(t, line, "�")
+		})
+	}
+}
+
 func TestRunOutput_StderrLogIsCapped(t *testing.T) {
 	logger, buf := testLoggerCapture()
 	stderrBuf := &cappedWriter{max: 1 << 20}
