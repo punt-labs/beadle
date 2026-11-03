@@ -2785,3 +2785,77 @@ stage is granted, not what the worker process itself can run.
 a worker holding `Bash`, or one compromised via prompt injection, can
 still invoke any binary it can reach by an absolute path or a directory
 already on its restricted `PATH`, independent of this change.
+
+## DES-038: deliver pipeline stage input via the per-spawn system prompt, not the tracked mission contract
+
+**Decision:** `buildStageContract` (`internal/daemon/pipeline.go`) no
+longer embeds the triggering email's body, the current stage's call
+args, or the prior stage's pipeline output in the mission contract's
+`context` field. Instead it writes a fixed, daemon-generated reference
+(pipeline ID and stage index). The actual payload is appended to the
+per-spawn system prompt file `BuildSystemPromptForTools`
+(`internal/daemon/templates.go`) already writes under
+`MissionTemplate.TmpDir` — untracked, `0o600`, removed by
+`ClaudeRunner.Run`'s deferred cleanup once the worker exits — and
+reaches the worker via `claude --append-system-prompt-file`
+(`internal/daemon/spawner.go`) before its first turn, independent of
+what built-in tools the stage's recipe grants.
+
+**Why:** ethos PR #539 (DES-080) redacts every mission-record writer,
+including the untagged `Contract.Context` and `Inputs.Trigger` fields a
+stage contract used to carry the real email content in. On a pin that
+includes it, a worker reading its own contract via `ethos mission show`
+would see `[redacted-email]` and a partially-scrubbed `context` instead
+of the real triggering content — a correctness regression with no error,
+log line, or beadle-side test failure to catch it, since beadle's
+existing tests exercise only `ethos mission create`'s acceptance of the
+generated contract, never what a later `ethos mission show` returns.
+ethos will not exempt these fields: they are free text and provenance
+metadata carrying adversarial input by design, and `#539`'s structural
+test (`TestTrackedWritersAreRedacted`) exists specifically to catch an
+unredacted writer, not to be carved around.
+
+**Alternatives considered:**
+
+- A per-stage payload file under the daemon's own `PipelineStore`
+  directory, referenced by pipeline ID and read via the worker's granted
+  `Read` tool. Rejected: a recipe with no built-in tools (`Tools: []`,
+  already a supported shape — see `BuildSystemPromptForTools`'s own
+  Bash-gated result-submission instruction) has no way to open the file,
+  and the file itself is a new artifact `PipelineStore.Prune` does not
+  know to reap.
+- A daemon-side MCP tool exposing the payload by pipeline/stage ID.
+  Rejected for the same no-tools failure mode as the file approach, plus
+  a strictly larger implementation cost (a new server, registry entry,
+  and stateful addressing scheme) to reproduce what the existing system
+  prompt file already does.
+
+**Consequences:** The tracked mission contract's `inputs.trigger.from`
+is no longer guaranteed to survive a redaction pass (it already wasn't,
+functionally — the daemon's auto-reply and failure-reply paths read
+`Pipeline.Email.From`, never the contract, so this was always cosmetic).
+`message_id` and `type` remain stable since neither is address- or
+credential-shaped. The worker's access to the real stage input is
+unchanged; only the channel carrying it moves from a file ethos commits
+and redacts to one the daemon owns for the lifetime of a single spawn.
+
+**Hardening added in implementation (rounds 2 through 4, beadle-4gm1):**
+the payload now carries literal newlines instead of sitting in a
+YAML-escaped scalar, so each field is wrapped in a begin/end fence
+stamped with a per-render `crypto/rand` nonce (`fenceField`,
+`genFenceNonce` in `internal/daemon/pipeline.go`); the STAGE INPUT
+header tells the worker that only fence lines carrying that nonce are
+the daemon's. A nonce-generation failure is returned as an error, never
+swallowed into a fixed fence. Sanitization (NUL stripped, invalid UTF-8
+replaced) and capping of the body happen exactly once, in
+`Executor.Run`, which stores `BodyTruncated` and `BodySanitized` on the
+pipeline record; the fence states those flags rather than re-deriving
+them from the bytes. The pipe value's truncation state travels with the
+value: `Runner.Run` returns it alongside its output and `Executor.Run`
+carries it as a local paired with `pipe`, with no field on `Pipeline`
+to reset on a schedule that can drift from the value it describes. The
+STAGE INPUT block is rendered unconditionally, with an explicit
+nonce-stamped `--- <nonce> <field>: (none) ---` marker per empty field, so
+a stage with no body, no args and no prior output still sees an empty
+hand-off rather than a missing one, and every daemon-emitted line in the
+block carries the render's nonce.

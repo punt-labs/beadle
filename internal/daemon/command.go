@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -319,6 +320,20 @@ func ValidateCommand(cmd *Command) error {
 	for i, a := range cmd.Args {
 		if a.Name == "" {
 			return fmt.Errorf("arg[%d]: missing name", i)
+		}
+		// An arg name becomes "stage arg <name>" in a fenceField begin/end
+		// line (stagePayloadText, pipeline.go). A name containing any
+		// unicode.IsSpace rune -- a plain space makes the field name
+		// itself ambiguous ("stage arg foo bar"); a newline or other
+		// line-break rune (\r, \v, \f, U+2028/U+2029) actually splits the
+		// one fence line in two, so the nonce stamped on the intended line
+		// no longer covers both halves -- the same fence-forgery gap the
+		// nonce exists to close (see fenceField's doc comment). Reject both
+		// cases at validation time rather than let either reach a fence.
+		for _, r := range a.Name {
+			if unicode.IsSpace(r) {
+				return fmt.Errorf("arg %q: name must not contain whitespace (would split a fenced stage-input line)", a.Name)
+			}
 		}
 		if !validArgTypes[a.Type] {
 			return fmt.Errorf("arg %q: unrecognized type %q", a.Name, a.Type)

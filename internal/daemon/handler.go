@@ -181,6 +181,27 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 				h.logger.Error("skip message: fetch body failed", "from", addr, "id", msg.ID, "error", err)
 				continue
 			}
+			if strings.TrimSpace(body) == "" {
+				// Not an error: fetchBody succeeded, the message simply has
+				// no body text (e.g. a subject-only email, or a
+				// multipart/signed message whose signed body part is
+				// nothing but the MIME boundary's own trailing CRLF --
+				// ParseMIME returns that literal whitespace, not ""). This
+				// check is diagnostic only, not a normalization: Executor.Run
+				// is the one place that actually normalizes a whitespace-only
+				// body to "" before sanitizing and capping it (see Run's doc
+				// comment) -- stagePayloadText fences on Pipeline.Body
+				// verbatim and only ever tests it against "", so a body that
+				// reached that point still carrying literal whitespace like
+				// "\r\n" would render as a 2-rune fence instead of the
+				// "(none)" marker a reader would expect for "no body text".
+				// Logged here so the daemon log explains why this pipeline's
+				// system prompt later renders "email body: (none)" instead
+				// of content -- without this line, that render looks like a
+				// bug to anyone reading the log without also reading the
+				// source message.
+				h.logger.Warn("message has no body text", "from", addr, "id", msg.ID)
+			}
 
 			select {
 			case h.workerSem <- struct{}{}:

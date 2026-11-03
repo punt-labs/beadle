@@ -1,0 +1,90 @@
+mission: m-2026-10-26-019
+round: 1
+created_at: "2026-10-26T18:25:14Z"
+author: bwk
+verdict: pass
+confidence: 0.92
+files_changed:
+    - path: internal/daemon/pipeline.go
+      added: 25
+      removed: 27
+    - path: internal/daemon/pipeline_edge_test.go
+      added: 3
+      removed: 3
+    - path: internal/daemon/pipeline_test.go
+      added: 153
+      removed: 14
+    - path: internal/daemon/runner.go
+      added: 70
+      removed: 49
+    - path: internal/daemon/runner_test.go
+      added: 90
+      removed: 43
+    - path: internal/daemon/templates.go
+      added: 10
+      removed: 6
+evidence:
+    - name: go build ./... and go vet ./... both clean across the whole module
+      status: pass
+    - name: go test -race -count=1 ./... (via make test)
+      status: pass
+    - name: make lint lint-strict (worktree-only G204 artifact only, paths begin with ../)
+      status: pass
+    - name: TestExecutor_TruncatedPipeReachesClaudeStagePayload verified to fail when the fix is reverted (manually patched PipelineOutputTruncated to a fixed false, confirmed failure, reverted)
+      status: pass
+    - name: 'test count: 127 at mission base vs 144 now, net +17, never decreased'
+      status: pass
+prose: |
+    Fixed the structural defect from m-2026-10-26-014's reflection: removed
+    Pipeline.PipeTruncated entirely and made truncation state travel with
+    the pipe value itself, never through a resettable shared field.
+
+    - internal/daemon/runner.go: Runner interface changed to
+      Run(ctx, e, p, idx, cmd, call, pipe string, pipeTruncated bool)
+      (output string, truncated bool, err error). ClaudeRunner.Run threads
+      the incoming pipeTruncated into StagePayload.PipelineOutputTruncated
+      and always returns truncated=false. CLIRunner.Run/runOutput/
+      runCompound return true at their own 1MB cap; runOutput and
+      runCompound no longer take *Pipeline at all, since there is nothing
+      left on it to write.
+    - internal/daemon/pipeline.go: Pipeline.PipeTruncated field deleted.
+      Executor.Run carries pipe and pipeTruncated as a local pair,
+      reassigned together only in the "process" mode branch -- a
+      passthrough stage changes neither. fireElse passes false for its
+      fixed else-pipe string (never truncated by construction); the
+      auto-reply passes the final carried state.
+    - internal/daemon/pipeline_test.go: mockClaudeRunner updated to the
+      new interface with a truncated map and per-call PipeTruncated
+      recording. Three new tests drive the real Executor.Run stage loop
+      with a genuine truncating CLIRunner+dd stage:
+      TestExecutor_TruncatedPipeReachesNextStage and
+      TestExecutor_FireElseDoesNotInheritStaleTruncation promote the
+      evaluator's failing overlay (now deleted from .tmp/);
+      TestExecutor_PassthroughStageDoesNotChangeTruncationState covers
+      the third required case (a passthrough stage's own truncation must
+      not leak into what the next stage sees).
+    - internal/daemon/runner_test.go: all runner.Run/runOutput call sites
+      updated to the new arity. New
+      TestExecutor_TruncatedPipeReachesClaudeStagePayload drives a REAL
+      ClaudeRunner against a real ethos CLI and a capturingSpawner,
+      asserting the actual written system prompt fences the pipeline
+      output as truncated -- not just that a mock recorded the flag, per
+      the criterion's explicit ask for a StagePayload/fence-header
+      assertion. I verified this test catches a regression by temporarily
+      hardcoding PipelineOutputTruncated to false in runner.go, confirming
+      the test failed with no "truncated" in the fence header, then
+      reverting. TestCLIRunner_OutputCap/_CompoundOutputCap updated to
+      assert the returned truncated value.
+    - internal/daemon/pipeline_edge_test.go: the three runner.Run call
+      sites fixed (mechanical arity change, `_, err :=` ->
+      `_, _, err :=`, no new assertions).
+    - internal/daemon/templates.go: StagePayload's doc comment updated to
+      describe the local-variable design instead of the deleted field.
+
+    The overlay fixture at .tmp/sfh-r3-pipetruncated-overlay_test.go was
+    moved to /tmp/ (not rm'd outright, per the destructive-ops preference)
+    after both its cases were promoted into pipeline_test.go.
+
+    One commit (9c9295e), make check green (worktree G204 exception
+    only). daemontest was untouched -- confirmed it implements only
+    Spawner, not Runner, so the arity change does not reach it.

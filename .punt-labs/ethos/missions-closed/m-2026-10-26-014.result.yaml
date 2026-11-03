@@ -1,0 +1,51 @@
+mission: m-2026-10-26-014
+round: 2
+created_at: "2026-10-26T18:16:33Z"
+author: bwk
+verdict: fail
+confidence: 1
+files_changed: []
+evidence:
+    - name: Runner.Run arity change (string, error) -> (string, bool, error) requires updating mockClaudeRunner's implementation and three call sites in internal/daemon/pipeline_edge_test.go, which is outside this mission's write set
+      status: fail
+open_questions:
+    - The mission's write_set did not include internal/daemon/pipeline_edge_test.go. mockClaudeRunner (which implements Runner) and three runner.Run(...) call sites live there and must change to match the new interface arity. Per the contract, a write-set gap is not something I can resolve by editing outside it -- reporting and stopping rather than editing.
+prose: |
+    All in-write-set work for the structural fix is complete and left
+    uncommitted in the worktree, as instructed, for the successor mission:
+
+    - internal/daemon/runner.go: Runner interface changed to
+      Run(ctx, e, p, idx, cmd, call, pipe string, pipeTruncated bool)
+      (output string, truncated bool, err error). ClaudeRunner.Run,
+      CLIRunner.Run, runOutput, and runCompound all updated; runOutput and
+      runCompound no longer take *Pipeline (nothing left to write to it).
+    - internal/daemon/pipeline.go: Pipeline.PipeTruncated field deleted.
+      Executor.Run carries pipe and pipeTruncated as a local pair,
+      reassigned together only in the process-mode branch. fireElse passes
+      false for its fixed else-pipe string. The auto-reply passes the
+      carried final truncation state.
+    - internal/daemon/pipeline_test.go: mockClaudeRunner updated to the new
+      interface (with a truncated map and per-call PipeTruncated
+      recording). Three new tests added, each driving the real
+      Executor.Run stage loop with a genuine truncating CLIRunner+dd stage:
+      TestExecutor_TruncatedPipeReachesNextStage (promoted overlay 1),
+      TestExecutor_FireElseDoesNotInheritStaleTruncation (promoted overlay
+      2), TestExecutor_PassthroughStageDoesNotChangeTruncationState (the
+      third required case).
+    - internal/daemon/runner_test.go: all ~29 runner.Run/runOutput call
+      sites updated to the new arity; TestCLIRunner_OutputCap and
+      TestCLIRunner_CompoundOutputCap adapted to assert the new return
+      value instead of a Pipeline field.
+    - internal/daemon/templates.go: StagePayload's doc comment updated to
+      stop citing the deleted Pipeline.PipeTruncated field.
+
+    go vet ./... confirms the ONLY remaining compile errors in the whole
+    module are the three runner.Run(...) call sites in
+    internal/daemon/pipeline_edge_test.go (lines 297, 331, 643) -- outside
+    this mission's write set, which also omitted that file's
+    mockClaudeRunner-adjacent dependency on the Runner interface shape.
+    Reported twice before this result; the leader confirmed the write-set
+    gap and is opening a successor mission with pipeline_edge_test.go and
+    persist_test.go added to the write set. No commit was made this round;
+    all edits remain uncommitted in the worktree for the successor to pick
+    up and finish.

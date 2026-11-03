@@ -862,7 +862,10 @@ func TestBuildSystemPrompt(t *testing.T) {
 			// the full instruction set, including the result-submission
 			// line; BuildSystemPrompt's nil-tools default now omits it
 			// (nil tools means no built-in tools, per spawner.go's Run).
-			path, err := tmpl.BuildSystemPromptForTools(tt.missionID, []string{"Bash"})
+			// StagePayload{} (no payload) matches BuildSystemPrompt's own
+			// behavior and keeps this test's assertions about exactly
+			// today's no-payload shape.
+			path, err := tmpl.BuildSystemPromptForTools(tt.missionID, []string{"Bash"}, StagePayload{})
 			require.NoError(t, err)
 			defer os.Remove(path)
 
@@ -905,4 +908,186 @@ func TestBuildSystemPromptNilToolsOmitsBashDependentResult(t *testing.T) {
 	assert.NotContains(t, content, "ethos mission result",
 		"nil tools grants no Bash, so the result-submission instruction must be omitted")
 	assert.Contains(t, content, "ethos mission show m-1")
+}
+
+// testStagePayload is the fixture shared by
+// TestBuildSystemPromptForTools_PayloadDelivered and its nil/empty-tools
+// siblings: a non-empty StagePayload carrying all three payload components
+// at once, so a test can assert each survives verbatim in the written file.
+func testStagePayload() StagePayload {
+	return StagePayload{
+		Args: []StageArg{
+			{Name: "env", Value: "prod"},
+			{Name: "region", Value: "us-east-1"},
+		},
+		PipelineOutput: `{"summary":"prior stage output"}`,
+		EmailBody:      "please deploy the new build to production",
+	}
+}
+
+// TestBuildSystemPromptForTools_PayloadDelivered is proving test 2 for
+// beadle-4gm1 (docs/email-payload-handoff.md, approach A): the system
+// prompt -- not the mission contract -- is the one place the stage's actual
+// payload must land, verbatim, when the recipe grants Bash (and therefore
+// every other built-in tool a typical recipe would grant alongside it).
+func TestBuildSystemPromptForTools_PayloadDelivered(t *testing.T) {
+	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+	payload := testStagePayload()
+
+	path, err := tmpl.BuildSystemPromptForTools("m-payload-1", []string{"Bash", "Read"}, payload)
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(data)
+
+	assert.Contains(t, content, "STAGE INPUT")
+	assert.Contains(t, content, "stage arg env")
+	assert.Contains(t, content, "\nprod\n")
+	assert.Contains(t, content, "stage arg region")
+	assert.Contains(t, content, "\nus-east-1\n")
+	assert.Contains(t, content, `{"summary":"prior stage output"}`,
+		"the prior stage's pipeline output must reach the system prompt verbatim")
+	assert.Contains(t, content, "please deploy the new build to production",
+		"the full, capped email body must reach the system prompt verbatim")
+
+	// The STAGE INPUT block must come after the SECURITY paragraph, per the
+	// design: the adversarial-content warning is read first, the content
+	// second.
+	securityIdx := strings.Index(content, "SECURITY:")
+	stageInputIdx := strings.Index(content, "STAGE INPUT")
+	require.NotEqual(t, -1, securityIdx)
+	require.NotEqual(t, -1, stageInputIdx)
+	assert.Less(t, securityIdx, stageInputIdx, "STAGE INPUT must appear after SECURITY")
+}
+
+// TestBuildSystemPromptForTools_PayloadDeliveredNilTools is proving test 3
+// (nil-tools half): the central claim of approach A is that the payload
+// reaches the worker through the system prompt independent of --tools, so a
+// recipe granting no built-in tools at all must still receive the full
+// payload -- there is no "fails the spawn" branch to design around, unlike
+// the per-stage-file and MCP-tool alternatives the design doc rejected.
+func TestBuildSystemPromptForTools_PayloadDeliveredNilTools(t *testing.T) {
+	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+	payload := testStagePayload()
+
+	path, err := tmpl.BuildSystemPromptForTools("m-payload-2", nil, payload)
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(data)
+
+	assert.Contains(t, content, "stage arg env")
+	assert.Contains(t, content, "stage arg region")
+	assert.Contains(t, content, `{"summary":"prior stage output"}`)
+	assert.Contains(t, content, "please deploy the new build to production")
+	assert.NotContains(t, content, "ethos mission result",
+		"nil tools still grants no Bash, independent of the payload")
+}
+
+// TestBuildSystemPromptForTools_PayloadDeliveredEmptyTools is proving test
+// 3's other half: Tools: [] (explicitly empty, distinct from nil at the
+// recipe-declaration level, see beadle-p43a's analogous MCPServers case)
+// must behave identically to nil for payload delivery.
+func TestBuildSystemPromptForTools_PayloadDeliveredEmptyTools(t *testing.T) {
+	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+	payload := testStagePayload()
+
+	path, err := tmpl.BuildSystemPromptForTools("m-payload-3", []string{}, payload)
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(data)
+
+	assert.Contains(t, content, "stage arg env")
+	assert.Contains(t, content, "stage arg region")
+	assert.Contains(t, content, `{"summary":"prior stage output"}`)
+	assert.Contains(t, content, "please deploy the new build to production")
+}
+
+// TestBuildSystemPromptForTools_EmptyPayloadRendersNoneMarkers is the
+// round-2 regression test for the finding that the old isEmpty gate was
+// wrong (renamed in round 3 from
+// TestBuildSystemPromptForTools_EmptyPayloadOmitsStageInput, since it no
+// longer omits anything): the STAGE INPUT block must always be present
+// (the one production caller, ClaudeRunner.Run, may legitimately pass any
+// of the three fields empty on its own), with an explicit "(none)" marker
+// per field and no fence at all for an empty field -- never a missing
+// block.
+func TestBuildSystemPromptForTools_EmptyPayloadRendersNoneMarkers(t *testing.T) {
+	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+
+	path, err := tmpl.BuildSystemPromptForTools("m-payload-4", []string{"Bash"}, StagePayload{})
+	require.NoError(t, err)
+	defer os.Remove(path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	content := string(data)
+
+	assert.Contains(t, content, "STAGE INPUT",
+		"the block must always be present, even for an empty payload")
+	nonce := extractStatedNonce(t, content)
+	assert.Contains(t, content, emptyMarker(nonce, "stage args"))
+	assert.Contains(t, content, emptyMarker(nonce, "pipeline output"))
+	assert.Contains(t, content, emptyMarker(nonce, "email body"))
+	assert.NotContains(t, content, "--- begin",
+		"no field is fenced when every field is empty")
+}
+
+// TestBuildSystemPromptForTools_NonceStatedAndStampsFences is round 3's
+// regression test for the fence-forgery finding: the STAGE INPUT header
+// must name the render's nonce, and every fence line in the rendered
+// payload must carry that exact nonce -- the property that lets a worker
+// (or a human reviewer) tell a real daemon-generated fence apart from one
+// the email body merely imitates. Two separate renders must use two
+// different nonces, since a fixed or reused nonce would let a sender who
+// has seen one render predict the next.
+func TestBuildSystemPromptForTools_NonceStatedAndStampsFences(t *testing.T) {
+	tmpl := &MissionTemplate{TmpDir: t.TempDir()}
+	payload := testStagePayload()
+
+	path1, err := tmpl.BuildSystemPromptForTools("m-nonce-1", []string{"Bash"}, payload)
+	require.NoError(t, err)
+	defer os.Remove(path1)
+	data1, err := os.ReadFile(path1)
+	require.NoError(t, err)
+	content1 := string(data1)
+
+	path2, err := tmpl.BuildSystemPromptForTools("m-nonce-2", []string{"Bash"}, payload)
+	require.NoError(t, err)
+	defer os.Remove(path2)
+	data2, err := os.ReadFile(path2)
+	require.NoError(t, err)
+	content2 := string(data2)
+
+	nonce1 := extractStatedNonce(t, content1)
+	nonce2 := extractStatedNonce(t, content2)
+	assert.NotEqual(t, nonce1, nonce2, "each render must generate a fresh nonce")
+
+	for _, line := range strings.Split(content1, "\n") {
+		if strings.HasPrefix(line, "--- ") {
+			assert.Contains(t, line, nonce1, "every fence line in render 1 must carry render 1's stated nonce: %q", line)
+			assert.NotContains(t, line, nonce2, "render 1's fences must not carry render 2's nonce")
+		}
+	}
+}
+
+// extractStatedNonce pulls the nonce BuildSystemPromptForTools's STAGE
+// INPUT header states ("Only fence lines carrying the nonce %q below...")
+// out of content, failing the test if the header is missing or malformed.
+func extractStatedNonce(t *testing.T, content string) string {
+	t.Helper()
+	const marker = "carrying the nonce \""
+	idx := strings.Index(content, marker)
+	require.NotEqual(t, -1, idx, "STAGE INPUT header must state the nonce: %q", content)
+	rest := content[idx+len(marker):]
+	end := strings.Index(rest, "\"")
+	require.NotEqual(t, -1, end, "stated nonce must be closed by a quote: %q", rest)
+	return rest[:end]
 }

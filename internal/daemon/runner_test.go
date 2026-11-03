@@ -11,10 +11,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/punt-labs/beadle/internal/testenv"
 )
@@ -67,6 +69,44 @@ func testPipeline() *Pipeline {
 	}
 }
 
+// capturingSpawner is a minimal Spawner that records the system prompt
+// file's content at the moment Run is called -- ClaudeRunner.Run removes
+// both the mcp-config and system-prompt files via deferred os.Remove once
+// Run returns, so this is the only window in which a package-daemon test
+// (which cannot import internal/daemontest, see daemontest's package
+// comment) can observe what ClaudeRunner.Run actually wrote.
+type capturingSpawner struct {
+	systemPromptContent []byte
+	missionID           string
+	result              WorkerResult
+	err                 error
+}
+
+func (s *capturingSpawner) Run(_ context.Context, missionID, _, systemPromptPath string, _ []string, _ map[string]string) (WorkerResult, error) {
+	s.missionID = missionID
+	content, readErr := os.ReadFile(systemPromptPath)
+	if readErr == nil {
+		s.systemPromptContent = content
+	}
+	return s.result, s.err
+}
+
+// removingSpawner deletes the mcp-config and system-prompt files itself,
+// during Run, before ClaudeRunner.Run's own deferred os.Remove calls fire
+// on them afterward -- standing in for a race or a worker that cleans up
+// its own temp files, so the test can force the "already gone" branch of
+// each deferred Remove without any other way to observe it (the paths
+// are otherwise invisible outside ClaudeRunner.Run itself).
+type removingSpawner struct {
+	result WorkerResult
+}
+
+func (s *removingSpawner) Run(_ context.Context, _, mcpConfigPath, systemPromptPath string, _ []string, _ map[string]string) (WorkerResult, error) {
+	_ = os.Remove(mcpConfigPath)
+	_ = os.Remove(systemPromptPath)
+	return s.result, nil
+}
+
 func TestBinaryWhitelist_Resolve(t *testing.T) {
 	dir, wl := setupWhitelist(t, "echo", "cat")
 
@@ -115,7 +155,7 @@ func TestCLIRunner_Echo(t *testing.T) {
 	call := CommandCall{Command: "test-echo", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "hello\n", result)
 }
@@ -135,7 +175,7 @@ func TestCLIRunner_CatStdin(t *testing.T) {
 	call := CommandCall{Command: "test-cat", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "pipe data")
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "pipe data", false)
 	require.NoError(t, err)
 	assert.Equal(t, "pipe data", result)
 }
@@ -155,7 +195,7 @@ func TestCLIRunner_NonzeroExit(t *testing.T) {
 	call := CommandCall{Command: "test-false", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cli false")
 }
@@ -174,7 +214,7 @@ func TestCLIRunner_BinaryNotInWhitelist(t *testing.T) {
 	call := CommandCall{Command: "test-nope", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found in whitelist")
 }
@@ -208,7 +248,7 @@ func TestCLIRunner_ArgAssembly(t *testing.T) {
 	}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	// echo -n --flag=val A B
 	assert.Equal(t, "--flag=val A B", result)
@@ -231,18 +271,26 @@ func TestCLIRunner_Timeout(t *testing.T) {
 	p := testPipeline()
 
 	start := time.Now()
-	_, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
 	assert.Less(t, elapsed, 5*time.Second)
 }
 
+// TestCLIRunner_OutputCap verifies truncation at the 1MB cap is both
+// capped and reported via Run's own truncated return value -- round 3 of
+// beadle-4gm1 moved the truncation signal off an appended marker string;
+// round 4 moved it off a shared Pipeline field (which raced the one reader
+// of a different stage's truncation state) onto this return value, which
+// Executor.Run carries forward as a local alongside the pipe value it
+// describes.
 func TestCLIRunner_OutputCap(t *testing.T) {
 	// Use dd to produce >1MB of output and verify truncation is capped and
-	// marked -- a downstream reader (including an LLM worker reading the
-	// mission contract's context field) must be able to tell the value was
-	// cut rather than silently trusting a partial value as complete.
+	// marked -- a downstream reader (including an LLM worker reading its
+	// system prompt's fenced pipeline output field) must be able to tell
+	// the value was cut rather than silently trusting a partial value as
+	// complete.
 	_, wl := setupWhitelist(t, "dd")
 	runner := &CLIRunner{Whitelist: wl}
 
@@ -258,10 +306,11 @@ func TestCLIRunner_OutputCap(t *testing.T) {
 	call := CommandCall{Command: "test-cap", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	result, truncated, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
-	assert.Equal(t, 1<<20+len(truncationMarker), len(result))
-	assert.True(t, strings.HasSuffix(result, truncationMarker))
+	assert.Equal(t, 1<<20, len(result), "the returned string itself is capped at exactly 1MB -- no marker appended")
+	assert.NotContains(t, result, "…[truncated]", "no truncation marker must reach the returned string; the truncated return value is the sole statement of truncation")
+	assert.True(t, truncated)
 }
 
 // TestCLIRunner_OutputCap_LogsTruncation is the regression test for
@@ -285,13 +334,15 @@ func TestCLIRunner_OutputCap_LogsTruncation(t *testing.T) {
 	call := CommandCall{Command: "test-cap-logged", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 
 	line := logLineContaining(t, buf, "cli command stdout truncated")
 	assert.Contains(t, line, "level=WARN")
 	assert.Contains(t, line, "test-cap-logged")
 	assert.Contains(t, line, "discarded_bytes=1")
+	assert.Contains(t, line, "pipeline=test-pipe")
+	assert.Contains(t, line, "stage=0")
 }
 
 // errAfter is an io.Reader that yields data once, then always fails with
@@ -342,7 +393,7 @@ func TestRunOutput_LogsStderrOnReadError(t *testing.T) {
 	cmd := &Command{Name: "test-stderr-on-read-error", Binary: "false"}
 	r := &errAfter{err: errors.New("pipe read boom")}
 
-	_, err := runOutput(r, func() error { return nil }, stderrBuf, e, cmd)
+	_, _, err := runOutput(r, func() error { return nil }, stderrBuf, e, cmd, nil, 0)
 	require.Error(t, err)
 
 	line := logLineContaining(t, buf, "boom: disk full")
@@ -364,17 +415,42 @@ func TestRunOutput_LogsStderrOnWaitError(t *testing.T) {
 	cmd := &Command{Name: "test-stderr-on-wait-error", Binary: "false"}
 	r := strings.NewReader("")
 
-	_, err := runOutput(r, func() error { return errors.New("wait boom") }, stderrBuf, e, cmd)
+	_, _, err := runOutput(r, func() error { return errors.New("wait boom") }, stderrBuf, e, cmd, nil, 0)
 	require.Error(t, err)
 
 	line := logLineContaining(t, buf, "exit status 1")
 	assert.Contains(t, line, "test-stderr-on-wait-error")
 }
 
+// TestRunOutput_StderrLogCarriesPipelineAndStage proves the "cli command
+// stderr" Info line (logged when the command exits 0 but still wrote to
+// stderr) is tagged with pipeline/stage via pipelineLogArgs, the same
+// correlation the truncation Warn lines already carry -- a daemon running
+// several pipelines concurrently needs it to tell one stage's stderr apart
+// from another's in the log stream.
+func TestRunOutput_StderrLogCarriesPipelineAndStage(t *testing.T) {
+	logger, buf := testLoggerCapture()
+	stderrBuf := &cappedWriter{max: 1 << 20}
+	_, writeErr := stderrBuf.Write([]byte("warning: deprecated flag"))
+	require.NoError(t, writeErr)
+
+	e := &Executor{Logger: logger}
+	cmd := &Command{Name: "test-stderr-attributed", Binary: "true"}
+	p := testPipeline()
+
+	_, _, err := runOutput(strings.NewReader(""), func() error { return nil }, stderrBuf, e, cmd, p, 2)
+	require.NoError(t, err)
+
+	line := logLineContaining(t, buf, "warning: deprecated flag")
+	assert.Contains(t, line, "test-stderr-attributed")
+	assert.Contains(t, line, "pipeline="+p.ID)
+	assert.Contains(t, line, "stage=2")
+}
+
 // TestReadCapped_ReportsExtraOnlyWhenTruncated confirms extra is 0 (no
 // truncation) when the reader has less data than the cap, and > 0 (real
 // truncation) when it has more -- the distinction TestCLIRunner_OutputCap
-// depends on to decide whether to append truncationMarker.
+// depends on to decide whether truncated is reported true.
 func TestReadCapped_ReportsExtraOnlyWhenTruncated(t *testing.T) {
 	t.Run("under cap", func(t *testing.T) {
 		data, extra, err := readCapped(strings.NewReader("short"), 1<<20)
@@ -413,7 +489,7 @@ func TestCLIRunner_InvalidTimeoutLogged(t *testing.T) {
 	call := CommandCall{Command: "test-bad-timeout", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "hi\n", result)
 
@@ -444,7 +520,7 @@ func TestCLIRunner_CompoundInvalidTimeoutLogged(t *testing.T) {
 	call := CommandCall{Command: "test-compound-bad-timeout", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", result)
 
@@ -485,7 +561,7 @@ func TestCLIRunner_MissingDeclaredEnvVarFailsStage(t *testing.T) {
 	call := CommandCall{Command: "test-missing-env", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BEADLE_K1G_DEFINITELY_UNSET_VAR")
 	assert.Contains(t, err.Error(), "test-missing-env")
@@ -513,7 +589,7 @@ func TestCLIRunner_CompoundMissingDeclaredEnvVarFailsStage(t *testing.T) {
 	call := CommandCall{Command: "test-compound-missing-env", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BEADLE_K1G_DEFINITELY_UNSET_VAR")
 	assert.Contains(t, err.Error(), "test-compound-missing-env")
@@ -537,7 +613,7 @@ func TestClaudeRunner_MissingDeclaredEnvVarFailsStage(t *testing.T) {
 	call := CommandCall{Command: "docs-ask", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BEADLE_K1G_DEFINITELY_UNSET_VAR")
 	assert.Contains(t, err.Error(), "docs-ask")
@@ -589,7 +665,7 @@ func TestClaudeRunner_MissingMCPBinaryCreatesNoMission(t *testing.T) {
 	call := CommandCall{Command: "test-missing-mcp-binary", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ethos")
 	assert.Contains(t, err.Error(), "beadle-tsku-nonexistent-binary")
@@ -601,15 +677,294 @@ func TestClaudeRunner_MissingMCPBinaryCreatesNoMission(t *testing.T) {
 		"a missing MCP server binary must fail before any ethos mission is created, leaving the isolated mission store empty")
 }
 
+// TestClaudeRunner_PayloadReachesSystemPrompt is the argument-threading
+// regression test for beadle-4gm1 (docs/email-payload-handoff.md,
+// DES-038): ClaudeRunner.Run must pass call.Args, pipe, and p.Body into the
+// system-prompt builder at the existing buildStageContract call site, so
+// the stage's actual payload reaches the worker's system prompt through
+// the real pipeline, not just in the templates_test.go unit tests that
+// call BuildSystemPromptForTools directly. Renamed (round 3) from
+// TestClaudeRunner_PayloadReachesSystemPromptNotContract: the contract
+// half of that name's claim is proven by the distinct
+// TestClaudeRunner_ContractCarriesNoPayload instead, which this test does
+// not touch.
+//
+// MCPServers: []string{} (explicitly empty, not nil) sidesteps
+// BuildMCPConfig's exec.LookPath resolution, so this test needs no real
+// ethos/beadle-email binaries on PATH beyond the real `ethos` CLI that
+// createMissionFromContract itself invokes (via testenv.EthosOrFatal/
+// IsolateEthos, the same pattern TestClaudeRunner_MissingMCPBinaryCreatesNoMission
+// uses).
+func TestClaudeRunner_PayloadReachesSystemPrompt(t *testing.T) {
+	testenv.EthosOrFatal(t)
+	testenv.IsolateEthos(t)
+
+	spawner := &capturingSpawner{result: WorkerResult{Output: "done"}}
+	runner := &ClaudeRunner{
+		Templates: &MissionTemplate{TmpDir: t.TempDir()},
+		Spawner:   spawner,
+	}
+	logger, _ := testLoggerCapture()
+
+	cmd := &Command{
+		Name:       "test-payload-threading",
+		Runner:     "claude",
+		MCPServers: []string{},
+		Prompt:     "Handle the stage",
+		WriteSet:   []string{fmt.Sprintf("internal/daemon/testdata/mission-regression-fixture-4gm1-%s.txt", uuid.New().String())},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds" json:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
+		}{Rounds: 1, ReflectionAfterEach: false},
+	}
+	call := CommandCall{Command: "test-payload-threading", Args: map[string]any{"region": "us-west-2"}}
+	p := testPipeline()
+	p.Body = "please handle this stage"
+
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, `{"prior":"stage output"}`, false)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, spawner.systemPromptContent, "system prompt file must have been captured")
+	content := string(spawner.systemPromptContent)
+	assert.Contains(t, content, "stage arg region",
+		"call.Args must reach the system prompt")
+	assert.Contains(t, content, "us-west-2",
+		"call.Args's value must reach the system prompt")
+	assert.Contains(t, content, `{"prior":"stage output"}`,
+		"the pipe value (prior stage output) must reach the system prompt")
+	assert.Contains(t, content, "please handle this stage",
+		"p.Body (the triggering email's body) must reach the system prompt")
+}
+
+// TestClaudeRunner_LogsFailedTempFileRemoval proves ClaudeRunner.Run Warns,
+// naming the path, when either deferred os.Remove (mcp-config,
+// system-prompt) fails -- rather than the prior silent
+// `_ = os.Remove(...)`. removingSpawner forces the "already gone" branch by
+// deleting both files itself during Run, before ClaudeRunner.Run's own
+// deferred removal fires on them.
+func TestClaudeRunner_LogsFailedTempFileRemoval(t *testing.T) {
+	testenv.EthosOrFatal(t)
+	testenv.IsolateEthos(t)
+
+	spawner := &removingSpawner{result: WorkerResult{Output: "done"}}
+	runner := &ClaudeRunner{
+		Templates: &MissionTemplate{TmpDir: t.TempDir()},
+		Spawner:   spawner,
+	}
+	logger, buf := testLoggerCapture()
+
+	cmd := &Command{
+		Name:       "test-temp-file-removal",
+		Runner:     "claude",
+		MCPServers: []string{},
+		Prompt:     "Handle the stage",
+		WriteSet:   []string{fmt.Sprintf("internal/daemon/testdata/mission-regression-fixture-tmpfile-%s.txt", uuid.New().String())},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds" json:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
+		}{Rounds: 1, ReflectionAfterEach: false},
+	}
+	call := CommandCall{Command: "test-temp-file-removal", Args: map[string]any{}}
+	p := testPipeline()
+
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "", false)
+	require.NoError(t, err)
+
+	mcpLine := logLineContaining(t, buf, "remove mcp config temp file")
+	assert.Contains(t, mcpLine, "level=WARN")
+	assert.Contains(t, mcpLine, "mcp-config-")
+
+	promptLine := logLineContaining(t, buf, "remove system prompt temp file")
+	assert.Contains(t, promptLine, "level=WARN")
+	assert.Contains(t, promptLine, "system-prompt-")
+}
+
+// TestClaudeRunner_ContractCarriesNoPayload is round 2's rewrite of
+// beadle-4gm1's leak-freedom regression test: the prior version
+// (pipeline_test.go's deleted TestBuildStageContract_ContextCarriesNoPayload)
+// was vacuous, because buildStageContract's signature no longer accepts the
+// stage's payload at all -- asserting absence of text a function was never
+// handed proves nothing. This drives ClaudeRunner.Run (the real call site)
+// end to end: the mission it creates via the real `ethos mission create`
+// lands in the isolated mission store at
+// $ETHOS_REPO_ROOT/.punt-labs/ethos/missions/<id>/contract.yaml, and this
+// test reads that file back and inspects the whole document except
+// inputs.trigger (which deliberately keeps meta.From, per success
+// criterion 1) for every piece of the payload.
+//
+// The fixture body puts the embedded address and the secret-shaped token
+// inside the first 200 runes (comfortably under maxContractFieldRunes), so
+// a regression that re-embeds the payload would not escape detection by
+// hiding past the cap.
+func TestClaudeRunner_ContractCarriesNoPayload(t *testing.T) {
+	testenv.EthosOrFatal(t)
+	testenv.IsolateEthos(t)
+	repoRoot := os.Getenv("ETHOS_REPO_ROOT")
+	require.NotEmpty(t, repoRoot, "testenv.IsolateEthos must have set ETHOS_REPO_ROOT")
+
+	spawner := &capturingSpawner{result: WorkerResult{Output: "done"}}
+	runner := &ClaudeRunner{
+		Templates: &MissionTemplate{TmpDir: t.TempDir()},
+		Spawner:   spawner,
+	}
+	logger, _ := testLoggerCapture()
+
+	const embeddedAddress = "attacker@example.com"
+	const secretToken = "sk-live-abcdefghijklmnopqrstuvwxyz123456"
+	body := fmt.Sprintf("Contact me at %s, token=%s, and read on.\n", embeddedAddress, secretToken) +
+		strings.Repeat("filler text to pad this body out well past the cap. ", 20)
+	require.Greater(t, utf8.RuneCountInString(body), maxContractFieldRunes,
+		"fixture body must exceed the cap to prove truncation does not hide a leak")
+	addressIdx := strings.Index(body, embeddedAddress)
+	require.GreaterOrEqual(t, addressIdx, 0, "fixture body must actually contain the embedded address")
+	require.Less(t, addressIdx, 200,
+		"the embedded address must sit inside the first 200 runes, well under the cap")
+	tokenIdx := strings.Index(body, secretToken)
+	require.GreaterOrEqual(t, tokenIdx, 0, "fixture body must actually contain the secret-shaped token")
+	require.Less(t, tokenIdx, 200,
+		"the secret-shaped token must sit inside the first 200 runes, well under the cap")
+
+	cmd := &Command{
+		Name:       "test-contract-no-payload",
+		Runner:     "claude",
+		MCPServers: []string{},
+		Prompt:     "Handle this",
+		WriteSet:   []string{fmt.Sprintf("internal/daemon/testdata/mission-regression-fixture-4gm1-contract-%s.txt", uuid.New().String())},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds" json:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
+		}{Rounds: 1, ReflectionAfterEach: false},
+	}
+	argValue := "distinctive-arg-value-42"
+	pipeValue := `{"pipeline":"distinctive-pipe-value-99"}`
+	call := CommandCall{Command: "test-contract-no-payload", Args: map[string]any{"note": argValue}}
+	meta := EmailMeta{MessageID: "77", From: "alice@example.com", Subject: "Hi"}
+	p := &Pipeline{ID: "test-pipe-contract", Email: meta, Body: body}
+
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, pipeValue, false)
+	require.NoError(t, err)
+	require.NotEmpty(t, spawner.missionID, "ClaudeRunner.Run must have created a mission")
+
+	contractPath := filepath.Join(repoRoot, ".punt-labs", "ethos", "missions", spawner.missionID, "contract.yaml")
+	contractBytes, err := os.ReadFile(contractPath)
+	require.NoError(t, err, "stored contract file must exist at the real ethos mission store path")
+	contract := string(contractBytes)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal(contractBytes, &doc))
+	trigger, ok := doc["inputs"].(map[string]any)["trigger"].(map[string]any)
+	require.True(t, ok, "inputs.trigger must be a map")
+	// escapeYAMLValue(meta.From) is the double-quoted YAML scalar
+	// buildStageContract wrote into the raw file; a YAML decoder resolves
+	// that quoted scalar to its plain value, which is exactly meta.From
+	// here (no characters escapeYAMLValue needs to escape or cap). Proving
+	// trigger["from"] decodes back to meta.From proves escapeYAMLValue's
+	// round trip, not just that some string happens to equal meta.From.
+	//
+	// Two forms are accepted because the store is written by the real ethos
+	// on PATH: ethos v4.16.0 keeps the address verbatim, while a build with
+	// DES-080 redaction stores "[redacted-email]". inputs.trigger.from is
+	// provenance, not payload, and DES-038 (docs/email-payload-handoff.md)
+	// allows either. Everything outside inputs.trigger stays strict below.
+	assert.Contains(t, []any{meta.From, "[redacted-email]"}, trigger["from"],
+		"inputs.trigger.from must be meta.From (round-tripped through YAML) or ethos's DES-080 redaction -- DES-038, success criterion 1")
+	delete(doc, "inputs")
+
+	rest, err := yaml.Marshal(doc)
+	require.NoError(t, err)
+	restStr := string(rest)
+
+	for _, line := range strings.Split(body, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		assert.NotContains(t, restStr, line,
+			"the stored contract (outside inputs.trigger) must not carry any line of the triggering email's body")
+	}
+	assert.NotContains(t, restStr, embeddedAddress,
+		"the stored contract (outside inputs.trigger) must not carry the body's embedded address")
+	assert.NotContains(t, restStr, secretToken,
+		"the stored contract (outside inputs.trigger) must not carry the secret-shaped token")
+	assert.NotContains(t, restStr, argValue,
+		"the stored contract (outside inputs.trigger) must not carry the stage's call arg value")
+	assert.NotContains(t, restStr, pipeValue,
+		"the stored contract (outside inputs.trigger) must not carry the pipe value")
+	assert.NotContains(t, restStr, meta.From,
+		"the stored contract (outside inputs.trigger) must not carry meta.From by any other path")
+
+	// Sanity: the whole raw file (inputs.trigger included) still carries
+	// none of the three payload components -- only meta.From there is
+	// expected and already proven above via escapeYAMLValue.
+	assert.NotContains(t, contract, embeddedAddress, "double-check against the raw file too")
+	assert.NotContains(t, contract, secretToken, "double-check against the raw file too")
+	assert.NotContains(t, contract, argValue, "double-check against the raw file too")
+	assert.NotContains(t, contract, pipeValue, "double-check against the raw file too")
+
+	assert.Equal(t, stageContextReference(p.ID, 0), doc["context"],
+		"context must equal the fixed reference string")
+}
+
+// TestExecutor_TruncatedPipeReachesClaudeStagePayload is round 4's
+// end-to-end proof that the claude stage's StagePayload (and therefore the
+// worker's actual fenced system prompt) reflects the carried
+// pipeTruncated local, not just that mockClaudeRunner recorded it: a
+// passthrough CLIRunner stage's stdout hits the 1MB cap, then a real
+// ClaudeRunner stage runs against a real ethos CLI and a capturingSpawner,
+// and its written system prompt must fence the pipeline output as
+// truncated.
+func TestExecutor_TruncatedPipeReachesClaudeStagePayload(t *testing.T) {
+	testenv.EthosOrFatal(t)
+	testenv.IsolateEthos(t)
+
+	_, wl := setupWhitelist(t, "dd")
+	spawner := &capturingSpawner{result: WorkerResult{Output: "done"}}
+	claude := &ClaudeRunner{
+		Templates: &MissionTemplate{TmpDir: t.TempDir()},
+		Spawner:   spawner,
+	}
+
+	cmds := testCommands()
+	cmds["cap"] = capCommand("text")
+	cmds["greet"].MCPServers = []string{} // sidestep BuildMCPConfig's exec.LookPath for ethos/beadle-email
+
+	exec := &Executor{
+		Planner: &StubPlanner{Result: []CommandCall{
+			{Command: "cap", Args: map[string]any{}},
+			{Command: "greet", Args: map[string]any{}},
+		}},
+		Commands: cmds,
+		Runners:  map[string]Runner{"cli": &CLIRunner{Whitelist: wl}, "claude": claude},
+		Logger:   testLogger(),
+	}
+
+	meta := EmailMeta{MessageID: "1", From: "jim@test.com", Subject: "T"}
+	p, err := exec.Run(context.Background(), meta, "body")
+	require.NoError(t, err)
+	require.Equal(t, "completed", p.Status)
+
+	require.NotEmpty(t, spawner.systemPromptContent, "greet's system prompt must have been captured")
+	content := string(spawner.systemPromptContent)
+	// The cap stage's own output is dd writing 1MiB of zero bytes, capped
+	// at exactly 1<<20 bytes by runOutput's readCapped -- every byte of
+	// which is one rune, so the fence header's rune count is the cap
+	// itself, not a guessed or hard-coded figure.
+	wantRunes := utf8.RuneCountInString(strings.Repeat("\x00", 1<<20))
+	wantHeader := fmt.Sprintf("pipeline output: %d runes, truncated ---", wantRunes)
+	assert.Contains(t, content, wantHeader,
+		"the pipeline output field's fence header must name the cap stage's own capped rune count and say truncated")
+}
+
 // TestCLIRunner_ArgsFromPipe_MalformedJSON is the regression test for
 // beadle-k1g defect 4: a pipe value that looks like JSON (starts with '{')
 // but fails to parse -- e.g. truncated by defect 1's 1MB cap -- used to be
 // swallowed by `_ = json.Unmarshal(...)`, silently omitting every arg that
-// should have been filled from the pipe with no record of why.
+// should have been filled from the pipe with no record of why. The log line
+// also carries pipeline/stage (pipelineLogArgs) and the incoming pipe's own
+// truncation state, so a cut pipe that fails to parse is attributed to the
+// cap, not read as unrelated malformed JSON.
 func TestCLIRunner_ArgsFromPipe_MalformedJSON(t *testing.T) {
 	_, wl := setupWhitelist(t, "echo")
 	runner := &CLIRunner{Whitelist: wl}
-	logger, buf := testLoggerCapture()
 
 	cmd := &Command{
 		Name:      "test-malformed-json",
@@ -624,18 +979,127 @@ func TestCLIRunner_ArgsFromPipe_MalformedJSON(t *testing.T) {
 		Timeout:      "5s",
 	}
 	call := CommandCall{Command: "test-malformed-json", Args: map[string]any{}}
-	p := testPipeline()
 
 	// Starts with '{' so the pipe-as-JSON path is taken, but the JSON is
 	// truncated mid-value and fails to parse.
 	pipe := `{"title": "Fix auth`
-	result, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, pipe)
-	require.NoError(t, err)
-	assert.Empty(t, result) // no args filled: title was never resolved
 
-	line := logLineContaining(t, buf, "pipe value looked like JSON but failed to parse")
-	assert.Contains(t, line, "level=WARN")
-	assert.Contains(t, line, "test-malformed-json")
+	for _, tt := range []struct {
+		name          string
+		pipeTruncated bool
+	}{
+		{"pipe not truncated upstream", false},
+		{"pipe truncated upstream: attributed to the cap", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, buf := testLoggerCapture()
+			p := testPipeline()
+
+			result, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, pipe, tt.pipeTruncated)
+			require.NoError(t, err)
+			assert.Empty(t, result) // no args filled: title was never resolved
+
+			line := logLineContaining(t, buf, "pipe value looked like JSON but failed to parse")
+			assert.Contains(t, line, "level=WARN")
+			assert.Contains(t, line, "test-malformed-json")
+			assert.Contains(t, line, "pipeline="+p.ID)
+			assert.Contains(t, line, "stage=0")
+			assert.Contains(t, line, fmt.Sprintf("pipe_truncated=%v", tt.pipeTruncated))
+		})
+	}
+}
+
+// TestBuildStageArgs_NoArgs confirms buildStageArgs returns nil (not an
+// empty, non-nil slice) for an empty args map -- stagePayloadText's own
+// len(payload.Args) > 0 check treats both the same way, but nil is the
+// honest zero value for "no args were ever processed."
+func TestBuildStageArgs_NoArgs(t *testing.T) {
+	e := &Executor{Logger: testLogger()}
+	p := testPipeline()
+
+	got := buildStageArgs(e, p, 0, "test-cmd", map[string]any{})
+	assert.Nil(t, got)
+}
+
+// TestBuildStageArgs_SortedByName proves buildStageArgs returns args sorted
+// by name, the ordering stagePayloadText used to produce itself (via
+// sort.Strings over the map's keys) before round 5 moved sanitizing and
+// capping -- and with it, the sort -- here.
+func TestBuildStageArgs_SortedByName(t *testing.T) {
+	e := &Executor{Logger: testLogger()}
+	p := testPipeline()
+
+	got := buildStageArgs(e, p, 0, "test-cmd", map[string]any{"zebra": "z", "alpha": "a", "mid": 1})
+	require.Len(t, got, 3)
+	assert.Equal(t, "alpha", got[0].Name)
+	assert.Equal(t, "mid", got[1].Name)
+	assert.Equal(t, "zebra", got[2].Name)
+}
+
+// TestBuildStageArgs_SanitizesNULAndInvalidUTF8 is the round-2 regression
+// test for beadle-4gm1's normalization finding (moved here in round 5
+// alongside the sanitize/cap logic itself, from stagePayloadText): a NUL
+// byte and an invalid UTF-8 sequence must be sanitized identically whether
+// the value is under or over maxContractFieldRunes -- capRunes alone left
+// invalid UTF-8 untouched under the cap while silently rewriting it at the
+// rune boundary over the cap, two different behaviors for the same input
+// depending only on length. Expected values are built from
+// sanitizeText/capRunes themselves (not hand-computed strings), since the
+// sanitize-then-cap pipeline is exactly what this test exists to pin down.
+// Each case also proves the Warn log: silent when nothing fired, naming the
+// affected arg (never its value) when something did.
+func TestBuildStageArgs_SanitizesNULAndInvalidUTF8(t *testing.T) {
+	invalid := "ok\x00bad\xffend"
+
+	t.Run("under cap", func(t *testing.T) {
+		sanitized, changed := sanitizeText(invalid)
+		require.True(t, changed, "fixture must actually need sanitizing")
+
+		logger, buf := testLoggerCapture()
+		e := &Executor{Logger: logger}
+		p := testPipeline()
+
+		got := buildStageArgs(e, p, 0, "test-cmd", map[string]any{"note": invalid})
+		require.Len(t, got, 1)
+		assert.Equal(t, StageArg{Name: "note", Value: sanitized, Truncated: false, Sanitized: true}, got[0])
+
+		line := logLineContaining(t, buf, "stage arg sanitized or truncated before stage input")
+		assert.Contains(t, line, "pipeline="+p.ID)
+		assert.Contains(t, line, "stage=0")
+		assert.Contains(t, line, "test-cmd")
+		assert.NotContains(t, line, invalid, "the arg's own value must never appear in the log line")
+	})
+
+	t.Run("over cap", func(t *testing.T) {
+		longInvalid := strings.Repeat("x", maxContractFieldRunes) + invalid
+		sanitized, changed := sanitizeText(longInvalid)
+		require.True(t, changed, "fixture must actually need sanitizing")
+		capped, truncated := capRunes(sanitized, maxContractFieldRunes)
+		require.True(t, truncated, "fixture must actually need truncating")
+
+		logger, buf := testLoggerCapture()
+		e := &Executor{Logger: logger}
+		p := testPipeline()
+
+		got := buildStageArgs(e, p, 0, "test-cmd", map[string]any{"note": longInvalid})
+		require.Len(t, got, 1)
+		assert.Equal(t, StageArg{Name: "note", Value: capped, Truncated: true, Sanitized: true}, got[0])
+
+		line := logLineContaining(t, buf, "stage arg sanitized or truncated before stage input")
+		assert.Contains(t, line, "pipeline="+p.ID)
+		assert.Contains(t, line, "stage=0")
+	})
+
+	t.Run("clean arg under the cap: no log line", func(t *testing.T) {
+		logger, buf := testLoggerCapture()
+		e := &Executor{Logger: logger}
+		p := testPipeline()
+
+		got := buildStageArgs(e, p, 0, "test-cmd", map[string]any{"note": "clean value"})
+		require.Len(t, got, 1)
+		assert.Equal(t, StageArg{Name: "note", Value: "clean value"}, got[0])
+		assert.NotContains(t, buf.String(), "stage arg sanitized or truncated")
+	})
 }
 
 // TestCappedWriter_Dropped_Beyond32BitRange is the regression test for the
@@ -656,12 +1120,16 @@ func TestCappedWriter_Dropped_Beyond32BitRange(t *testing.T) {
 	assert.Equal(t, int64(math.MaxInt32)+100, w.dropped())
 }
 
+// TestCLIRunner_CompoundOutputCap is TestCLIRunner_OutputCap's sibling for
+// the compound-step path: truncation is reported via Run's own truncated
+// return value, not a marker appended to the returned string (round 3 of
+// beadle-4gm1) and not a shared Pipeline field (round 4).
 func TestCLIRunner_CompoundOutputCap(t *testing.T) {
 	// The last step emits >1MiB. The compound path captures it in a
 	// cappedWriter, so the result truncates at 1MiB without hanging —
-	// equivalent to the single-process LimitReader cap. It must also carry
-	// a visible truncation marker (beadle-k1g defect 2): cappedWriter used
-	// to drop the excess with no trace, in the result or in a log line.
+	// equivalent to the single-process LimitReader cap. It must also be
+	// recorded visibly (beadle-k1g defect 2): cappedWriter used to drop the
+	// excess with no trace, in the result or in a log line.
 	_, wl := setupWhitelist(t, "echo", "dd")
 	runner := &CLIRunner{Whitelist: wl}
 	logger, buf := testLoggerCapture()
@@ -680,15 +1148,18 @@ func TestCLIRunner_CompoundOutputCap(t *testing.T) {
 	call := CommandCall{Command: "test-compound-cap", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "input data")
+	result, truncated, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, "input data", false)
 	require.NoError(t, err)
-	assert.Equal(t, 1<<20+len(truncationMarker), len(result))
-	assert.True(t, strings.HasSuffix(result, truncationMarker))
+	assert.Equal(t, 1<<20, len(result), "the returned string itself is capped at exactly 1MB -- no marker appended")
+	assert.NotContains(t, result, "…[truncated]", "no truncation marker must reach the returned string; the truncated return value is the sole statement of truncation")
+	assert.True(t, truncated)
 
 	line := logLineContaining(t, buf, "compound command stdout truncated")
 	assert.Contains(t, line, "level=WARN")
 	assert.Contains(t, line, "test-compound-cap")
 	assert.Contains(t, line, "discarded_bytes=1")
+	assert.Contains(t, line, "pipeline=test-pipe")
+	assert.Contains(t, line, "stage=0")
 }
 
 func TestCLIRunner_CompoundTwoSteps(t *testing.T) {
@@ -709,7 +1180,7 @@ func TestCLIRunner_CompoundTwoSteps(t *testing.T) {
 	call := CommandCall{Command: "test-compound", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "input data")
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "input data", false)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", result)
 }
@@ -733,7 +1204,7 @@ func TestCLIRunner_CompoundThreeSteps(t *testing.T) {
 	call := CommandCall{Command: "test-three", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 	assert.Equal(t, "HELLO WORLD", result)
 }
@@ -756,7 +1227,7 @@ func TestCLIRunner_CompoundFirstStepFails(t *testing.T) {
 	call := CommandCall{Command: "test-fail-first", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "step[0]")
 }
@@ -779,7 +1250,7 @@ func TestCLIRunner_CompoundLastStepFails(t *testing.T) {
 	call := CommandCall{Command: "test-fail-last", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "step[1]")
 }
@@ -803,7 +1274,7 @@ func TestCLIRunner_CompoundTimeout(t *testing.T) {
 	p := testPipeline()
 
 	start := time.Now()
-	_, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
@@ -828,7 +1299,7 @@ func TestCLIRunner_EnvIsolation(t *testing.T) {
 	call := CommandCall{Command: "test-env", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 
 	assert.NotContains(t, result, "BEADLE_TEST_SENTINEL", "subprocess must not inherit daemon env")
@@ -857,7 +1328,7 @@ func TestCLIRunner_EnvDeclaredVars(t *testing.T) {
 	call := CommandCall{Command: "test-env-declared", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.NoError(t, err)
 
 	assert.Contains(t, result, "BEADLE_ALLOWED_VAR=included", "declared var must be present")
@@ -883,7 +1354,7 @@ func TestCLIRunner_CompoundPipeStdin(t *testing.T) {
 	call := CommandCall{Command: "test-pipe-stdin", Args: map[string]any{}}
 	p := testPipeline()
 
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "pipe data")
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "pipe data", false)
 	require.NoError(t, err)
 	assert.Equal(t, "PIPE DATA", result)
 }
@@ -909,7 +1380,7 @@ func TestCLIRunner_ArgsFromPipe(t *testing.T) {
 	p := testPipeline()
 
 	pipe := `{"title": "Fix auth", "type": "task"}`
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe, false)
 	require.NoError(t, err)
 	assert.Contains(t, result, "--title=Fix auth")
 	assert.Contains(t, result, "--type=task")
@@ -938,7 +1409,7 @@ func TestCLIRunner_ArgsPlannerOverridesPipe(t *testing.T) {
 	p := testPipeline()
 
 	pipe := `{"title": "From pipe"}`
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe, false)
 	require.NoError(t, err)
 	assert.Contains(t, result, "--title=Override")
 	assert.NotContains(t, result, "From pipe")
@@ -968,7 +1439,7 @@ func TestCLIRunner_ArgsFromPipe_InvalidJSON(t *testing.T) {
 
 	// Pipe is not valid JSON — should not crash, args from call.Args only.
 	pipe := "this is not json"
-	result, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe)
+	result, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, pipe, false)
 	require.NoError(t, err)
 	assert.Contains(t, result, "--title=FromArgs")
 }
