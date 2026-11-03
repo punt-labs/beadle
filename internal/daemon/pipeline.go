@@ -287,7 +287,14 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			// The auto-reply reads the FINAL pipe value and its carried
 			// truncation state -- whatever the last "process" stage left
 			// them as -- never a flag reset on its own schedule.
-			replyResult, _, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe, pipeTruncated)
+			// A capped CLI stage leaves a silently partial pipe; tell the
+			// sender. The notice is daemon-authored and added here, where
+			// pipeTruncated is carried.
+			replyPipe := pipe
+			if pipeTruncated {
+				replyPipe += truncationNotice
+			}
+			replyResult, _, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, replyPipe, pipeTruncated)
 			if err != nil {
 				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
 				p.Error = fmt.Sprintf("auto-reply failed: %v", err)
@@ -486,6 +493,9 @@ func genFenceNonce() (string, error) {
 	}
 	return hex.EncodeToString(buf), nil
 }
+
+// truncationNotice marks an auto-reply whose body was cut at the CLI stdout cap.
+const truncationNotice = "\n[output truncated at 1MB]\n"
 
 // sanitizeText strips NUL bytes and replaces invalid UTF-8 with the Unicode
 // replacement character, reporting whether either change fired.

@@ -1696,3 +1696,51 @@ func TestExecutor_RawPipeReachesNextCLIStage(t *testing.T) {
 	require.Len(t, cli.pipes, 2)
 	assert.Equal(t, "a\x00b\xffc", cli.pipes[1])
 }
+
+// TestExecutor_AutoReplyCarriesTruncationNotice proves a capped CLI stage that
+// feeds the auto-reply marks the reply partial, and that an intermediate
+// capped stage hands the next CLI stage the exact bytes with no notice.
+func TestExecutor_AutoReplyCarriesTruncationNotice(t *testing.T) {
+	_, wl := setupWhitelist(t, "dd", "tr", "cat")
+
+	t.Run("last stage", func(t *testing.T) {
+		claude := &mockClaudeRunner{results: []WorkerResult{{Output: "reply sent"}}}
+		cmds := testCommands()
+		cmds["cap"] = capCommand("text")
+		exec := &Executor{
+			Planner:  &StubPlanner{Result: []CommandCall{{Command: "cap", Args: map[string]any{}}}},
+			Commands: cmds,
+			Runners:  map[string]Runner{"cli": &CLIRunner{Whitelist: wl}, "claude": claude},
+			Logger:   testLogger(),
+		}
+		_, err := exec.Run(context.Background(), EmailMeta{MessageID: "1", From: "[EMAIL]", Subject: "T"}, "body")
+		require.NoError(t, err)
+		require.Len(t, claude.calls, 1)
+		assert.True(t, strings.HasSuffix(claude.calls[0].Pipe, truncationNotice))
+	})
+
+	t.Run("intermediate stage", func(t *testing.T) {
+		cli := &recordingRunner{inner: &CLIRunner{Whitelist: wl}}
+		claude := &mockClaudeRunner{results: []WorkerResult{{Output: "reply sent"}}}
+		cmds := testCommands()
+		cmds["cap"] = capCommand("text")
+		cmds["echo"] = &Command{
+			Name: "echo", Runner: "cli", Mode: "passthrough", Binary: "cat",
+			OutputSchema: "text", Timeout: "5s",
+		}
+		exec := &Executor{
+			Planner: &StubPlanner{Result: []CommandCall{
+				{Command: "cap", Args: map[string]any{}},
+				{Command: "echo", Args: map[string]any{}},
+			}},
+			Commands: cmds,
+			Runners:  map[string]Runner{"cli": cli, "claude": claude},
+			Logger:   testLogger(),
+		}
+		_, err := exec.Run(context.Background(), EmailMeta{MessageID: "1", From: "[EMAIL]", Subject: "T"}, "body")
+		require.NoError(t, err)
+		require.Len(t, cli.pipes, 2)
+		assert.Equal(t, 1<<20, len(cli.pipes[1]))
+		assert.NotContains(t, cli.pipes[1], "truncated at 1MB")
+	})
+}
