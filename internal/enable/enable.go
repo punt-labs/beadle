@@ -21,9 +21,8 @@ import (
 // enabled. It must be byte-identical across every tool the standard governs.
 const ImportLine = "@.punt-labs/beadle/CLAUDE.md"
 
-// Progressf reports a progress line. A nil Progressf discards progress, so a
-// surface with nowhere to print (the MCP tool) passes nil and the CLI passes a
-// stderr writer that honors --quiet.
+// Progressf reports a progress line. A nil Progressf discards progress; the CLI
+// passes a stderr writer that honors --quiet and the MCP tool passes a collector.
 type Progressf func(format string, a ...any)
 
 func (p Progressf) printf(format string, a ...any) {
@@ -67,15 +66,11 @@ func Enable(root string, progress Progressf) error {
 
 func enableLocked(root string, progress Progressf) error {
 	dir := filepath.Join(root, ".punt-labs", "beadle")
-	// Grant beadle's allow rules in this repo only; enable is the consent. It
-	// runs before any other write, so a refusal (malformed or symlinked
-	// settings, a home-directory repo) fails enable with nothing changed.
-	added, err := permissions.Grant(root)
-	if err != nil {
-		return fmt.Errorf("granting permissions in .claude/settings.json: %w", err)
-	}
-	if len(added) > 0 {
-		progress.printf("allowed in .claude/settings.json: %s\n", strings.Join(added, ", "))
+	// Read-only preflight: a refusal (malformed or symlinked settings, a
+	// home-directory repo) fails enable with nothing changed. The rules
+	// themselves are granted only after the import registers, below.
+	if err := permissions.Preflight(root); err != nil {
+		return fmt.Errorf("checking .claude/settings.json: %w", err)
 	}
 
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -107,8 +102,23 @@ func enableLocked(root string, progress Progressf) error {
 		progress.printf("%s already imports beadle\n", hostPath)
 	}
 
+	// Enable is the consent for the allow rules. They land after the import and
+	// before the marker; a failure past this point rolls back exactly the rules
+	// this run added, so a half-enabled repo never keeps grants.
+	added, err := permissions.Grant(root)
+	if err != nil {
+		return fmt.Errorf("granting permissions in .claude/settings.json: %w", err)
+	}
+	if len(added) > 0 {
+		progress.printf("allowed in .claude/settings.json: %s\n", strings.Join(added, ", "))
+	}
+
 	markerPath := filepath.Join(dir, "enabled")
 	if err := os.WriteFile(markerPath, nil, 0o644); err != nil { // #nosec G306 -- committed-via-PR marker, not a secret
+		if _, rbErr := permissions.Remove(root, added); rbErr != nil {
+			return errors.Join(fmt.Errorf("writing %s: %w", markerPath, err),
+				fmt.Errorf("rolling back permissions: %w", rbErr))
+		}
 		return fmt.Errorf("writing %s: %w", markerPath, err)
 	}
 
@@ -139,8 +149,9 @@ func Disable(root string, purge bool, progress Progressf) error {
 func disableLocked(root string, purge bool, progress Progressf) error {
 	dir := filepath.Join(root, ".punt-labs", "beadle")
 
-	// Revoke beadle's allow rules before any other change, so a refusal fails
-	// disable with the repo still enabled rather than disabled with grants left.
+	// Revoke first, before the marker is cleared or the import pruned: a later
+	// failure then never leaves a repo that looks disabled while its allow rules
+	// remain, and a refusal fails disable with the repo still enabled.
 	revoked, err := permissions.Revoke(root)
 	if err != nil {
 		return fmt.Errorf("removing permissions from .claude/settings.json: %w", err)

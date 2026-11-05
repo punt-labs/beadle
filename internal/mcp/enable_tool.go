@@ -64,7 +64,8 @@ func (h *handler) enable(_ context.Context, req mcplib.CallToolRequest) (*mcplib
 		return mcplib.NewToolResultError(err.Error()), nil
 	}
 
-	// nil progress: the MCP surface reports through the tool result, not stderr.
+	// Progress is collected, not printed: the MCP surface reports through the
+	// tool result, which repeats the settings.json lines.
 	var report progressLog
 	if act == actionEnable {
 		if err := enable.Enable(root, report.printf); err != nil {

@@ -66,6 +66,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   uninstall` no longer edits `~/.claude/settings.json`; delete rules earlier
   versions wrote there by hand
   ([punt-kit#396](https://github.com/punt-labs/punt-kit/pull/396)).
+  Security hardening of that edit (beadle-s5yx): every access to `.claude/`,
+  the lock file included, goes through one `os.Root` handle, so a `.claude`
+  or lock symlink swapped in during the lock wait cannot redirect a read or
+  write out of the repo. Unrelated settings keep their key order, number
+  text (integers above 2^53 included) and escaping byte-for-byte; only
+  `permissions.allow` changes. `disable` removes only the rules `enable`
+  added, recorded in `.claude/.beadle-granted.json` (commit it with
+  `settings.json`), so a rule the repo allowed beforehand survives. `enable`
+  grants rules only after the import registers and rolls them back if a
+  later step fails; `disable` revokes before clearing the marker.
 - **Inbox polling accepts `2m` and `3m`.** The allowed interval set had
   nothing between `1m` and `5m`, so the only way to poll an agent mailbox
   at least every three minutes was the one-minute floor. The set is now
