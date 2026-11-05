@@ -32,6 +32,7 @@
 # --- Claude Code runtime state ---
 .claude/*
 !.claude/settings.json
+!.claude/.beadle-granted.json
 !.claude/commands/
 !.claude/hooks/
 !.claude/agents/

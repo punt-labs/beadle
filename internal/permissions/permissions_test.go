@@ -279,3 +279,30 @@ func TestPreflightWritesNothing(t *testing.T) {
 	writeSettings(t, bad, `{not json`)
 	require.ErrorIs(t, Preflight(bad), ErrRefused)
 }
+
+func TestGrantWritesRecordAndFreshRevokeUsesIt(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"allow":["Skill(mail)","Read"]}}`)
+	added, err := Grant(root)
+	require.NoError(t, err)
+
+	record, err := os.ReadFile(filepath.Join(root, ".claude", grantedName))
+	require.NoError(t, err, "the record sits next to settings.json")
+	var recorded []string
+	require.NoError(t, json.Unmarshal(record, &recorded))
+	assert.Equal(t, added, recorded)
+
+	// A collaborator's clone carries only the committed files; a fresh Revoke
+	// must read the record and remove exactly the granted set.
+	clone := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(clone, ".claude"), 0o750))
+	for _, name := range []string{settingsName, grantedName} {
+		data, readErr := os.ReadFile(filepath.Join(root, ".claude", name))
+		require.NoError(t, readErr)
+		require.NoError(t, os.WriteFile(filepath.Join(clone, ".claude", name), data, 0o600))
+	}
+	removed, err := Revoke(clone)
+	require.NoError(t, err)
+	assert.Equal(t, added, removed, "exactly the granted set, no more and no fewer")
+	assert.Equal(t, asAny("Skill(mail)", "Read"), allowList(t, clone))
+}

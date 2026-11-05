@@ -37,5 +37,6 @@ The tool writes working-tree files only — it does not run git.
 
 Report the tool's result verbatim. Remind the user to commit the change
 (`.punt-labs/beadle/`, the `CLAUDE.md` import line, and the
-`.claude/settings.json` permission change) through a PR — enablement
+`.claude/settings.json` permission change, and the
+`.claude/.beadle-granted.json` record beside it) through a PR — enablement
 is per-repo policy that lands through review, not a tool side effect.
