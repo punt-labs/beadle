@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# SessionStart — deploy commands, auto-allow MCP permissions, first-run setup.
+# SessionStart — deploy commands, first-run setup. Grants no permissions.
 
 # Claude Code sets CLAUDE_PLUGIN_ROOT for an installed plugin. When it is
 # absent — the script run by hand, or from a dev checkout — resolve the plugin
@@ -16,7 +16,6 @@ if [[ -z "$PLUGIN_ROOT" ]]; then
   fi
 fi
 
-SETTINGS="$HOME/.claude/settings.json"
 COMMANDS_DIR="$HOME/.claude/commands"
 PLUGIN_JSON="${PLUGIN_ROOT}/.claude-plugin/plugin.json"
 
@@ -24,8 +23,8 @@ PLUGIN_JSON="${PLUGIN_ROOT}/.claude-plugin/plugin.json"
 # derived from it. Without this, a wrong PLUGIN_ROOT degrades silently rather
 # than loudly: the dev-mode probe below reads false because grep cannot open
 # the file, and the deploy loop iterates an empty glob under nullglob — so a
-# future relayout or a misconfigured CLAUDE_PLUGIN_ROOT deploys nothing, writes
-# the wrong permission glob, and says so nowhere. Fail visibly instead.
+# future relayout or a misconfigured CLAUDE_PLUGIN_ROOT deploys nothing and
+# says so nowhere. Fail visibly instead.
 if [[ ! -f "$PLUGIN_JSON" ]]; then
   if command -v jq >/dev/null 2>&1; then
     jq -n --arg root "$PLUGIN_ROOT" '{
@@ -44,12 +43,6 @@ fi
 DEV_MODE=false
 if grep -q '"beadle-dev"' "$PLUGIN_JSON" 2>/dev/null; then
   DEV_MODE=true
-fi
-
-if [[ "$DEV_MODE" == "true" ]]; then
-  TOOL_GLOB="mcp__plugin_beadle-dev_email__*"
-else
-  TOOL_GLOB="mcp__plugin_beadle_email__*"
 fi
 
 ACTIONS=()
@@ -91,63 +84,9 @@ else
   fi
 fi
 
-# ── Auto-allow MCP tools and skills ───────────────────────────────────
-# Every MCP tool and every skill must be auto-approved so users never see
-# a permission prompt after enabling the plugin. Uses the PLUGIN_RULES
-# array pattern from punt-kit/standards/permissions.md § 6.
-#
-# Skill names must match deployed commands: inbox.md, mail.md, send.md.
-# If a command is added/renamed, update this list — stale entries cause
-# unexplained permission prompts (see punt-kit/standards/plugins.md § 2).
-if ! command -v jq >/dev/null 2>&1; then
-  ACTIONS+=("jq not found, skipping permission setup")
-else
-  # Build PLUGIN_RULES via jq to avoid JSON injection from $TOOL_GLOB
-  PLUGIN_RULES=$(jq -n --arg glob "$TOOL_GLOB" \
-    '[$glob, "mcp__beadle-email__*", "Skill(inbox)", "Skill(mail)", "Skill(send)", "Skill(contacts)"]' 2>/dev/null) || {
-    ACTIONS+=("jq failed to build permission rules — skipping permission setup")
-    PLUGIN_RULES=""
-  }
-
-  if [[ -z "$PLUGIN_RULES" ]]; then
-    : # jq failed above, already logged
-  else
-    if [[ ! -f "$SETTINGS" ]]; then
-      if mkdir -p "$(dirname "$SETTINGS")" && printf '{}' > "$SETTINGS"; then
-        ACTIONS+=("Created ~/.claude/settings.json")
-      else
-        ACTIONS+=("Failed to create ~/.claude/settings.json — skipping permission setup")
-      fi
-    fi
-  fi
-
-  if [[ -n "$PLUGIN_RULES" ]] && [[ -f "$SETTINGS" ]]; then
-    ADDED=$(jq -r --argjson new "$PLUGIN_RULES" '
-      (.permissions.allow // []) as $orig
-      | [$new[] | select(. as $r | $orig | index($r) | not)] | length
-    ' "$SETTINGS" 2>/dev/null) || ADDED=""
-
-    if [[ -z "$ADDED" ]]; then
-      ACTIONS+=("Failed to read permissions from settings.json (file may be corrupt)")
-    elif [[ "$ADDED" -gt 0 ]]; then
-      TMP=$(mktemp "$SETTINGS.XXXXXX" 2>/dev/null) || {
-        ACTIONS+=("mktemp failed — skipped permission update")
-        TMP=""
-      }
-      if [[ -n "$TMP" ]] && jq --argjson new "$PLUGIN_RULES" '
-        (.permissions.allow // []) as $orig
-        | .permissions.allow = $orig + [$new[] | select(. as $r | $orig | index($r) | not)]
-      ' "$SETTINGS" > "$TMP" && mv "$TMP" "$SETTINGS"; then
-        ACTIONS+=("Auto-allowed $ADDED permission rule(s) in settings.json")
-      else
-        if [[ -n "$TMP" ]]; then
-          rm -f "$TMP"
-          ACTIONS+=("Failed to update permissions in settings.json")
-        fi
-      fi
-    fi
-  fi
-fi
+# Permission rules are not set up here: SessionStart never edits a settings
+# file. `beadle-email enable` adds beadle's allow rules to the repo's
+# .claude/settings.json (punt-kit permissions.md §6).
 
 # ── First-run check: verify beadle-email binary is available ──────────
 if ! command -v beadle-email >/dev/null 2>&1; then

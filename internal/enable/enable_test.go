@@ -1,11 +1,15 @@
 package enable
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/punt-labs/beadle/internal/permissions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -138,4 +142,95 @@ func TestProgressfNilIsSafe(t *testing.T) {
 	// A nil Progressf discards output; the MCP surface relies on this.
 	var p Progressf
 	assert.NotPanics(t, func() { p.printf("anything %d\n", 1) })
+}
+
+func TestRefusedSettingsFailEnableAndDisableWithNothingChanged(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, Enable(root, nil))
+	settings := filepath.Join(root, ".claude", "settings.json")
+	require.NoError(t, os.WriteFile(settings, []byte("{not json"), 0o600))
+
+	require.ErrorIs(t, Disable(root, false, nil), permissions.ErrRefused)
+	assert.True(t, exists(t, markerPath(root)), "a refused revoke leaves the repo enabled")
+
+	fresh := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(fresh, ".claude"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(fresh, ".claude", "settings.json"), []byte("{not json"), 0o600))
+	require.ErrorIs(t, Enable(fresh, nil), permissions.ErrRefused)
+	assert.False(t, exists(t, markerPath(fresh)))
+	assert.False(t, exists(t, filepath.Join(fresh, "CLAUDE.md")), "a refused grant writes nothing else")
+}
+
+func allowRules(t *testing.T, root string) []any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	require.NoError(t, err)
+	var s struct {
+		Permissions struct {
+			Allow []any `json:"allow"`
+		} `json:"permissions"`
+	}
+	require.NoError(t, json.Unmarshal(data, &s))
+	return s.Permissions.Allow
+}
+
+func TestEnableFailedRegisterInstallsNoRules(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(hostPath(root), 0o755))
+
+	require.Error(t, Enable(root, nil))
+	assert.Empty(t, allowRules(t, root), "rules are granted only after the import registers")
+	assert.False(t, exists(t, markerPath(root)))
+}
+
+func TestEnableFailedMarkerRollsBackOnlyAddedRules(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "settings.json"),
+		[]byte(`{"permissions":{"allow":["Skill(mail)"]}}`), 0o600))
+	// A directory at the marker path makes the final write fail.
+	require.NoError(t, os.MkdirAll(markerPath(root), 0o750))
+
+	require.Error(t, Enable(root, nil))
+	assert.Equal(t, []any{"Skill(mail)"}, allowRules(t, root), "rollback removes what enable added, nothing else")
+}
+
+func TestDisableRevokesBeforePruneFailure(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, Enable(root, nil))
+	require.NoError(t, os.Remove(hostPath(root)))
+	// A directory where CLAUDE.md was makes the prune fail.
+	require.NoError(t, os.Mkdir(hostPath(root), 0o755))
+
+	require.Error(t, Disable(root, false, nil))
+	assert.Empty(t, allowRules(t, root), "a failed prune never strands granted rules")
+	assert.False(t, exists(t, markerPath(root)))
+}
+
+func TestDisableKeepsRulesPresentBeforeEnable(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "settings.json"),
+		[]byte(`{"permissions":{"allow":["Skill(mail)"]}}`), 0o600))
+	require.NoError(t, Enable(root, nil))
+	require.NoError(t, Disable(root, false, nil))
+	assert.Equal(t, []any{"Skill(mail)"}, allowRules(t, root))
+}
+
+func TestDisableWarnsOfBeadleRulesNoRecordExplains(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "settings.json"),
+		[]byte(`{"permissions":{"allow":["Skill(mail)"]}}`), 0o600))
+
+	var lines []string
+	progress := func(format string, a ...any) { lines = append(lines, fmt.Sprintf(format, a...)) }
+	require.NoError(t, Disable(root, false, progress))
+
+	assert.Contains(t, strings.Join(lines, ""), "warning: left in .claude/settings.json")
+	assert.Contains(t, strings.Join(lines, ""), "Skill(mail)")
+	assert.Equal(t, []any{"Skill(mail)"}, allowRules(t, root), "the rule is left in place")
 }

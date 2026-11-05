@@ -87,7 +87,7 @@ var installCmd = &cobra.Command{
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "Remove beadle-email",
-	Long:  "Remove MCP registration, deployed commands, and permissions.",
+	Long:  "Remove MCP registration and deployed commands. Permission rules live in each repo's .claude/settings.json; beadle-email disable removes them.",
 	RunE: func(_ *cobra.Command, _ []string) error {
 		removed := 0
 
@@ -114,13 +114,6 @@ var uninstallCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "removed %s\n", path)
 				removed++
 			}
-		}
-
-		// 3. Clean permissions from settings.json
-		settingsPath := filepath.Join(home, ".claude", "settings.json")
-		if cleanedPerms := cleanSettings(settingsPath); cleanedPerms > 0 {
-			fmt.Fprintf(os.Stderr, "removed %d permission rule(s) from settings.json\n", cleanedPerms)
-			removed++
 		}
 
 		if removed == 0 {
@@ -175,53 +168,4 @@ func selfPath() string {
 		return "beadle-email"
 	}
 	return exe
-}
-
-// cleanSettings removes beadle-related entries from settings.json.
-func cleanSettings(path string) int {
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return 0
-	}
-
-	var settings map[string]any
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return 0
-	}
-
-	removed := 0
-
-	if perms, ok := settings["permissions"].(map[string]any); ok {
-		if allow, ok := perms["allow"].([]any); ok {
-			var cleaned []any
-			for _, rule := range allow {
-				s, ok := rule.(string)
-				if ok && (strings.Contains(s, "beadle") || strings.Contains(s, "Skill(inbox)") || strings.Contains(s, "Skill(mail)") || strings.Contains(s, "Skill(send)") || strings.Contains(s, "Skill(contacts)")) {
-					removed++
-					continue
-				}
-				cleaned = append(cleaned, rule)
-			}
-			perms["allow"] = cleaned
-		}
-	}
-
-	if removed == 0 {
-		return 0
-	}
-
-	out, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return 0
-	}
-	out = append(out, '\n')
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o600); err != nil {
-		return 0
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return 0
-	}
-	return removed
 }
