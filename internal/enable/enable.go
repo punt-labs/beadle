@@ -152,9 +152,12 @@ func disableLocked(root string, purge bool, progress Progressf) error {
 	// Revoke first, before the marker is cleared or the import pruned: a later
 	// failure then never leaves a repo that looks disabled while its allow rules
 	// remain, and a refusal fails disable with the repo still enabled.
-	revoked, err := permissions.Revoke(root)
+	revoked, unrecorded, err := permissions.Revoke(root)
 	if err != nil {
 		return fmt.Errorf("removing permissions from .claude/settings.json: %w", err)
+	}
+	if len(unrecorded) > 0 {
+		progress.printf("warning: left in .claude/settings.json because no grant record explains them: %s; remove them by hand, or re-run enable then disable\n", strings.Join(unrecorded, ", "))
 	}
 	if len(revoked) > 0 {
 		progress.printf("removed from .claude/settings.json: %s\n", strings.Join(revoked, ", "))

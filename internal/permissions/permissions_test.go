@@ -134,7 +134,7 @@ func TestRevokeRemovesExactlyBeadleRules(t *testing.T) {
 	data, err := json.Marshal(map[string]any{"permissions": map[string]any{"allow": append(asAny("Read"), append(asAny(Rules...), "Bash(x)")...)}})
 	require.NoError(t, err)
 	writeSettings(t, root, string(data))
-	removed, err := Revoke(root)
+	removed, _, err := Revoke(root)
 	require.NoError(t, err)
 	assert.Equal(t, Rules, removed)
 	assert.Equal(t, asAny("Read", "Bash(x)"), allowList(t, root))
@@ -142,7 +142,7 @@ func TestRevokeRemovesExactlyBeadleRules(t *testing.T) {
 
 func TestRevokeWithoutSettingsCreatesNothing(t *testing.T) {
 	root := t.TempDir()
-	removed, err := Revoke(root)
+	removed, _, err := Revoke(root)
 	require.NoError(t, err)
 	assert.Empty(t, removed)
 	_, statErr := os.Stat(filepath.Join(root, ".claude"))
@@ -153,6 +153,7 @@ func TestGrantSurvivesClaudeSwappedForSymlinkDuringLockWait(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "repo")
 	outside := filepath.Join(base, "outside")
+	moved := filepath.Join(base, "moved")
 	require.NoError(t, os.MkdirAll(outside, 0o750))
 	writeSettings(t, repo, `{"env":{"A":"1"}}`)
 
@@ -169,14 +170,20 @@ func TestGrantSurvivesClaudeSwappedForSymlinkDuringLockWait(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { _, err := Grant(repo); done <- err }()
-	time.Sleep(200 * time.Millisecond)
+	// Blocking on the flock is not observable; give Grant time to reach it. The
+	// swap below is safe whether or not it has.
+	select {
+	case err := <-done:
+		t.Fatalf("Grant returned while the lock was held: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
 
 	// Swap .claude for a symlink to a directory holding its own settings.
 	require.NoError(t, os.WriteFile(filepath.Join(outside, "settings.json"), []byte(`{"victim":true}`), 0o600))
-	require.NoError(t, os.Rename(filepath.Join(repo, ".claude"), filepath.Join(base, "moved")))
+	require.NoError(t, os.Rename(filepath.Join(repo, ".claude"), moved))
 	require.NoError(t, os.Symlink(outside, filepath.Join(repo, ".claude")))
 	close(release)
-	<-done
+	require.NoError(t, <-done, "Grant holds the original directory and succeeds there")
 
 	data, err := os.ReadFile(filepath.Join(outside, "settings.json"))
 	require.NoError(t, err)
@@ -184,6 +191,18 @@ func TestGrantSurvivesClaudeSwappedForSymlinkDuringLockWait(t *testing.T) {
 	entries, err := os.ReadDir(outside)
 	require.NoError(t, err)
 	assert.Len(t, entries, 1, "nothing is created in the symlink target")
+
+	data, err = os.ReadFile(filepath.Join(moved, "settings.json"))
+	require.NoError(t, err)
+	var got struct {
+		Env         map[string]string `json:"env"`
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	require.NoError(t, json.Unmarshal(data, &got))
+	assert.Equal(t, map[string]string{"A": "1"}, got.Env, "pre-existing content is kept")
+	assert.Equal(t, Rules, got.Permissions.Allow, "the rules landed in the moved original")
 }
 
 func TestGrantRefusesSymlinkedLockFile(t *testing.T) {
@@ -222,7 +241,7 @@ func TestEditsPreserveUnrelatedBytes(t *testing.T) {
 	assert.Less(t, strings.Index(got, `"alpha"`), strings.Index(got, `"permissions"`))
 	assert.Less(t, strings.Index(got, `"deny"`), strings.Index(got, `"allow"`))
 
-	_, err = Revoke(root)
+	_, _, err = Revoke(root)
 	require.NoError(t, err)
 	data, err = os.ReadFile(settingsFile(root))
 	require.NoError(t, err)
@@ -239,7 +258,7 @@ func TestRevokeKeepsRulesPresentBeforeGrant(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, added, "Skill(mail)")
 
-	removed, err := Revoke(root)
+	removed, _, err := Revoke(root)
 	require.NoError(t, err)
 	assert.NotContains(t, removed, "Skill(mail)")
 	assert.Equal(t, asAny("Skill(mail)"), allowList(t, root), "the pre-existing rule survives disable")
@@ -250,10 +269,35 @@ func TestRevokeKeepsRulesPresentBeforeGrant(t *testing.T) {
 func TestRevokeWithoutRecordRemovesNothing(t *testing.T) {
 	root := t.TempDir()
 	writeSettings(t, root, `{"permissions":{"allow":["Skill(mail)"]}}`)
-	removed, err := Revoke(root)
+	removed, unrecorded, err := Revoke(root)
 	require.NoError(t, err)
 	assert.Empty(t, removed)
+	assert.Equal(t, []string{"Skill(mail)"}, unrecorded, "a beadle rule no record explains is reported, not removed")
 	assert.Equal(t, asAny("Skill(mail)"), allowList(t, root))
+}
+
+func TestRevokeWithRecordStaysQuietAboutOtherRules(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"allow":["Read","Skill(mail)"]}}`)
+	_, err := Grant(root)
+	require.NoError(t, err)
+	_, unrecorded, err := Revoke(root)
+	require.NoError(t, err)
+	assert.Empty(t, unrecorded)
+}
+
+func TestGrantRefusesWhenHomeUnknown(t *testing.T) {
+	t.Setenv("HOME", "")
+	_, err := Grant(t.TempDir())
+	require.ErrorIs(t, err, ErrRefused)
+}
+
+func TestRefusalToRevokeTellsOperatorToEditByHand(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{not json`)
+	_, _, err := Revoke(root)
+	require.ErrorIs(t, err, ErrRefused)
+	assert.Contains(t, err.Error(), "by hand")
 }
 
 func TestRemoveRollsBackOnlyTheGivenRules(t *testing.T) {
@@ -264,7 +308,7 @@ func TestRemoveRollsBackOnlyTheGivenRules(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, added[:2], removed)
 	assert.Equal(t, asAny(added[2:]...), allowList(t, root))
-	again, err := Revoke(root)
+	again, _, err := Revoke(root)
 	require.NoError(t, err)
 	assert.Equal(t, added[2:], again, "the record kept the rest")
 }
@@ -301,7 +345,7 @@ func TestGrantWritesRecordAndFreshRevokeUsesIt(t *testing.T) {
 		require.NoError(t, readErr)
 		require.NoError(t, os.WriteFile(filepath.Join(clone, ".claude", name), data, 0o600))
 	}
-	removed, err := Revoke(clone)
+	removed, _, err := Revoke(clone)
 	require.NoError(t, err)
 	assert.Equal(t, added, removed, "exactly the granted set, no more and no fewer")
 	assert.Equal(t, asAny("Skill(mail)", "Read"), allowList(t, clone))

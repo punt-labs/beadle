@@ -6,9 +6,9 @@
 // rules are never granted: maintainers add them by hand.
 //
 // Every access to the repo's .claude directory — the lock file included — goes
-// through one *os.Root opened on that directory, so the kernel refuses any
-// symlink that would lead outside it, even one swapped in while the flock is
-// being waited on.
+// through one *os.Root opened on that directory, so the kernel refuses any path
+// that would lead outside it, even a symlink swapped in while the flock is being
+// waited on. A symlink that resolves inside .claude is followed.
 //
 // On-disk contract: the rules a grant added are recorded in
 // .claude/.beadle-granted.json (a JSON list of strings). Revoke removes only the
@@ -16,8 +16,10 @@
 // disable. A repo with no record has nothing to revoke. Commit the record with
 // settings.json.
 //
-// Edits preserve every byte of settings.json outside permissions.allow: key
-// order, number text and string escaping are kept as written.
+// Edits keep settings.json's key order and every value's bytes (number text and
+// string escaping included) outside permissions.allow. The file as a whole is
+// normalized to two-space indentation, and object keys are re-encoded, so an
+// exotic key escape may be rewritten.
 package permissions
 
 import (
@@ -72,12 +74,19 @@ type request struct {
 
 // Grant appends each missing rule to <root>/.claude/settings.json, creating the
 // file when absent, records the rules it added, and returns them.
-func Grant(root string) ([]string, error) { return run(root, request{add: true}) }
+func Grant(root string) ([]string, error) {
+	changed, _, err := run(root, request{add: true})
+	return changed, err
+}
 
 // Revoke removes the rules a previous Grant recorded from
 // <root>/.claude/settings.json and returns the rules removed. A repo with no
-// settings file is left untouched.
-func Revoke(root string) ([]string, error) { return run(root, request{}) }
+// settings file is left untouched. It also returns the members of Rules that
+// are allowed in settings.json when no record exists: they are left in
+// place because nothing shows beadle granted them, and the caller should say so.
+func Revoke(root string) (removed, unrecorded []string, err error) {
+	return run(root, request{})
+}
 
 // Remove withdraws the given rules, which must be members of Rules, and drops
 // them from the record. Enable uses it to roll back exactly what it just added.
@@ -85,56 +94,61 @@ func Remove(root string, rules []string) ([]string, error) {
 	if len(rules) == 0 {
 		return nil, nil
 	}
-	return run(root, request{rules: rules})
+	changed, _, err := run(root, request{rules: rules})
+	return changed, err
 }
 
 // Preflight reports, without writing anything, whether Grant would be refused.
 func Preflight(root string) error {
-	_, err := run(root, request{add: true, dry: true})
+	_, _, err := run(root, request{add: true, dry: true})
 	return err
 }
 
-func run(root string, q request) ([]string, error) {
-	if home, err := os.UserHomeDir(); err == nil && sameDir(root, home) {
-		return nil, fmt.Errorf("%w: the repo is the home directory, whose .claude/settings.json is user-global", ErrRefused)
+func run(root string, q request) (changed, unrecorded []string, err error) {
+	// Fail closed: a home directory that cannot be found cannot be ruled out.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: cannot determine the home directory, so cannot prove the repo is not it: %w", ErrRefused, err)
+	}
+	if sameDir(root, home) {
+		return nil, nil, fmt.Errorf("%w: the repo is the home directory, whose .claude/settings.json is user-global", ErrRefused)
 	}
 	dir := filepath.Join(root, claudeDir)
 	// A fast preflight; the confined handle below is what holds the line.
 	present, err := settingsPresent(dir, filepath.Join(dir, settingsName))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !present && (!q.add || q.dry) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	r, err := os.OpenRoot(root)
 	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", root, err)
+		return nil, nil, fmt.Errorf("opening %s: %w", root, err)
 	}
 	defer func() { _ = r.Close() }()
 	if q.add {
 		if err := r.Mkdir(claudeDir, 0o750); err != nil && !errors.Is(err, fs.ErrExist) {
-			return nil, fmt.Errorf("creating %s: %w", dir, err)
+			return nil, nil, fmt.Errorf("creating %s: %w", dir, err)
 		}
 	}
 	c, err := r.OpenRoot(claudeDir)
 	if err != nil {
-		return nil, openError(dir, err)
+		return nil, nil, openError(dir, err)
 	}
 	defer func() { _ = c.Close() }()
 
 	if q.dry {
-		_, err := transact(c, q)
-		return nil, err
+		_, _, err := transact(c, q)
+		return nil, nil, err
 	}
-	var changed []string
 	err = withLock(c, func() error {
 		var txErr error
-		changed, txErr = transact(c, q)
+		changed, unrecorded, txErr = transact(c, q)
 		return txErr
 	})
-	return changed, err
+	return changed, unrecorded, err
 }
 
 // openError explains a failure to open .claude, naming a symlink as a refusal.
@@ -165,16 +179,19 @@ func settingsPresent(dir, file string) (bool, error) {
 }
 
 // transact performs one edit inside the confined directory and returns the
-// rules changed. The record is written before settings.json on a grant and
-// after it on a removal, so a crash never leaves a granted rule unrecorded.
-func transact(c *os.Root, q request) ([]string, error) {
+// rules changed, and on a revoke the rules allowed but never recorded. The
+// record is written before settings.json on a grant and after it on a removal,
+// so a crash never leaves a granted rule unrecorded. If the settings write
+// fails on a grant, the previous record is restored; a crash between the two
+// writes leaves the record a superset of settings, the safe direction.
+func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 	data, err := readConfined(c, settingsName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	granted, err := readGranted(c)
 	if err != nil {
-		return nil, err
+		return nil, nil, handEdit(err)
 	}
 	rules := q.rules
 	switch {
@@ -188,12 +205,15 @@ func transact(c *os.Root, q request) ([]string, error) {
 	}
 
 	changed, out, err := plan(data, q.add, rules)
-	if err != nil || q.dry {
-		return nil, err
+	if err != nil {
+		return nil, nil, handEdit(err)
+	}
+	if q.dry {
+		return nil, nil, nil
 	}
 	if q.add {
 		if len(changed) == 0 {
-			return nil, nil
+			return nil, nil, nil
 		}
 		merged := slices.Clone(granted)
 		for _, rule := range changed {
@@ -202,22 +222,45 @@ func transact(c *os.Root, q request) ([]string, error) {
 			}
 		}
 		if err := writeGranted(c, merged); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return changed, writeAtomic(c, settingsName, out)
+		if err := writeAtomic(c, settingsName, out); err != nil {
+			if rbErr := writeGranted(c, granted); rbErr != nil {
+				err = errors.Join(err, fmt.Errorf("restoring %s: %w", grantedName, rbErr))
+			}
+			return nil, nil, err
+		}
+		return changed, nil, nil
+	}
+	if q.rules == nil && len(granted) == 0 {
+		// No record: rules in allow stay put, but the operator is told.
+		stray := slices.DeleteFunc(slices.Clone(Rules), func(s string) bool { return slices.Contains(granted, s) })
+		if unrecorded, _, err = plan(data, false, stray); err != nil {
+			return nil, nil, handEdit(err)
+		}
 	}
 	if len(changed) > 0 {
 		if err := writeAtomic(c, settingsName, out); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	rest := slices.DeleteFunc(slices.Clone(granted), func(s string) bool { return slices.Contains(rules, s) })
 	if len(rest) != len(granted) {
 		if err := writeGranted(c, rest); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return changed, nil
+	return changed, unrecorded, nil
+}
+
+// handEdit tells the operator how to get past a refusal: the file is theirs, so
+// beadle will not repair it, and disable (purge included) stays blocked until
+// they do.
+func handEdit(err error) error {
+	if !errors.Is(err, ErrRefused) {
+		return err
+	}
+	return fmt.Errorf("%w; fix .claude/settings.json (and .beadle-granted.json) by hand, then retry; enable and disable stay blocked until then", err)
 }
 
 // member is one key of a JSON object with its value kept as written.
