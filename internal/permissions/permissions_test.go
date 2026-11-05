@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,4 +147,135 @@ func TestRevokeWithoutSettingsCreatesNothing(t *testing.T) {
 	assert.Empty(t, removed)
 	_, statErr := os.Stat(filepath.Join(root, ".claude"))
 	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestGrantSurvivesClaudeSwappedForSymlinkDuringLockWait(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	outside := filepath.Join(base, "outside")
+	require.NoError(t, os.MkdirAll(outside, 0o750))
+	writeSettings(t, repo, `{"env":{"A":"1"}}`)
+
+	// Hold the lock so Grant passes its preflight and then blocks on the flock.
+	c, err := os.OpenRoot(filepath.Join(repo, ".claude"))
+	require.NoError(t, err)
+	defer func() { _ = c.Close() }()
+	release := make(chan struct{})
+	held := make(chan struct{})
+	go func() {
+		_ = withLock(c, func() error { close(held); <-release; return nil })
+	}()
+	<-held
+
+	done := make(chan error, 1)
+	go func() { _, err := Grant(repo); done <- err }()
+	time.Sleep(200 * time.Millisecond)
+
+	// Swap .claude for a symlink to a directory holding its own settings.
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "settings.json"), []byte(`{"victim":true}`), 0o600))
+	require.NoError(t, os.Rename(filepath.Join(repo, ".claude"), filepath.Join(base, "moved")))
+	require.NoError(t, os.Symlink(outside, filepath.Join(repo, ".claude")))
+	close(release)
+	<-done
+
+	data, err := os.ReadFile(filepath.Join(outside, "settings.json"))
+	require.NoError(t, err)
+	assert.Equal(t, `{"victim":true}`, string(data), "the symlink target is never written")
+	entries, err := os.ReadDir(outside)
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "nothing is created in the symlink target")
+}
+
+func TestGrantRefusesSymlinkedLockFile(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	outsideLock := filepath.Join(base, "outside.lock")
+	writeSettings(t, repo, `{}`)
+	require.NoError(t, os.Symlink(outsideLock, filepath.Join(repo, ".claude", lockName)))
+
+	_, err := Grant(repo)
+	require.Error(t, err)
+	_, statErr := os.Stat(outsideLock)
+	assert.True(t, os.IsNotExist(statErr), "O_CREATE must not follow the lock symlink out of the repo")
+	data, err := os.ReadFile(settingsFile(repo))
+	require.NoError(t, err)
+	assert.Equal(t, `{}`, string(data))
+}
+
+func TestEditsPreserveUnrelatedBytes(t *testing.T) {
+	const big = "9007199254740993"
+	content := "{\n  \"zeta\": " + big + ",\n  \"alpha\": 1.0e2,\n  \"permissions\": {\"deny\": [\"Bash(rm:*)\"], \"allow\": [\"Bash(make && test)\", \"<&>\"]},\n  \"a\": \"x\\u0026y\"\n}\n"
+	root := t.TempDir()
+	writeSettings(t, root, content)
+
+	_, err := Grant(root)
+	require.NoError(t, err)
+	data, err := os.ReadFile(settingsFile(root))
+	require.NoError(t, err)
+	got := string(data)
+	assert.Contains(t, got, big, "large integer survives byte-for-byte")
+	assert.Contains(t, got, "1.0e2")
+	assert.Contains(t, got, `"Bash(make && test)"`, "HTML characters are not re-escaped")
+	assert.Contains(t, got, `"<&>"`)
+	assert.Contains(t, got, `x\u0026y`, "an unrelated string's escaping is kept as written")
+	assert.Less(t, strings.Index(got, `"zeta"`), strings.Index(got, `"alpha"`), "key order kept")
+	assert.Less(t, strings.Index(got, `"alpha"`), strings.Index(got, `"permissions"`))
+	assert.Less(t, strings.Index(got, `"deny"`), strings.Index(got, `"allow"`))
+
+	_, err = Revoke(root)
+	require.NoError(t, err)
+	data, err = os.ReadFile(settingsFile(root))
+	require.NoError(t, err)
+	got = string(data)
+	assert.Contains(t, got, big)
+	assert.Contains(t, got, `"Bash(make && test)"`)
+	assert.NotContains(t, got, Rules[0])
+}
+
+func TestRevokeKeepsRulesPresentBeforeGrant(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"allow":["Skill(mail)"]}}`)
+	added, err := Grant(root)
+	require.NoError(t, err)
+	assert.NotContains(t, added, "Skill(mail)")
+
+	removed, err := Revoke(root)
+	require.NoError(t, err)
+	assert.NotContains(t, removed, "Skill(mail)")
+	assert.Equal(t, asAny("Skill(mail)"), allowList(t, root), "the pre-existing rule survives disable")
+	_, statErr := os.Stat(filepath.Join(root, ".claude", grantedName))
+	assert.True(t, os.IsNotExist(statErr), "record removed once nothing remains granted")
+}
+
+func TestRevokeWithoutRecordRemovesNothing(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"allow":["Skill(mail)"]}}`)
+	removed, err := Revoke(root)
+	require.NoError(t, err)
+	assert.Empty(t, removed)
+	assert.Equal(t, asAny("Skill(mail)"), allowList(t, root))
+}
+
+func TestRemoveRollsBackOnlyTheGivenRules(t *testing.T) {
+	root := t.TempDir()
+	added, err := Grant(root)
+	require.NoError(t, err)
+	removed, err := Remove(root, added[:2])
+	require.NoError(t, err)
+	assert.Equal(t, added[:2], removed)
+	assert.Equal(t, asAny(added[2:]...), allowList(t, root))
+	again, err := Revoke(root)
+	require.NoError(t, err)
+	assert.Equal(t, added[2:], again, "the record kept the rest")
+}
+
+func TestPreflightWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, Preflight(root))
+	_, statErr := os.Stat(filepath.Join(root, ".claude"))
+	assert.True(t, os.IsNotExist(statErr))
+
+	bad := t.TempDir()
+	writeSettings(t, bad, `{not json`)
+	require.ErrorIs(t, Preflight(bad), ErrRefused)
 }
