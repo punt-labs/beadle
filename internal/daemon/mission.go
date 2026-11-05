@@ -17,9 +17,14 @@ type EmailMeta struct {
 }
 
 // maxContractFieldRunes bounds the length of a single user-controlled
-// mission-contract field (an escaped YAML value or a stage arg embedded in
-// the context field). Shared so the two cap sites cannot silently drift
-// apart.
+// field: an escaped YAML value in a mission contract (escapeYAMLValue,
+// this file), the triggering email's body (Executor.Run, pipeline.go), or
+// a stage arg fenced into the per-spawn system prompt (stagePayloadText,
+// pipeline.go). Shared so the three cap sites cannot silently drift apart.
+// Stage args and the email body are no longer embedded in the mission
+// contract at all (DES-038, docs/email-payload-handoff.md) -- they travel
+// through the per-spawn system prompt instead -- but they share this same
+// cap with the contract fields escapeYAMLValue still bounds.
 const maxContractFieldRunes = 500
 
 // BuildContract generates a mission contract YAML string from email metadata,
@@ -33,9 +38,10 @@ const maxContractFieldRunes = 500
 // email content: it used to direct the worker to fetch it itself via
 // beadle-email tools, which meant granting mailbox read access -- any
 // message, not just this one -- for a single-message task (beadle-ivtd).
-// This function has no way to grant the narrower alternative (passing the
-// body directly, as the pipeline path now does in buildStageContract)
-// since nothing here spawns a worker with a scoped body in hand; whoever
+// This function has no way to grant the narrower alternative the pipeline
+// path uses instead: handing the worker its body via the per-spawn system
+// prompt (StagePayload, BuildSystemPromptForTools in templates.go), since
+// nothing here spawns a worker with a scoped body in hand; whoever
 // eventually works this mission decides how to get the content, under
 // whatever grant their own invocation configures.
 // All user-controlled values are double-quoted via escapeYAMLValue.
@@ -83,17 +89,20 @@ func escapeYAMLValue(s string) string {
 }
 
 // escapeYAMLPipe returns a double-quoted YAML scalar for content that must
-// not be silently truncated: pipeline stage context (call args, already
-// capped by stageContext, plus the prior stage's pipeline output, which is
-// left uncapped and can run to 1MB) and a Command's Prompt, which becomes a
-// mission's success_criteria. Stage context as a whole is not
-// signature-verified -- it can carry planner-supplied args or email-derived
-// pipe data. Only the Prompt call site is trusted: a Prompt reaches here
-// trusted because cmd/beadle-daemon/main.go's loadDaemonCommands only loads
-// commands whose signature daemon.LoadCommands verified against the recipe
-// authorizer's key -- that enforcement lives in the caller, not in this
-// function or in the Command type. Unlike escapeYAMLValue it has no length
-// cap. NUL bytes are still stripped.
+// not be silently truncated. Its one remaining caller is buildStageContract,
+// for a Command's Prompt, which becomes a mission's success_criteria --
+// since DES-038 (docs/email-payload-handoff.md) moved the triggering
+// email's body, the stage's call args, and the prior stage's pipeline
+// output out of the contract entirely, onto the per-spawn system prompt
+// (StagePayload, BuildSystemPromptForTools in templates.go), none of that
+// content reaches this function anymore. A Prompt reaches here trusted,
+// unlike that retired email-derived content: cmd/beadle-daemon/main.go's
+// loadDaemonCommands only loads commands whose signature daemon.LoadCommands
+// verified against the recipe authorizer's key -- that enforcement lives in
+// the caller, not in this function or in the Command type -- so an
+// operator-authored Prompt is exactly the kind of trusted, bounded text that
+// does not need escapeYAMLValue's length cap or adversarial-input posture.
+// Unlike escapeYAMLValue it has no length cap. NUL bytes are still stripped.
 func escapeYAMLPipe(s string) string {
 	s = strings.ReplaceAll(s, "\x00", "")
 	escaped := strings.ReplaceAll(s, `\`, `\\`)

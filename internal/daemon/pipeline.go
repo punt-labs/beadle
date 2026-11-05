@@ -2,11 +2,12 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -25,17 +26,30 @@ type Pipeline struct {
 	Email     EmailMeta `json:"email"`
 	// Body is the triggering email's body, carried so a stage can act on the
 	// actual message content instead of being handed a shell and left to go
-	// fetch it itself (beadle-ivtd). It is capped at maxContractFieldRunes
-	// when the pipeline is created (see Run), matching the cap
-	// buildStageContract applies before this value reaches the mission
-	// contract a worker reads -- storing more than a worker will ever see
-	// is wasted disk and memory for no benefit.
-	Body     string        `json:"body"`
-	Commands []CommandCall `json:"commands"`
-	ElseCmd  *CommandCall  `json:"else_cmd"`
-	Current  int           `json:"current"`
-	Results  []string      `json:"results"`
-	Status   string        `json:"status"`
+	// fetch it itself (beadle-ivtd). It is sanitized (sanitizeText) and
+	// capped at maxContractFieldRunes exactly once, when the pipeline is
+	// created (see Run) -- the one place that decides this state, per the
+	// round-3 design rule (beadle-4gm1): a downstream reader of Body must
+	// never re-sanitize or re-cap it and infer BodyTruncated/BodySanitized
+	// from the bytes, both because that duplicates work and because a
+	// second round of sanitization or capping on already-processed text
+	// produces a different, wrong answer (NULs already stripped shift where
+	// a rune-count cap lands; an already-capped value is never over length
+	// a second time, so a naive "capped != value" check downstream would
+	// always read false even when the ORIGINAL body needed truncating).
+	// Body itself never carries a truncation marker -- capRunes returns
+	// whether it cut the value as a separate bool, so there is no marker
+	// text to ever strip back off -- BodyTruncated is the sole statement of
+	// that fact, read by stagePayloadText (BuildSystemPromptForTools,
+	// templates.go) when it fences this value.
+	Body          string        `json:"body"`
+	BodyTruncated bool          `json:"body_truncated"`
+	BodySanitized bool          `json:"body_sanitized"`
+	Commands      []CommandCall `json:"commands"`
+	ElseCmd       *CommandCall  `json:"else_cmd"`
+	Current       int           `json:"current"`
+	Results       []string      `json:"results"`
+	Status        string        `json:"status"`
 	// Error may be set even when Status is "completed" -- it records a
 	// non-fatal auto-reply failure. Test Status for success, not Error.
 	Error    string   `json:"error"`
@@ -58,15 +72,65 @@ type Executor struct {
 
 // Run plans and executes a pipeline for the given email.
 func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipeline, error) {
+	// Sanitize and cap body exactly once, here -- the one place that
+	// decides Pipeline.Body's truncation and sanitization state (see
+	// Pipeline.Body's doc comment). capRunes never appends a marker, so
+	// there is nothing to strip back off: BodyTruncated is the sole
+	// statement of that fact for every downstream reader (stagePayloadText,
+	// via BuildSystemPromptForTools) to fence on.
+	//
+	// A whitespace-only body (e.g. "\r\n" -- the trailing MIME boundary
+	// CRLF ParseMIME returns for a multipart/signed message whose signed
+	// part carries no real text) is normalized to "" here, the one place
+	// that decides it: stagePayloadText used to assume an empty and a
+	// whitespace-only body "render the same way downstream," but it only tests
+	// EmailBody != "" -- "\r\n" is not "", so it rendered as a 2-rune
+	// fence instead of the "(none)" marker the comment claimed. Deciding
+	// it here, before sanitize/cap, means a trimmed-to-empty body also
+	// carries no truncation or sanitization state: there is nothing left
+	// to have truncated or sanitized once the decision is "no body text."
+	//
+	// Not an error: a subject-only email, or a multipart/signed message
+	// whose signed part is nothing but the MIME boundary's CRLF, simply has
+	// no body text. It is logged below (once p.ID exists) so the daemon log
+	// explains why this pipeline's system prompt renders "email body: (none)"
+	// -- without the line, that render looks like a bug to anyone reading the
+	// log without also reading the source message.
+	bodyEmpty := strings.TrimSpace(body) == ""
+	if bodyEmpty {
+		body = ""
+	}
+	sanitizedBody, bodySanitized := sanitizeText(body)
+	cappedBody, bodyTruncated := capRunes(sanitizedBody, maxContractFieldRunes)
+
 	p := &Pipeline{
-		Version:   1,
-		ID:        uuid.New().String(),
-		CreatedAt: time.Now(),
-		Email:     meta,
-		Body:      capRunes(body, maxContractFieldRunes),
-		Status:    "running",
+		Version:       1,
+		ID:            uuid.New().String(),
+		CreatedAt:     time.Now(),
+		Email:         meta,
+		Body:          cappedBody,
+		BodyTruncated: bodyTruncated,
+		BodySanitized: bodySanitized,
+		Status:        "running",
 	}
 	e.save(p)
+
+	if bodyEmpty {
+		e.Logger.Warn("email body empty or whitespace-only", "pipeline", p.ID)
+	}
+
+	// Logged once, right after the one place that decided it, so the
+	// decision has a record independent of whatever a later stage renders
+	// from it -- no body content in the line, since the whole reason for
+	// sanitizing and capping is that this text is adversarial.
+	if bodyTruncated || bodySanitized {
+		e.Logger.Warn("email body sanitized or truncated before stage input",
+			"pipeline", p.ID,
+			"truncated", bodyTruncated,
+			"sanitized", bodySanitized,
+			"original_runes", utf8.RuneCountInString(body),
+			"kept_runes", utf8.RuneCountInString(cappedBody))
+	}
 
 	calls, err := e.Planner.Plan(ctx, meta, body)
 	if err != nil {
@@ -137,6 +201,17 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 		return p, fmt.Errorf("pipeline %s: marshal pipe: %w", p.ID, err)
 	}
 	pipe := string(pipeData)
+	// pipeTruncated travels WITH pipe, as a local pair, never through a
+	// field on p: round 4 of beadle-4gm1 found that a shared, resettable
+	// Pipeline.PipeTruncated field described whichever stage ran most
+	// recently, not necessarily the one whose pipe value the current stage
+	// is about to read -- the reset at the top of stage i raced the one
+	// read of stage i-1's truncation state inside runner.Run at the bottom
+	// of stage i. Carrying both as locals, reassigned together only where
+	// pipe itself is reassigned, makes that race structurally impossible:
+	// there is no field left to reset on a schedule that can get out of
+	// sync with the value it describes.
+	pipeTruncated := false
 
 	// Execute sequentially.
 	for i, call := range calls {
@@ -152,7 +227,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			e.fireElse(p)
 			return p, fmt.Errorf("pipeline %s stage %d (%s): unknown runner %q", p.ID, i, call.Command, cmd.Runner)
 		}
-		result, err := runner.Run(ctx, e, p, i, cmd, call, pipe)
+		result, resultTruncated, err := runner.Run(ctx, e, p, i, cmd, call, pipe, pipeTruncated)
 		if err != nil {
 			p.Status = "failed"
 			p.Error = fmt.Sprintf("stage %d (%s): %v", i, call.Command, err)
@@ -163,18 +238,29 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 
 		if cmd.Mode == "process" {
 			if err := ValidateOutput(schemas[call.Command], result); err != nil {
+				// The validator can quote the offending value, which is stage
+				// output derived from the email: cap it before it is logged or
+				// stored.
+				msg := truncateLog(err.Error(), 200)
+				if resultTruncated {
+					msg = "output truncated at the 1MB cap, then output validation: " + msg
+				}
 				e.Logger.Warn("output schema validation failed",
 					"pipeline", p.ID, "stage", i,
-					"command", call.Command, "error", err)
+					"command", call.Command, "error", msg, "truncated", resultTruncated)
 				p.Status = "failed"
-				p.Error = fmt.Sprintf("stage %d (%s): output validation: %v", i, call.Command, err)
+				p.Error = fmt.Sprintf("stage %d (%s): output validation: %s", i, call.Command, msg)
 				e.save(p)
 				e.fireElse(p)
-				return p, fmt.Errorf("pipeline %s stage %d (%s): output validation: %w", p.ID, i, call.Command, err)
+				return p, fmt.Errorf("pipeline %s stage %d (%s): output validation: %s", p.ID, i, call.Command, msg)
 			}
+			// The pipe stays RAW so a CLI stage downstream reads exactly the
+			// bytes this one wrote; ClaudeRunner sanitizes at the fence.
 			pipe = result
+			pipeTruncated = resultTruncated
 		}
-		// passthrough: pipe unchanged, result recorded like any other stage
+		// passthrough: pipe (and its truncation state) unchanged, result
+		// recorded like any other stage
 
 		p.Results = append(p.Results, result)
 		e.save(p)
@@ -198,7 +284,17 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			e.Logger.Error("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
 			p.Error = fmt.Sprintf("auto-reply runner not registered: %s", replyCmd.Runner)
 		} else {
-			replyResult, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, pipe)
+			// The auto-reply reads the FINAL pipe value and its carried
+			// truncation state -- whatever the last "process" stage left
+			// them as -- never a flag reset on its own schedule.
+			// A capped CLI stage leaves a silently partial pipe; tell the
+			// sender. The notice is daemon-authored and added here, where
+			// pipeTruncated is carried.
+			replyPipe := pipe
+			if pipeTruncated {
+				replyPipe += truncationNotice
+			}
+			replyResult, _, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, replyPipe, pipeTruncated)
 			if err != nil {
 				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
 				p.Error = fmt.Sprintf("auto-reply failed: %v", err)
@@ -215,21 +311,28 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 	return p, nil
 }
 
-// buildStageContract generates a mission contract string for one pipeline stage.
+// buildStageContract generates a mission contract string for one pipeline
+// stage. The contract carries no part of the stage's actual payload: not
+// the triggering email's body, not this stage's call args, not the prior
+// stage's pipeline output. All three are adversarial, email-derived free
+// text, and the mission contract is a file ethos's own writers persist and
+// may redact on a later read (ethos PR #539, DES-080) -- a worker reading
+// its own contract via `ethos mission show` must not depend on an ethos
+// version the daemon does not control. The payload instead travels through
+// the per-spawn, untracked system prompt file (stagePayloadText,
+// BuildSystemPromptForTools in templates.go), which ethos's mission-record
+// writers never see. See docs/email-payload-handoff.md (DES-038) for the
+// design and the rejected alternatives.
+//
+// context carries only a fixed, daemon-generated reference naming
+// pipelineID and stageIdx, so a human reading the contract knows where the
+// real content lives without the contract ever having held it.
 //
 // ethos's inputs schema recognizes only trigger, files, ticket, and
 // references (see ethos's internal/mission/inputs.go) -- there is no
-// inputs.args or inputs.pipeline_output. Stage args, the prior stage's
-// pipeline output, and the triggering email's body are carried instead as
-// free text in the top-level context field, which exists for exactly this
-// kind of information.
-//
-// body is the triggering email's raw content (Pipeline.Body) -- passed here
-// so a stage acts on the actual message instead of being handed a shell and
-// left to fetch it itself (beadle-ivtd). It is adversarial input from an
-// external sender, same as meta's fields, so stageContext caps it the same
-// way.
-func buildStageContract(meta EmailMeta, cmd *Command, call CommandCall, pipe, body string) string {
+// inputs.args or inputs.pipeline_output, which is why that content was
+// never a candidate for inputs in the first place.
+func buildStageContract(meta EmailMeta, cmd *Command, pipelineID string, stageIdx int) string {
 	return fmt.Sprintf(`leader: claude
 worker: bwk
 evaluator:
@@ -252,7 +355,7 @@ budget:
 		escapeYAMLValue(meta.MessageID),
 		escapeYAMLValue(meta.From),
 		escapeYAMLValue(meta.Subject),
-		escapeYAMLPipe(stageContext(call.Args, pipe, body)),
+		escapeYAMLValue(stageContextReference(pipelineID, stageIdx)),
 		writeSetYAML(cmd.WriteSet),
 		escapeYAMLPipe(cmd.Prompt),
 		cmd.Budget.Rounds,
@@ -260,56 +363,162 @@ budget:
 	)
 }
 
-// stageContext formats a stage's call args, the prior stage's pipeline
-// output, and the triggering email's body as the free-text content of the
-// mission contract's context field. Args are sorted by key for
-// deterministic output. Each arg value and the body are capped at
-// maxContractFieldRunes, matching escapeYAMLValue's cap on other
-// user-controlled contract fields -- the pipe value itself is left
-// uncapped, since pipe data can be up to 1MB and escapeYAMLPipe (applied by
-// the caller to the whole returned string) is the field meant to carry it
-// uncapped.
-func stageContext(args map[string]any, pipe, body string) string {
-	pipeValue := "none"
-	if pipe != "" {
-		pipeValue = pipe
+// stageContextReference is the fixed-shape text buildStageContract writes
+// into the mission contract's context field in place of the stage's actual
+// payload. It names pipelineID and stageIdx so a reader of the tracked
+// contract knows which pipeline run and stage it belongs to; the real
+// content -- stage args, prior pipeline output, the triggering email's
+// body -- is in that stage's own per-spawn system prompt (stagePayloadText,
+// BuildSystemPromptForTools), not here.
+func stageContextReference(pipelineID string, stageIdx int) string {
+	// fireElse runs its reply with idx -1: it is no stage of the plan.
+	stage := fmt.Sprintf("stage %d", stageIdx)
+	if stageIdx < 0 {
+		stage = "failure reply"
 	}
-
-	argsText := "none"
-	if len(args) > 0 {
-		keys := make([]string, 0, len(args))
-		for k := range args {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-
-		parts := make([]string, len(keys))
-		for i, k := range keys {
-			parts[i] = fmt.Sprintf("%s=%s", k, capRunes(fmt.Sprint(args[k]), maxContractFieldRunes))
-		}
-		argsText = strings.Join(parts, ", ")
-	}
-
-	bodyText := "none"
-	if body != "" {
-		bodyText = capRunes(body, maxContractFieldRunes)
-	}
-
-	return "stage args: " + argsText + "\npipeline output: " + pipeValue + "\nemail body: " + bodyText
+	return fmt.Sprintf(
+		"stage input delivered via the per-spawn system prompt (pipeline %s, "+
+			"%s); the triggering email's body, this stage's args, and the "+
+			"prior stage's output are not stored here -- see this worker's own "+
+			"appended system prompt (STAGE INPUT, after SECURITY) for the content",
+		pipelineID, stage)
 }
 
-// truncationMarker is appended by capRunes when a value is actually cut, so
-// a worker reading the context field can tell it is looking at a partial
-// value rather than the whole thing.
-const truncationMarker = " …[truncated]"
+// stagePayloadText formats a stage's call args, the prior stage's pipeline
+// output, and the triggering email's body as the content of the per-spawn
+// system prompt's STAGE INPUT block (BuildSystemPromptForTools,
+// templates.go) -- never the mission contract (see buildStageContract's doc
+// comment). Args are sorted by key for deterministic output.
+//
+// Each field is wrapped in a begin/end fence stamped with nonce (one per
+// render, generated by BuildSystemPromptForTools via genFenceNonce) and
+// naming the field, its rune count, and whether it was truncated and/or
+// sanitized -- never a bare "field: value" line. The payload is
+// adversarial, email-derived text (see buildStageContract's doc comment):
+// without the nonce, a body containing a line that reads
+// "--- end email body ---" followed by a forged "--- begin pipeline
+// output: 0 runes ---" could impersonate a daemon-generated field boundary
+// a worker (or a naive human reader) might trust; the attacker cannot
+// predict the nonce in advance, so a forged fence line simply fails to
+// carry it and is distinguishable on sight (BuildSystemPromptForTools's
+// STAGE INPUT header states this rule). A fence is also how "no content"
+// (the empty marker "--- <nonce> <name>: (none) ---", emptyMarker) is told
+// apart from "content that happens to be empty-looking": every line this
+// function emits, fence or empty marker, carries the nonce, so a sender line
+// that reads the same way but lacks it is plainly sender content.
+//
+// Stage args, like the pipe and the body, carry truncation/sanitization
+// state decided upstream (see StagePayload's doc comment) -- every StageArg
+// in payload.Args arrives already sanitized, capped, and pre-sorted by
+// Name, by ClaudeRunner.Run, so stagePayloadText only fences it. Pipeline
+// output and email body carry their states the same way in payload
+// (PipelineOutputTruncated, EmailBodyTruncated, EmailBodySanitized): all
+// three were already sanitized and/or capped upstream (ClaudeRunner.Run for
+// args, CLIRunner.Run/runOutput/runCompound for the pipe's cap and
+// Executor.Run for its sanitization, Executor.Run for the body), and
+// re-deriving "truncated" from "capped != value" down here
+// would read false even when the ORIGINAL value needed truncating, since an
+// already-capped value is never over length a second time.
+func stagePayloadText(payload StagePayload, nonce string) string {
+	var parts []string
 
-// capRunes truncates s to at most n runes. If truncation occurred,
-// truncationMarker is appended, so the returned string can exceed n runes.
-func capRunes(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
-		return s
+	if len(payload.Args) > 0 {
+		argParts := make([]string, len(payload.Args))
+		for i, a := range payload.Args {
+			argParts[i] = fenceField(nonce, fmt.Sprintf("stage arg %s", a.Name), a.Value, a.Truncated, a.Sanitized)
+		}
+		parts = append(parts, argParts...)
+	} else {
+		parts = append(parts, emptyMarker(nonce, "stage args"))
 	}
-	return string([]rune(s)[:n]) + truncationMarker
+
+	if payload.PipelineOutput != "" {
+		parts = append(parts, fenceField(nonce, "pipeline output", payload.PipelineOutput, payload.PipelineOutputTruncated, payload.PipelineOutputSanitized))
+	} else {
+		parts = append(parts, emptyMarker(nonce, "pipeline output"))
+	}
+
+	if payload.EmailBody != "" {
+		parts = append(parts, fenceField(nonce, "email body", payload.EmailBody, payload.EmailBodyTruncated, payload.EmailBodySanitized))
+	} else {
+		parts = append(parts, emptyMarker(nonce, "email body"))
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+// emptyMarker renders the "no content" line for an empty field, stamped with
+// nonce like every other daemon-emitted line in the STAGE INPUT block, so a
+// sender-planted "name: (none)" line is never mistaken for it.
+func emptyMarker(nonce, name string) string {
+	return fmt.Sprintf("--- %s %s: (none) ---", nonce, name)
+}
+
+// fenceField wraps the already-sanitized-and-capped value in a nonce-
+// stamped "--- begin/end <nonce> <name> ---" fence. The rune count in the
+// begin line is utf8.RuneCountInString(value) -- exactly the content
+// between the begin and end lines, nothing else -- and the "truncated"/
+// "sanitized" states named alongside it are passed in, never recomputed
+// from value itself (see stagePayloadText's doc comment for why). capRunes
+// never appends a truncation marker to value, so the fence header is the
+// sole statement of truncation.
+func fenceField(nonce, name, value string, truncated, sanitized bool) string {
+	var states []string
+	if sanitized {
+		states = append(states, "sanitized")
+	}
+	if truncated {
+		states = append(states, "truncated")
+	}
+	state := ""
+	if len(states) > 0 {
+		state = ", " + strings.Join(states, ", ")
+	}
+
+	return fmt.Sprintf("--- begin %s %s: %d runes%s ---\n%s\n--- end %s %s ---",
+		nonce, name, utf8.RuneCountInString(value), state, value, nonce, name)
+}
+
+// genFenceNonce returns a fresh, random 8-byte value hex-encoded (16
+// characters), for BuildSystemPromptForTools to stamp into every fence line
+// of one system-prompt render (fenceField, stagePayloadText) -- see
+// BuildSystemPromptForTools's doc comment for why a per-render nonce closes
+// the fence-forgery gap a fixed fence string leaves open. A crypto/rand
+// failure is returned as an error, never silently swallowed into a
+// weaker or fixed fallback: a fence a sender could predict is not a fence.
+func genFenceNonce() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("read random bytes: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+// truncationNotice marks an auto-reply whose body was cut at the CLI stdout cap.
+const truncationNotice = "\n[output truncated at 1MB]\n"
+
+// sanitizeText strips NUL bytes and replaces invalid UTF-8 with the Unicode
+// replacement character, reporting whether either change fired.
+func sanitizeText(s string) (out string, changed bool) {
+	stripped := strings.ReplaceAll(s, "\x00", "")
+	valid := strings.ToValidUTF8(stripped, "�")
+	return valid, valid != s
+}
+
+// capRunes truncates s to at most n runes, never appending a marker --
+// truncated reports whether s was actually cut, the sole statement of that
+// fact for every caller. A marker-in-the-value design was tried and
+// removed (round 3 of beadle-4gm1): capRunes used to append one, and every
+// caller then had to strip it back off before storing or fencing the
+// value, because a value under the cap that happened to end with the exact
+// marker text would otherwise look truncated when it was not. Returning
+// the bool directly makes that failure mode structurally impossible --
+// there is no marker text left to collide with.
+func capRunes(s string, n int) (out string, truncated bool) {
+	if utf8.RuneCountInString(s) <= n {
+		return s, false
+	}
+	return string([]rune(s)[:n]), true
 }
 
 // writeSetYAML formats a write_set slice as YAML list items.
@@ -417,7 +626,9 @@ func (e *Executor) fireElse(p *Pipeline) {
 	}
 
 	ctx := context.Background()
-	_, err := runner.Run(ctx, e, p, -1, replyCmd, replyCall, elsePipe)
+	// elsePipe is a fixed, daemon-authored string -- never truncated,
+	// regardless of what the failed stage's own pipe value was doing.
+	_, _, err := runner.Run(ctx, e, p, -1, replyCmd, replyCall, elsePipe, false)
 	if err != nil {
 		// The pipeline is already terminally failed by the time fireElse
 		// runs -- this is the last chance to tell the sender why, not a

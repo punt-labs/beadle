@@ -1,0 +1,57 @@
+mission_id: m-2026-10-26-019
+status: closed
+type: implement
+created_at: "2026-10-26T18:17:46Z"
+updated_at: "2026-10-26T18:35:08Z"
+closed_at: "2026-10-26T18:35:08Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: djb
+    pinned_at: "2026-10-26T18:17:46Z"
+    hash: 85800c9c7277e2fd9745f65041596879e461bdb130c9bc4252a6ff78f79a479c
+inputs:
+    ticket: beadle-4gm1
+    files:
+        - docs/email-payload-handoff.md
+        - internal/daemontest/daemontest.go
+write_set:
+    - internal/daemon/pipeline.go
+    - internal/daemon/pipeline_test.go
+    - internal/daemon/pipeline_edge_test.go
+    - internal/daemon/persist_test.go
+    - internal/daemon/runner.go
+    - internal/daemon/runner_test.go
+    - internal/daemon/templates.go
+    - internal/daemon/templates_test.go
+    - internal/daemon/handler.go
+    - internal/daemon/handler_test.go
+    - internal/daemon/harness_test.go
+success_criteria:
+    - The shared mutable Pipeline.PipeTruncated field is removed. Runner.Run returns its own truncation state with its output, as (output string, truncated bool, err error) or a small result struct; CLIRunner's runOutput and runCompound report true at their 1MB cap and never append truncationMarker; ClaudeRunner reports false. Every implementor in the write set (CLIRunner, ClaudeRunner, mockClaudeRunner in pipeline_edge_test.go, any runner fake in runner_test.go) and every caller is updated; go build ./... and go vet ./... are clean.
+    - Executor.Run carries pipeTruncated as a local alongside pipe and assigns it only where pipe = result is assigned; a passthrough stage leaves both unchanged. StagePayload.PipelineOutputTruncated is populated from that local via the runner call, never from a Pipeline field. fireElse passes false for its fixed else-pipe string; the auto-reply stage passes the carried local for the final pipe. The Pipeline doc comments and the StagePayload doc comment describe this and no longer mention a reset.
+    - 'Three regression tests through the real Executor.Run stage loop, in pipeline_test.go or pipeline_edge_test.go: a CLI stage whose stdout hits the cap followed by a claude stage, asserting the claude stage''s StagePayload shows PipelineOutputTruncated true and its fence header says truncated; a CLI stage whose capped output fails output validation, asserting fireElse''s reply stage sees false; a passthrough CLI stage with capped output followed by a process stage, asserting the next stage sees the state of the unchanged pipe. The overlay at .tmp/sfh-r3-pipetruncated-overlay_test.go is the starting point for the first two; delete the overlay file after promoting it. TestCLIRunner_OutputCap and _CompoundOutputCap are adapted to assert on the returned state.'
+    - make check is green from the worktree after each commit (worktree-only gosec G204 artifact with ../ or .claude/worktrees/ paths excepted; nothing else). Test count does not go down. Commits are one logical step each, fix(daemon) or test(daemon), staged by file name. No t.Skip, no nolint. Do not push, do not touch PRs or merge; the leader does that. Do not commit after submitting.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Successor to m-2026-10-26-014, which closed failed at a write-set
+    boundary (pipeline_edge_test.go implements and calls Runner.Run and was
+    omitted from that contract), not on substance. Bead beadle-4gm1, branch
+    fix/email-payload-off-contract, worktree [leader message has the path],
+    HEAD 3ffbed7, with the worker's uncommitted runner.go edits from the
+    prior round already in the tree; continue from them. The defect, found
+    independently by djb and the silent-failure hunter: pipeline.go resets
+    p.PipeTruncated at the top of stage i before ClaudeRunner.Run in the
+    same iteration reads it, so a CLI stage i-1 that hit the cap sets true
+    and the reset wipes it before the only reader sees it; the fence then
+    says nothing over a cut value. The reverse holds on fireElse, which
+    passes a fixed string while the flag is still true. Design rule, a
+    leader decision: truncation state travels with the value it describes,
+    returned by the runner that produced it and carried by the executor as
+    a local; there is no field to reset. daemontest is outside the write
+    set; if a fake there must change, stop and report. make test
+    provisions tools itself; scratch under the worktree's .tmp/ only; one
+    commit per logical step, each green.

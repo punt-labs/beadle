@@ -217,6 +217,68 @@ func TestOnNewMail_PGPKeyMatch(t *testing.T) {
 	assert.Equal(t, 1, len(mock.calls), "mission should be created: key matches")
 }
 
+// TestOnNewMail_EmptyBodyLogsWarn is round 3's regression test for
+// beadle-4gm1's criterion that an empty-but-successfully-fetched body is
+// logged at Warn: without it, a pipeline's system prompt later rendering
+// "email body: (none)" looks like a bug to anyone reading the daemon log
+// without also reading the triggering message. Uses capturingSpawner
+// (runner_test.go, same package) since this exercises the real
+// h.spawner != nil && h.templates != nil branch in OnNewMail, not the
+// mockMissionCreator fallback path above.
+func TestOnNewMail_EmptyBodyLogsWarn(t *testing.T) {
+	gpgBin := gpgBinary(t)
+
+	env := testenv.New(t, "test@test.com")
+	fix := testserver.NewFixture(t)
+	env.WriteConfig(fix.Config)
+	dialer := testserver.TestDialer{Password: "testpass"}
+	env.AddContact("Jim", "jim@punt-labs.com", "rwx")
+
+	raw := buildPGPSignedRFC822(t, gpgBin, "jim@punt-labs.com", "No body", "")
+	fix.AddRawMessage("INBOX", raw)
+
+	logger, buf := testLoggerCapture()
+	spawner := &capturingSpawner{result: WorkerResult{Output: "done"}}
+	templates := &MissionTemplate{TmpDir: t.TempDir()}
+	planner := &StubPlanner{Result: []CommandCall{{Command: "greet", Args: map[string]any{}}}}
+
+	handler := NewMailHandler(t.Context(), env.Resolver, dialer, nil, spawner, templates,
+		logger, 0, planner, testCommands(), nil)
+	handler.OnNewMail(1)
+	handler.Stop()
+
+	line := logLineContaining(t, buf, "email body empty or whitespace-only")
+	assert.Contains(t, line, "level=WARN")
+	assert.Contains(t, line, "pipeline=")
+}
+
+// TestOnNewMail_NonEmptyBodyDoesNotLogWarn is the negative half: a message
+// with real body text must not trigger the empty-body warning.
+func TestOnNewMail_NonEmptyBodyDoesNotLogWarn(t *testing.T) {
+	gpgBin := gpgBinary(t)
+
+	env := testenv.New(t, "test@test.com")
+	fix := testserver.NewFixture(t)
+	env.WriteConfig(fix.Config)
+	dialer := testserver.TestDialer{Password: "testpass"}
+	env.AddContact("Jim", "jim@punt-labs.com", "rwx")
+
+	raw := buildPGPSignedRFC822(t, gpgBin, "jim@punt-labs.com", "Has body", "actual content")
+	fix.AddRawMessage("INBOX", raw)
+
+	logger, buf := testLoggerCapture()
+	spawner := &capturingSpawner{result: WorkerResult{Output: "done"}}
+	templates := &MissionTemplate{TmpDir: t.TempDir()}
+	planner := &StubPlanner{Result: []CommandCall{{Command: "greet", Args: map[string]any{}}}}
+
+	handler := NewMailHandler(t.Context(), env.Resolver, dialer, nil, spawner, templates,
+		logger, 0, planner, testCommands(), nil)
+	handler.OnNewMail(1)
+	handler.Stop()
+
+	assert.NotContains(t, buf.String(), "email body empty or whitespace-only")
+}
+
 // TestVerifyTrust_RejectsProtonHeadersOnNonLocalIMAPHost guards
 // beadle-hv7i: verifyTrust's Trusted branch passes through
 // channel.Trusted purely from the message's own TrustLevel field,

@@ -181,7 +181,6 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 				h.logger.Error("skip message: fetch body failed", "from", addr, "id", msg.ID, "error", err)
 				continue
 			}
-
 			select {
 			case h.workerSem <- struct{}{}:
 				h.wg.Add(1)

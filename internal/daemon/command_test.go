@@ -506,6 +506,62 @@ func TestValidateCommand_Tools(t *testing.T) {
 	})
 }
 
+// TestValidateCommand_ArgNameWhitespace is the regression test for the
+// finding that an arg name outside the allowlist (whitespace, control,
+// bidi, zero-width) can split or disguise the one
+// "stage arg <name>" fence line stagePayloadText (pipeline.go) generates
+// into two -- a newline in the name breaks the begin/end fence into two
+// lines, so the nonce stamped on the intended line no longer covers both
+// halves, the same fence-forgery gap the nonce exists to close.
+func TestValidateCommand_ArgNameWhitespace(t *testing.T) {
+	base := func() *Command {
+		return &Command{
+			Name:         "test",
+			Runner:       "claude",
+			Prompt:       "hello",
+			OutputSchema: "text",
+			Budget: struct {
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
+			}{Rounds: 1},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		argName string
+		wantErr bool
+	}{
+		{"clean name is valid", "message", false},
+		{"name with internal space rejected", "my arg", true},
+		{"name with embedded newline rejected", "arg\nname", true},
+		{"name with carriage return rejected", "arg\rname", true},
+		{"name with tab rejected", "arg\tname", true},
+		{"dotted dashed underscored name is valid", "my-arg_v2.x", false},
+		{"name with NUL control character rejected", "arg\x00name", true},
+		{"name with escape control character rejected", "arg\x1bname", true},
+		{"name with bidi override rejected", "arg\u202ename", true},
+		{"name with bidi isolate rejected", "arg\u2066name", true},
+		{"name with zero-width space rejected", "arg\u200bname", true},
+		{"name with line separator rejected", "arg\u2028name", true},
+		{"non-ASCII letter rejected", "arg\u00e9", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := base()
+			cmd.Args = []CommandArg{{Name: tt.argName, Type: "string"}}
+			err := ValidateCommand(cmd)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "name must match")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestValidateArgs(t *testing.T) {
 	cmd := &Command{
 		Name: "test",
