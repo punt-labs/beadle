@@ -139,12 +139,14 @@ var runCmd = &cobra.Command{
 		// Configure planner. Use RulePlanner with a "summarize" rule.
 		// Reply is auto-appended by the executor after the last stage. The
 		// summarize command takes no args -- the triggering email's body
-		// reaches it through the mission contract's context field
-		// (Executor.Run -> buildStageContract), not a stage arg; see
-		// beadle-ivtd. An earlier version of this rule passed a literal
-		// placeholder string here ("see email body") instead of the body
-		// itself, which a worker with no other way to get the real content
-		// had every reason to go fetch on its own.
+		// reaches the worker through the per-spawn system prompt file
+		// (StagePayload, BuildSystemPromptForTools in internal/daemon's
+		// templates.go), never the mission contract; see
+		// docs/email-payload-handoff.md (DES-038) and beadle-ivtd. An
+		// earlier version of this rule passed a literal placeholder string
+		// here ("see email body") instead of the body itself, which a
+		// worker with no other way to get the real content had every
+		// reason to go fetch on its own.
 		var planner daemon.Planner
 		if len(commands) > 0 {
 			rules := []daemon.RuleEntry{

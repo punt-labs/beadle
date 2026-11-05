@@ -58,6 +58,10 @@ Run before every commit. The Makefile is the source of truth (`make help`).
 make check                             # All gates: lint + docs + test
 ```
 
+## Pull Requests
+
+PR review follows punt-kit/standards/pr-review.md: local review (qodo review + silent-failure-hunter + code-reviewer) before the PR, then Qodo and Bugbot once at open, at most two rounds, Copilot only on request.
+
 ## Scratch Files
 
 Use `.tmp/` for scratch and temporary files — never `/tmp`. `TMPDIR` is set via `.envrc`. Exception: GPG test home directories use short `/tmp/bg-*` paths to stay under the 108-byte Unix-socket path limit (see [`docs/TESTING.md`](docs/TESTING.md)); the deep `.tmp/` path would overflow it.

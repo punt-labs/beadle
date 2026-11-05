@@ -46,8 +46,8 @@ predicates over declared terms, never as bare primed flags.
 The operator owns requirements and design direction, rules on genuine design
 forks, and confirms verification of what only a human can judge. Claude runs
 everything else: the backlog, the missions, the review cycles, and the
-merges. Review of code is done by agents — the local review agents plus
-Copilot and Bugbot on the PR. There is no human review gate. The operator
+merges. Review of code is done by agents — the local review agents before
+the PR, then Qodo and Bugbot on the PR. There is no human review gate. The operator
 reads code in the IDE, but that inspection is separate, feeds design
 discussion only, and nothing in these loops waits on it.
 
@@ -224,11 +224,8 @@ function pr_loop(unit):
 
     # B. FULL-DIFF VERIFICATION (local, before any PR exists)
     make check                            # full gate on the accumulated diff
-    agents = 2 to 6 review agents by scope
-    repeat:
-        findings = run all agents on the full diff
-        fix every finding in this PR      # no deferrals
-    until a round produces zero findings
+    if local_review(full diff) is blocked: stop the unit until the
+        operator rules                    # local_review: after close_out
 
     # C. VERIFY — drive the real entry point, not just the tests
     make install                          # build + copy beadle-email to ~/.local/bin
@@ -245,39 +242,342 @@ function pr_loop(unit):
                                             # push, once local review + verify
                                             # pass and the unit is merge-ready
     push; create the PR (description carries the verification playbook)
-    request Copilot review once, on open
-    schedule a background poll with /loop   # never gh pr checks --watch,
-                                            # never foreground sleep loops
+    if the PR changes a file that is not demo_exempt:
+        comment "demo confirmed: <head sha>"   # once step C passed on that
+                                               #   head, with the operator's
+                                               #   confirmation only where
+                                               #   step C requires it
+        # Qodo reviews once, on open (.pr_agent.toml); Bugbot reviews once,
+        #   on its own, at open (Cursor dashboard: once per PR) — no
+        #   "bugbot run" comment for round 1
+    if the operator asked for Copilot: request one review, at open   # never
+                                          #   by default, never on push
+    schedule a background poll with /loop 3m  # never gh pr checks --watch,
+                                              # never foreground sleep loops
     # If the PR is later abandoned or closed unmerged, reopen its bead
     # (bd update <id> --status open) so the backlog never shows unshipped
     # work as done — the one case where a closed bead returns to the funnel.
 
+# Terms, all read from GitHub (Qodo's login is qodo-code-review[bot]).
+# The rules are model-checked in punt-kit standards/pr-review-model.tex and
+# pr-review-model-bugbot.tex.
+#   round(pr)    = 1 + the number of "/agentic_review" comments the leader
+#                  has posted on the PR
+#   trigger(N)   = the PR open for N = 1; the leader's (N-1)th
+#                  "/agentic_review" comment for N > 1
+#   head(N)      = the PR head commit when trigger(N) happened
+#   qodo_in(N)   = `qodo read pr-review-session findings --pr-url <url>`
+#                  reports review_session.status "completed" with a
+#                  started_at at or after trigger(N) and a commit_sha that
+#                  is head(N) or a later commit on the branch; or the
+#                  outage fallback ran for round N. A session that started
+#                  before trigger(N) — a round-1 session for N = 2 — never
+#                  completes round N, and a clean review counts like any
+#                  other.
+#   bugbot_in(N) = a "Cursor Bugbot" check run on head(N) or a later branch
+#                  commit, started at or after trigger(N) — the PR open for
+#                  N = 1 (Bugbot's automatic run), round 2's "bugbot run"
+#                  comment for N = 2 — and completed with a conclusion
+#                  showing the review finished (success or neutral). A run
+#                  that failed, timed out, or was cancelled reviewed
+#                  nothing, so it does not count; a later push does not
+#                  undo a completed run. A clean run posts no review, so
+#                  read the check run. Or: 30 minutes have passed since
+#                  trigger(N) (or since rerun(N), if later), bugbot_open is
+#                  false, and, if a run for round N failed, rerun(N) was
+#                  posted — the timeout covers an outage, never a live run
+#                  and never a skipped re-run.
+#   rerun(N)     = a "bugbot run" comment the leader posted because a
+#                  round-N run ended without a finished review, plus a
+#                  ledger comment `rerun(N): <failed check-run id>` posted
+#                  in the same tick. The ledger line is what records the
+#                  round: the comment text is the same for every round. One
+#                  "bugbot run" comment may serve several rounds, one
+#                  ledger line each. Round 2's trigger comment and a
+#                  stuck-run nudge use the same text, have no ledger line,
+#                  and are neither: a round has at most one rerun.
+#   copilot_in   = no Copilot review was requested on the PR, or one was and
+#                  (a review by copilot-pull-request-reviewer exists or 30
+#                  minutes have passed since the request)
+#   pending(pr)  = (not skipped(pr) and (not qodo_in(round(pr))
+#                  or not bugbot_in(round(pr)))) or not copilot_in
+#                  # a requested Copilot review counts on a skipped
+#                  # (bot-authored) PR too
+#   finding      = any unresolved review thread, from any author, any
+#                  Medium in Qodo's summary, or a finding reopened after a
+#                  force-push or rebase (answered(f)) — whenever it arrives,
+#                  late ones included
+#   answered(f)  = one path per source, never both:
+#                  - a finding with a Qodo id (from the CLI read): its
+#                    attribution_status is closed (implemented, dismissed,
+#                    outdated); close it with `qodo pr-review-session
+#                    mark-implemented` (the explanation names the fix sha)
+#                    or `dismiss` plus the reason and file:line. A ledger
+#                    line does not close it, except a reopened one (below).
+#                  - any other finding — Bugbot, a security automation,
+#                    Copilot, a human, the local outage fallback: fixed by a
+#                    commit on the PR head, or a ledger comment gives the
+#                    reason and file:line.
+#                  Whatever the source, and whether or not it was
+#                  escalated, a finding answered by a fix is answered only
+#                  once its fix commit is on the PR head and passed
+#                  local_review. A finding whose latest ruling is "fix" is
+#                  answered only by its fix; a "dismiss" ruling, including
+#                  one after a blocked fix, answers it once recorded.
+#                  After a force-push or rebase, a finding answered by a
+#                  fix, from any source, is reopened, unanswered, only if
+#                  that fix's change is no longer in the branch; new commit
+#                  ids alone do not reopen it. The leader unresolves a
+#                  reopened finding's review thread; a finding with no
+#                  review thread (a local or a Qodo summary finding) is
+#                  recorded by a ledger line
+#                  `reopened: <finding> <fix sha>`. A Qodo finding is
+#                  answered again by a ledger line naming its Qodo id and
+#                  a new fix sha, which is its recorded fix; any other by
+#                  a new fix commit; both under the fix rule above.
+#                  A finding repeated from an earlier round keeps its
+#                  answer, unless it was reopened.
+#   new High     = a High raised by a round-2 review (one that started at
+#                  or after trigger(2)) and not raised in an earlier round;
+#                  a manual review may re-scan the whole PR and repeat old
+#                  findings, and a round-1 High that arrives late is not
+#                  new — it takes the normal fix path
+#   escalation   = the leader's "escalated:" comment on one new round-2
+#                  High, on a fix-ruled finding whose fix was blocked in
+#                  local_review, on a blocked local_review, or on a stuck
+#                  Bugbot run; closed by a
+#                  later ledger entry recording the operator's ruling. The
+#                  entry closes the escalation, not the finding (see
+#                  answered(f))
+#   skipped(pr)  = the PR author is a bot ([github_app] ignore_bot_pr in
+#                  .pr_agent.toml); no title or label lets an author skip
+#   reviewed_head = set by a completing Qodo review or outage fallback to
+#                  the commit that review ran on (not the head when it
+#                  completed), or by promoting a delta_head that is the PR
+#                  head once every finding its delta review raised is
+#                  answered. It never moves backward: a completing review
+#                  moves it only when it is unset, is not in the head's
+#                  history (a rebase orphaned it), or is an ancestor of the
+#                  reviewed commit. A skipped (bot-authored) PR has none
+#                  until a delta review promotes one
+#   delta_head   = the PR head a local delta review ran on, set only when
+#                  that review completes; unset until the first one
+#                  completes
+#   delta_base   = the markers among reviewed_head and delta_head that are
+#                  set and are the head or an ancestor of it; empty when
+#                  neither is — no marker yet, or a rebase orphaned both
+#   delta range  = the PR's own commits in the head's history that no
+#                  delta_base commit reaches:
+#                  `git log <head> --not <delta_base> <base branch>`; with
+#                  delta_base empty, `git log <head> --not <base branch>`,
+#                  the merge-base(base branch, head)..head diff. Excluding
+#                  the base branch keeps commits merged in from it out of
+#                  every range
+#   bugbot_open  = a Cursor Bugbot check run on any commit of the PR, not
+#                  only the head, whose status is not completed (queued or
+#                  in progress), whatever its age, and that has no recorded
+#                  "proceed" ruling; only the run ending or a "proceed"
+#                  ruling clears it, and a "wait" ruling does not
+#   bugbot_stuck = a Bugbot run queued or in progress for more than 60
+#                  minutes, with no recorded "proceed" ruling
+#   demoed_head  = the commit named in the leader's latest "demo confirmed:"
+#                  PR comment, newer than any "demo failed:" comment; the
+#                  leader posts it once the verification gate passes on
+#                  that commit, with the operator's confirmation only where
+#                  the gate requires it (a live-mailbox result a human must
+#                  judge)
+#   demo_exempt(f) = f is *.md, under docs/, or *_test.go, and is not under
+#                  plugin/ — commands and hooks there are behavior even when
+#                  Markdown, because Claude Code executes them
+#   demo_ok(pr)  = every file the PR changes is demo_exempt, or demoed_head
+#                  exists, is the head or an ancestor of it, and every file
+#                  changed since it is demo_exempt
+# A "ledger comment" is a PR comment that records one finding, its reason,
+# and the code reference. "Pre-existing", "intentional", "expected", and
+# "by design" are not reasons.
+
 function poll_tick(pr):
     state = current reviews, threads, checks
-    for finding in unaddressed(state):    # handled now, never on a later tick
-        delegate the fix to a bare agent  # or reply with the concrete reason
-                                          # the finding does not apply
-        make check; commit; push          # each push restarts the gate
-        resolve the thread                # the leader resolves, not the agent
+    N = round(pr)
+    if CI failed: fix in this PR
+    if not skipped(pr) and not qodo_in(N)
+            and 30 minutes have passed since trigger(N)
+            and the fallback has not yet run for round N:
+        run code_reviewer locally on the diff Qodo was asked to review;
+            it completes round N for qodo_in only if it completed — on an
+            error, re-run once, then report to the operator and stop;
+            its findings have no Qodo id, so they take the ledger path
+                                                   # outage fallback
+    if a Bugbot run of any round M <= N completed without a finished
+            review (failure, timeout, or cancelled — a fix push cancels an
+            in-progress run) and no rerun(M) was posted:
+        comment "bugbot run"; and, for each such M, a ledger comment
+            "rerun(M): <failed check-run id>"
+                                           # together rerun(M) for every such
+                                           #   M: once per round, even after
+                                           #   the 30-minute fallback
+                                           #   elapsed, and for round 1 even
+                                           #   after round 2 opened; it
+                                           #   restarts the window; if the
+                                           #   re-run fails too or none
+                                           #   starts, the fallback in
+                                           #   bugbot_in applies
+    if a bugbot_stuck run has no "bugbot run" comment since it got stuck:
+        comment "bugbot run"               # once; the leader cancels nothing
+    if a run is still bugbot_stuck 30 minutes after that comment and no
+            escalation has been posted for this run:
+        post an escalation comment         # once, ever, per run; the operator
+                                           #   rules: "proceed" — the run is
+                                           #   abandoned, the ledger entry
+                                           #   names its check-run id, and
+                                           #   bugbot_open ignores it; "wait" —
+                                           #   the escalation closes and
+                                           #   bugbot_open stays true until
+                                           #   the run ends or the operator
+                                           #   later rules "proceed" on it,
+                                           #   which needs no new escalation
+    for each finding not answered(f) and not under an open escalation
+            nor in a diff whose block escalation is open:
+        if N == 2 and f is a new High with no ruling:
+            post an escalation comment; the operator rules
+        else:
+            fix it now (answered after the push, below), or answer it by
+                its source's path (answered(f))
+            # never re-litigated; Qodo Lows are dropped by comments_routing;
+            # no deferral beads; the latest ruling governs
+    for each escalation the operator has ruled on:
+        record the ruling in a ledger comment   # closes the escalation,
+                                                #   not the finding
+        a "dismiss" ruling answers the finding (a Qodo id: `dismiss`)
+    if fixes were made: delegate them to a bare agent; make check; commit
+        if local_review(the fix diff) is blocked:
+            post an escalation comment naming the blocked fix commit and
+                what blocked it, and one on each fix-ruled finding in the
+                diff; every other finding in the diff stays unanswered
+                and is taken again after the operator rules on the block:
+                "retry" (the fix is reworked and passes local_review
+                before any push) or "drop" (the blocked fix commit is
+                discarded unpushed and its findings return unanswered,
+                and the next local_review starts fresh, not resumed, so
+                the dropped fix's closures carry no weight); either
+                ruling's ledger entry closes the escalation; stop
+        push once                          # every fix reaches the PR head
+    answer each finding fixed this tick, or fix-ruled, whose fix commit is
+        now on the PR head and passed local_review — a Qodo id by
+        `mark-implemented` (a reopened one by a ledger line naming its
+        Qodo id and the new fix sha), any other source by that commit,
+        named in its ledger entry
+        # whatever the source: answered earlier, a stopped fix would merge
+        #   unfixed, with no open escalation and no unanswered finding
+    resolve each thread that is answered, one by one — the leader
+        resolves, not the agent
+    if not skipped(pr) and not pending(pr) and N == 1
+            and a High was fixed since trigger(1):
+        comment "/agentic_review"; comment "bugbot run"   # opens round 2,
+                                                          #   the last
+    if not pending(pr) and no delta review is running
+            and the PR head is neither reviewed_head nor delta_head:
+        run code_reviewer locally on the delta range; its findings are
+            findings like any other; when it completes, set delta_head to
+            the head it ran on
+                                           # an unset delta_head or a marker
+                                           #   a rebase orphaned never
+                                           #   blocks it
+    if delta_head is the PR head, reviewed_head is not, and every finding
+            that delta review raised is answered(f):
+        set reviewed_head to delta_head    # bounded rounds, but no
+                                           #   unreviewed merge, bot-authored
+                                           #   PRs included
+    if not demo_ok(pr) and nothing was pushed this tick:
+        re-run the verification gate on the head; once it passes, comment
+            "demo confirmed: <sha>" naming the head exercised, after the
+            operator's confirmation only where the gate requires it; on a
+            failure comment "demo
+            failed: <sha>" with what was observed, and the failure is a
+            finding like any other
+    if not pending(pr) and not bugbot_open and no finding is unanswered:
+        cadence = 15m                      # only CI or a late thread can
+                                           #   change state now
+    else: cadence = 3m
+    if the poll's interval is not cadence:
+        cancel the poll job; schedule /loop <cadence> in its place
+    re-read state                          # the gate must see this tick's
+                                           #   push and comment
     if merge_gate(state): merge (squash); close_out()
 
 function merge_gate(state) -> bool:
     return CI green on the latest commit
-       and Copilot has reviewed the latest commit   # it re-reviews on push
-       and (Bugbot has reviewed the latest commit
-            or Bugbot never reviewed this PR and more than six minutes
-               have passed since CI went green)
+       and not pending(pr)                 # no requested review outstanding
+       and not bugbot_open                 # any queued or in-progress run on
+                                           #   any commit, unless ruled
+                                           #   "proceed": its findings land
+                                           #   before the merge, until it
+                                           #   ends
+       and every round with a failed Bugbot run has its rerun(N)
+                                           # any round, not only round(pr)
+       and reviewed_head is the PR head    # a bot-authored PR is covered by
+                                           #   the local delta review, never
+                                           #   waived
+       and every finding is answered
        and zero unresolved review threads
-       and the latest review round had zero material findings
-    # When this returns true: merge. Do not ask, do not wait.
+       and round(pr) ≤ 2
+       and no escalation is open
+       and demo_ok(pr)                     # confirmed on this head, or
+                                           #   nothing demo-relevant since
+    # A push restarts CI, not review. When this returns true: merge
+    # explicitly. No auto-merge. No admin override. Do not ask, do not wait.
 
 function close_out():
     cancel the poll loop
     delete the branch; checkout main; pull
     send the merge recap via beadle-email # to jim@punt-labs.com, every merge,
                                           # unprompted — a permanent record in
-                                          # the 8-part recap structure
+                                          # the 8-part recap structure, plus
+                                          # the review data block from
+                                          # ../.bin/review-metrics.py pr
+                                          # punt-labs/beadle <N> --format
+                                          # recap, pasted verbatim
     start the next unit immediately       # no stopping to report
+
+function local_review(diff):
+    # Local rounds are cheap and bugs die here; the PR gate is kept short.
+    for round in 1..5:
+        if this is the unit's first full diff or diff is 20 lines or more:
+            reviewers = code_reviewer + silent_failure_hunter + `qodo review`
+        else:
+            reviewers = `qodo review`    # a small fix diff
+        if diff touches credentials, secrets, or caller text that reaches
+                a file, a log line, or a header:
+            reviewers += djb             # whatever the diff's size
+        if this is not the unit's first full diff:
+            scope: regressions this diff introduces, and High findings
+                inside it — nothing outside the diff, no Medium or Low on
+                unchanged behaviour
+        run reviewers in parallel        # qodo review from the worktree,
+                                         #   against the pushed base
+        re-run once any reviewer that did not complete (error, outage)
+        if a reviewer still has not completed:
+            report it to the operator
+            return blocked               # a review that never ran is not
+                                         #   clean
+        findings = every reviewer's findings
+        if round == 5 and a finding needs a fix:
+            report the open findings to the operator
+            return blocked               # the caller stops; see below
+        answer each finding: fix it, or dismiss it with the exact finding,
+            the specific reason, and file:line
+        close each local Qodo finding through the Qodo CLI
+            (mark-implemented or dismiss, with its local_review_id) —
+            an unclosed one comes back as still_open in every later run
+        if no finding was fixed:
+            return clean                 # nothing found, or all dismissed
+        make check; commit
+        diff = this round's fix diff     # every change is reviewed,
+                                         #   Low fixes included
+    # at most four fix rounds, plus a fifth review that only verifies the
+    # fourth round's fixes. No deferral beads. Every caller acts only on
+    # clean: on blocked, nothing opens and nothing is pushed until the
+    # operator rules and local_review then returns clean.
 ```
 
 Entry and exit for one PR iteration. `merge_gate` in the pseudocode is the
@@ -294,14 +594,24 @@ EnterPR ≙ [ LoopState; unit : ℙ BEAD |
 
 ExitPR ≙ [ Δ LoopState; pr : PR |
   merged(pr)
-  ∧ localFindings(pr) = ∅                 -- held BEFORE the PR opened
+  ∧ localReviewClean(pr)                  -- a local round that left nothing
+                                          --   to fix, BEFORE the PR opened and
+                                          --   before every fix push
   ∧ verified(pr)                          -- driven through its real entry
                                           --   point BEFORE the PR opened
   ∧ ciGreen(head(pr))
-  ∧ reviewedByBots(head(pr))              -- Copilot + Bugbot on the latest
-                                          --   commit, per the merge_gate rules
+  ∧ ¬ pending(pr)                         -- every requested review is in
+  ∧ demoOk(pr)                            -- demo_ok held at the merge
+  ∧ ¬ bugbotOpen(pr)                      -- no Bugbot run on any commit of
+                                          --   the PR was open at merge
+  ∧ bugbotRerunsPosted(pr)                -- each round with a failed run
+                                          --   had its rerun(N)
+  ∧ reviewedHead(pr) = head(pr)           -- merged code was reviewed, bot-
+                                          --   authored PRs included
+  ∧ (∀ f : findings(pr) • answered(f))    -- fixed on head, or reasoned
+  ∧ round(pr) ≤ 2                         -- round 2 only after a High fix
   ∧ unresolvedThreads(pr) = ∅
-  ∧ materialFindings(latestRound(pr)) = ∅
+  ∧ openEscalations(pr) = ∅               -- each closed by a recorded ruling
   ∧ beadsOf(pr) ⊆ closed′
   ∧ mergeRecapSent(pr) ]
 ```
@@ -309,19 +619,60 @@ ExitPR ≙ [ Δ LoopState; pr : PR |
 ### Local review before the PR
 
 Full-diff local review is where issues die cheaply. A local round costs
-seconds; a remote review cycle costs minutes to hours. The 2–6 agents are
-chosen by scope:
+seconds; a remote review cycle costs minutes to hours. `local_review` (above)
+runs `code-reviewer`, `silent-failure-hunter`, and `qodo review` on the unit's
+first full diff and on every fix diff of 20 lines or more; a fix diff under 20
+lines gets `qodo review` alone. `djb` joins any diff that touches credentials,
+secrets, or caller text that reaches a file, a log line, or a header — in
+beadle that is `internal/pgp`, `internal/secret`, and the daemon's
+command-file loader — whatever the diff's size. Local rounds repeat until a
+round leaves nothing to fix: at most four fix rounds plus one review that
+verifies the last fixes. Every fix diff goes through the same loop before it
+is pushed, including fixes made for PR findings.
 
-- **Always:** `code-reviewer` and `silent-failure-hunter`.
-- **New type, struct, or interface:** add `type-design-analyzer`.
-- **Significant doc or comment changes:** add `comment-analyzer`.
-- **Tests added or restructured:** add `pr-test-analyzer`.
-- **After the others are clean:** add `code-simplifier` last.
+From the second round on, the review is scoped to what the diff changed:
+regressions it introduces and Highs inside it. Without that boundary a
+failure-focused reviewer walks outward into code the diff never touched and
+the rounds do not converge. The three reviewers are not substitutes — in the
+vox pilot each found defects the other two missed. `qodo review` is the
+engine that later reviews the PR, so what it finds locally does not come back
+as a PR round.
 
 Every finding is fixed in this PR. A dismissal requires the exact finding, the
 specific reason it does not apply, and the code reference. "Pre-existing", "by
 design", "intentional", and "expected" are not reasons. Opening a PR with
-unresolved local findings is a procedural violation.
+unresolved local findings is a procedural violation. Nothing is deferred to a
+bead.
+
+### Remote review: Qodo and Bugbot, at most two rounds
+
+Remote review is automated-only and runs on already-clean code, so findings
+should be few. The full specification is
+[`punt-kit/standards/pr-review.md`](https://github.com/punt-labs/punt-kit/blob/main/standards/pr-review.md);
+this section names what beadle does with it.
+
+Qodo is the primary remote reviewer (`.pr_agent.toml`). It reviews when the PR
+opens and never on push. High findings post inline as threads, and the
+`required_review_thread_resolution` ruleset rule makes each one block the
+merge. Medium findings appear in the summary. Lows are dropped by
+`comments_routing`. Bugbot reviews each PR once, on its own, when the PR opens
+(Cursor dashboard setting); a push draws no Bugbot review. Its findings are
+handled whenever they arrive.
+
+Round 1 is the review at open. Round 2 — one `/agentic_review` plus one
+`bugbot run` — happens only when round 1's fixes included a High, and it is
+the last. A new High in round 2 goes to the operator.
+
+Copilot is not a default reviewer. Repo rulesets carry no
+`copilot_code_review` rule, so Copilot reviews only when requested: at most
+one request per PR, at open, never on push. Its findings are findings like any
+other.
+
+This holds only when four settings are in place: `.pr_agent.toml` is on
+`main` (Qodo reads it from the default branch); "Review every push" is
+Disabled in the Qodo portal; Bugbot is set to review each PR once, at open;
+and the ruleset has no `copilot_code_review` rule. If a push still starts a
+Bugbot run, its findings are findings like any other.
 
 ### The verification gate
 
@@ -411,7 +762,7 @@ table in `delegation.md` — reviews the worker's result inside the mission
 before the leader accepts it.
 
 **Remote review findings are the one delegation that is not a mission.** When
-Copilot or Bugbot report on the PR, the leader reads each finding and hands
+Qodo or Bugbot report on the PR, the leader reads each finding and hands
 the mechanical fix to a bare agent, then pushes and resolves the thread
 itself.
 
@@ -534,11 +885,16 @@ the diff is missing any of these, the PR is not ready to merge.
 1. **Beads are the single funnel.** Every piece of work is a bead before it is
    anything else; external queues (issues, alerts) drain into it at intake.
 2. **A satisfied merge gate means merge now.** The gate is the only path to a
-   merge, and nothing waits once it passes.
-3. **Findings never wait.** Review feedback is handled the moment it arrives,
-   not on the next poll tick and never in a follow-up PR.
-4. **Every push restarts the merge gate.** Fresh CI and fresh reviews on the
-   new commit, with the single Bugbot exception stated in the gate.
+   merge, and nothing waits once it passes. Merge is always explicit — never
+   auto-merge, never an admin override.
+3. **Do or do not.** A finding is fixed in this PR or dismissed with a
+   reason, the moment it arrives. It is never deferred to a bead or a
+   follow-up PR. A thread is resolved only once it is answered per
+   `answered(f)`, one by one, never in bulk.
+4. **A push restarts CI, not review.** Local rounds run until clean (at most
+   four fix rounds plus a verifying review) before the PR opens and before
+   every fix push. PR rounds are at most two, and the second only after a
+   High fix.
 5. **Defects flow inward, scope flows outward.** A defect found while a PR is
    open is fixed in that PR. Only genuinely new lines of work become beads.
 6. **The operator gates verification and direction, never diffs or

@@ -142,6 +142,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`beadle-daemon` no longer hands a pipeline stage's email body, stage
+  args, or prior stage output to the worker through the tracked ethos
+  mission contract.** `buildStageContract` wrote all three into the
+  contract's `context` field, and ethos PR #539 (DES-080) redacts every
+  mission-record writer, so on a future `ETHOS_VERSION` bump a worker
+  reading its own contract would have seen `[redacted-email]` and a
+  scrubbed body with no error or test failure on beadle's side. The
+  payload now travels only through the per-spawn, untracked system prompt
+  file (`StagePayload`, `BuildSystemPromptForTools`), which reaches the
+  worker before its first turn regardless of which built-in tools the
+  recipe grants; the contract carries a fixed reference naming the
+  pipeline and stage. Each payload field is fenced with a per-render
+  nonce so sender-controlled text cannot forge a field boundary, the body
+  is sanitized and capped exactly once with its truncation and
+  sanitization state stated in the fence header, and a CLI stage's 1MB
+  output cap is reported with the value it describes instead of a marker
+  spliced into the bytes passed between stages. The auto-reply, which the
+  sender reads, additionally gets a fixed daemon-authored
+  `[output truncated at 1MB]` notice. The stage output stays raw between
+  stages and is sanitized only where it is rendered into the fence. A
+  pipeline record now persists `body_truncated` and `body_sanitized`. DES-038, `docs/email-payload-handoff.md`
+  (beadle-4gm1).
+
 - **Mission workers can reach their MCP servers on a provisioned host.**
   The daemon handed each worker an MCP config naming `ethos`,
   `beadle-email`, and `biff` by bare command, which Claude Code resolved

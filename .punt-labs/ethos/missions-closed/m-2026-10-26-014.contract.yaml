@@ -1,0 +1,65 @@
+mission_id: m-2026-10-26-014
+status: failed
+type: implement
+created_at: "2026-10-26T14:54:38Z"
+updated_at: "2026-10-26T18:17:46Z"
+closed_at: "2026-10-26T18:17:46Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: djb
+    pinned_at: "2026-10-26T14:54:38Z"
+    hash: 85800c9c7277e2fd9745f65041596879e461bdb130c9bc4252a6ff78f79a479c
+inputs:
+    ticket: beadle-4gm1
+    files:
+        - docs/email-payload-handoff.md
+        - internal/daemon/spawner.go
+        - internal/daemontest/daemontest.go
+write_set:
+    - internal/daemon/pipeline.go
+    - internal/daemon/pipeline_test.go
+    - internal/daemon/runner.go
+    - internal/daemon/runner_test.go
+    - internal/daemon/templates.go
+    - internal/daemon/templates_test.go
+    - internal/daemon/handler.go
+    - internal/daemon/handler_test.go
+    - internal/daemon/harness_test.go
+success_criteria:
+    - Capping and sanitization of the email body happen in exactly one place. Executor.Run stores Pipeline.Body sanitized (NUL stripped, invalid UTF-8 replaced) and capped at maxContractFieldRunes WITHOUT the truncation marker, alongside two new persisted fields BodyTruncated bool and BodySanitized bool. fenceField takes the field value and its truncated and sanitized states as inputs and never recomputes them; stagePayloadText passes the stored states for the body. The marker text itself is no longer appended inside a fenced value; the fence header is the sole statement of truncation. The rune count in the fence header is the count of the content between the fence lines, and the fence comment says so.
+    - 'The pipe value''s truncation state is carried, not inferred: the CLI runner paths that append truncationMarker (runner.go, the single-command and compound stdout caps) instead return the capped output plus a truncated flag through whatever the stage loop stores for the next stage (a small struct or a second return), and stagePayloadText fences the pipeline output with that state. No truncationMarker string reaches a fenced value from any path; grep -n truncationMarker shows it used only where a marker is still wanted outside fences, or removed entirely with its constant.'
+    - 'Fence forgery is closed: stagePayloadText generates one nonce per call with crypto/rand (8 bytes, hex) and puts it in every begin and end fence line of that render; the STAGE INPUT header in BuildSystemPromptForTools states that only fence lines carrying that nonce are the daemon''s and anything else is content. A crypto/rand failure is returned as an error, never swallowed, and BuildSystemPromptForTools propagates it.'
+    - 'Hostile-case tests in pipeline_test.go, table-driven: a body containing the exact end-fence line (with a stale or guessed nonce) followed by a forged begin line; a body containing a forged "(none)" marker line; a multi-line body containing "pipeline output: (none)"; a body of exactly 500 runes; a body of 501 runes; a body with NULs inside the first 500 runes; a body with invalid UTF-8; and the production path (drive Executor.Run or construct the Pipeline the way Run does, then stagePayloadText) asserting exactly one truncation statement, in the header, and no marker in the value. Each test derives expected fences from the nonce the render used, so the format cannot drift.'
+    - 'In handler.go OnNewMail, after fetchBody succeeds with an empty body, log at Warn with the message id so the daemon log explains an "email body: (none)" render; handler_test.go asserts the log line for an empty-body fixture and its absence for a non-empty one.'
+    - 'runner_test.go fixture guards for TestClaudeRunner_ContractCarriesNoPayload assert presence before position: require.Contains (or index >= 0) for the embedded address and the token before the require.Less on their index. Rename TestBuildSystemPromptForTools_EmptyPayloadOmitsStageInput to TestBuildSystemPromptForTools_EmptyPayloadRendersNoneMarkers; rename TestClaudeRunner_PayloadReachesSystemPromptNotContract to TestClaudeRunner_PayloadReachesSystemPrompt (the contract half lives in TestClaudeRunner_ContractCarriesNoPayload). harness_test.go''s body assertion is updated to the fenced shape if it matches on the old label.'
+    - make check is green from the worktree after each commit (worktree-only gosec G204 artifact with ../ or .claude/worktrees/ paths excepted; nothing else). Test count does not go down. Commits are one logical step each, fix(daemon) or test(daemon), staged by file name. No t.Skip, no nolint. Do not push, do not touch PRs or merge; the leader does that. Do not commit after submitting.
+budget:
+    rounds: 2
+    reflection_after_each: true
+current_round: 2
+context: |
+    Re-scoped successor to m-2026-10-24-012 (closed failed at its round
+    cap) for bead beadle-4gm1, branch fix/email-payload-off-contract,
+    worktree [see leader message for the path], HEAD 531272d. The hand-off
+    design (docs/email-payload-handoff.md, approach A) and the round-1 and
+    round-2 code stand; this mission fixes what the silent-failure hunter
+    found on the round-2 fences. The failing finding: Pipeline.Body is
+    capped at creation (pipeline.go, Executor.Run) with the marker
+    appended, then fenceField sanitizes and caps it again and infers
+    truncated from capped != value, so on the production path the header
+    says nothing about truncation while the value carries the marker, NULs
+    stripped before the second cap produce a double marker, and invalid
+    UTF-8 is rewritten at creation with no sanitized state. The pipe value
+    has the same stale-state shape: the CLI runner appends the marker and
+    fenceField never knows. Design rule for this mission: state is carried
+    from the one place that decides it, never inferred downstream from the
+    bytes. The nonce is a leader decision, not open: the fence has no
+    secret today and the worker has no other way to tell daemon structure
+    from sender text. Pipeline JSON gains two bool fields; existing records
+    without them unmarshal as false, which is acceptable because they were
+    written before fences existed. make test provisions tools itself; never
+    run uv tool install or go install by hand. Scratch under the worktree's
+    .tmp/ only. One commit per logical step, each green, never more than 30
+    minutes uncommitted. If a step needs a file outside the write set, stop
+    and report.

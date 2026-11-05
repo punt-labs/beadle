@@ -1,0 +1,62 @@
+mission_id: m-2026-10-24-011
+status: closed
+type: implement
+created_at: "2026-10-24T05:42:21Z"
+updated_at: "2026-10-24T06:28:13Z"
+closed_at: "2026-10-24T06:28:13Z"
+leader: claude
+worker: bwk
+evaluator:
+    handle: djb
+    pinned_at: "2026-10-24T05:42:21Z"
+    hash: 85800c9c7277e2fd9745f65041596879e461bdb130c9bc4252a6ff78f79a479c
+inputs:
+    ticket: beadle-4gm1
+    files:
+        - internal/daemon/pipeline.go
+        - internal/daemon/runner.go
+        - internal/daemon/templates.go
+        - internal/daemon/spawner.go
+        - internal/daemon/persist.go
+        - internal/daemon/handler.go
+        - docs/ARCHITECTURE.md
+        - docs/worker-mcp-path.md
+write_set:
+    - docs/email-payload-handoff.md
+success_criteria:
+    - 'docs/email-payload-handoff.md exists and answers three questions in order: what this change alters (buildStageContract in internal/daemon/pipeline.go writes the triggering email body, stage args and prior pipeline output into the tracked contract''s context field and the sender, subject and message_id into inputs.trigger; ethos PR #539 / DES-080 redacts every mission-record writer, so from a pin that includes it the worker reading the contract via ethos mission show sees [redacted-email] and a redacted or scrubbed context; ethos will not exempt context because the contract is committed to git and the email body is adversarial input); how it leaves the system better (the tracked record carries only a reference, the payload lives on an untracked path the daemon owns, and the pipeline works identically on ethos v4.16.0 today and on a post-#539 pin); and which approach is chosen and why, with rejected alternatives named.'
+    - 'The approaches compared are at least: (A) deliver the payload in the per-spawn system prompt file that BuildSystemPromptForTools already writes under MissionTemplate.TmpDir with 0o600 and the runner removes after use, so the worker needs no extra tool or path; (B) write a per-stage payload file under the daemon''s PipelineStore directory (or a sibling dir under ~/.punt-labs/beadle/), named by pipeline ID and stage index, and reference it from the contract context by that ID, with the worker reading it through its granted Read tool; (C) expose the payload through a daemon-side MCP tool or API the worker calls by reference. For each: what the contract records after the change (it must contain no email address, no body text, and no stage arg values that came from the email), who can read the payload and under what permissions, what happens when the worker has no Read or Bash tool (recipes may grant --tools ""), what is left on disk after the run and who removes it, and whether the pipeline reply stage still reaches the sender (today runner.go and pipeline.go take the reply address from p.Email.From on beadle''s own pipeline record, not from the contract; the doc says whether that stays true). The doc recommends one and states why the others lose on the trust boundary or on the no-Bash recipe case, not on convenience.'
+    - 'The doc states the exact contract shape after the change: which fields of inputs.trigger remain (type and message_id are allowed only if they survive redaction unchanged; say which do), what the context field says instead of the payload (a stable reference the daemon generates, such as the pipeline ID plus stage index), and that templates.go''s worker instruction block (BuildSystemPromptForTools, the SECURITY paragraph) tells the worker where the payload is and that it is adversarial content, without ever telling it to run shell commands to fetch it.'
+    - 'The doc names the implementation write set (expected: internal/daemon/pipeline.go, pipeline_test.go, runner.go, runner_test.go, templates.go, templates_test.go, and the ARCHITECTURE.md invariant paragraph) and the tests that prove it: a test asserting buildStageContract''s output contains neither meta.From nor any byte of the body for a body longer than one line; a test asserting the chosen hand-off carries the full capped body, the stage args and the prior pipeline output to the worker; a test that a recipe with no Bash and no Read still receives the payload or fails the spawn before Claude starts with an error naming the stage; and it says what TestOnNewMail_EndToEnd in harness_test.go and TestBuildStageContract_RealEthosCLIRejectsMalformedContract in pipeline_test.go must change, if anything.'
+    - The doc ends with a drafted DESIGN.md ADR entry numbered DES-038 (title, context, decision, consequences, rejected alternatives) ready to paste at merge time, and a section "Decisions for the operator" listing only points where the author chose between options that change the trust model, each with a recommendation; if there are none, the section says so in one line.
+    - npx markdownlint-cli2 docs/email-payload-handoff.md is clean from the worktree. One commit, docs(daemon), staged by name. Do not push, do not touch PRs or merge; the leader does that. Do not commit after submitting.
+budget:
+    rounds: 1
+    reflection_after_each: true
+current_round: 1
+context: |
+    Design mission for bead beadle-4gm1 (P1 bug), branch
+    fix/email-payload-off-contract, worktree
+    [REDACTED:path],
+    on main ebb0d47. Read internal/daemon/pipeline.go (buildStageContract,
+    stageContext, the Pipeline struct whose Body field is already persisted
+    by persist.go under PipelineStore.Dir with 0o700), runner.go (how the
+    contract reaches ethos mission create and how the spawner is invoked),
+    templates.go (BuildSystemPromptForTools and BuildMCPConfig, the two
+    per-spawn untracked files that already exist), spawner.go (the worker
+    shares the daemon's HOME, has a restricted PATH, and --tools is passed
+    verbatim so a recipe can grant no built-in tools), handler.go
+    (fetchBody and where p.Email.From is set), and docs/ARCHITECTURE.md's
+    Design Invariants plus docs/worker-mcp-path.md (DES-037) for the house
+    style of a daemon design doc. The ethos side: PR #539 on punt-labs/ethos
+    is open, not merged; gh pr diff 539 --repo punt-labs/ethos shows the
+    context field and inputs.trigger values are redacted on every contract
+    write. Beadle's Makefile pins ETHOS_VERSION v4.16.0, which predates it;
+    the design must hold on both pins and must not propose bumping the pin
+    in this unit. This is a trust-boundary change: the email body is
+    adversarial input from an external sender, the tracked contract is
+    committed to git, and whatever path carries the payload is readable by
+    the worker, so say who else can read it. Write the design, not the
+    code. No test binaries are run in this mission. KNOWN ARTIFACT:
+    lint-strict from a worktree reports spurious G204 lines; not relevant
+    to a docs-only mission.

@@ -16,8 +16,27 @@ import (
 )
 
 // Runner executes a single pipeline command and returns its output.
+// pipeTruncated is the truncation state of the INCOMING pipe value --
+// decided by whichever runner produced it, read here only so ClaudeRunner
+// can thread it into StagePayload.PipelineOutputTruncated when it fences
+// pipe for the worker. truncated reports whether THIS call's own output
+// was cut at the runner's own cap (currently only CLIRunner's 1MB stdout
+// cap) -- the one place that decides it. The caller (Executor.Run) carries
+// both as local variables alongside the pipe value itself, never on a
+// shared Pipeline field: round 4 of beadle-4gm1 found that a single
+// resettable p.PipeTruncated field described whichever stage ran most
+// recently, not necessarily the one whose pipe value a later stage was
+// about to read, because Executor.Run's own reset-before-stage-i raced the
+// one reader of stage i-1's truncation state. State now travels WITH the
+// pipe value it describes, as a pair of local variables, never through a
+// field with its own reset schedule. ClaudeRunner always returns
+// truncated=false: a Claude worker's own output has no cap of its own to
+// report (WorkerSpawner.Run); Pipeline.BodyTruncated/BodySanitized -- the
+// body's own state, decided once in Executor.Run -- travel through
+// StagePayload independently of this return value and are unaffected by
+// this parameter.
 type Runner interface {
-	Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string) (string, error)
+	Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated bool) (output string, truncated bool, err error)
 }
 
 // ClaudeRunner executes a command via a Claude Code worker session.
@@ -28,8 +47,11 @@ type ClaudeRunner struct {
 	Registry  map[string]MCPServerConfig
 }
 
-// Run creates a mission from the stage contract, spawns a Claude worker, and returns the output.
-func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string) (string, error) {
+// Run creates a mission from the stage contract, spawns a Claude worker,
+// and returns the output. truncated is always false: a Claude worker's
+// output has no cap of its own to report (WorkerSpawner.Run), unlike
+// CLIRunner's 1MB stdout cap.
+func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated bool) (string, bool, error) {
 	// Checked first, before any mission or config file is built: a
 	// permanent deployment misconfiguration (the var was never set in the
 	// unit/plist that starts beadle-daemon) fails identically on every
@@ -56,7 +78,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	// it to discover later.
 	envOverrides, missingEnv := resolveEnvVars(cmd.EnvVars)
 	if len(missingEnv) > 0 {
-		return "", fmt.Errorf("command %q declares env var(s) %v, absent from the "+
+		return "", false, fmt.Errorf("command %q declares env var(s) %v, absent from the "+
 			"daemon's environment -- set them in the unit/plist that starts "+
 			"beadle-daemon; running without them would silently degrade this "+
 			"command", cmd.Name, missingEnv)
@@ -68,33 +90,63 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	}
 	mcpPath, err := r.Templates.BuildMCPConfig(servers, r.Registry)
 	if err != nil {
-		return "", fmt.Errorf("build mcp config: %w", err)
+		return "", false, fmt.Errorf("build mcp config: %w", err)
 	}
-	defer func() { _ = os.Remove(mcpPath) }()
+	defer func() {
+		if rmErr := os.Remove(mcpPath); rmErr != nil {
+			e.Logger.Warn("remove mcp config temp file", "path", mcpPath, "error", rmErr)
+		}
+	}()
 
-	contract := buildStageContract(p.Email, cmd, call, pipe, p.Body)
+	contract := buildStageContract(p.Email, cmd, p.ID, idx)
 
 	missionID, err := createMissionFromContract(r.Templates.TmpDir, contract)
 	if err != nil {
-		return "", fmt.Errorf("create stage mission: %w", err)
+		return "", false, fmt.Errorf("create stage mission: %w", err)
 	}
 
 	e.Logger.Info("stage mission created",
 		"pipeline", p.ID, "stage", idx,
 		"command", call.Command, "mission", missionID)
 
-	promptPath, err := r.Templates.BuildSystemPromptForTools(missionID, cmd.Tools)
-	if err != nil {
-		return "", fmt.Errorf("build system prompt: %w", err)
+	// The fence shows sanitized text; the pipe itself stays raw. Decided here,
+	// at the one place the pipe is rendered.
+	fencedPipe, pipeSanitized := sanitizeText(pipe)
+	if pipeSanitized {
+		e.Logger.Warn("stage output sanitized before stage input",
+			"pipeline", p.ID, "stage", idx)
 	}
-	defer func() { _ = os.Remove(promptPath) }()
+	payload := StagePayload{
+		Args:                    buildStageArgs(e, p, idx, cmd.Name, call.Args),
+		PipelineOutput:          fencedPipe,
+		PipelineOutputTruncated: pipeTruncated,
+		PipelineOutputSanitized: pipeSanitized,
+		EmailBody:               p.Body,
+		EmailBodyTruncated:      p.BodyTruncated,
+		EmailBodySanitized:      p.BodySanitized,
+	}
+	promptPath, err := r.Templates.BuildSystemPromptForTools(missionID, cmd.Tools, payload)
+	if err != nil {
+		return "", false, fmt.Errorf("build system prompt: %w", err)
+	}
+	defer func() {
+		// promptPath carries sender content (the STAGE INPUT block) -- a
+		// failed removal leaves that content on disk, worth a Warn naming
+		// the path so an operator can clean it up, not a silently
+		// swallowed error.
+		if rmErr := os.Remove(promptPath); rmErr != nil {
+			e.Logger.Warn("remove system prompt temp file", "path", promptPath, "error", rmErr)
+		}
+	}()
 
 	wr, err := r.Spawner.Run(ctx, missionID, mcpPath, promptPath, cmd.Tools, envOverrides)
 	if err != nil {
-		return "", fmt.Errorf("spawn worker: %w", err)
+		return "", false, fmt.Errorf("spawn worker: %w", err)
 	}
 	if wr.IsError {
-		return "", fmt.Errorf("worker error (exit %d): %s", wr.ExitCode, wr.Output)
+		// wr.Output is model output derived from the email-borne stage input:
+		// untrusted, and this error is logged and persisted, so cap it.
+		return "", false, fmt.Errorf("worker error (exit %d): %s", wr.ExitCode, truncateLog(wr.Output, 500))
 	}
 
 	closeOut, closeErr := exec.CommandContext(ctx, "ethos", "mission", "close", missionID).CombinedOutput()
@@ -106,7 +158,52 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 		"pipeline", p.ID, "stage", idx,
 		"command", call.Command, "mission", missionID)
 
-	return wr.Output, nil
+	return wr.Output, false, nil
+}
+
+// buildStageArgs sanitizes and caps each of args' values at
+// maxContractFieldRunes -- the one decision point for this field, deliberate
+// here rather than left to stagePayloadText itself (see StagePayload's doc
+// comment on why round 5 moved it): CLIRunner.Run reads call.Args raw,
+// unprocessed, so args are adversarial input exactly like the pipe and the
+// body, not trusted contract content, and every other such field is already
+// decided by the runner that owns it before stagePayloadText ever sees it.
+// Returned args are sorted by name for deterministic output. Warns (with
+// pipeline/stage/command attribution, never an arg's own value) when any arg
+// was truncated or sanitized, the same record-the-decision discipline
+// Executor.Run applies to the email body.
+func buildStageArgs(e *Executor, p *Pipeline, idx int, cmdName string, args map[string]any) []StageArg {
+	if len(args) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(args))
+	for name := range args {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make([]StageArg, len(names))
+	var truncatedNames, sanitizedNames []string
+	for i, name := range names {
+		sanitized, argSanitized := sanitizeText(fmt.Sprint(args[name]))
+		capped, argTruncated := capRunes(sanitized, maxContractFieldRunes)
+		out[i] = StageArg{Name: name, Value: capped, Truncated: argTruncated, Sanitized: argSanitized}
+		if argTruncated {
+			truncatedNames = append(truncatedNames, name)
+		}
+		if argSanitized {
+			sanitizedNames = append(sanitizedNames, name)
+		}
+	}
+
+	if len(truncatedNames) > 0 || len(sanitizedNames) > 0 {
+		e.Logger.Warn("stage arg sanitized or truncated before stage input",
+			append(pipelineLogArgs(p, idx), "command", cmdName,
+				"truncated_args", truncatedNames, "sanitized_args", sanitizedNames)...)
+	}
+
+	return out
 }
 
 // BinaryWhitelist resolves and validates binary paths.
@@ -155,15 +252,37 @@ type CLIRunner struct {
 	Whitelist *BinaryWhitelist
 }
 
-// Run executes a single-binary CLI command and returns its stdout.
-func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cmd *Command, call CommandCall, pipe string) (string, error) {
+// Run executes a single-binary CLI command and returns its stdout plus
+// whether THIS call's own output was truncated at the 1MB cap -- the one
+// place that decides it (see Runner's doc comment). CLIRunner never fences
+// the incoming pipe's own truncation state (pipeTruncated) into anything a
+// worker reads -- only ClaudeRunner's system prompt does -- but it is still
+// attributed in the log lines below: a stage that fails to parse pipe as
+// JSON, or that passes a truncated pipe straight through to a CLI binary,
+// is a consequence of the cap upstream, not a bug in this stage, and the
+// log line must say so rather than leave a reader to guess. p and idx are
+// carried through to tag those same logs with which pipeline and stage
+// produced them -- a daemon running several pipelines concurrently needs
+// that correlation to tell one stage's output apart from another's in the
+// log stream.
+//
+// call.Args are deliberately passed to the target binary uncapped and
+// unsanitized, unlike ClaudeRunner.Run's args (buildStageArgs, which
+// sanitizes and caps every value at maxContractFieldRunes before it ever
+// reaches a worker's system prompt): a CLI binary is an operator-authored,
+// signature-verified command (DES-034/DES-035) that reads its args as plain
+// process arguments, not as untrusted text folded into a prompt an LLM
+// reads and might be steered by -- there is no prompt-injection surface
+// here for sanitizing or capping to close, and the binary's own argument
+// parsing already bounds what it accepts.
+func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, call CommandCall, pipe string, pipeTruncated bool) (string, bool, error) {
 	if len(cmd.Steps) > 0 {
-		return r.runCompound(ctx, e, cmd, pipe)
+		return r.runCompound(ctx, e, p, idx, cmd, pipe)
 	}
 
 	resolvedPath, err := r.Whitelist.Resolve(cmd.Binary)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	// Best-effort parse of pipe as JSON so declared args can fall back
@@ -176,8 +295,11 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cm
 			// the same command can succeed on the next run. pipeFields stays
 			// nil, so every arg meant to be filled from the pipe is omitted
 			// below rather than filled with a stale or partial value.
+			// pipe_truncated is logged alongside the parse error so a cut
+			// pipe value that fails to parse as JSON is attributed to the
+			// cap, not read as unrelated malformed JSON.
 			e.Logger.Warn("pipe value looked like JSON but failed to parse, args will not be filled from it",
-				"command", cmd.Name, "error", err)
+				append(pipelineLogArgs(p, idx), "command", cmd.Name, "error", err, "pipe_truncated", pipeTruncated)...)
 			pipeFields = nil
 		}
 	}
@@ -221,7 +343,7 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cm
 
 	env, err := envForCommand(cmd, r.Whitelist.Dirs)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	timeout := parseTimeout(e, cmd)
@@ -237,13 +359,13 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cm
 
 	stdoutPipe, err := c.StdoutPipe()
 	if err != nil {
-		return "", fmt.Errorf("stdout pipe: %w", err)
+		return "", false, fmt.Errorf("stdout pipe: %w", err)
 	}
 	if err := c.Start(); err != nil {
-		return "", fmt.Errorf("start %s: %w", cmd.Binary, err)
+		return "", false, fmt.Errorf("start %s: %w", cmd.Binary, err)
 	}
 
-	return runOutput(stdoutPipe, c.Wait, stderrBuf, e, cmd)
+	return runOutput(stdoutPipe, c.Wait, stderrBuf, e, cmd, p, idx)
 }
 
 // runOutput reads stdout (capped) and waits for the owning process to
@@ -253,28 +375,53 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, _ *Pipeline, _ int, cm
 // return. wait must not be called until the stdout read completes: Wait
 // closes the pipe once the process exits, and reading concurrently with or
 // after that races (see exec.Cmd.StdoutPipe's doc comment).
-func runOutput(stdoutPipe io.Reader, wait func() error, stderrBuf *cappedWriter, e *Executor, cmd *Command) (string, error) {
-	output, extra, readErr := readCapped(stdoutPipe, 1<<20)
+//
+// truncated is returned here, not stored on a shared field: this output
+// never carries truncationMarker (round 3 of beadle-4gm1 removed it from
+// every fenced value), so the return value is the only way the caller
+// (CLIRunner.Run, then Executor.Run) can tell this value was cut. Round 4
+// moved it off Pipeline entirely, after a shared resettable field proved
+// to describe the wrong stage's output under a two-stage pipeline. p and
+// idx are logging context only -- which pipeline and stage this truncation
+// happened in -- and are never read for anything else; p may be nil (a
+// caller with no pipeline in scope), in which case the pipeline/stage
+// fields are simply omitted from the log line rather than panicking on a
+// nil dereference.
+func runOutput(stdoutPipe io.Reader, wait func() error, stderrBuf *cappedWriter, e *Executor, cmd *Command, p *Pipeline, idx int) (output string, truncated bool, err error) {
+	data, extra, readErr := readCapped(stdoutPipe, 1<<20)
 	waitErr := wait()
 
 	if stderrBuf.buf.Len() > 0 {
-		e.Logger.Info("cli command stderr", "command", cmd.Name, "stderr", stderrBuf.buf.String())
+		e.Logger.Info("cli command stderr",
+			append(pipelineLogArgs(p, idx), "command", cmd.Name, "stderr", truncateLog(stderrBuf.buf.String(), 500))...)
 	}
 
 	if waitErr != nil {
-		return "", fmt.Errorf("cli %s: %w", cmd.Binary, waitErr)
+		return "", false, fmt.Errorf("cli %s: %w", cmd.Binary, waitErr)
 	}
 	if readErr != nil {
-		return "", fmt.Errorf("read stdout for %s: %w", cmd.Binary, readErr)
+		return "", false, fmt.Errorf("read stdout for %s: %w", cmd.Binary, readErr)
 	}
 
 	if extra > 0 {
 		e.Logger.Warn("cli command stdout truncated at cap",
-			"command", cmd.Name, "captured_bytes", len(output), "discarded_bytes", extra)
-		output = append(output, []byte(truncationMarker)...)
+			append(pipelineLogArgs(p, idx), "command", cmd.Name, "captured_bytes", len(data), "discarded_bytes", extra)...)
+		truncated = true
 	}
 
-	return string(output), nil
+	return string(data), truncated, nil
+}
+
+// pipelineLogArgs returns the "pipeline"/"stage" slog key-value pair for p
+// and idx, or nil when p is nil -- the one caller with no pipeline in scope
+// (a direct runOutput/runCompound test, or a future call site with none to
+// give). slog accepts a nil []any as zero extra args, so callers can always
+// append this unconditionally.
+func pipelineLogArgs(p *Pipeline, idx int) []any {
+	if p == nil {
+		return nil
+	}
+	return []any{"pipeline", p.ID, "stage", idx}
 }
 
 // readCapped reads at most n bytes from r into data, then drains and
@@ -329,8 +476,11 @@ func envForCommand(cmd *Command, dirs []string) ([]string, error) {
 }
 
 // runCompound chains multiple binaries via io.Pipe, running all steps
-// concurrently under a shared context timeout.
-func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, pipe string) (string, error) {
+// concurrently under a shared context timeout. truncated is returned true
+// when the last step's output hits the 1MB cap, the same
+// single-decision-point rule runOutput follows for the single-binary path.
+// p and idx are logging context only; see pipelineLogArgs.
+func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, p *Pipeline, idx int, cmd *Command, pipe string) (string, bool, error) {
 	timeout := parseTimeout(e, cmd)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -342,7 +492,7 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 	for i, step := range cmd.Steps {
 		p, err := r.Whitelist.Resolve(step.Binary)
 		if err != nil {
-			return "", fmt.Errorf("step[%d]: %w", i, err)
+			return "", false, fmt.Errorf("step[%d]: %w", i, err)
 		}
 		resolved[i] = p
 	}
@@ -357,7 +507,7 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 	// Build commands.
 	env, err := envForCommand(cmd, r.Whitelist.Dirs)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	// Capture the last step's stdout in a capped buffer rather than via
@@ -405,7 +555,7 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 			for j := 0; j < i; j++ {
 				_ = cmds[j].Wait()
 			}
-			return "", fmt.Errorf("step[%d] start %s: %w", i, cmd.Steps[i].Binary, err)
+			return "", false, fmt.Errorf("step[%d] start %s: %w", i, cmd.Steps[i].Binary, err)
 		}
 	}
 
@@ -453,16 +603,17 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, cmd *Command, 
 	}
 
 	if firstErr != nil {
-		return "", firstErr
+		return "", false, firstErr
 	}
 
 	result := lastStdout.buf.String()
+	truncated := false
 	if dropped := lastStdout.dropped(); dropped > 0 {
 		e.Logger.Warn("compound command stdout truncated at cap",
-			"command", cmd.Name, "captured_bytes", len(result), "discarded_bytes", dropped)
-		result += truncationMarker
+			append(pipelineLogArgs(p, idx), "command", cmd.Name, "captured_bytes", len(result), "discarded_bytes", dropped)...)
+		truncated = true
 	}
-	return result, nil
+	return result, truncated, nil
 }
 
 // cappedWriter is a bytes.Buffer that stops storing data after max bytes

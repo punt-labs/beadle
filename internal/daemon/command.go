@@ -6,11 +6,15 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// validArgName is the allowlist for CommandArg.Name.
+var validArgName = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 // CommandArg describes a single typed argument in a command definition.
 // Values carries json:",omitempty" for the same nil-vs-empty-slice reason
@@ -319,6 +323,16 @@ func ValidateCommand(cmd *Command) error {
 	for i, a := range cmd.Args {
 		if a.Name == "" {
 			return fmt.Errorf("arg[%d]: missing name", i)
+		}
+		// An arg name becomes "stage arg <name>" in a fenceField begin/end
+		// line (stagePayloadText, pipeline.go). Anything outside a strict
+		// allowlist -- whitespace, a line-break rune that would split the
+		// fence line and leave half of it outside the nonce's coverage,
+		// control characters, bidi overrides, zero-width characters -- could
+		// forge or disguise a fence line (see fenceField's doc comment), so
+		// reject it at validation time rather than let it reach a fence.
+		if !validArgName.MatchString(a.Name) {
+			return fmt.Errorf("arg %q: name must match %s (it is rendered into a fenced stage-input line)", a.Name, validArgName)
 		}
 		if !validArgTypes[a.Type] {
 			return fmt.Errorf("arg %q: unrecognized type %q", a.Name, a.Type)

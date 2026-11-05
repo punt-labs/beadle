@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -294,7 +295,7 @@ func TestCLIRunner_CompoundMidChainFailure(t *testing.T) {
 	call := CommandCall{Command: "test-mid-fail", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "step[1]")
 	assert.Contains(t, err.Error(), "false")
@@ -328,7 +329,7 @@ func TestCLIRunner_WhitelistDeletedBinary(t *testing.T) {
 	call := CommandCall{Command: "test-deleted", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err = runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	_, _, err = runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found in whitelist")
 }
@@ -640,7 +641,7 @@ func TestCLIRunner_CompoundResolveFailure(t *testing.T) {
 	call := CommandCall{Command: "test-resolve-fail", Args: map[string]any{}}
 	p := testPipeline()
 
-	_, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "")
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: testLogger()}, p, 0, cmd, call, "", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "step[1]")
 	assert.Contains(t, err.Error(), "not found in whitelist")
@@ -753,5 +754,82 @@ func TestExecutor_MultiplePassthroughStages(t *testing.T) {
 	for i := 1; i < 4; i++ {
 		assert.Equal(t, initialPipe, runner.calls[i].Pipe,
 			"call %d pipe should equal initial pipe", i)
+	}
+}
+
+// TestExecutor_SchemaValidationErrorIsCapped: a validator message can quote
+// the offending (email-derived) value, so what is logged and stored is capped.
+func TestExecutor_SchemaValidationErrorIsCapped(t *testing.T) {
+	runner := &mockClaudeRunner{
+		results: []WorkerResult{
+			{Output: `{"` + strings.Repeat("k", 5000) + `":1}`},
+			{Output: "else reply sent"},
+		},
+	}
+	cmds := map[string]*Command{
+		"strict": {
+			Name:   "strict",
+			Runner: "claude",
+			Mode:   "process",
+			Prompt: "Strict schema",
+			OutputSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+			},
+			Budget: struct {
+				Rounds              int  `yaml:"rounds" json:"rounds"`
+				ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
+			}{Rounds: 1},
+		},
+		"reply": testCommands()["reply"],
+	}
+	logger, buf := testLoggerCapture()
+	exec := &Executor{
+		Planner:  &StubPlanner{Result: []CommandCall{{Command: "strict", Args: map[string]any{}}}},
+		Commands: cmds,
+		Runners:  testRunners(runner),
+		Logger:   logger,
+	}
+
+	p, err := exec.Run(context.Background(), EmailMeta{MessageID: "c1", From: "[EMAIL]", Subject: "S"}, "body")
+	require.Error(t, err)
+	assert.Contains(t, p.Error, "output validation")
+	assert.Less(t, len(p.Error), 400)
+	assert.Less(t, len(err.Error()), 400)
+	assert.NotContains(t, buf.String(), strings.Repeat("k", 300))
+}
+
+// TestExecutor_EmptyBodyLogsWarn: Run is where a whitespace-only body is
+// normalized to "", so Run logs it, for every caller.
+func TestExecutor_EmptyBodyLogsWarn(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		body     string
+		wantWarn bool
+	}{
+		{"empty", "", true},
+		{"whitespace only", "\r\n", true},
+		{"real body", "hello", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logger, buf := testLoggerCapture()
+			exec := &Executor{
+				Planner:  &StubPlanner{Result: []CommandCall{{Command: "greet", Args: map[string]any{}}}},
+				Commands: testCommands(),
+				Runners:  testRunners(&mockClaudeRunner{}),
+				Logger:   logger,
+			}
+			p, err := exec.Run(context.Background(), EmailMeta{MessageID: "1", From: "[EMAIL]", Subject: "S"}, tt.body)
+			require.NoError(t, err)
+
+			if !tt.wantWarn {
+				assert.NotContains(t, buf.String(), "email body empty or whitespace-only")
+				return
+			}
+			line := logLineContaining(t, buf, "email body empty or whitespace-only")
+			assert.Contains(t, line, "level=WARN")
+			assert.Contains(t, line, "pipeline="+p.ID)
+			assert.Empty(t, p.Body)
+		})
 	}
 }

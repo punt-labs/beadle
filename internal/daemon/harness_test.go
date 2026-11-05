@@ -100,10 +100,10 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 			env.AddContact("Jim", "jim@punt-labs.com", tt.contactPerm)
 
 			if tt.messageSigned {
-				raw, _ := testenv.BuildPGPSignedMessage(t, gpgBin, "jim@punt-labs.com", "Run the test command", "body")
+				raw, _ := testenv.BuildPGPSignedMessage(t, gpgBin, "jim@punt-labs.com", "Run the test command", "e2e-fixture-body-4gm1")
 				fix.AddRawMessage("INBOX", raw)
 			} else {
-				fix.AddMessage("INBOX", "jim@punt-labs.com", "Run the test command", "body")
+				fix.AddMessage("INBOX", "jim@punt-labs.com", "Run the test command", "e2e-fixture-body-4gm1")
 			}
 
 			// Gate 3: a real command file, signed by a real owner key,
@@ -171,6 +171,19 @@ func TestOnNewMail_EndToEnd(t *testing.T) {
 				// not just WorkerSpawner.Run in isolation (spawner_test.go).
 				assert.Equal(t, []string{"Read"}, calls[0].Tools,
 					"the fixture command's declared Tools must reach the spawner")
+
+				// beadle-4gm1: the triggering email's body
+				// ("e2e-fixture-body-4gm1", the AddRawMessage/AddMessage
+				// fixture content above -- distinctive so this assertion
+				// cannot pass vacuously against stagePayloadText's own
+				// "email body:" label text) must reach the real spawn's
+				// system prompt through the real pipeline -- not just the
+				// unit-level proof in templates_test.go and
+				// runner_test.go -- confirming the end-to-end hand-off
+				// actually works, not only its pieces in isolation.
+				require.NotEmpty(t, calls[0].SystemPromptContent, "system prompt file must have been captured")
+				assert.Contains(t, string(calls[0].SystemPromptContent), "e2e-fixture-body-4gm1",
+					"the fixture message's body must reach the spawned worker's system prompt")
 			}
 
 			// Non-vacuous because storeDir is a fresh t.TempDir per subtest
@@ -213,7 +226,7 @@ func e2eFixture(t *testing.T, gpgBin string, mutate func(*daemon.Command)) (*tes
 	env.WriteConfig(fix.Config)
 	env.AddContact("Jim", "jim@punt-labs.com", "rwx")
 
-	raw, _ := testenv.BuildPGPSignedMessage(t, gpgBin, "jim@punt-labs.com", "Run the test command", "body")
+	raw, _ := testenv.BuildPGPSignedMessage(t, gpgBin, "jim@punt-labs.com", "Run the test command", "e2e-fixture-body-4gm1")
 	fix.AddRawMessage("INBOX", raw)
 
 	ownerHome := testenv.ShortGPGHome(t)

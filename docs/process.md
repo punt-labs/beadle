@@ -227,9 +227,9 @@ Before starting an epic:
 
 After stage 5:
 
-1. `make check` — all quality gates pass
+1. `make check` — all quality gates pass, then `local_review` on the full diff ([`WORKFLOW.md`](WORKFLOW.md))
 2. Push branch, create PR
-3. Copilot review cycle (2-6 rounds expected)
+3. Qodo and Bugbot review once at open, at most two rounds ([`WORKFLOW.md`](WORKFLOW.md))
 4. Merge
 5. `bd close` for all task beads and the epic
 6. Recap email to the CEO
