@@ -409,7 +409,15 @@ function mission_loop(mission):
                  + evaluator review      # distinct specialist (delegation.md)
                  + leader verification   # run the change, review agents
                                          # on the mission diff
-        if findings: reflect(findings)   # another round, same mission
+        if findings: reflect(findings)   # another round, same mission —
+                                         #   continue the same worker and
+                                         #   reviewer via SendMessage, not a
+                                         #   fresh spawn (delegation.md § Reuse
+                                         #   vs respawn): the reviewer still
+                                         #   holds its findings, the worker its
+                                         #   code model, so round 2 is "did they
+                                         #   address what I said?", not a cold
+                                         #   re-read
     while findings remain
     close(mission)
     # the test stage is a seat, not a step the implementer performs on itself:
@@ -472,6 +480,9 @@ is under test.
 **Remote review findings are the one delegation that is not a mission.** When
 Qodo or Bugbot report on the PR, the leader reads each finding and hands the
 mechanical fix to a bare agent, then pushes and resolves the thread itself.
+Across review rounds on the same diff, continue that agent via `SendMessage`
+rather than spawning a fresh one each round — it keeps the code context it
+built (delegation.md § Reuse vs respawn).
 
 ### The lifecycle
 
