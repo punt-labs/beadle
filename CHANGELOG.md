@@ -54,6 +54,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Delegation docs: continue an agent across rounds instead of respawning
+  it.** `delegation.md` and `docs/WORKFLOW.md` now distinguish spawning a fresh
+  agent (a stage's first pass, or unrelated work) from continuing one via
+  `SendMessage` (the same work re-examined — a reviewer verifying a fix to its
+  own findings, a worker reworking its round). A fresh agent re-reads the diff
+  and re-derives context it already built; continuation keeps the findings list
+  and code model, so a review round 2 is "did they address what I said?" rather
+  than a cold re-read. Bounded to within a round-trip on one piece of work.
 - **Permission rules are repo-level, granted by `beadle-email enable`.** The
   SessionStart hook used to create `~/.claude/settings.json` if needed and add
   `mcp__plugin_beadle_email__*` (or the `-dev` glob), `mcp__beadle-email__*`

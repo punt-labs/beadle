@@ -56,12 +56,40 @@ This creates 5 missions (design → implement → test → review → document) 
 
 For each stage in the pipeline:
 
-1. **Spawn**: `Agent(subagent_type=<worker>, run_in_background=true)` with a prompt pointing at the mission ID. Fresh agent per stage — sub-agents are stateless, the mission contract carries context.
+1. **Spawn or continue** (see "Reuse vs respawn" below): for a stage's first pass, `Agent(subagent_type=<worker>, run_in_background=true)` with a prompt pointing at the mission ID. For a re-examination of work the same agent just did — a reviewer looking at a fix to findings it raised, a worker reworking its own round — `SendMessage` to that agent instead, so it keeps the context it already built.
 2. **Wait**: notification arrives when agent completes.
 3. **Review**: read the diff and the result artifact.
 4. **Reflect**: `ethos mission reflect <id> --file <path>`. Pass or findings.
-5. **Advance or close**: if findings → `ethos mission advance <id>`, spawn fresh worker to fix. If clean → mission closes, next stage unblocks.
+5. **Advance or close**: if findings → `ethos mission advance <id>`; `SendMessage` the same worker to fix (not a fresh spawn) when the fix builds on its own round. If clean → mission closes, next stage unblocks.
 6. **Commit**: after each clean stage. Tests must pass at every commit.
+
+### Reuse vs respawn
+
+A fresh `Agent()` reads everything from scratch — the diff, what the bug was,
+why the last attempt failed. When the next task *builds on context the agent
+already holds*, that re-read is wasted tokens and a worse result: a reviewer
+spawned fresh for round 2 cannot tell "they fixed finding #2 but #3 is still
+open," because it never held the findings. The harness supports continuing an
+agent: `SendMessage` to its ID or name resumes it with context intact; a new
+`Agent()` call starts cold.
+
+The discriminator is **whether the next task builds on context the agent
+already has:**
+
+- **Spawn fresh** (`Agent()`): a stage's first pass, or genuinely new,
+  unrelated work. There is nothing to carry, and stale context would be noise.
+- **Continue** (`SendMessage` to the same agent): the *same work re-examined* —
+  a code-reviewer verifying a fix to findings it raised, a test-engineer
+  looking at the next round of the same code, a QA agent re-running a journey
+  after a fix, a worker reworking its own prior round. It still holds the code
+  model, the findings list, and the reasoning, so it only looks at what
+  changed.
+
+Two bounds: reuse is **within** a round-trip on one piece of work, not "keep
+one agent alive forever" — an agent carried across different files or different
+missions accumulates irrelevant context and degrades. And the mission contract
+still frames the work (dispatch is two operations); `SendMessage` reuse is an
+optimization on the follow-up, not a replacement for the contract.
 
 For security-critical stages, spawn djb (security engineer — cryptographic implementation, threat-modeling, and policy) as a separate background review agent before reflecting.
 
