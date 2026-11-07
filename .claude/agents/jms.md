@@ -42,7 +42,7 @@ tools:
   - mcp__plugin_z-spec-dev_zspec__animate
   - mcp__plugin_z-spec-dev_zspec__browse
   - mcp__plugin_z-spec-dev_zspec__get_report
-model: "sonnet"
+model: "opus"
 skills:
   - "baseline-ops"
 hooks:

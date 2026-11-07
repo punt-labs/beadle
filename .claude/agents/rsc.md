@@ -30,7 +30,7 @@ tools:
   - mcp__plugin_biff-dev_tty__read_messages
   - mcp__plugin_ethos-dev_self__identity
   - mcp__plugin_ethos-dev_self__session
-model: "sonnet"
+model: "opus"
 skills:
   - "baseline-ops"
 hooks:
