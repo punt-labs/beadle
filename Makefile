@@ -11,6 +11,16 @@ GOVULNCHECK_VERSION := v1.7.0
 ETHOS_VERSION := v4.16.0
 BIFF_VERSION := 1.19.0
 
+# Pin the Go toolchain to the go.mod `toolchain` line for every `go`
+# invocation. GOTOOLCHAIN=auto uses the NEWER of (host Go, go.mod directive),
+# so a host running a Go release ahead of the pin (e.g. 1.27) would run the
+# pinned analyzers (staticcheck, golangci-lint) under that newer Go — and they
+# cannot decode its export-data format, crashing with "export data version N is
+# greater than maximum supported version M". Forcing the pinned toolchain keeps
+# the analyzers and the compiler that built the stdlib they read in lockstep,
+# identically on every host and in CI.
+export GOTOOLCHAIN := go1.26.10
+
 # Every shell script in the repo, discovered by shebang rather than by
 # extension or a hardcoded list: a script deployed under a literal binary
 # name (scripts/beadle-sysreport, resolved by beadle-daemon's cli-runner
