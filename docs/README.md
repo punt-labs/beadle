@@ -26,7 +26,7 @@ session.
 | Doc | What it is |
 |-----|-----------|
 | [`setup-guide.md`](setup-guide.md) | New-machine setup for `beadle-email` end to end. |
-| [`cli-mcp-cmd-analysis.md`](cli-mcp-cmd-analysis.md) | Gap analysis across the CLI / MCP / slash surfaces (baselined at v0.7.0). |
+| [`cli-mcp-cmd-analysis.md`](cli-mcp-cmd-analysis.md) | Gap analysis across the CLI / MCP / slash surfaces, with a noun-verb naming assessment (re-baselined at v0.17.0). |
 | [`process.md`](process.md) | How the COO runs multi-task epics with ethos pipelines. `WORKFLOW.md` is authoritative for the loop itself; this is the epic-execution narrative around it. |
 
 ## Design specs (LaTeX)
@@ -51,9 +51,11 @@ architecture from these; cross-check against `ARCHITECTURE.md`.
 | [`orchestrator-design.md`](orchestrator-design.md) | Design behind the shipped daemon/orchestrator. |
 | [`pipeline-v2-design.md`](pipeline-v2-design.md) | Pipeline v2 design — implemented (see the pipeline-v2 release). |
 | [`pipeline-v2.md`](pipeline-v2.md) | Pipeline v2 implementation notes — implemented. |
-| [`email-channel-plan.md`](email-channel-plan.md) | Email-channel implementation plan — implemented. |
 | [`gpg-signature-verification.md`](gpg-signature-verification.md) | Command-file signature verification (DES-034) — design ratified, `VerifySignature` implemented. |
 | [`wire-verifysignature.md`](wire-verifysignature.md) | Wiring `VerifySignature` into the daemon (DES-035) — `daemon.json`, the `owner_handle`/`owner_gpg_key_id` owner-key sources, and the `loadCommand` call site. |
+| [`worker-mcp-path.md`](worker-mcp-path.md) | Spawn-time MCP-server path resolution for workers (DES-037) — implemented; rejected alternatives recorded. |
+| [`email-payload-handoff.md`](email-payload-handoff.md) | Email-derived stage payload delivered via the per-spawn system prompt, not the tracked mission contract (DES-038) — implemented. |
+| [`daemon-test-harness.md`](daemon-test-harness.md) | The daemon-pipeline test tier (gates 1–4 through the real `OnNewMail` entry point) — current; see `TESTING.md`. |
 
 ## Artifacts
 

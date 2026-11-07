@@ -19,7 +19,7 @@ lets consumers make graduated decisions.
 |-------|--------|
 | trusted | `X-Pm-Content-Encryption: end-to-end` + `X-Pm-Origin: internal` |
 | verified | `gpg --verify` exit 0 |
-| untrusted | `gpp --verify` exit non-zero |
+| untrusted | `gpg --verify` exit non-zero |
 | unverified | No `multipart/signed` in Content-Type |
 
 ## DES-002: Inline PGP verification in list_messages
@@ -456,8 +456,10 @@ was rejected because `switch args[i]` matched exact strings only. The parser als
 lacked per-flag help generation, global flag propagation to subcommands, and
 actionable error messages. These are solved problems in cobra.
 
-**Status:** Implemented. All 14 subcommands migrated. punt-kit/standards/cli.md
-updated with Go/cobra guidance alongside Python/typer.
+**Status:** Implemented. Every command uses cobra — 21 top-level commands
+(including the `contact` and `identity` noun groups, which carry their own
+subcommands). punt-kit/standards/cli.md updated with Go/cobra guidance
+alongside Python/typer.
 
 **Rejected alternatives:**
 
@@ -1305,13 +1307,14 @@ passphrase is written to a mode-600 temp file and passed via
 wrong-key failure, non-encrypted rejection, `IsEncrypted` classification,
 and temp-file cleanup verification.
 
-**Open question:** The CEO flagged the system keyring decision for post-
-testing security review. The alternative — an isolated GNUPGHOME with the
-private key imported per-operation — would provide hermetic isolation but
-requires either copying the private key (exposure) or symlinking
-`~/.gnupg/private-keys-v1.d/` (fragile, gpg-agent socket path issues).
-Neither option is clearly better. This ADR will move to SETTLED or be
-revised after the deferred discussion.
+**Settled as implemented.** The system keyring decision shipped and is the
+current behavior (`internal/pgp/decrypt.go`). The alternative weighed at design
+time — an isolated GNUPGHOME with the private key imported per-operation — would
+provide hermetic isolation but requires either copying the private key
+(exposure) or symlinking `~/.gnupg/private-keys-v1.d/` (fragile, gpg-agent
+socket path issues); neither is clearly better. If the deferred post-testing
+security review is to reopen this, it does so as a new ADR, not by leaving this
+one's status unresolved.
 
 **Rejected alternatives:**
 
@@ -2438,8 +2441,10 @@ header, no filter.
 
 **Decision:** Beadle tags outbound mail and scopes the inbox by repo using the
 mailing-list pattern — a visible subject tag for humans plus a structured
-header for tools — with the repo surfaced as its own column in beadle's list
-view rather than left inside the subject. Four ratified points:
+header for tools — with the `[owner/repo]` tag kept in the subject. A dedicated
+repo column in the list view was weighed and **deferred** (see the ratified
+refinements below); the tag lives in the subject, not a separate column. Four
+ratified points:
 
 1. **Tag scope is the repo, not the agent.** The subject tag carries the repo;
    the agent identity is already the mailbox and travels in a header.
@@ -2473,10 +2478,10 @@ commands.
 Outbound composition (all paths: plain, signed, encrypted) auto-adds the
 subject tag and the headers `X-Beadle-Repo: <owner/repo>` and
 `X-Beadle-Agent: <handle>`. The read side filters on `X-Beadle-Repo` first and
-the subject tag second (so human replies without the header are still caught),
-and beadle's list view renders a dedicated short `repo` column (owner stripped)
-sourced from the tag/header — the SUBJECT column is never used to carry the
-repo, so it stays readable.
+the subject tag second (so human replies without the header are still caught).
+The repo stays in the `[owner/repo]` subject tag; the dedicated repo column was
+deferred, so the list view (`internal/mcp/format.go`) carries the columns R,
+FROM, DATE, T, SUBJECT and no repo column.
 
 **Why:** The tag must be first-class for both audiences without hacking either.
 A human in any mail client sees and searches `[punt-labs/beadle]` in the
@@ -2524,7 +2529,10 @@ SUBJECT. Scoped to the current repo, an agent in `beadle` sees its handful of
 ## DES-034: Command-file signature verification — canonical-subset signing, isolated verification against a known owner key
 
 **Status:** SETTLED (beadle-iru). `VerifySignature` implemented in
-`internal/daemon/signature.go`.
+`internal/daemon/signature.go`. Terminology note: "owner key" here is the
+recipe-authorizer key; the owner→authorizer rename is pending (beadle-4ul).
+Config identifiers (`owner_gpg_key_id`, `owner_handle`) are real code names and
+stay until that rename lands.
 
 **Decision:** `VerifySignature(cmd *Command, gpgBinary, ownerKeyID string)
 error` signs/verifies the canonical `yaml.Marshal` of `Command` with
@@ -2573,7 +2581,10 @@ see DES-035's rationale).
 ## DES-035: Wiring VerifySignature into daemon startup — daemon.json, owner_gpg_key_id, and the no-ethos owner-key path
 
 **Status:** SETTLED (beadle-iru). Wired into `LoadCommands`/`loadCommand`
-in `internal/daemon/command.go`.
+in `internal/daemon/command.go`. Terminology note: "owner" names the
+recipe-authorizer concept; the owner→authorizer rename is pending (beadle-4ul).
+`daemon.json`'s `owner_handle`/`owner_gpg_key_id` are real config keys and stay
+until that rename.
 
 **Decision:** a new `~/.punt-labs/beadle/daemon.json` (`internal/daemon.Config`)
 holds exactly one owner-key source: `owner_handle` (resolved through
