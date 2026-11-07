@@ -24,7 +24,7 @@ exists yet for an operator to configure it.
 ## Quick Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/4cc7f6b/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/355710a/install.sh | sh
 ```
 
 Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts to install the Claude Code plugin (MCP tools + slash commands + hooks). If plugin installation fails, the script falls back to registering the standalone MCP server (no slash commands or hooks). Runs `doctor` to check your setup. Restart Claude Code after install. If you previously registered `beadle-email` as a standalone MCP server via `claude mcp add`, remove it first with `claude mcp remove beadle-email` to avoid duplicate registrations.
@@ -35,7 +35,7 @@ Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts 
 <summary>Inspect before running</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/4cc7f6b/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/355710a/install.sh -o install.sh
 ```
 
 ```bash
@@ -94,7 +94,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 ## What It Looks Like
 
 ```text
-$ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/4cc7f6b/install.sh | sh
+$ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/355710a/install.sh | sh
 ...
 ▶ Running doctor...
 [+] version          0.16.5
