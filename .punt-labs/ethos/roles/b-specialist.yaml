@@ -1,5 +1,5 @@
 name: b-specialist
-model: sonnet
+model: opus
 responsibilities:
   - B-method and Event-B modeling, refinement proofs, proof obligations
   - mathematical machine specification and abstract-state design

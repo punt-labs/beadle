@@ -227,7 +227,7 @@ Before starting an epic:
 
 After stage 5:
 
-1. `make check` — all quality gates pass, then `local_review` on the full diff ([`WORKFLOW.md`](WORKFLOW.md))
+1. `make check` — all quality gates pass, then the local review sequence on the full diff ([`WORKFLOW.md`](WORKFLOW.md) § Local review before the PR)
 2. Push branch, create PR
 3. Qodo and Bugbot review once at open, at most two rounds ([`WORKFLOW.md`](WORKFLOW.md))
 4. Merge

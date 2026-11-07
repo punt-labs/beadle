@@ -1,5 +1,5 @@
 name: go-toolchain
-model: sonnet
+model: opus
 responsibilities:
   - Go modules, build tooling, and supply-chain integrity
   - dependency review, vendoring discipline, vulnerability triage

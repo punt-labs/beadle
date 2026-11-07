@@ -1,6 +1,8 @@
 # Delegation with Missions and Pipelines
 
-All code delegation uses ethos missions. Missions are typed contracts between a leader (claude) and a worker (bwk, mdm, djb, adb) that enforce write-set admission, frozen evaluators, bounded rounds, and append-only event logs.
+All code delegation uses ethos missions. Missions are typed contracts between a leader (claude) and a worker (bwk, rsc, rmh, gvr, mdm, rop, djb, adb, jms, jra, kwb, jbh, edt, dna, adt) that enforce write-set admission, frozen evaluators, bounded rounds, and append-only event logs.
+
+Two seats never write production code: `kwb` (test-engineer, write set is test files only) and `jbh` (qa-engineer, no Write/Edit at all). They exist so the top of the testing pyramid — adversarial tests, integration tiers, end-to-end journeys through the real entry point — has an owner who is not the person whose code is under test.
 
 ## Pipeline Selection
 
@@ -46,7 +48,9 @@ ethos mission pipeline instantiate standard \
   --var target=internal/daemon/
 ```
 
-This creates 5 missions (design → implement → test → review → document) with `inputs_from` dependency edges. The worker picks up each stage in order. The leader is the quality gate between stages.
+This creates 5 missions (design → implement → test → review → document) with `inputs_from` dependency edges. The leader is the quality gate between stages.
+
+**`--worker`/`--evaluator` are global: ethos stamps the same pair onto every stage of the pipeline — there is no per-stage override flag.** So the command above does *not* route the test stage to a different handle on its own. The leader enforces the seat split at spawn time, not through instantiation: when the `test` stage unblocks, the leader spawns `kwb` (test-engineer) for it — not the `--worker` implementer — and when `review` unblocks, spawns the implementer's pair evaluator. The implementer is never the test author of record for its own code; the spawn is what makes that true, not the instantiate command. Where the split must be enforced in the contract itself, dispatch the test stage as its own single mission (`ethos mission dispatch --worker kwb --evaluator <implementer>`) instead of relying on the pipeline's global worker. After `review`, before the PR opens, the leader dispatches `jbh` (qa-engineer) for the verification gate against the installed artifact (`docs/WORKFLOW.md` § C. DEMO).
 
 ## Execution Loop
 
@@ -59,7 +63,7 @@ For each stage in the pipeline:
 5. **Advance or close**: if findings → `ethos mission advance <id>`, spawn fresh worker to fix. If clean → mission closes, next stage unblocks.
 6. **Commit**: after each clean stage. Tests must pass at every commit.
 
-For security-critical stages, spawn djb (cryptographic implementation) or bcs (threat-modeling and policy) as a separate background review agent before reflecting.
+For security-critical stages, spawn djb (security engineer — cryptographic implementation, threat-modeling, and policy) as a separate background review agent before reflecting.
 
 ## When NOT to Use Pipelines
 
@@ -84,7 +88,7 @@ ethos mission dispatch \
 
 ```yaml
 leader: claude
-worker: bwk                    # bwk|rsc|mdm|rop|adb|kth|djb|bcs
+worker: bwk                    # bwk|rsc|rmh|gvr|mdm|rop|adb|djb|jms|jra|kwb|jbh|edt|dna|adt
 evaluator:
   handle: mdm                  # must differ from worker, no shared role
 inputs:
@@ -122,14 +126,21 @@ Two specialists per domain. Within each row, the worker and evaluator must be di
 |-----------|--------|-----------|
 | Go internals / library design | `bwk` (Kernighan) | `rsc` (Cox) — toolchain, supply-chain |
 | Go module / dependency / vuln | `rsc` | `bwk` |
+| Python implementation | `rmh` (Hettinger) | `gvr` (van Rossum) — language design |
+| Python language / API design | `gvr` | `rmh` |
 | CLI / command design | `mdm` (McIlroy) | `rop` (Pike) — Plan 9 minimalism |
 | CLI minimalism / man-page | `rop` | `mdm` |
-| Crypto / PGP implementation | `bwk` | `djb` (Bernstein) |
-| Threat-modeling / policy | `claude` (leader) | `bcs` (Schneier) |
-| Infrastructure / CI | `adb` (Lovelace) | `kth` (Hightower) — cloud-native |
-| Cloud-native / kubernetes | `kth` | `adb` |
-| Product validation (PR/FAQ) | `claude` (leader) | `mcg` (Cagan) |
-| Product discovery / interviews | `claude` (leader) | `tdt` (Torres) |
+| Crypto / PGP implementation | `bwk` | `djb` (Bernstein) — security |
+| Security / threat-modeling / policy | `djb` | `bwk` |
+| Infrastructure / CI | `adb` (Lovelace) | `rsc` — toolchain, supply-chain |
+| Formal methods (Z) | `jms` (Spivey) | `jra` (Abrial) — B method |
+| Formal methods (B) | `jra` | `jms` |
+| Test stage of any pipeline; regression test for a bug; coverage gap | `kwb` (Beck) — `*_test.go` only | the implementing specialist (`bwk`, `rmh`, `mdm`, `adb`) — it is their code the tests indict |
+| Test infrastructure (`testserver`, `daemontest`, fixtures, helpers) | `kwb` | `bwk` |
+| QA / verification gate: real entry point, expected-vs-actual evidence, bug reproduction | `jbh` (Bach) — read-only + Bash | `kwb` — a broken journey becomes a failing test |
+| UX / information design | `edt` (Tufte) | `dna` (Norman) — cognitive |
+| UX / cognitive design | `dna` | `edt` |
+| Product / grounding | `adt` | `claude` (leader) |
 
 ## Task Tracking
 
