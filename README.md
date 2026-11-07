@@ -97,7 +97,7 @@ Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadl
 $ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/355710a/install.sh | sh
 ...
 ▶ Running doctor...
-[+] version          0.16.5
+[+] version          0.17.0
 [+] identity         you@example.com (source: ethos)
 [+] secret_backends  pass, secret-tool, file (~/.punt-labs/beadle/secrets/), environment variable
 [+] config           ~/.punt-labs/beadle/identities/you@example.com/email.json
@@ -110,7 +110,7 @@ $ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/355710a/install.
 [+] contacts         2 contacts at ~/.punt-labs/beadle/identities/you@example.com/contacts.json
 [+] mcp_registration plugin provides the MCP server (no standalone duplicate)
 
-beadle-email v0.16.5 is ready!
+beadle-email v0.17.0 is ready!
 ```
 
 ## MCP Tools

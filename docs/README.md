@@ -54,6 +54,9 @@ architecture from these; cross-check against `ARCHITECTURE.md`.
 | [`email-channel-plan.md`](email-channel-plan.md) | Email-channel implementation plan — implemented. |
 | [`gpg-signature-verification.md`](gpg-signature-verification.md) | Command-file signature verification (DES-034) — design ratified, `VerifySignature` implemented. |
 | [`wire-verifysignature.md`](wire-verifysignature.md) | Wiring `VerifySignature` into the daemon (DES-035) — `daemon.json`, the `owner_handle`/`owner_gpg_key_id` owner-key sources, and the `loadCommand` call site. |
+| [`worker-mcp-path.md`](worker-mcp-path.md) | Spawn-time MCP-server path resolution for workers (DES-037) — implemented; rejected alternatives recorded. |
+| [`email-payload-handoff.md`](email-payload-handoff.md) | Email-derived stage payload delivered via the per-spawn system prompt, not the tracked mission contract (DES-038) — implemented. |
+| [`daemon-test-harness.md`](daemon-test-harness.md) | The daemon-pipeline test tier (gates 1–4 through the real `OnNewMail` entry point) — current; see `TESTING.md`. |
 
 ## Artifacts
 

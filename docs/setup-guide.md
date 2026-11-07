@@ -82,7 +82,7 @@ make install   # copies binary to ~/.local/bin/
 
 ```bash
 beadle-email version
-# Expected: beadle-email 0.9.0
+# Expected: beadle-email 0.17.0
 ```
 
 If `beadle-email: command not found`, add `~/.local/bin` to your PATH:
