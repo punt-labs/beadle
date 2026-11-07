@@ -15,9 +15,10 @@ end-to-end encryption down to an unverified message with no signature, and
 per-contact `rwx` permissions gate what the agent can read, reply to, and
 act on. It is the first shipping piece of a larger vision for a
 GPG-signed, autonomous agent daemon (`beadle-daemon`). That daemon works —
-GPG-signed command files, trust and permission gates, a pipeline runner — but
-is not part of this release: it ships no binary, and no `init`/`sign` tooling
-exists yet for an operator to configure it.
+GPG-signed command files, trust and permission gates, a pipeline runner, and
+`init`/`sign`/`verify` tooling for an operator to configure `daemon.json` and
+sign command files (shipped in PR #263) — but is not part of this release: it
+ships no binary.
 
 **Platforms:** macOS, Linux
 
