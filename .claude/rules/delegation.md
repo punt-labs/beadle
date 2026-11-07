@@ -48,7 +48,9 @@ ethos mission pipeline instantiate standard \
   --var target=internal/daemon/
 ```
 
-This creates 5 missions (design → implement → test → review → document) with `inputs_from` dependency edges. The leader is the quality gate between stages. **Stages are seats, not steps one worker performs in sequence**: `--worker` names the implementer for `design`, `implement`, and `document`; the `test` stage is always dispatched to `kwb` (test-engineer), who writes only test files; the `review` stage goes to the implementer's pair evaluator. After `review`, before the PR opens, `jbh` (qa-engineer) runs the verification gate against the installed artifact (`docs/WORKFLOW.md` § C. VERIFY). The implementer is never the test author of record for its own code.
+This creates 5 missions (design → implement → test → review → document) with `inputs_from` dependency edges. The leader is the quality gate between stages.
+
+**`--worker`/`--evaluator` are global: ethos stamps the same pair onto every stage of the pipeline — there is no per-stage override flag.** So the command above does *not* route the test stage to a different handle on its own. The leader enforces the seat split at spawn time, not through instantiation: when the `test` stage unblocks, the leader spawns `kwb` (test-engineer) for it — not the `--worker` implementer — and when `review` unblocks, spawns the implementer's pair evaluator. The implementer is never the test author of record for its own code; the spawn is what makes that true, not the instantiate command. Where the split must be enforced in the contract itself, dispatch the test stage as its own single mission (`ethos mission dispatch --worker kwb --evaluator <implementer>`) instead of relying on the pipeline's global worker. After `review`, before the PR opens, the leader dispatches `jbh` (qa-engineer) for the verification gate against the installed artifact (`docs/WORKFLOW.md` § C. DEMO).
 
 ## Execution Loop
 

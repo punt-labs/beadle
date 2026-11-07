@@ -19,9 +19,9 @@ move the other way — anything found while a PR is open is fixed in that PR,
 never sent back to the backlog.
 
 This file instantiates
-[punt-kit/standards/workflow.md](../../punt-kit/standards/workflow.md) for
+[punt-kit/standards/workflow.md](https://github.com/punt-labs/punt-kit/blob/main/standards/workflow.md) for
 beadle, and defers the PR-review machine to
-[punt-kit/standards/pr-review.md](../../punt-kit/standards/pr-review.md). The
+[punt-kit/standards/pr-review.md](https://github.com/punt-labs/punt-kit/blob/main/standards/pr-review.md). The
 pseudocode at each level gives the control flow; a small Z schema at each
 level gives the doorway conditions — what must be true to enter an iteration
 and what must be true to leave it. The state those schemas observe:
@@ -232,15 +232,17 @@ function pr_loop(unit):
     # C. DEMO — drive the real entry point, not just the tests
     qa_mission(unit)                      # jbh (qa-engineer), read-only + Bash:
         make install                      #   build + copy beadle-email to ~/.local/bin
-        write down the expected outcome, then exercise the change:
-            MCP tools via `beadle-email serve` (restart Claude Code to reload)
-            CLI via `beadle-email list|read|send|move|doctor|status`
+        write down the expected outcome, then exercise the CLI entry points:
+            beadle-email list|read|send|move|doctor|status
         cover one invalid input, one missing-dependency case, one boundary
         report expected-vs-actual, verified / inferred / unknown kept apart,
-            and name the human-judged remainder
-    a journey jbh finds broken is a defect: kwb writes the failing test,
-        the implementer fixes it, in this PR
-    the operator confirms only the human-judged remainder — a real message
+            and name the MCP and human-judged remainders
+    the leader runs the MCP-tool journeys jbh cannot reach (jbh has Bash
+        but no beadle-email MCP tools): the `email` tools over the running
+        `beadle-email serve`, expected output written first
+    a journey jbh or the leader finds broken is a defect: kwb writes the
+        failing test, the implementer fixes it, in this PR
+    the operator confirms the human-judged remainder — a real message
         sent and received, a signature that verifies, a trust level
         classified correctly against a live mailbox
 
@@ -251,27 +253,24 @@ function pr_loop(unit):
     schedule a background poll with /loop   # never gh pr checks --watch,
                                             # never foreground sleep loops
 
-function poll_tick(pr):
-    state = current reviews, threads, checks
-    if CI failed: fix in this PR          # gh run view --log-failed
-    for finding in unaddressed(state):    # handled now, never on a later tick
-        delegate the fix to a bare agent  # or reply with the concrete reason
-                                          # the finding does not apply; a fix
-                                          # diff re-runs local review before push
-        make check; commit; push          # each push restarts the gate
-        resolve the thread                # the leader resolves, not the agent
-    if merge_gate(state): merge (squash); close_out()
-
-function merge_gate(state) -> bool:
-    return CI green on the latest commit
-       and not pending(pr)                # Qodo and Bugbot rounds in — the
-                                          #   terms, rounds, and fallbacks are
-                                          #   pr-review.md's, run as written
-       and zero unresolved review threads
-       and every finding answered         # fixed on head, or reasoned
-       and mergeStateStatus in {CLEAN, HAS_HOOKS}
-    # When this returns true: merge (squash, expectedHeadSha). Do not ask,
-    # do not wait.
+# poll_tick and merge_gate are NOT redefined here. They are
+# pr-review.md's, run exactly as written there — including the demo
+# re-confirmation after a non-exempt fix push (demo_ok), the reviewed_head
+# / local delta-review transition that keeps a changed head from merging
+# unreviewed, the round-2 Qodo+Bugbot trigger after a round-1 High fix, and
+# the separate check for queued or in-progress Bugbot runs. Restating a
+# subset here would create a second, weaker gate that drifts from the
+# standard; do not. beadle adds only these deltas on top of the standard's
+# loop, nothing subtracted:
+#   - CI failure: `gh run view --log-failed`; fix in this PR
+#   - a fix commit runs local_review (below) on its diff before the push
+#   - the demo gate is driven by jbh (qa-engineer); its re-confirmation
+#     after a non-exempt fix push is the standard's demo_ok, exercised
+#     through beadle's real entry points (§ The demo gate)
+#   - merge is squash with expectedHeadSha; mergeStateStatus must be in
+#     {CLEAN, HAS_HOOKS}
+# When the standard's merge_gate holds: merge (squash); close_out(). Do not
+# ask, do not wait.
 
 function close_out():
     cancel the poll loop
@@ -284,9 +283,9 @@ function close_out():
     start the next unit immediately       # no stopping to report
 ```
 
-Entry and exit for one PR iteration. `merge_gate` in the pseudocode is the
-pre-merge subset of these conditions; `ExitPR` describes the state after
-close-out completes.
+Entry and exit for one PR iteration. The pre-merge gate is pr-review.md's
+`merge_gate`, not a subset restated here; `ExitPR` names the state after
+close-out completes and carries every conjunct the standard's gate requires.
 
 ```text
 EnterPR ≙ [ LoopState; unit : ℙ BEAD |
@@ -300,13 +299,19 @@ ExitPR ≙ [ Δ LoopState; pr : PR |
   merged(pr)
   ∧ localFindings(pr) = ∅                 -- held BEFORE the PR opened, and
                                           --   before every fix push
-  ∧ demoConfirmed(pr)                     -- driven through its real entry point
-                                          --   BEFORE the PR opened; operator
-                                          --   confirmed the human-judged part
+  ∧ demoOk(pr)                            -- the standard's demo_ok: the demo
+                                          --   covers the head, re-confirmed by
+                                          --   jbh after any non-exempt fix push
   ∧ ciGreen(head(pr))
   ∧ ¬ pending(pr)                         -- Qodo and Bugbot rounds in
+  ∧ ¬ bugbotOpen(pr)                      -- no queued/in-progress Bugbot run
+  ∧ reviewedHead(pr) = head(pr)           -- the merged commit was reviewed;
+                                          --   a fix push advances it only after
+                                          --   its delta review's findings clear
   ∧ (∀ f : findings(pr) • answered(f))    -- fixed on head, or reasoned
   ∧ unresolvedThreads(pr) = ∅
+  ∧ round(pr) ≤ 2                         -- round 2 only after a High fix
+  ∧ openEscalations(pr) = ∅
   ∧ beadsOf(pr) ⊆ closed′
   ∧ mergeRecapSent(pr) ]
 ```
@@ -317,7 +322,7 @@ Full-diff local review is where issues die cheaply. A local round costs
 seconds; a remote review cycle costs minutes to hours. The review sequence —
 agent selection, round limits, the dismissal standard, and what "installed"
 means — is owned by
-[punt-kit/standards/pr-review.md](../../punt-kit/standards/pr-review.md). For
+[punt-kit/standards/pr-review.md](https://github.com/punt-labs/punt-kit/blob/main/standards/pr-review.md). For
 beadle: `code-reviewer`, `silent-failure-hunter`, and `qodo review` run on the
 unit's first full diff and on every fix diff of 20 lines or more;
 `invariant-completeness-reviewer` joins any claimed invariant or
@@ -339,7 +344,7 @@ plus one `bugbot run`) happens only when round 1's fixes included a High, and
 it is the last; a new High in round 2 goes to the operator. The full
 terminology — `round`, `qodo_in`, `bugbot_in`, `answered(f)`, `reviewed_head`,
 `bugbot_open`, the outage fallbacks, and the model-checked rules — is
-[punt-kit/standards/pr-review.md](../../punt-kit/standards/pr-review.md)'s, run
+[punt-kit/standards/pr-review.md](https://github.com/punt-labs/punt-kit/blob/main/standards/pr-review.md)'s, run
 as written there. Copilot is not a default reviewer; request it only when the
 operator asks, at open.
 
@@ -488,12 +493,14 @@ mechanical fix to a bare agent, then pushes and resolves the thread itself.
    reviews it; reflect-and-advance rounds continue until the evaluator
    accepts.
 6. **The leader verifies and closes.** Check the result against the contract.
-   Dispatch `jbh` to drive the change through its real entry point —
-   `make install`, then `beadle-email serve` for MCP tools, the CLI
-   subcommands, `doctor` — with expected output written first and one invalid
-   input, one missing dependency, one boundary covered; `jbh` returns an
-   expected-vs-actual evidence block. The leader reads that evidence, re-runs
-   the one line it doubts, and never accepts on the worker's report alone. Run
+   Dispatch `jbh` to drive the change through its real entry points — `make
+   install`, then the CLI subcommands and `doctor` — with expected output
+   written first and one invalid input, one missing dependency, one boundary
+   covered; `jbh` returns an expected-vs-actual evidence block. `jbh` has Bash
+   but no beadle-email MCP tools, so the leader runs the MCP-tool journeys
+   itself (the `email` tools over a running `beadle-email serve`), expected
+   output written first. The leader reads jbh's evidence, re-runs the one line
+   it doubts, and never accepts on the worker's report alone. Run
    the applicable local review agents on the mission diff and fix every
    finding; a dismissal requires the exact finding, the specific reason it
    does not apply, and the code reference. If the result raises a design
