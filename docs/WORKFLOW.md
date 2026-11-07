@@ -263,10 +263,13 @@ function pr_loop(unit):
 # standard; do not. beadle adds only these deltas on top of the standard's
 # loop, nothing subtracted:
 #   - CI failure: `gh run view --log-failed`; fix in this PR
-#   - a fix commit runs local_review (below) on its diff before the push
+#   - a fix commit re-runs the local review sequence (§ Local review before
+#     the PR) on its diff before the push; if that review is blocked, nothing
+#     is pushed and the block escalates to the operator (pr-review.md)
 #   - the demo gate is driven by jbh (qa-engineer); its re-confirmation
 #     after a non-exempt fix push is the standard's demo_ok, exercised
-#     through beadle's real entry points (§ The demo gate)
+#     through beadle's real entry points (§ The demo gate), where a
+#     non-exempt file is any file not matching demo_exempt (defined there)
 #   - merge is squash with expectedHeadSha; mergeStateStatus must be in
 #     {CLEAN, HAS_HOOKS}
 # When the standard's merge_gate holds: merge (squash); close_out(). Do not
@@ -351,17 +354,26 @@ operator asks, at open.
 ### The demo gate
 
 `make check` passing means the code compiles and the tests pass. It does not
-mean the feature works. Before any PR opens, `jbh` (qa-engineer) drives the
-feature through its real entry point — an MCP tool call over `beadle-email
-serve`, a `beadle-email` CLI subcommand, `beadle-email doctor` — with the
-expected outcome written down first, then compared against actual output, and
-returns an expected-vs-actual evidence block (verified / inferred / unknown
-kept separate). Because beadle talks to a live mail system, the human-judged
-part is real: a message actually sent and received, a PGP signature that
-actually verifies, a sender actually classified at the right trust level. That
-remainder is the operator's to confirm, and it is a demo, not a diff.
-Docs-only changes are the one exception — markdownlint plus a read-through is
-their verification.
+mean the feature works. Before any PR opens, the feature is driven through its
+real entry points with the expected outcome written down first, then compared
+against actual output. The work is split by tool access: `jbh` (qa-engineer)
+has Bash but no beadle-email MCP tools, so `jbh` drives the CLI entry points
+(`beadle-email list|read|send|move|doctor|status`) and returns an
+expected-vs-actual evidence block (verified / inferred / unknown kept
+separate); the **leader** runs the MCP-tool journeys `jbh` cannot reach — the
+`email` tools over a running `beadle-email serve`. Because beadle talks to a
+live mail system, the human-judged part is real: a message actually sent and
+received, a PGP signature that actually verifies, a sender actually classified
+at the right trust level. That remainder is the operator's to confirm, and it
+is a demo, not a diff.
+
+`demo_exempt(f)` — the files that need no demo — is beadle's instance of the
+standard's set (`pr-review.md`): `f` is `*.md`, under `docs/`, or `*_test.go`,
+and is **not** under `plugin/` (commands and hooks there are behavior even when
+Markdown, because Claude Code executes them). A change touching only
+demo-exempt files is verified by markdownlint plus a read-through; any
+non-exempt file requires the demo above, re-confirmed on the current head
+after a non-exempt fix push.
 
 ## Level 3 — The mission loop (design, code, test)
 
