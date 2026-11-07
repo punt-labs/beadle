@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-07
+
 ### Removed
 
 - **The push-guard `PreToolUse` hook (`no-push-to-main.sh`) is gone.**
