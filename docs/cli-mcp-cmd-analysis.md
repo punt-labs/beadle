@@ -1,16 +1,27 @@
 # CLI / MCP / Slash Command Gap Analysis
 
-Analysis of beadle-email's three tool surfaces as of v0.7.0 (2026-03-23).
+Analysis of beadle-email's three tool surfaces as of v0.17.0 (2026-11-07).
+Re-baselined from the v0.7.0 (2026-03-23) snapshot: the message `mark`,
+`reply`, and `search` operations, the two `batch_*` MCP tools, the poll-status
+pair, and the `enable` MCP tool all postdate the old baseline, and this pass
+adds a noun-verb naming assessment against
+[punt-kit/standards/cli.md](https://github.com/punt-labs/punt-kit/blob/main/standards/cli.md)
+§ Subcommand naming.
 
 ## Capability Matrix
 
 | Capability | MCP Tool | CLI Command | Slash Command | Notes |
 |-----------|----------|-------------|---------------|-------|
 | List messages | `list_messages` | `list` | `/inbox` | MCP: filters + unread. CLI: folder/count flags. Slash: triage workflow |
-| Read message | `read_message` | `read <uid>` | `/inbox` | Slash command reads as part of triage |
+| Read message | `read_message` | `read <uid>` | `/inbox` | Slash reads as part of triage |
 | Send email | `send_email` | `send` | `/mail`, `/send` | All support to/cc/bcc/subject/body/attachments |
+| Reply to message | `reply_message` | `reply <uid>` | — | Added since v0.7.0 |
+| Search messages | `search_messages` | `search` | — | Added since v0.7.0 |
+| Mark read/unread | `mark_message` | `mark` | — | Added since v0.7.0 |
+| Mark many read/unread | `batch_mark_messages` | — | — | MCP only; batch variant |
+| Move message | `move_message` | `move <uid>` | `/inbox` | Slash auto-archives per permission |
+| Move many messages | `batch_move_messages` | — | — | MCP only; batch variant |
 | List folders | `list_folders` | `folders` | — | No slash command |
-| Move message | `move_message` | `move <uid>` | `/inbox` | Slash command auto-archives per permission |
 | Verify signature | `verify_signature` | — | — | MCP only |
 | Show MIME | `show_mime` | — | — | MCP only |
 | Check trust | `check_trust` | — | `/inbox` | Slash uses internally for permission enforcement |
@@ -22,94 +33,123 @@ Analysis of beadle-email's three tool surfaces as of v0.7.0 (2026-03-23).
 | Show identity | `whoami` | `identity show` | — | Different output (see gap #5) |
 | Switch identity | `switch_identity` | — | — | MCP only, session-scoped |
 | Set repo identity | — | `identity set` | — | CLI only, persistent config |
+| Poll status | `get_poll_status` | — | — | MCP only; present only when polling is configured |
+| Set poll interval | `set_poll_interval` | — | — | MCP only; present only when polling is configured |
+| Enable in repo | `enable` | `enable` | — | Deposits guide + marker; MCP tool mirrors the CLI verb |
+| Disable in repo | — | `disable` | — | CLI only |
 | Health check | — | `doctor` | — | CLI only |
+| WebSocket health | — | `health` | — | CLI only |
 | Status summary | — | `status` | — | CLI only |
 | Version | — | `version` | — | CLI only |
 | Start MCP server | — | `serve` | — | CLI only |
 | Install/uninstall | — | `install` / `uninstall` | — | CLI only |
 
-## Intentional Gaps (by design)
+## Noun-verb naming assessment
+
+[punt-kit/standards/cli.md](https://github.com/punt-labs/punt-kit/blob/main/standards/cli.md)
+§ Subcommand naming: a tool that acts on **more than one kind of noun** uses
+`noun verb` (`lux scene show`, `bd issue list`); only a genuinely single-noun
+tool uses flat verbs (`quarry search`, `biff who`). beadle-email acts on
+several nouns — **message, folder, contact, identity** — so the noun-first form
+is the one the standard prescribes.
+
+The surface is **split**: the contact and identity nouns already group
+correctly, but the message and folder operations are flat top-level verbs.
+
+| Area | Current | Standard-conformant | Status |
+|---|---|---|---|
+| Contacts | `contact add\|find\|list\|remove` | same | ✓ conformant |
+| Identity | `identity show\|set` | same | ✓ conformant |
+| Messages | `list`, `read`, `send`, `reply`, `search`, `mark`, `move` | `message list\|read\|send\|reply\|search\|mark\|move` | ✗ flat; should be noun-first |
+| Folders | `folders` | `folder list` | ✗ flat, and plural-noun-as-verb |
+
+The message verbs are the bulk of the product surface and the clearest
+deviation: seven flat verbs that all act on the `message` noun. Under the
+standard they belong under a `message` group, which also future-proofs the
+surface — a new message operation becomes a new verb under `message`, not a new
+top-level command competing with `doctor`/`serve`/`install`.
+
+This is a **breaking CLI change** (every `beadle-email list` becomes
+`beadle-email message list`), so it is a deliberate, versioned decision, not a
+drive-by rename — see recommendation #1. The admin/diagnostic verbs
+(`doctor`, `status`, `health`, `version`, `serve`, `install`, `uninstall`,
+`enable`, `disable`) are correctly flat: cli.md § Layer 2 exempts the admin
+tier from noun-first, as they name a machine-level action, not a domain noun.
+
+## Intentional gaps (by design)
 
 | Gap | Why it's fine |
 |-----|--------------|
-| `doctor`, `status`, `version`, `serve` CLI-only | Admin/diagnostic — terminal tools, not conversational |
+| `doctor`, `status`, `health`, `version`, `serve` CLI-only | Admin/diagnostic — terminal tools, not conversational |
 | `identity set` CLI-only | Writes persistent config — setup step, not session action |
-| `/inbox` has no CLI equivalent | `/inbox` is a workflow (read → triage → archive → reply), not a single operation. CLI has the primitives |
-| `/mail` and `/send` no CLI parity concern | Conversational wrappers composing MCP primitives. CLI `send` covers the raw operation |
-| `install`/`uninstall` CLI-only | One-time setup, not used during normal operation |
+| `/inbox` has no single CLI equivalent | `/inbox` is a workflow (read → triage → archive → reply); CLI has the primitives |
+| `/mail` and `/send` no CLI parity concern | Conversational wrappers over the `send` primitive |
+| `install`/`uninstall`/`enable`/`disable` CLI-only (enable also MCP) | Setup operations, not normal-operation actions |
+| `batch_move_messages`, `batch_mark_messages` MCP only | Batch variants for the conversational surface; CLI scripts loop the singular verb |
+| `get_poll_status`, `set_poll_interval` MCP only, conditional | Appear only when polling is configured for the identity |
 
-## Questionable Gaps
+## Questionable gaps
 
-### 1. `verify_signature` — MCP only
+### 1. `download_attachment` — MCP only
 
-No CLI `verify <uid>` command. Low usage — MCP is the primary surface. But `doctor` already validates GPG, so a CLI verify would be consistent with the diagnostic pattern.
+CLI users can `list` and `read` but cannot save attachments. A real gap —
+attachment download is a common workflow.
+**Verdict:** worth adding, as `beadle-email message download <uid> --part <index>`
+(noun-first, per the assessment above).
 
-**Verdict:** Low priority. Add if CLI users request it.
+### 2. `whoami` vs `identity show` — different output
 
-### 2. `show_mime` — MCP only
+`whoami` (MCP) shows email, source, handle, name, contacts path + count,
+override status, session participants. `identity show` (CLI) shows email,
+handle, source, contacts path. Missing on the CLI side: contacts count,
+override indicator, session participants.
+**Verdict:** `identity show` should converge with `whoami` — same data, two surfaces.
 
-No CLI MIME inspection. This is a debugging/diagnostic tool. MCP-only is fine — CLI users can pipe `read` output to external tools.
+### 3. `switch_identity` — MCP only, no slash command
 
-**Verdict:** Acceptable gap.
+No CLI switch (session-scoped, in-memory, by design) and no slash command. A
+`/identity` slash wrapping `whoami` + `switch_identity` is the natural
+user-facing entry point.
+**Verdict:** add `/identity`. Users currently must know the MCP tool name to switch.
 
-### 3. `download_attachment` — MCP only
+### 4. `verify_signature`, `show_mime`, `check_trust` — MCP only
 
-CLI users can `list` and `read` messages but cannot save attachments. This is a real gap — downloading attachments is a common workflow.
+Diagnostic/inspection tools. `doctor` covers the GPG setup side; per-message
+trust is visible in `list` output.
+**Verdict:** acceptable as MCP-only; add a CLI verb only on request.
 
-**Verdict:** Worth adding as `beadle-email download <uid> --part <index>`.
+### 5. `list_folders` — no slash command
 
-### 4. `check_trust` — no CLI
+Folders rarely change and aren't part of typical workflows.
+**Verdict:** acceptable gap.
 
-`/inbox` uses it internally, MCP exposes it. CLI users can't classify trust from terminal. Useful for scripting and debugging trust issues.
-
-**Verdict:** Low priority. `doctor` covers the setup side; per-message trust is visible in `list` output.
-
-### 5. `whoami` vs `identity show` — different output
-
-`whoami` (MCP) shows: email, source, handle, name, contacts path + count, override status, session participants. `identity show` (CLI) shows: email, handle, source, contacts path. Missing: contacts count, override indicator, session participants.
-
-**Verdict:** `identity show` should converge with `whoami` output. Same data, different surface.
-
-### 6. `switch_identity` — MCP only, no slash command
-
-No CLI switch (by design — switch is session-scoped in-memory). No slash command either. A `/identity` or `/whoami` command wrapping `whoami` + `switch_identity` would be the natural user-facing entry point.
-
-**Verdict:** Add `/identity` slash command. Users currently must know the MCP tool name to switch.
-
-### 7. `list_folders` — no slash command
-
-No `/folders`. Minor — folders rarely change and aren't part of typical workflows.
-
-**Verdict:** Acceptable gap.
-
-## Overlap Concerns
+## Overlap concerns
 
 ### `/mail` vs `/send`
 
-`/send` is described as "any channel (email today, more later)" but today only does email — identical to `/mail`. Two options:
+`/send` is described as "any channel (email today, more later)" but today only
+emails — identical to `/mail`. Keep both: `/mail` is explicit, `/send` is the
+forward-looking intent command that gains value when a second channel ships.
+**Verdict:** keep both; revisit when a non-email channel lands.
 
-- **Keep both:** `/mail` is explicit ("I'm emailing"), `/send` is intent-based ("send this, you pick the channel"). When Signal/SMS ships, `/send` gains value.
-- **Deprecate `/mail`:** `/send` subsumes it. One command, less confusion.
+### CLI flags vs MCP param names
 
-**Verdict:** Keep both for now. `/send` is the forward-looking command; `/mail` is the explicit one. Revisit when a second channel ships.
-
-### CLI `list` vs MCP `list_messages` parameter names
-
-CLI uses `--unread`, MCP uses `unread_only`. CLI uses `--count`, MCP uses `count`. Minor inconsistency — different surfaces have different conventions (flags vs params).
-
-**Verdict:** Acceptable. CLI flags are short (`--unread`); MCP params are descriptive (`unread_only`).
-
-## Missing Slash Commands Worth Adding
-
-| Command | What it would do | Priority |
-|---------|-----------------|----------|
-| `/identity` | Show identity (`whoami`) + switch (`switch_identity`) | P2 — natural entry point for identity switching |
-| `/attachments` | Download attachment from a message | P3 — common workflow |
+CLI `--unread` / `--count` vs MCP `unread_only` / `count`. Different surface
+conventions (short flags vs descriptive params).
+**Verdict:** acceptable.
 
 ## Recommendations
 
-1. **Converge `identity show` with `whoami`** — add contacts count and session participants to CLI output
-2. **Add `/identity` slash command** — wraps `whoami` + `switch_identity` for user-facing identity management
-3. **Add CLI `download` subcommand** — `beadle-email download <uid> --part <index>` for attachment extraction
-4. **Keep `/mail` and `/send` separate** — revisit when second channel ships
-5. **Leave `verify_signature`, `show_mime`, `check_trust` as MCP-only** — diagnostic tools that don't need CLI/slash wrappers
+1. **Decide the noun-verb migration for the message and folder surface.** The
+   standard prescribes `message list`/`message read`/…/`folder list`; the CLI
+   ships flat verbs. This is a breaking change and the single largest
+   conformance gap — it needs an operator ruling (migrate with a deprecation
+   window, or document a standing exception), not a silent rename.
+2. **Converge `identity show` with `whoami`** — add contacts count and session
+   participants to the CLI output.
+3. **Add a `/identity` slash command** — wraps `whoami` + `switch_identity`.
+4. **Add attachment download to the CLI** — `message download <uid> --part <index>`.
+5. **Keep `/mail` and `/send` separate** — revisit when a second channel ships.
+6. **Leave `verify_signature`, `show_mime`, `check_trust`, the `batch_*` tools,
+   and the poll pair as MCP-only** — diagnostic or batch/conversational tools
+   that do not need CLI or slash wrappers.

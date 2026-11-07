@@ -26,7 +26,7 @@ session.
 | Doc | What it is |
 |-----|-----------|
 | [`setup-guide.md`](setup-guide.md) | New-machine setup for `beadle-email` end to end. |
-| [`cli-mcp-cmd-analysis.md`](cli-mcp-cmd-analysis.md) | Gap analysis across the CLI / MCP / slash surfaces (baselined at v0.7.0). |
+| [`cli-mcp-cmd-analysis.md`](cli-mcp-cmd-analysis.md) | Gap analysis across the CLI / MCP / slash surfaces, with a noun-verb naming assessment (re-baselined at v0.17.0). |
 | [`process.md`](process.md) | How the COO runs multi-task epics with ethos pipelines. `WORKFLOW.md` is authoritative for the loop itself; this is the epic-execution narrative around it. |
 
 ## Design specs (LaTeX)
