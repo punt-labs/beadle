@@ -1,6 +1,6 @@
 # Delegation with Missions and Pipelines
 
-All code delegation uses ethos missions. Missions are typed contracts between a leader (claude) and a worker (bwk, rsc, mdm, djb, adb, kwb, jbh) that enforce write-set admission, frozen evaluators, bounded rounds, and append-only event logs. The roster is the `beadle` team in `.punt-labs/ethos/teams/beadle.yaml`, resolved repo-only — a handle not on it does not exist here. It is sized to what this repo dispatches: Go, Go toolchain, security, infrastructure, CLI, test, QA. Python, UX, product, and formal-methods seats return by adding them to the team and re-running `ethos vendor --team beadle --apply --prune`.
+All code delegation uses ethos missions. Missions are typed contracts between a leader (claude) and a worker (bwk, rsc, mdm, djb, adb, kwb, jbh, jms, jra) that enforce write-set admission, frozen evaluators, bounded rounds, and append-only event logs. The roster is the `beadle` team in `.punt-labs/ethos/teams/beadle.yaml`, resolved repo-only — a handle not on it does not exist here. It is sized to what this repo dispatches: Go, Go toolchain, security, infrastructure, CLI, test, QA, and formal methods (Z/B). Python, UX, and product seats return by adding them to the team and re-running `ethos vendor --team beadle --apply --prune`.
 
 Two seats never write production code: `kwb` (test-engineer, write set is test files only) and `jbh` (qa-engineer, no Write/Edit at all). They exist so the top of the testing pyramid — adversarial tests, integration tiers, end-to-end journeys through the real entry point — has an owner who is not the person whose code is under test.
 
@@ -116,7 +116,7 @@ ethos mission dispatch \
 
 ```yaml
 leader: claude
-worker: bwk                    # bwk|rsc|mdm|djb|adb|kwb|jbh
+worker: bwk                    # bwk|rsc|mdm|djb|adb|kwb|jbh|jms|jra
 evaluator:
   handle: mdm                  # must differ from worker, no shared role
 inputs:
@@ -161,8 +161,8 @@ Two specialists per domain. Within each row, the worker and evaluator must be di
 | Test stage of any pipeline; regression test for a bug; coverage gap | `kwb` (Beck) — `*_test.go` only | the implementing specialist (`bwk`, `mdm`, `adb`) — it is their code the tests indict |
 | Test infrastructure (`testserver`, `daemontest`, fixtures, helpers) | `kwb` | `bwk` |
 | QA / verification gate: installed binary, CLI and daemon entry points, `scripts/`, example recipes, the manual live tier — expected-vs-actual evidence, bug reproduction | `jbh` (Bach) — read-only + Bash | `kwb` — a broken journey becomes a failing test |
-
-Formal methods (`jms`/`jra`) are not on this team; a z-spec change (beadle-ye24, beadle-8zti) adds them first.
+| Formal methods (Z): daemon-pipeline and trust-model schemas, model-checking a formal class before implementation | `jms` (Spivey) | `jra` (Abrial) — B method |
+| Formal methods (B): refinement, Event-B | `jra` | `jms` |
 
 ## Task Tracking
 

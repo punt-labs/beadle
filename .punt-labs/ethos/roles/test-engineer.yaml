@@ -1,5 +1,5 @@
 name: test-engineer
-model: opus
+model: sonnet
 responsibilities:
   - Write tests that cover new and changed behavior, adversarially, for code someone else wrote
   - Own the test stage of every pipeline — the test author is never the implementer
