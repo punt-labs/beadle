@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The ethos team is now product-scoped and the vendored tree is a
+  verified closure.** `.punt-labs/ethos/teams/beadle.yaml` names the nine
+  seats this repo dispatches (CEO, COO, Go, Go toolchain, security,
+  infrastructure, CLI, test, QA); `.punt-labs/ethos.yaml` sets
+  `resolution: repo-only`; `ethos vendor --team beadle --apply --prune`
+  wrote the catalog as that team's closure and recorded it in
+  `.vendor.yaml`. The previous 17-member org `engineering` team (PR #293)
+  generated 15 agents per session for a repo whose 33 closed missions had
+  only ever dispatched four handles; it is now 7 agents plus the three
+  review-checklist agents, and 136 catalog files no identity referenced
+  (personalities, roles, talents, writing styles) are gone, alongside the
+  8 off-team identities and 15 hand-written agent sources. `ethos doctor`
+  passes "Repo-only completeness: 9 identities resolve with no global
+  fallback" (beadle-56zd).
+- **QA and test seats scoped to every tier, not only the Go suite.** The
+  `qa-engineer` role now names the installed binary, the `beadle-email`
+  and `beadle-daemon` entry points, `install.sh`, the `scripts/`
+  directory, the example recipes, and the manual live-mailbox tier from
+  `docs/TESTING.md`, and carries an `output_format` (verdict, expected-vs-
+  actual table, verified/inferred/unknown). `test-engineer` names the
+  `testserver`, `daemontest`, and `-tags integration` tiers. Both edits
+  live in the role YAML because that is what the generator reads; the
+  hand-written `.punt-labs/ethos/agents/*.md` files were never an input
+  and are removed.
+- **Model tiers aligned to the work.** `qa-engineer` and `infra-engineer`
+  move from sonnet to opus: QA judges a live trust boundary, and the
+  infrastructure seat spent rounds 2–8 of one mission (beadle-f34m) on
+  shell-capture semantics in the Makefile — the recurrence signal
+  `docs/WORKFLOW.md` names.
+
+### Removed
+
+- `.punt-labs/ethos/missions-closed/` (66 files, 408 KB of exported
+  contracts and results) is no longer tracked; the mission store is
+  `.punt-labs/local/ethos/`, and no sibling repo tracks exports.
+- A stale `.punt-labs/ethos/.git` gitdir pointer to the retired
+  `punt-labs/team` submodule, plus the `.biff` and `.claude/settings.json`
+  that clone carried. The pointer made git and `ethos doctor` treat the
+  vendored tree as a separate working tree, which hid a mis-rooted
+  `.punt-labs/ethos/.punt-labs/local/` runtime zone and blocked the
+  DES-079 storage checks. The orphan `.git/modules/.punt-labs/ethos`
+  directory and `submodule..punt-labs/ethos.*` config entries are
+  per-clone residue outside the tree; remove them by hand.
+
 ## [0.17.0] - 2026-11-07
 
 ### Removed
