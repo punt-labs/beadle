@@ -88,14 +88,19 @@ Two other org standards are non-autoloaded references — linked, not
 this repo loads on demand:
 
 - The Go standard,
-  [`punt-kit/standards/go.md`](../punt-kit/standards/go.md), is backed
-  per-turn by [`.claude/rules/go-standards.md`](.claude/rules/go-standards.md)
+  [`go.md`](https://github.com/punt-labs/punt-kit/blob/main/standards/go.md),
+  is the complete, authoritative spec and is what a Go change answers to. Its
+  core conventions are carried per-turn by
+  [`.claude/rules/go-standards.md`](.claude/rules/go-standards.md)
   (`paths: ["**/*.go"]`), which auto-loads the moment an agent touches a `.go`
-  file. Consult go.md by link for the full org standard.
+  file — a working reminder, not a substitute. The full standard (functional
+  options, `ValidationError`, the `//nolint`/`_ =`/`pkg/`/global-state bans,
+  and the rest) is one link away above; consult it when the per-turn rule does
+  not settle the question.
 - The org workflow standard,
-  [`punt-kit/standards/workflow.md`](../punt-kit/standards/workflow.md), is
-  instantiated by this repo's [`docs/WORKFLOW.md`](docs/WORKFLOW.md), which is
-  authoritative for process here and is `@`-imported above. Consult the org
+  [`workflow.md`](https://github.com/punt-labs/punt-kit/blob/main/standards/workflow.md),
+  is instantiated by this repo's [`docs/WORKFLOW.md`](docs/WORKFLOW.md), which
+  is authoritative for process here and is `@`-imported above. Consult the org
   standard by link when you need the abstract org-wide frame.
 
 @../punt-kit/standards/github.md
