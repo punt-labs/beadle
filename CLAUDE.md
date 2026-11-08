@@ -99,3 +99,4 @@ and `workflow.md` are the PR and org-workflow standards. These are cross-repo
 @.punt-labs/vox/CLAUDE.md
 @.punt-labs/ethos/CLAUDE.md
 @.punt-labs/beadle/CLAUDE.md
+@.punt-labs/z-spec/CLAUDE.md
