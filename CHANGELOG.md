@@ -17,9 +17,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `.vendor.yaml`. The previous 17-member org `engineering` team (PR #293)
   generated 15 agents per session for a repo whose 33 closed missions had
   only ever dispatched four handles; it is now 7 agents plus the three
-  review-checklist agents, and 144 catalog files no identity referenced
-  are gone. `ethos doctor` passes "Repo-only completeness: 9 identities
-  resolve with no global fallback" (beadle-56zd).
+  review-checklist agents, and 136 catalog files no identity referenced
+  (personalities, roles, talents, writing styles) are gone, alongside the
+  8 off-team identities and 15 hand-written agent sources. `ethos doctor`
+  passes "Repo-only completeness: 9 identities resolve with no global
+  fallback" (beadle-56zd).
 - **QA and test seats scoped to every tier, not only the Go suite.** The
   `qa-engineer` role now names the installed binary, the `beadle-email`
   and `beadle-daemon` entry points, `install.sh`, the `scripts/`
