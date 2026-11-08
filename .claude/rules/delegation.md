@@ -1,6 +1,6 @@
 # Delegation with Missions and Pipelines
 
-All code delegation uses ethos missions. Missions are typed contracts between a leader (claude) and a worker (bwk, rsc, rmh, gvr, mdm, rop, djb, adb, jms, jra, kwb, jbh, edt, dna, adt) that enforce write-set admission, frozen evaluators, bounded rounds, and append-only event logs.
+All code delegation uses ethos missions. Missions are typed contracts between a leader (claude) and a worker (bwk, rsc, mdm, djb, adb, kwb, jbh) that enforce write-set admission, frozen evaluators, bounded rounds, and append-only event logs. The roster is the `beadle` team in `.punt-labs/ethos/teams/beadle.yaml`, resolved repo-only — a handle not on it does not exist here. It is sized to what this repo dispatches: Go, Go toolchain, security, infrastructure, CLI, test, QA. Python, UX, product, and formal-methods seats return by adding them to the team and re-running `ethos vendor --team beadle --apply --prune`.
 
 Two seats never write production code: `kwb` (test-engineer, write set is test files only) and `jbh` (qa-engineer, no Write/Edit at all). They exist so the top of the testing pyramid — adversarial tests, integration tiers, end-to-end journeys through the real entry point — has an owner who is not the person whose code is under test.
 
@@ -116,7 +116,7 @@ ethos mission dispatch \
 
 ```yaml
 leader: claude
-worker: bwk                    # bwk|rsc|rmh|gvr|mdm|rop|adb|djb|jms|jra|kwb|jbh|edt|dna|adt
+worker: bwk                    # bwk|rsc|mdm|djb|adb|kwb|jbh
 evaluator:
   handle: mdm                  # must differ from worker, no shared role
 inputs:
@@ -154,21 +154,15 @@ Two specialists per domain. Within each row, the worker and evaluator must be di
 |-----------|--------|-----------|
 | Go internals / library design | `bwk` (Kernighan) | `rsc` (Cox) — toolchain, supply-chain |
 | Go module / dependency / vuln | `rsc` | `bwk` |
-| Python implementation | `rmh` (Hettinger) | `gvr` (van Rossum) — language design |
-| Python language / API design | `gvr` | `rmh` |
-| CLI / command design | `mdm` (McIlroy) | `rop` (Pike) — Plan 9 minimalism |
-| CLI minimalism / man-page | `rop` | `mdm` |
+| CLI / command design, help text, 80-column table output | `mdm` (McIlroy) | `bwk` — the implementer whose code renders it |
 | Crypto / PGP implementation | `bwk` | `djb` (Bernstein) — security |
-| Security / threat-modeling / policy | `djb` | `bwk` |
-| Infrastructure / CI | `adb` (Lovelace) | `rsc` — toolchain, supply-chain |
-| Formal methods (Z) | `jms` (Spivey) | `jra` (Abrial) — B method |
-| Formal methods (B) | `jra` | `jms` |
-| Test stage of any pipeline; regression test for a bug; coverage gap | `kwb` (Beck) — `*_test.go` only | the implementing specialist (`bwk`, `rmh`, `mdm`, `adb`) — it is their code the tests indict |
+| Security / threat-modeling / policy (findings only) | `djb` | `bwk` |
+| Infrastructure / CI / Makefile provisioning / install.sh | `adb` (Lovelace) | `djb` — provisioning is a trust boundary; `rsc` for a pure toolchain-pin change |
+| Test stage of any pipeline; regression test for a bug; coverage gap | `kwb` (Beck) — `*_test.go` only | the implementing specialist (`bwk`, `mdm`, `adb`) — it is their code the tests indict |
 | Test infrastructure (`testserver`, `daemontest`, fixtures, helpers) | `kwb` | `bwk` |
-| QA / verification gate: real entry point, expected-vs-actual evidence, bug reproduction | `jbh` (Bach) — read-only + Bash | `kwb` — a broken journey becomes a failing test |
-| UX / information design | `edt` (Tufte) | `dna` (Norman) — cognitive |
-| UX / cognitive design | `dna` | `edt` |
-| Product / grounding | `adt` | `claude` (leader) |
+| QA / verification gate: installed binary, CLI and daemon entry points, `scripts/`, example recipes, the manual live tier — expected-vs-actual evidence, bug reproduction | `jbh` (Bach) — read-only + Bash | `kwb` — a broken journey becomes a failing test |
+
+Formal methods (`jms`/`jra`) are not on this team; a z-spec change (beadle-ye24, beadle-8zti) adds them first.
 
 ## Task Tracking
 
