@@ -79,14 +79,29 @@ map and conflict-triage guide.
 @docs/TESTING.md
 
 These org-wide standards from the `punt-kit` sibling repo are the merged source
-of truth for how Punt Labs tools are built, `@`-imported so they load at
-session start. `go.md` is the Go standard beadle's code answers to; `github.md`
-and `workflow.md` are the PR and org-workflow standards. These are cross-repo
-(external) imports, so the first load may ask for approval.
+of truth for how Punt Labs tools are built. `github.md` is the PR standard, and
+it is `@`-imported so it loads at session start. It is a cross-repo (external)
+import, so the first load may ask for approval.
 
-@../punt-kit/standards/go.md
+Two other org standards are non-autoloaded references — linked, not
+`@`-imported, because each is already covered for per-turn work by a mechanism
+this repo loads on demand:
+
+- The Go standard,
+  [`punt-kit/standards/go.md`](../punt-kit/standards/go.md), is backed
+  per-turn by [`.claude/rules/go-standards.md`](.claude/rules/go-standards.md)
+  (`paths: ["**/*.go"]`), which auto-loads the moment an agent touches a `.go`
+  file. Consult go.md by link for the full org standard.
+- The org workflow standard,
+  [`punt-kit/standards/workflow.md`](../punt-kit/standards/workflow.md), is
+  instantiated by this repo's [`docs/WORKFLOW.md`](docs/WORKFLOW.md), which is
+  authoritative for process here and is `@`-imported above. Consult the org
+  standard by link when you need the abstract org-wide frame.
+
 @../punt-kit/standards/github.md
-@../punt-kit/standards/workflow.md
+<!-- go.md and workflow.md are non-autoloaded references (linked above), not @-imports: go.md is enforced per-turn by .claude/rules/go-*.md, and docs/WORKFLOW.md instantiates workflow.md and is authoritative here. -->
+<!-- @../punt-kit/standards/go.md -->
+<!-- @../punt-kit/standards/workflow.md -->
 
 ## Key Documents
 
