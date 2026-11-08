@@ -1,11 +1,5 @@
 name: infra-engineer
-# opus: the work here is shell-capture and provisioning semantics in the
-# Makefile and CI (tool pins, PATH composition, stderr handling). On
-# bead beadle-f34m this seat spent rounds 2–8 of one mission fixing the
-# previous round's diagnostic and opening a narrower one — the recurrence
-# signal docs/WORKFLOW.md names. That is a reasoning-depth problem, not
-# a volume problem.
-model: opus
+model: sonnet
 responsibilities:
   - CI/CD pipeline design and maintenance
   - cross-repo tooling and deployment

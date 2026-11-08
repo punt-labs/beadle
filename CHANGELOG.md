@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Spivey) and `jra` (b-specialist, Abrial) join the roster — beadle carries
   Z schemas for the daemon pipeline and trust model (`docs/*.tex`,
   beadle-8zti), so they are first-class members. Both roles are opus
-  (model-checking and proofs are reasoning-depth work). The vendored closure
+  (model-checking and proofs); see the model-tier entry below. The vendored closure
   is re-run to 11 identities; `ethos doctor` passes "Repo-only completeness:
   11 identities resolve with no global fallback". delegation.md gains the
   Z and B evaluator rows (jms↔jra).
@@ -40,11 +40,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   live in the role YAML because that is what the generator reads; the
   hand-written `.punt-labs/ethos/agents/*.md` files were never an input
   and are removed.
-- **Model tiers aligned to the work.** `qa-engineer` and `infra-engineer`
-  move from sonnet to opus: QA judges a live trust boundary, and the
-  infrastructure seat spent rounds 2–8 of one mission (beadle-f34m) on
-  shell-capture semantics in the Makefile — the recurrence signal
-  `docs/WORKFLOW.md` names.
+- **Model tiers corrected to opus only where it earns its place.** opus is
+  reserved for djb (security — a wrong call ships a trust defect) and the
+  two formal-methods seats jms/jra (model-checking and proofs). The
+  implementation and execution roles — go-specialist, go-toolchain,
+  infra-engineer, test-engineer, qa-engineer — are sonnet. This undoes the
+  opus-everywhere tiering PR #293 introduced and PR #308 initially carried
+  forward.
 
 ### Removed
 
