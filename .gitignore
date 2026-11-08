@@ -266,6 +266,5 @@ meetings/
 .punt-labs/ethos/missions.jsonl
 .punt-labs/ethos/.biff
 
-# ethos runtime (never track) — DES-058 live zone + mission locks
-.punt-labs/**/*.ethos-tmp*
+# ethos: shared machine-local zone (never track)
 .punt-labs/ethos/sessions/
