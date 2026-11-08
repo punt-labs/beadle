@@ -2,7 +2,7 @@
 # verify this set is complete under `resolution: repo-only`.
 # Do not edit by hand — re-run `ethos vendor --apply` instead.
 version: 1
-generated_at: 2026-11-08T16:02:38Z
+generated_at: 2026-11-08T19:20:43Z
 seeds:
     - adb
     - bwk
@@ -10,6 +10,8 @@ seeds:
     - djb
     - jbh
     - jfreeman
+    - jms
+    - jra
     - kwb
     - mdm
     - rsc
@@ -25,10 +27,13 @@ identities:
       ext:
         - quarry.yaml
         - vox.yaml
+    - handle: jms
+    - handle: jra
     - handle: kwb
     - handle: mdm
     - handle: rsc
 personalities:
+    - abrial
     - bach
     - beck
     - bernstein
@@ -38,7 +43,9 @@ personalities:
     - lovelace
     - mcilroy
     - principal-engineer
+    - spivey
 writing_styles:
+    - abrial-prose
     - bach-prose
     - beck-prose
     - bernstein-prose
@@ -48,20 +55,28 @@ writing_styles:
     - kernighan-prose
     - lovelace-prose
     - mcilroy-prose
+    - spivey-prose
 talents:
+    - b-method
     - dependency-management
     - engineering
+    - event-b
     - exploratory-testing
+    - formal-methods
     - go
     - infrastructure
     - management
     - operations
     - product-development
+    - refinement
     - security
     - smalltalk
     - supply-chain-security
     - tooling
+    - type-systems
+    - z-notation
 roles:
+    - b-specialist
     - ceo
     - cli-specialist
     - coo
@@ -71,5 +86,6 @@ roles:
     - qa-engineer
     - security-engineer
     - test-engineer
+    - z-specialist
 teams:
     - beadle

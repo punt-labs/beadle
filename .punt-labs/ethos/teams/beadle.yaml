@@ -1,10 +1,10 @@
 name: beadle
 repositories:
   - punt-labs/beadle
-# The seats this repo dispatches. Evidence, not aspiration: across the 33
-# missions closed here through 2026-11-05, every worker was bwk or adb and
-# every evaluator was rsc or djb. The repo has no Python, no UI, and z-spec
-# is not enabled (beadle-ye24); those seats return when the work does.
+# The seats this repo dispatches: Go, Go toolchain, security, infra, CLI,
+# test, QA, and formal methods. beadle carries Z schemas for the daemon
+# pipeline (docs/*.tex, beadle-8zti), so the z-spec (jms) and B (jra)
+# specialists are first-class members, not deferred.
 members:
   - identity: jfreeman
     role: ceo
@@ -40,6 +40,15 @@ members:
   # no Write/Edit
   - identity: jbh
     role: qa-engineer
+  # Formal methods — Z schemas for the daemon pipeline and trust model
+  # (docs/*.tex); model-checking before implementation for the formal
+  # classes in docs/WORKFLOW.md. opus: proofs and model checks are
+  # reasoning-depth work.
+  - identity: jms
+    role: z-specialist
+  # B method — refinement and Event-B; evaluator for z-specialist's work
+  - identity: jra
+    role: b-specialist
 collaborations:
   - from: coo
     to: ceo
@@ -65,6 +74,12 @@ collaborations:
   - from: qa-engineer
     to: coo
     type: reports_to
+  - from: z-specialist
+    to: coo
+    type: reports_to
+  - from: b-specialist
+    to: coo
+    type: reports_to
   # Domain pairings. The agent generator renders only reports_to edges
   # (internal/hook/generate_agents.go, "not handled by the MVP"); these
   # are declarations for ethos team show and the delegation table, not
@@ -74,4 +89,7 @@ collaborations:
     type: collaborates_with
   - from: qa-engineer
     to: test-engineer
+    type: collaborates_with
+  - from: b-specialist
+    to: z-specialist
     type: collaborates_with

@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Formal-methods seats added to the beadle team.** `jms` (z-specialist,
+  Spivey) and `jra` (b-specialist, Abrial) join the roster — beadle carries
+  Z schemas for the daemon pipeline and trust model (`docs/*.tex`,
+  beadle-8zti), so they are first-class members. Both roles are opus
+  (model-checking and proofs are reasoning-depth work). The vendored closure
+  is re-run to 11 identities; `ethos doctor` passes "Repo-only completeness:
+  11 identities resolve with no global fallback". delegation.md gains the
+  Z and B evaluator rows (jms↔jra).
 - **The ethos team is now product-scoped and the vendored tree is a
   verified closure.** `.punt-labs/ethos/teams/beadle.yaml` names the nine
   seats this repo dispatches (CEO, COO, Go, Go toolchain, security,
