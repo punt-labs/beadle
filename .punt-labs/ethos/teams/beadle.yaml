@@ -1,0 +1,77 @@
+name: beadle
+repositories:
+  - punt-labs/beadle
+# The seats this repo dispatches. Evidence, not aspiration: across the 33
+# missions closed here through 2026-11-05, every worker was bwk or adb and
+# every evaluator was rsc or djb. The repo has no Python, no UI, and z-spec
+# is not enabled (beadle-ye24); those seats return when the work does.
+members:
+  - identity: jfreeman
+    role: ceo
+  - identity: claude
+    role: coo
+  # Go — internal/{email,pgp,mcp,daemon,...}, cmd/beadle-{email,daemon}
+  - identity: bwk
+    role: go-specialist
+  # Go toolchain — go.mod, golangci-lint pin, release matrix; evaluator
+  # for go-specialist's work
+  - identity: rsc
+    role: go-toolchain
+  # Security — trust classification, PGP verify/sign, command-file
+  # signature enforcement, credential resolution; evaluator for
+  # infra-engineer's work
+  - identity: djb
+    role: security-engineer
+  # Infrastructure — Makefile tool provisioning (ethos/biff/beadle-email
+  # pins), CI workflows, install.sh, plugin release scripts
+  - identity: adb
+    role: infra-engineer
+  # CLI — beadle-email list|read|send|move|doctor|status surface, help
+  # text, 80-column table output (.claude/rules/mock-before-code.md)
+  - identity: mdm
+    role: cli-specialist
+  # Test — the pyramid tiers the implementer's commit does not reach:
+  # testserver integration, daemontest end-to-end, -tags integration;
+  # write set is test files only
+  - identity: kwb
+    role: test-engineer
+  # QA — the verification gate: installed binary, CLI and daemon entry
+  # points, scripts/, example recipes, the manual live-mailbox tier;
+  # no Write/Edit
+  - identity: jbh
+    role: qa-engineer
+collaborations:
+  - from: coo
+    to: ceo
+    type: reports_to
+  - from: go-specialist
+    to: coo
+    type: reports_to
+  - from: go-toolchain
+    to: coo
+    type: reports_to
+  - from: security-engineer
+    to: coo
+    type: reports_to
+  - from: infra-engineer
+    to: coo
+    type: reports_to
+  - from: cli-specialist
+    to: coo
+    type: reports_to
+  - from: test-engineer
+    to: coo
+    type: reports_to
+  - from: qa-engineer
+    to: coo
+    type: reports_to
+  # Domain pairings. The agent generator renders only reports_to edges
+  # (internal/hook/generate_agents.go, "not handled by the MVP"); these
+  # are declarations for ethos team show and the delegation table, not
+  # generated prose.
+  - from: go-toolchain
+    to: go-specialist
+    type: collaborates_with
+  - from: qa-engineer
+    to: test-engineer
+    type: collaborates_with

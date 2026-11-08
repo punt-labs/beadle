@@ -1,0 +1,75 @@
+# Written by `ethos vendor`. Records the vendored closure so ethos can
+# verify this set is complete under `resolution: repo-only`.
+# Do not edit by hand — re-run `ethos vendor --apply` instead.
+version: 1
+generated_at: 2026-11-08T16:02:38Z
+seeds:
+    - adb
+    - bwk
+    - claude
+    - djb
+    - jbh
+    - jfreeman
+    - kwb
+    - mdm
+    - rsc
+identities:
+    - handle: adb
+    - handle: bwk
+    - handle: claude
+      ext:
+        - quarry.yaml
+    - handle: djb
+    - handle: jbh
+    - handle: jfreeman
+      ext:
+        - quarry.yaml
+        - vox.yaml
+    - handle: kwb
+    - handle: mdm
+    - handle: rsc
+personalities:
+    - bach
+    - beck
+    - bernstein
+    - cox
+    - friendly-direct
+    - kernighan
+    - lovelace
+    - mcilroy
+    - principal-engineer
+writing_styles:
+    - bach-prose
+    - beck-prose
+    - bernstein-prose
+    - concise-quantified
+    - cox-prose
+    - direct-with-quips
+    - kernighan-prose
+    - lovelace-prose
+    - mcilroy-prose
+talents:
+    - dependency-management
+    - engineering
+    - exploratory-testing
+    - go
+    - infrastructure
+    - management
+    - operations
+    - product-development
+    - security
+    - smalltalk
+    - supply-chain-security
+    - tooling
+roles:
+    - ceo
+    - cli-specialist
+    - coo
+    - go-specialist
+    - go-toolchain
+    - infra-engineer
+    - qa-engineer
+    - security-engineer
+    - test-engineer
+teams:
+    - beadle
