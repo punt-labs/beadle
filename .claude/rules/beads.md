@@ -19,5 +19,4 @@ bd show <id>                # View issue details
 bd update <id> --status=in_progress   # Claim work
 bd close <id>               # Mark complete
 bd create --title="..." --type=task   # Create issue
-bd sync                     # Sync with git remote
 ```
