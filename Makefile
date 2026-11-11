@@ -19,7 +19,7 @@ BIFF_VERSION := 1.19.0
 # greater than maximum supported version M". Forcing the pinned toolchain keeps
 # the analyzers and the compiler that built the stdlib they read in lockstep,
 # identically on every host and in CI.
-export GOTOOLCHAIN := go1.26.10
+export GOTOOLCHAIN := go1.26.11
 
 # Every shell script in the repo, discovered by shebang rather than by
 # extension or a hardcoded list: a script deployed under a literal binary

@@ -62,6 +62,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   directory and `submodule..punt-labs/ethos.*` config entries are
   per-clone residue outside the tree; remove them by hand.
 
+### Security
+
+- Go toolchain pinned to go1.26.11 for GO-2026-6859 (HTTP/1 server crash
+  from a `MaxBytesReader` header race in `net/http`). `make vulncheck`
+  reported the vulnerability on go1.26.10 and failed every PR's test job.
+  The pin lives in two places that must agree: the `go.mod` `toolchain`
+  line, which CI reads through `go-version-file`, and the Makefile's
+  `GOTOOLCHAIN` export, which every `make` target forces for its `go`
+  invocations.
+
 ## [0.17.0] - 2026-11-07
 
 ### Removed
