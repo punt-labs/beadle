@@ -79,6 +79,33 @@ func TestGrantNeverAddsDevRules(t *testing.T) {
 	}
 }
 
+func TestRulesAreLeastPrivilegeAndScoped(t *testing.T) {
+	entries, err := filepath.Glob(filepath.Join("..", "..", "plugin", "commands", "*.md"))
+	require.NoError(t, err)
+	var want []string
+	for _, path := range entries {
+		name := strings.TrimSuffix(filepath.Base(path), ".md")
+		if !strings.HasSuffix(name, "-dev") {
+			want = append(want, "Skill(beadle:"+name+")")
+		}
+	}
+	var skills []string
+	for _, rule := range Rules {
+		if strings.HasPrefix(rule, "Skill(") {
+			skills = append(skills, rule)
+		}
+	}
+	require.NotEmpty(t, want)
+	assert.Equal(t, want, skills)
+	assert.NotContains(t, Rules, "Bash(beadle-email:*)")
+	assert.NotContains(t, Rules, "mcp__plugin_beadle_email__*")
+	for _, verb := range []string{"serve", "install", "uninstall", "enable", "disable", "identity set", "contact add", "contact remove"} {
+		for _, rule := range Rules {
+			assert.False(t, strings.HasPrefix(rule, "Bash(beadle-email "+verb+":"), rule)
+		}
+	}
+}
+
 func TestGrantRefusesMalformedSettings(t *testing.T) {
 	for _, content := range []string{`{not json`, `[]`, `{"permissions":[]}`, `{"permissions":{"allow":"x"}}`, "{\"a\":\"\xff\"}"} {
 		root := t.TempDir()
@@ -253,32 +280,32 @@ func TestEditsPreserveUnrelatedBytes(t *testing.T) {
 
 func TestRevokeKeepsRulesPresentBeforeGrant(t *testing.T) {
 	root := t.TempDir()
-	writeSettings(t, root, `{"permissions":{"allow":["Skill(mail)"]}}`)
+	writeSettings(t, root, `{"permissions":{"allow":["Skill(beadle:mail)"]}}`)
 	added, err := Grant(root)
 	require.NoError(t, err)
-	assert.NotContains(t, added, "Skill(mail)")
+	assert.NotContains(t, added, "Skill(beadle:mail)")
 
 	removed, _, err := Revoke(root)
 	require.NoError(t, err)
-	assert.NotContains(t, removed, "Skill(mail)")
-	assert.Equal(t, asAny("Skill(mail)"), allowList(t, root), "the pre-existing rule survives disable")
+	assert.NotContains(t, removed, "Skill(beadle:mail)")
+	assert.Equal(t, asAny("Skill(beadle:mail)"), allowList(t, root), "the pre-existing rule survives disable")
 	_, statErr := os.Stat(filepath.Join(root, ".claude", grantedName))
 	assert.True(t, os.IsNotExist(statErr), "record removed once nothing remains granted")
 }
 
 func TestRevokeWithoutRecordRemovesNothing(t *testing.T) {
 	root := t.TempDir()
-	writeSettings(t, root, `{"permissions":{"allow":["Skill(mail)"]}}`)
+	writeSettings(t, root, `{"permissions":{"allow":["Skill(beadle:mail)"]}}`)
 	removed, unrecorded, err := Revoke(root)
 	require.NoError(t, err)
 	assert.Empty(t, removed)
-	assert.Equal(t, []string{"Skill(mail)"}, unrecorded, "a beadle rule no record explains is reported, not removed")
-	assert.Equal(t, asAny("Skill(mail)"), allowList(t, root))
+	assert.Equal(t, []string{"Skill(beadle:mail)"}, unrecorded, "a beadle rule no record explains is reported, not removed")
+	assert.Equal(t, asAny("Skill(beadle:mail)"), allowList(t, root))
 }
 
 func TestRevokeWithRecordStaysQuietAboutOtherRules(t *testing.T) {
 	root := t.TempDir()
-	writeSettings(t, root, `{"permissions":{"allow":["Read","Skill(mail)"]}}`)
+	writeSettings(t, root, `{"permissions":{"allow":["Read","Skill(beadle:mail)"]}}`)
 	_, err := Grant(root)
 	require.NoError(t, err)
 	_, unrecorded, err := Revoke(root)
@@ -326,7 +353,7 @@ func TestPreflightWritesNothing(t *testing.T) {
 
 func TestGrantWritesRecordAndFreshRevokeUsesIt(t *testing.T) {
 	root := t.TempDir()
-	writeSettings(t, root, `{"permissions":{"allow":["Skill(mail)","Read"]}}`)
+	writeSettings(t, root, `{"permissions":{"allow":["Skill(beadle:mail)","Read"]}}`)
 	added, err := Grant(root)
 	require.NoError(t, err)
 
@@ -348,5 +375,5 @@ func TestGrantWritesRecordAndFreshRevokeUsesIt(t *testing.T) {
 	removed, _, err := Revoke(clone)
 	require.NoError(t, err)
 	assert.Equal(t, added, removed, "exactly the granted set, no more and no fewer")
-	assert.Equal(t, asAny("Skill(mail)", "Read"), allowList(t, clone))
+	assert.Equal(t, asAny("Skill(beadle:mail)", "Read"), allowList(t, clone))
 }

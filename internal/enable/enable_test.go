@@ -190,12 +190,12 @@ func TestEnableFailedMarkerRollsBackOnlyAddedRules(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "settings.json"),
-		[]byte(`{"permissions":{"allow":["Skill(mail)"]}}`), 0o600))
+		[]byte(`{"permissions":{"allow":["Skill(beadle:mail)"]}}`), 0o600))
 	// A directory at the marker path makes the final write fail.
 	require.NoError(t, os.MkdirAll(markerPath(root), 0o750))
 
 	require.Error(t, Enable(root, nil))
-	assert.Equal(t, []any{"Skill(mail)"}, allowRules(t, root), "rollback removes what enable added, nothing else")
+	assert.Equal(t, []any{"Skill(beadle:mail)"}, allowRules(t, root), "rollback removes what enable added, nothing else")
 }
 
 func TestDisableRevokesBeforePruneFailure(t *testing.T) {
@@ -214,23 +214,23 @@ func TestDisableKeepsRulesPresentBeforeEnable(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "settings.json"),
-		[]byte(`{"permissions":{"allow":["Skill(mail)"]}}`), 0o600))
+		[]byte(`{"permissions":{"allow":["Skill(beadle:mail)"]}}`), 0o600))
 	require.NoError(t, Enable(root, nil))
 	require.NoError(t, Disable(root, false, nil))
-	assert.Equal(t, []any{"Skill(mail)"}, allowRules(t, root))
+	assert.Equal(t, []any{"Skill(beadle:mail)"}, allowRules(t, root))
 }
 
 func TestDisableWarnsOfBeadleRulesNoRecordExplains(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "settings.json"),
-		[]byte(`{"permissions":{"allow":["Skill(mail)"]}}`), 0o600))
+		[]byte(`{"permissions":{"allow":["Skill(beadle:mail)"]}}`), 0o600))
 
 	var lines []string
 	progress := func(format string, a ...any) { lines = append(lines, fmt.Sprintf(format, a...)) }
 	require.NoError(t, Disable(root, false, progress))
 
 	assert.Contains(t, strings.Join(lines, ""), "warning: left in .claude/settings.json")
-	assert.Contains(t, strings.Join(lines, ""), "Skill(mail)")
-	assert.Equal(t, []any{"Skill(mail)"}, allowRules(t, root), "the rule is left in place")
+	assert.Contains(t, strings.Join(lines, ""), "Skill(beadle:mail)")
+	assert.Equal(t, []any{"Skill(beadle:mail)"}, allowRules(t, root), "the rule is left in place")
 }

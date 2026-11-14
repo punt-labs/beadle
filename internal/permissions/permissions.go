@@ -41,15 +41,35 @@ import (
 // Rules is the deterministic rule set: Grant adds every missing member and
 // Revoke removes the recorded subset of it. A rule retired here strands on
 // disable, so it stays in the set until no enabled repo can still carry it.
+//
+// The MCP grant is the native namespace beadle-email install registers
+// (claude mcp add); the plugin proxy namespace grants nothing once it exists
+// (permissions.md §3). The CLI is granted per subcommand, never as
+// Bash(beadle-email:*): serve, install, uninstall, enable, disable, identity set
+// and contact add/remove (which change who may direct the agent) keep prompting.
+// Skills are granted by their plugin-scoped name only.
 var Rules = []string{
-	"mcp__plugin_beadle_email__*",
 	"mcp__beadle-email__*",
-	"Bash(beadle-email:*)",
-	"Skill(beadle)",
-	"Skill(contacts)",
-	"Skill(inbox)",
-	"Skill(mail)",
-	"Skill(send)",
+	"Bash(beadle-email contact find:*)",
+	"Bash(beadle-email contact list:*)",
+	"Bash(beadle-email doctor:*)",
+	"Bash(beadle-email folders:*)",
+	"Bash(beadle-email health:*)",
+	"Bash(beadle-email identity show:*)",
+	"Bash(beadle-email list:*)",
+	"Bash(beadle-email mark:*)",
+	"Bash(beadle-email move:*)",
+	"Bash(beadle-email read:*)",
+	"Bash(beadle-email reply:*)",
+	"Bash(beadle-email search:*)",
+	"Bash(beadle-email send:*)",
+	"Bash(beadle-email status:*)",
+	"Bash(beadle-email version:*)",
+	"Skill(beadle:beadle)",
+	"Skill(beadle:contacts)",
+	"Skill(beadle:inbox)",
+	"Skill(beadle:mail)",
+	"Skill(beadle:send)",
 }
 
 // ErrRefused marks a settings file left untouched because editing it would be
