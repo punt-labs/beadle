@@ -39,8 +39,8 @@ import (
 )
 
 // Rules is the deterministic rule set: Grant adds every missing member and
-// Revoke removes the recorded subset of it. A rule retired here strands on
-// disable, so it stays in the set until no enabled repo can still carry it.
+// Revoke removes every rule the record says a grant added, so a rule retired
+// from this set is still removed by disable in a repo an older version enabled.
 //
 // The MCP grant is the native namespace beadle-email install registers
 // (claude mcp add); the plugin proxy namespace grants nothing once it exists
@@ -219,9 +219,6 @@ func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 		rules = Rules
 	case rules == nil:
 		rules = granted
-	}
-	if !q.add {
-		rules = slices.DeleteFunc(slices.Clone(rules), func(s string) bool { return !slices.Contains(Rules, s) })
 	}
 
 	changed, out, err := plan(data, q.add, rules)

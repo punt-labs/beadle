@@ -377,3 +377,13 @@ func TestGrantWritesRecordAndFreshRevokeUsesIt(t *testing.T) {
 	assert.Equal(t, added, removed, "exactly the granted set, no more and no fewer")
 	assert.Equal(t, asAny("Skill(beadle:mail)", "Read"), allowList(t, clone))
 }
+
+func TestRevokeRemovesRecordedRuleRetiredFromRules(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"allow":["Read","Bash(beadle-email:*)"]}}`)
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", grantedName), []byte(`["Bash(beadle-email:*)"]`), 0o600))
+	removed, _, err := Revoke(root)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Bash(beadle-email:*)"}, removed)
+	assert.Equal(t, asAny("Read"), allowList(t, root))
+}
