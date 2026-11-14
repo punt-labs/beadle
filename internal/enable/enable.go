@@ -110,7 +110,7 @@ func enableLocked(root string, progress Progressf) error {
 		return fmt.Errorf("granting permissions in .claude/settings.json: %w", err)
 	}
 	if len(added) > 0 {
-		progress.printf("allowed in .claude/settings.json: %s\n", strings.Join(added, ", "))
+		progress.printf("permission rules added to .claude/settings.json: %s\n", strings.Join(added, ", "))
 	}
 
 	markerPath := filepath.Join(dir, "enabled")
