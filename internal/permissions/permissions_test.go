@@ -91,7 +91,9 @@ func TestEachSurfaceIsAllowedBroadly(t *testing.T) {
 }
 
 func TestUnsafeOperationsAsk(t *testing.T) {
-	assert.Contains(t, Ask, "Bash(beadle-email -*)")
+	for _, prefix := range []string{"", " identity", " contact"} {
+		assert.Contains(t, Ask, "Bash(beadle-email"+prefix+" -*)", "a flag before the verb still asks")
+	}
 	for _, verb := range []string{"serve", "install", "uninstall", "enable", "disable", "identity set", "contact add", "contact remove"} {
 		assert.Contains(t, Ask, "Bash(beadle-email "+verb+":*)")
 	}

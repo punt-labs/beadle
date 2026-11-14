@@ -43,8 +43,9 @@ import (
 // allow, so the carve-outs still prompt while new safe commands, MCP tools and
 // skills work without a rule update. They cover what installs or serves
 // beadle, changes enablement, or changes who may direct the agent (identity and
-// contacts); Bash(beadle-email -*) asks for a global option before the verb,
-// which the verb rules would not match. The MCP grant is the plugin namespace:
+// contacts). Cobra accepts a flag anywhere, and the verb rules only match a
+// verb in place, so Bash(beadle-email -*) and the group-level -* rules ask
+// for a flag before the verb (beadle-email identity --json set). The MCP grant is the plugin namespace:
 // beadle-email install registers a native server only with --standalone.
 var (
 	Allow = []string{"Bash(beadle-email:*)", "mcp__plugin_beadle_email__*", "Skill(beadle:*)"}
@@ -56,8 +57,10 @@ var (
 		"Bash(beadle-email enable:*)",
 		"Bash(beadle-email disable:*)",
 		"Bash(beadle-email identity set:*)",
+		"Bash(beadle-email identity -*)",
 		"Bash(beadle-email contact add:*)",
 		"Bash(beadle-email contact remove:*)",
+		"Bash(beadle-email contact -*)",
 		"mcp__plugin_beadle_email__enable",
 		"mcp__plugin_beadle_email__switch_identity",
 		"mcp__plugin_beadle_email__add_contact",
