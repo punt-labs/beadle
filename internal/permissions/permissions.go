@@ -1,4 +1,4 @@
-// Package permissions adds and removes beadle's Claude Code allow rules in one
+// Package permissions adds and removes beadle's Claude Code permission rules in one
 // repo's .claude/settings.json. beadle-email enable is the operator's explicit
 // opt-in, so it — not plugin startup — grants the rules, and disable removes
 // exactly the set that enable added. Nothing here touches the user-global
@@ -12,12 +12,12 @@
 //
 // On-disk contract: the rules a grant added are recorded in
 // .claude/.beadle-granted.json (a JSON list of strings). Revoke removes only the
-// recorded rules, so an allow rule the repo carried before enable survives
+// recorded rules, so a rule the repo carried before enable survives
 // disable. A repo with no record has nothing to revoke. Commit the record with
 // settings.json.
 //
 // Edits keep settings.json's key order and every value's bytes (number text and
-// string escaping included) outside permissions.allow. The file as a whole is
+// string escaping included) outside the permissions tiers it edits. The file as a whole is
 // normalized to two-space indentation, and object keys are re-encoded, so an
 // exotic key escape may be rewritten.
 package permissions
@@ -38,18 +38,51 @@ import (
 	"unicode/utf8"
 )
 
-// Rules is the deterministic rule set: Grant adds every missing member and
-// Revoke removes the recorded subset of it. A rule retired here strands on
-// disable, so it stays in the set until no enabled repo can still carry it.
-var Rules = []string{
-	"mcp__plugin_beadle_email__*",
-	"mcp__beadle-email__*",
-	"Bash(beadle-email:*)",
-	"Skill(beadle)",
-	"Skill(contacts)",
-	"Skill(inbox)",
-	"Skill(mail)",
-	"Skill(send)",
+// Allow and Ask are the rule set enable grants: a broad allow per surface with
+// exact ask carve-outs (permissions.md § 6). Claude Code evaluates ask before
+// allow, so the carve-outs still prompt while new safe commands, MCP tools and
+// skills work without a rule update. They cover what installs or serves
+// beadle, changes enablement, or changes who may direct the agent (identity and
+// contacts). Cobra accepts a flag anywhere, and the verb rules only match a
+// verb in place, so Bash(beadle-email -*) and the group-level -* rules ask
+// for a flag before the verb (beadle-email identity --json set). The MCP grant is the plugin namespace:
+// beadle-email install registers a native server only with --standalone.
+var (
+	Allow = []string{"Bash(beadle-email:*)", "mcp__plugin_beadle_email__*", "Skill(beadle:*)"}
+	Ask   = []string{
+		"Bash(beadle-email -*)",
+		"Bash(beadle-email serve:*)",
+		"Bash(beadle-email install:*)",
+		"Bash(beadle-email uninstall:*)",
+		"Bash(beadle-email enable:*)",
+		"Bash(beadle-email disable:*)",
+		"Bash(beadle-email identity set:*)",
+		"Bash(beadle-email identity -*)",
+		"Bash(beadle-email contact add:*)",
+		"Bash(beadle-email contact remove:*)",
+		"Bash(beadle-email contact -*)",
+		"mcp__plugin_beadle_email__enable",
+		"mcp__plugin_beadle_email__switch_identity",
+		"mcp__plugin_beadle_email__add_contact",
+		"mcp__plugin_beadle_email__remove_contact",
+	}
+)
+
+// Rules is every value enable owns. Grant adds each missing member to its tier;
+// Revoke removes every rule the record says a grant added, so a rule retired
+// from this set is still removed by disable in a repo an older version enabled.
+var Rules = slices.Concat(Allow, Ask)
+
+// tiers lists the permissions keys beadle edits, in file order.
+var tiers = []string{"allow", "ask"}
+
+// tierOf names the permissions key a rule lives in. A recorded rule retired
+// from the set was an allow rule.
+func tierOf(rule string) string {
+	if slices.Contains(Ask, rule) {
+		return "ask"
+	}
+	return "allow"
 }
 
 // ErrRefused marks a settings file left untouched because editing it would be
@@ -200,9 +233,6 @@ func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 	case rules == nil:
 		rules = granted
 	}
-	if !q.add {
-		rules = slices.DeleteFunc(slices.Clone(rules), func(s string) bool { return !slices.Contains(Rules, s) })
-	}
 
 	changed, out, err := plan(data, q.add, rules)
 	if err != nil {
@@ -294,49 +324,19 @@ func plan(data []byte, add bool, rules []string) ([]string, []byte, error) {
 			return nil, nil, fmt.Errorf("%w: 'permissions' is not an object", ErrRefused)
 		}
 	}
-	allowAt, err := find(perms, "allow")
-	if err != nil {
-		return nil, nil, err
-	}
-	var allow []json.RawMessage
-	if allowAt >= 0 {
-		val := bytes.TrimSpace(perms[allowAt].val)
-		if val[0] != '[' || json.Unmarshal(val, &allow) != nil {
-			return nil, nil, fmt.Errorf("%w: 'permissions.allow' is not a list", ErrRefused)
-		}
-	}
-
 	var changed []string
-	if add {
-		for _, rule := range rules {
-			if !hasRule(allow, rule) {
-				enc, err := encodeString(rule)
-				if err != nil {
-					return nil, nil, err
-				}
-				allow = append(allow, enc)
-				changed = append(changed, rule)
-			}
+	for _, tier := range tiers {
+		owned := slices.DeleteFunc(slices.Clone(rules), func(r string) bool { return tierOf(r) != tier })
+		var tierChanged []string
+		if perms, tierChanged, err = editTier(perms, tier, add, owned); err != nil {
+			return nil, nil, err
 		}
-	} else {
-		kept := allow[:0:0]
-		for _, raw := range allow {
-			if s, ok := ruleString(raw); ok && slices.Contains(rules, s) {
-				if !slices.Contains(changed, s) {
-					changed = append(changed, s)
-				}
-				continue
-			}
-			kept = append(kept, raw)
-		}
-		allow = kept
+		changed = append(changed, tierChanged...)
 	}
 	if len(changed) == 0 {
 		return nil, nil, nil
 	}
 
-	allowRaw := json.RawMessage("[" + string(bytes.Join(rawBytes(allow), []byte(","))) + "]")
-	perms = set(perms, "allow", allowRaw)
 	permsRaw, err := encodeObject(perms)
 	if err != nil {
 		return nil, nil, err
@@ -352,6 +352,53 @@ func plan(data []byte, add bool, rules []string) ([]string, []byte, error) {
 	}
 	out.WriteByte('\n')
 	return changed, out.Bytes(), nil
+}
+
+// editTier adds or removes rules in permissions.<tier> and returns the members
+// with the list rebuilt. A tier with nothing to change is left as written, so a
+// removal never creates an absent tier.
+func editTier(perms []member, tier string, add bool, rules []string) ([]member, []string, error) {
+	at, err := find(perms, tier)
+	if err != nil {
+		return nil, nil, err
+	}
+	var list []json.RawMessage
+	if at >= 0 {
+		val := bytes.TrimSpace(perms[at].val)
+		if val[0] != '[' || json.Unmarshal(val, &list) != nil {
+			return nil, nil, fmt.Errorf("%w: 'permissions.%s' is not a list", ErrRefused, tier)
+		}
+	}
+	var changed []string
+	if add {
+		for _, rule := range rules {
+			if !hasRule(list, rule) {
+				enc, err := encodeString(rule)
+				if err != nil {
+					return nil, nil, err
+				}
+				list = append(list, enc)
+				changed = append(changed, rule)
+			}
+		}
+	} else {
+		kept := list[:0:0]
+		for _, raw := range list {
+			if s, ok := ruleString(raw); ok && slices.Contains(rules, s) {
+				if !slices.Contains(changed, s) {
+					changed = append(changed, s)
+				}
+				continue
+			}
+			kept = append(kept, raw)
+		}
+		list = kept
+	}
+	if len(changed) == 0 {
+		return perms, nil, nil
+	}
+	raw := json.RawMessage("[" + string(bytes.Join(rawBytes(list), []byte(","))) + "]")
+	return set(perms, tier, raw), changed, nil
 }
 
 func rawBytes(raws []json.RawMessage) [][]byte {
