@@ -98,7 +98,7 @@ func TestRulesAreLeastPrivilegeAndScoped(t *testing.T) {
 	require.NotEmpty(t, want)
 	assert.Equal(t, want, skills)
 	assert.NotContains(t, Rules, "Bash(beadle-email:*)")
-	assert.NotContains(t, Rules, "mcp__plugin_beadle_email__*")
+	assert.NotContains(t, Rules, "mcp__beadle-email__*")
 	for _, verb := range []string{"serve", "install", "uninstall", "enable", "disable", "identity set", "contact add", "contact remove"} {
 		for _, rule := range Rules {
 			assert.False(t, strings.HasPrefix(rule, "Bash(beadle-email "+verb+":"), rule)

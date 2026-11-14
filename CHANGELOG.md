@@ -12,8 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `Bash(beadle-email:*)` is replaced by one `Bash(beadle-email <cmd>:*)`
   rule per mail and read-only subcommand, so `serve`, `install`,
   `uninstall`, `enable`, `disable`, `identity set` and `contact add`/`remove`
-  keep prompting. Only the native `mcp__beadle-email__*` MCP wildcard is
-  granted; the plugin proxy `mcp__plugin_beadle_email__*` is dropped. Every
+  keep prompting. Only the plugin's `mcp__plugin_beadle_email__*` MCP
+  wildcard is granted, since `install` registers a native server only with
+  `--standalone`; `mcp__beadle-email__*` is dropped. `disable` now removes
+  every rule its record lists, including rules retired from the set. Every
   `Skill()` rule now uses its plugin-scoped `Skill(beadle:<cmd>)` name.
 
 - **Formal-methods seats added to the beadle team.** `jms` (z-specialist,

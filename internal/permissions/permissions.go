@@ -42,14 +42,15 @@ import (
 // Revoke removes every rule the record says a grant added, so a rule retired
 // from this set is still removed by disable in a repo an older version enabled.
 //
-// The MCP grant is the native namespace beadle-email install registers
-// (claude mcp add); the plugin proxy namespace grants nothing once it exists
-// (permissions.md §3). The CLI is granted per subcommand, never as
+// The MCP grant is the plugin namespace: beadle-email install leaves MCP to
+// the plugin and registers a native server only with --standalone, so the
+// default install's tools are mcp__plugin_beadle_email__* (permissions.md §3,
+// one value per tool). The CLI is granted per subcommand, never as
 // Bash(beadle-email:*): serve, install, uninstall, enable, disable, identity set
 // and contact add/remove (which change who may direct the agent) keep prompting.
 // Skills are granted by their plugin-scoped name only.
 var Rules = []string{
-	"mcp__beadle-email__*",
+	"mcp__plugin_beadle_email__*",
 	"Bash(beadle-email contact find:*)",
 	"Bash(beadle-email contact list:*)",
 	"Bash(beadle-email doctor:*)",
