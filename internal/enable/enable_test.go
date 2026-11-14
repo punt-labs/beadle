@@ -224,13 +224,13 @@ func TestDisableWarnsOfBeadleRulesNoRecordExplains(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "settings.json"),
-		[]byte(`{"permissions":{"allow":["Skill(beadle:mail)"]}}`), 0o600))
+		[]byte(`{"permissions":{"allow":["Skill(beadle:*)"]}}`), 0o600))
 
 	var lines []string
 	progress := func(format string, a ...any) { lines = append(lines, fmt.Sprintf(format, a...)) }
 	require.NoError(t, Disable(root, false, progress))
 
 	assert.Contains(t, strings.Join(lines, ""), "warning: left in .claude/settings.json")
-	assert.Contains(t, strings.Join(lines, ""), "Skill(beadle:mail)")
-	assert.Equal(t, []any{"Skill(beadle:mail)"}, allowRules(t, root), "the rule is left in place")
+	assert.Contains(t, strings.Join(lines, ""), "Skill(beadle:*)")
+	assert.Equal(t, []any{"Skill(beadle:*)"}, allowRules(t, root), "the rule is left in place")
 }

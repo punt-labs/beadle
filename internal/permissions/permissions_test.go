@@ -31,11 +31,16 @@ func readSettings(t *testing.T, root string) map[string]any {
 
 func allowList(t *testing.T, root string) []any {
 	t.Helper()
+	return tierList(t, root, "allow")
+}
+
+func tierList(t *testing.T, root, tier string) []any {
+	t.Helper()
 	perms, ok := readSettings(t, root)["permissions"].(map[string]any)
 	require.True(t, ok)
-	allow, ok := perms["allow"].([]any)
+	list, ok := perms[tier].([]any)
 	require.True(t, ok)
-	return allow
+	return list
 }
 
 func asAny(rules ...string) []any {
@@ -51,7 +56,8 @@ func TestGrantCreatesSettingsWithEveryRule(t *testing.T) {
 	added, err := Grant(root)
 	require.NoError(t, err)
 	assert.Equal(t, Rules, added)
-	assert.Equal(t, asAny(Rules...), allowList(t, root))
+	assert.Equal(t, asAny(Allow...), allowList(t, root))
+	assert.Equal(t, asAny(Ask...), tierList(t, root, "ask"))
 }
 
 func TestGrantKeepsOtherSettingsAndAddsOnlyMissing(t *testing.T) {
@@ -61,7 +67,7 @@ func TestGrantKeepsOtherSettingsAndAddsOnlyMissing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Rules[1:], added)
 	assert.Equal(t, map[string]any{"A": "1"}, readSettings(t, root)["env"])
-	assert.Equal(t, asAny(append([]string{"Read"}, Rules...)...), allowList(t, root))
+	assert.Equal(t, asAny(append([]string{"Read"}, Allow...)...), allowList(t, root))
 }
 
 func TestGrantIsIdempotent(t *testing.T) {
@@ -79,35 +85,26 @@ func TestGrantNeverAddsDevRules(t *testing.T) {
 	}
 }
 
-func TestRulesAreLeastPrivilegeAndScoped(t *testing.T) {
-	entries, err := filepath.Glob(filepath.Join("..", "..", "plugin", "commands", "*.md"))
-	require.NoError(t, err)
-	var want []string
-	for _, path := range entries {
-		name := strings.TrimSuffix(filepath.Base(path), ".md")
-		if !strings.HasSuffix(name, "-dev") {
-			want = append(want, "Skill(beadle:"+name+")")
-		}
-	}
-	var skills []string
-	for _, rule := range Rules {
-		if strings.HasPrefix(rule, "Skill(") {
-			skills = append(skills, rule)
-		}
-	}
-	require.NotEmpty(t, want)
-	assert.Equal(t, want, skills)
-	assert.NotContains(t, Rules, "Bash(beadle-email:*)")
+func TestEachSurfaceIsAllowedBroadly(t *testing.T) {
+	assert.Equal(t, []string{"Bash(beadle-email:*)", "mcp__plugin_beadle_email__*", "Skill(beadle:*)"}, Allow)
 	assert.NotContains(t, Rules, "mcp__beadle-email__*")
+}
+
+func TestUnsafeOperationsAsk(t *testing.T) {
+	assert.Contains(t, Ask, "Bash(beadle-email -*)")
 	for _, verb := range []string{"serve", "install", "uninstall", "enable", "disable", "identity set", "contact add", "contact remove"} {
-		for _, rule := range Rules {
-			assert.False(t, strings.HasPrefix(rule, "Bash(beadle-email "+verb+":"), rule)
-		}
+		assert.Contains(t, Ask, "Bash(beadle-email "+verb+":*)")
+	}
+	for _, tool := range []string{"enable", "switch_identity", "add_contact", "remove_contact"} {
+		assert.Contains(t, Ask, "mcp__plugin_beadle_email__"+tool)
+	}
+	for _, rule := range Ask {
+		assert.Equal(t, "ask", tierOf(rule))
 	}
 }
 
 func TestGrantRefusesMalformedSettings(t *testing.T) {
-	for _, content := range []string{`{not json`, `[]`, `{"permissions":[]}`, `{"permissions":{"allow":"x"}}`, "{\"a\":\"\xff\"}"} {
+	for _, content := range []string{`{not json`, `[]`, `{"permissions":[]}`, `{"permissions":{"allow":"x"}}`, `{"permissions":{"ask":"x"}}`, "{\"a\":\"\xff\"}"} {
 		root := t.TempDir()
 		writeSettings(t, root, content)
 		_, err := Grant(root)
@@ -158,13 +155,29 @@ func TestRevokeRemovesExactlyBeadleRules(t *testing.T) {
 	root := t.TempDir()
 	_, err := Grant(root)
 	require.NoError(t, err)
-	data, err := json.Marshal(map[string]any{"permissions": map[string]any{"allow": append(asAny("Read"), append(asAny(Rules...), "Bash(x)")...)}})
+	data, err := json.Marshal(map[string]any{"permissions": map[string]any{"allow": append(asAny("Read"), append(asAny(Allow...), "Bash(x)")...), "ask": asAny(Ask...)}})
 	require.NoError(t, err)
 	writeSettings(t, root, string(data))
 	removed, _, err := Revoke(root)
 	require.NoError(t, err)
 	assert.Equal(t, Rules, removed)
 	assert.Equal(t, asAny("Read", "Bash(x)"), allowList(t, root))
+	assert.Empty(t, tierList(t, root, "ask"))
+}
+
+func TestRevokeNeverCreatesAnAbsentTier(t *testing.T) {
+	root := t.TempDir()
+	_, err := Grant(root)
+	require.NoError(t, err)
+	data, err := json.Marshal(map[string]any{"permissions": map[string]any{"allow": append(asAny("Read"), asAny(Allow...)...)}})
+	require.NoError(t, err)
+	writeSettings(t, root, string(data))
+	_, _, err = Revoke(root)
+	require.NoError(t, err)
+	perms, ok := readSettings(t, root)["permissions"].(map[string]any)
+	require.True(t, ok)
+	assert.NotContains(t, perms, "ask")
+	assert.Equal(t, asAny("Read"), allowList(t, root))
 }
 
 func TestRevokeWithoutSettingsCreatesNothing(t *testing.T) {
@@ -229,7 +242,7 @@ func TestGrantSurvivesClaudeSwappedForSymlinkDuringLockWait(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(data, &got))
 	assert.Equal(t, map[string]string{"A": "1"}, got.Env, "pre-existing content is kept")
-	assert.Equal(t, Rules, got.Permissions.Allow, "the rules landed in the moved original")
+	assert.Equal(t, Allow, got.Permissions.Allow, "the rules landed in the moved original")
 }
 
 func TestGrantRefusesSymlinkedLockFile(t *testing.T) {
@@ -295,12 +308,12 @@ func TestRevokeKeepsRulesPresentBeforeGrant(t *testing.T) {
 
 func TestRevokeWithoutRecordRemovesNothing(t *testing.T) {
 	root := t.TempDir()
-	writeSettings(t, root, `{"permissions":{"allow":["Skill(beadle:mail)"]}}`)
+	writeSettings(t, root, `{"permissions":{"allow":["Skill(beadle:*)"]}}`)
 	removed, unrecorded, err := Revoke(root)
 	require.NoError(t, err)
 	assert.Empty(t, removed)
-	assert.Equal(t, []string{"Skill(beadle:mail)"}, unrecorded, "a beadle rule no record explains is reported, not removed")
-	assert.Equal(t, asAny("Skill(beadle:mail)"), allowList(t, root))
+	assert.Equal(t, []string{"Skill(beadle:*)"}, unrecorded, "a beadle rule no record explains is reported, not removed")
+	assert.Equal(t, asAny("Skill(beadle:*)"), allowList(t, root))
 }
 
 func TestRevokeWithRecordStaysQuietAboutOtherRules(t *testing.T) {
@@ -334,7 +347,7 @@ func TestRemoveRollsBackOnlyTheGivenRules(t *testing.T) {
 	removed, err := Remove(root, added[:2])
 	require.NoError(t, err)
 	assert.Equal(t, added[:2], removed)
-	assert.Equal(t, asAny(added[2:]...), allowList(t, root))
+	assert.Equal(t, asAny(Allow[2:]...), allowList(t, root))
 	again, _, err := Revoke(root)
 	require.NoError(t, err)
 	assert.Equal(t, added[2:], again, "the record kept the rest")
