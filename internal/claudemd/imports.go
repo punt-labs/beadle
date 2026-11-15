@@ -230,9 +230,10 @@ func scanTopLevel(lines []string, fn func(i int, body string)) {
 
 // fencedRanges returns the [open, close] index pairs of matched fenced blocks
 // among the terminator-stripped bodies. A block opened by a run of N of a marker
-// closes only on a later same-marker delimiter whose run is at least N: a ```
-// block cannot be closed by ~~~ or by a shorter run, so a mismatched or shorter
-// delimiter inside the block is content, not a close. Blocks do not nest — once
+// closes only on a later bare same-marker delimiter whose run is at least N: a
+// ``` block cannot be closed by ~~~, by a shorter run, or by a run followed by
+// an info string (valid on an opener only), so such a line inside the block is
+// content, not a close. Blocks do not nest — once
 // open, every line up to the matching close is content. The index of an opener
 // that never closes is returned separately, or -1 when every fence closed.
 func fencedRanges(bodies []string) (ranges [][2]int, open int) {
@@ -247,7 +248,7 @@ func fencedRanges(bodies []string) (ranges [][2]int, open int) {
 			}
 			continue
 		}
-		if ok && marker == openMarker && run >= openLen {
+		if ok && marker == openMarker && run >= openLen && strings.TrimSpace(b)[run:] == "" {
 			ranges = append(ranges, [2]int{open, i})
 			open = -1
 		}

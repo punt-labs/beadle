@@ -141,6 +141,8 @@ func TestPresentFenceSemantics(t *testing.T) {
 		{"shorter run cannot close, longer opener dangles", "````\n" + line + "\n```\n", false},
 		{"inline triple-backtick span is not a fence", "```example``` inline\n" + line + "\n", true},
 		{"inner tilde does not toggle a backtick block", "```\n~~~\n" + line + "\n```\n", false},
+		{"an info-tagged run cannot close, the bare run does", "```\n```go\n" + line + "\n```\n" + line + "\n", true},
+		{"an info-tagged run inside a block stays content", "```\n```go\n" + line + "\n```\n", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
