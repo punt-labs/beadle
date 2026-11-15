@@ -48,7 +48,7 @@ adds a noun-verb naming assessment against
 
 [punt-kit/standards/cli.md](https://github.com/punt-labs/punt-kit/blob/main/standards/cli.md)
 § Subcommand naming: a tool that acts on **more than one kind of noun** uses
-`noun verb` (`lux scene show`, `bd issue list`); only a genuinely single-noun
+`noun verb` (`lux scene show`, `gh issue list`); only a genuinely single-noun
 tool uses flat verbs (`quarry search`, `biff who`). beadle-email acts on
 several nouns — **message, folder, contact, identity** — so the noun-first form
 is the one the standard prescribes.

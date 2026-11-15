@@ -23,7 +23,7 @@ Never suggest //nolint directives, discarding errors with _ =, panics in library
 compliance_user_guidelines = """
 Apply code rules only: correctness, typing, error handling, security, and the coding standards for the changed files.
 Do not grade PR titles, PR descriptions, commit messages, or CHANGELOG wording.
-Do not grade agent process rules from CLAUDE.md, AGENTS.md, or WORKFLOW.md (missions, beads, review cycles, delegation).
+Do not grade agent process rules from CLAUDE.md, AGENTS.md, or WORKFLOW.md (missions, issue tracking, review cycles, delegation).
 """
 smart_router_extra_instructions = """
 High risk: internal/pgp/ (signing, verification, decryption, key-expiry checks), internal/secret/ (credential resolution),
