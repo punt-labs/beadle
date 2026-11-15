@@ -109,7 +109,7 @@ ethos mission dispatch \
   --write-set "internal/email/config.go,internal/email/config_test.go" \
   --criteria "1m is a valid poll interval,make check passes" \
   --context "Add 1m to validPollIntervals map" \
-  --ticket beadle-xyz --budget 1
+  --ticket PL-1234 --budget 1
 ```
 
 ## Contract Schema (Required Fields)
@@ -120,7 +120,7 @@ worker: bwk                    # bwk|rsc|mdm|djb|adb|kwb|jbh|jms|jra
 evaluator:
   handle: mdm                  # must differ from worker, no shared role
 inputs:
-  bead: beadle-xyz             # optional bead link
+  ticket: PL-1234              # optional Linear issue link
 write_set:                     # repo-relative paths, at least one
   - internal/email/smtp.go
   - internal/email/smtp_test.go
@@ -166,7 +166,7 @@ Two specialists per domain. Within each row, the worker and evaluator must be di
 
 ## Task Tracking
 
-Pipelines handle stage sequencing via `depends_on`. Use beads for tracking at the epic/task level. Use `ethos mission show <id>` and `ethos mission log <id>` for per-stage tracking. Do not duplicate pipeline sequencing in TaskCreate.
+Pipelines handle stage sequencing via `depends_on`. Use Linear issues for tracking at the epic/task level. Use `ethos mission show <id>` and `ethos mission log <id>` for per-stage tracking. Do not duplicate pipeline sequencing in TaskCreate.
 
 Mission contract YAMLs go in `.tmp/missions/`. Result artifact YAMLs go in `.tmp/missions/results/`.
 
@@ -181,6 +181,6 @@ Biff is the team messaging system. Use it for presence, coordination, and async 
 - `/write @<agent> <message>` — send a direct message
 - `/wall <message>` — broadcast to all active agents
 
-Start every session with `/tty beadle`, `/plan`, and `/loop 5m /biff:read`. All three before any bead work.
+Start every session with `/tty beadle`, `/plan`, and `/loop 5m /biff:read`. All three before any issue work.
 
 Every biff message requires a reply. Acknowledge instructions, answer questions, or confirm receipt. Silence is not acceptable.

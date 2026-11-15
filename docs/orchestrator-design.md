@@ -397,7 +397,7 @@ works when no one is home.
 - **Mission contract is the scope boundary**: write_set + budget + timeout.
 - **Append-only event log**: tamperproof audit trail in ethos.
 
-## Open Beads
+## Open Issues
 
 - **beadle-88g** (P1): Pipeline orchestrator — command composition layer.
 - **beadle-vyv** (closed): Orchestrator design. Settled.

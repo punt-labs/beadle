@@ -183,44 +183,44 @@ Security-critical stages (whitelist, exec, crypto) typically need
 
 ## Task Tracking
 
-Every epic has beads (issues) that map to the work. The task list
+Every epic has Linear issues (label `repo:beadle`) that map to the work. The task list
 is the COO's primary tracking instrument — it shows what's done,
 what's in progress, and what's blocked.
 
-**Bead structure for an epic:**
+**Issue structure for an epic:**
 
-- One epic bead (`bd create --type=epic`)
-- One task bead per pipeline stage (`bd create --type=task`)
-- Each task bead's description includes the stage name, worker, and
+- One epic issue (type label `Epic`)
+- One task issue per pipeline stage (type label `Improvement` or `Feature`)
+- Each task issue's description includes the stage name, worker, and
   evaluator
 
-**Lifecycle per task bead:**
+**Lifecycle per task issue:**
 
 ```text
-bd update <id> --status=in_progress   # when stage starts
+set the issue In Progress   # when stage starts
   → spawn worker, review, reflect loop
-bd close <id>                         # when stage closes clean
+set the issue Done          # when stage closes clean
 ```
 
-The beads mirror the pipeline stages. When a stage closes in ethos,
-the corresponding bead closes. The epic bead closes when all stage
-beads are closed and the PR is merged.
+The issues mirror the pipeline stages. When a stage closes in ethos,
+the corresponding issue closes. The epic issue closes when all stage
+issues are closed and the PR is merged.
 
 **In-session tracking:** Use `TaskCreate` for the active session's
-task list. Map each task to its bead ID. Mark tasks `in_progress`
-when starting, `completed` when the bead closes. This gives the
-user visibility into progress without checking beads directly.
+task list. Map each task to its Linear issue ID. Mark tasks `in_progress`
+when starting, `completed` when the issue closes. This gives the
+user visibility into progress without checking Linear directly.
 
 ## Setup Checklist
 
 Before starting an epic:
 
-1. `bd update <epic-id> --status=in_progress`
-2. Create task beads for each pipeline stage (if not already created)
+1. Set the epic issue In Progress in Linear
+2. Create task issues for each pipeline stage (if not already created)
 3. `git checkout -b feat/<name> main`
 4. `/plan` with epic summary
 5. `ethos mission pipeline instantiate <pipeline> --leader claude --worker bwk --evaluator mdm --var feature=<name> --var target=<path>`
-6. Create session task list (`TaskCreate`) mapping each task to its bead
+6. Create session task list (`TaskCreate`) mapping each task to its issue
 7. Begin stage 1
 
 ## Shipping
@@ -231,7 +231,7 @@ After stage 5:
 2. Push branch, create PR
 3. Qodo and Bugbot review once at open, at most two rounds ([`WORKFLOW.md`](WORKFLOW.md))
 4. Merge
-5. `bd close` for all task beads and the epic
+5. Mark all task issues and the epic Done in Linear
 6. Recap email to the CEO
 
 ## What Can Go Wrong
