@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **An unclosed code fence in `CLAUDE.md` runs to the end of the file
+  (PL-1087).** Claude Code's Markdown lexer treats a fence that never closes
+  as code through EOF, so an `@`-import after it never loads.
+  `beadle-email enable` now refuses (`ErrUnclosedFence`), before granting any
+  rule, instead of appending an inert import; an import before the open fence
+  is unaffected. A triple-backtick inline span such as ```` ```x``` ```` is
+  not a fence.
+
 ### Changed
 
 - **`beadle-email enable` allows each surface broadly with exact `ask`
