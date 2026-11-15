@@ -248,7 +248,7 @@ func fencedRanges(bodies []string) (ranges [][2]int, open int) {
 			}
 			continue
 		}
-		if ok && marker == openMarker && run >= openLen && strings.TrimSpace(b)[run:] == "" {
+		if ok && marker == openMarker && run >= openLen && strings.Trim(strings.TrimLeft(b, " ")[run:], " ") == "" {
 			ranges = append(ranges, [2]int{open, i})
 			open = -1
 		}

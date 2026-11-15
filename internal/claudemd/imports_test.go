@@ -143,6 +143,9 @@ func TestPresentFenceSemantics(t *testing.T) {
 		{"inner tilde does not toggle a backtick block", "```\n~~~\n" + line + "\n```\n", false},
 		{"an info-tagged run cannot close, the bare run does", "```\n```go\n" + line + "\n```\n" + line + "\n", true},
 		{"an info-tagged run inside a block stays content", "```\n```go\n" + line + "\n```\n", false},
+		{"a tab after a closing run does not close", "~~~\n~~~\t\n" + line + "\n", false},
+		{"a no-break space after a closing run does not close", "~~~\n~~~\u00a0\n" + line + "\n", false},
+		{"trailing spaces after a closing run still close", "~~~\n~~~  \n" + line + "\n", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
