@@ -86,7 +86,7 @@ func TestRegisterIdempotent(t *testing.T) {
 // contract: enable is idempotent (a second Register appends no duplicate) and
 // disable round-trips (Prune restores the original bytes). content is the user's
 // file before any import; the column-0 import beadle appends is always
-// top-level, so a dangling opener never hides it — it delimits nothing (§2.4).
+// top-level; a host ending inside an unclosed fence is refused instead (§2.4).
 func TestFenceAudit(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -99,9 +99,6 @@ func TestFenceAudit(t *testing.T) {
 		{"import-matching line inside a fence", "# T\n```\n" + line + "\n```\n"},
 		{"indented code block", "# T\n\n    " + line + "\n"},
 		{"backticks then tildes, balanced", "```\na\n```\n~~~\nb\n~~~\n"},
-		// A dangling opener delimits nothing: the appended import stays top-level.
-		{"only a dangling fence", "```\n"},
-		{"dangling fence with info string", "# T\n```go\ncode\n"},
 		// ``` cannot close a ~~~ block, but a later ~~~ can, so this closes.
 		{"tilde block with an inner backtick line, balanced", "~~~\ncode\n```\ncode\n~~~\n"},
 	}
@@ -127,8 +124,8 @@ func TestFenceAudit(t *testing.T) {
 }
 
 // TestPresentFenceSemantics pins the balanced-pair fence rules (§2.4) at the
-// present() boundary: an import inside a real fenced block is hidden, but a
-// dangling or mismatched opener delimits nothing and leaves the import visible.
+// present() boundary: an import inside a fenced block is hidden, including a
+// block whose opener never closes and so runs to the end of the file.
 func TestPresentFenceSemantics(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -137,10 +134,11 @@ func TestPresentFenceSemantics(t *testing.T) {
 	}{
 		{"import inside a real fenced block is hidden", "# T\n```\n" + line + "\n```\n", false},
 		{"import inside a tilde block is hidden", "# T\n~~~\n" + line + "\n~~~\n", false},
-		{"dangling opener above import leaves it visible", "```\n" + line + "\n", true},
+		{"dangling opener above import hides it", "```\n" + line + "\n", false},
+		{"import above a dangling opener stays visible", line + "\n```\n", true},
 		{"indented fences are inert, import top-level", "    ```\n" + line + "\n    ```\n", true},
-		{"backtick cannot close a tilde block, opener dangles", "~~~\n" + line + "\n```\n", true},
-		{"shorter run cannot close, longer opener dangles", "````\n" + line + "\n```\n", true},
+		{"backtick cannot close a tilde block, opener dangles", "~~~\n" + line + "\n```\n", false},
+		{"shorter run cannot close, longer opener dangles", "````\n" + line + "\n```\n", false},
 		{"inner tilde does not toggle a backtick block", "```\n~~~\n" + line + "\n```\n", false},
 	}
 	for _, tt := range tests {
@@ -151,47 +149,45 @@ func TestPresentFenceSemantics(t *testing.T) {
 	}
 }
 
-// TestDanglingFenceAboveImportStillPruned is the regression proving GAP 2 fixed.
-// A stray ``` in the user's prose above a registered import used to flip the
-// naive parity scan for the rest of the file: beadle misread its own column-0
-// import as fenced and disable left it — a dead @-import that 404s every
-// session. The balanced-pair scan treats the dangling opener as delimiting
-// nothing, so the import stays top-level and Prune removes it. Under the old
-// logic Prune would report no change and strand the import.
-func TestDanglingFenceAboveImportStillPruned(t *testing.T) {
+// TestImportAfterDanglingFenceIsInert pins §2.4: a fence that never closes
+// runs to the end of the file, as in Claude Code's Markdown lexer, so an import
+// below it loads nothing. Prune leaves that inert copy alone.
+func TestImportAfterDanglingFenceIsInert(t *testing.T) {
 	content := "# Notes\n\n```\nsome unclosed snippet\n\n" + line + "\n"
 	path := writeHost(t, content)
 
 	pruned, err := Prune(path, line)
 	require.NoError(t, err)
-	assert.True(t, pruned, "the import below a dangling fence is top-level and is pruned")
-	assert.Equal(t, "# Notes\n\n```\nsome unclosed snippet\n\n", readHost(t, path),
-		"only the import line is removed; the user's dangling fence is left intact")
+	assert.False(t, pruned, "the import below a dangling fence is fenced, not beadle's to remove")
+	assert.Equal(t, content, readHost(t, path))
 }
 
-// TestDanglingFenceEnableAppendsTopLevel is the enable-direction counterpart:
-// a host CLAUDE.md ending in a dangling ``` opener. We follow §2.4 — the opener
-// delimits nothing — so Register appends the import at column 0 (top-level), a
-// re-run is idempotent, and a subsequent Prune re-matches and removes it. The
-// old endsInOpenFence refusal is gone; the import must land, not be rejected.
-func TestDanglingFenceEnableAppendsTopLevel(t *testing.T) {
+// TestRegisterRefusesAnOpenFence: appending after an unclosed fence would add
+// an inert line and report success, so Register refuses and writes nothing.
+func TestRegisterRefusesAnOpenFence(t *testing.T) {
 	content := "# Notes\n\n```\nunclosed snippet\n"
 	path := writeHost(t, content)
 
 	wrote, err := Register(path, line)
-	require.NoError(t, err)
-	require.True(t, wrote, "enable appends the import even under a dangling opener")
-	assert.Equal(t, content+line+"\n", readHost(t, path),
-		"the import lands at column 0, below the dangling fence")
+	require.ErrorIs(t, err, ErrUnclosedFence)
+	assert.False(t, wrote)
+	assert.Equal(t, content, readHost(t, path))
+}
 
-	wrote, err = Register(path, line)
+// TestImportBeforeDanglingFenceStaysActive: a dangling fence below the import
+// hides nothing above it, so Register is a no-op and Prune removes the import.
+func TestImportBeforeDanglingFenceStaysActive(t *testing.T) {
+	content := line + "\n```\nopen\n" + line + "\n"
+	path := writeHost(t, content)
+
+	wrote, err := Register(path, line)
 	require.NoError(t, err)
-	assert.False(t, wrote, "re-run is idempotent: the appended line is top-level, so it is seen")
+	assert.False(t, wrote)
 
 	pruned, err := Prune(path, line)
 	require.NoError(t, err)
-	assert.True(t, pruned, "disable re-matches the top-level import and removes it")
-	assert.Equal(t, content, readHost(t, path), "the user's dangling fence is left intact")
+	assert.True(t, pruned)
+	assert.Equal(t, "```\nopen\n"+line+"\n", readHost(t, path))
 }
 
 func TestPrune(t *testing.T) {

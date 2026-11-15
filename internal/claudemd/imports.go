@@ -35,6 +35,10 @@ import (
 //go:embed guide.md
 var Guide []byte
 
+// ErrUnclosedFence is Register's refusal to append an import that a code fence
+// left open at the end of the file would make inert.
+var ErrUnclosedFence = errors.New("CLAUDE.md ends inside an unclosed code fence; close it first")
+
 // newFileMode is the mode for a CLAUDE.md that Register creates; an existing
 // file keeps its own mode.
 const newFileMode = 0o644
@@ -49,9 +53,9 @@ const newFileMode = 0o644
 // not byte-for-byte (see the package comment).
 //
 // The import is always written at column 0, so it is top-level by construction
-// (§2.4). A dangling code fence in the user's prose delimits nothing, so it
-// never hides the appended line — Register appends it top-level and Prune
-// re-matches it regardless of an unterminated opener above.
+// (§2.4). A fence that never closes runs to the end of the file, as in Claude
+// Code's Markdown lexer, so an import appended after it would load nothing:
+// Register returns ErrUnclosedFence instead of writing that inert line.
 func Register(path, importLine string) (bool, error) {
 	if err := validate(importLine); err != nil {
 		return false, err
@@ -65,6 +69,9 @@ func Register(path, importLine string) (bool, error) {
 		lines := splitKeepEnds(content)
 		if present(lines, importLine) {
 			return nil
+		}
+		if _, open := fencedRanges(trimmedBodies(lines)); open >= 0 {
+			return ErrUnclosedFence
 		}
 		next := append(lines, appended(lines, importLine))
 		if err := write(target, strings.Join(next, "")); err != nil {
@@ -195,17 +202,19 @@ func remove(lines []string, importLine string) []string {
 // its terminator. This is the code-block definition the Tool Enable/Disable
 // Standard (§2.4) fixes so every implementation agrees, ported from the named
 // reference ClaudeMdImport in punt-labs/biff #312. A line is non-top-level when
-// it lies inside a matched fenced block (fencedRanges) or is itself an indented
+// it lies inside a fenced block (fencedRanges, including one that never
+// closes and so runs to the end of the file) or is itself an indented
 // code line — a tab or four or more leading spaces. beadle's own import is
 // written at column 0 with no info string, so it is top-level by construction
-// unless it sits inside a genuine fenced block.
+// unless it sits inside a fenced block.
 func scanTopLevel(lines []string, fn func(i int, body string)) {
-	bodies := make([]string, len(lines))
-	for i, ln := range lines {
-		bodies[i] = trimTerminator(ln)
+	bodies := trimmedBodies(lines)
+	ranges, open := fencedRanges(bodies)
+	if open >= 0 {
+		ranges = append(ranges, [2]int{open, len(bodies) - 1})
 	}
 	inside := make(map[int]bool)
-	for _, r := range fencedRanges(bodies) {
+	for _, r := range ranges {
 		// The content and the closing delimiter are inside; the opener is not.
 		for i := r[0] + 1; i <= r[1]; i++ {
 			inside[i] = true
@@ -224,12 +233,10 @@ func scanTopLevel(lines []string, fn func(i int, body string)) {
 // closes only on a later same-marker delimiter whose run is at least N: a ```
 // block cannot be closed by ~~~ or by a shorter run, so a mismatched or shorter
 // delimiter inside the block is content, not a close. Blocks do not nest — once
-// open, every line up to the matching close is content. An unterminated opener
-// is dropped (it delimits nothing), so a dangling fence in the user's prose
-// above the import never swallows the rest of the file.
-func fencedRanges(bodies []string) [][2]int {
-	var ranges [][2]int
-	open := -1
+// open, every line up to the matching close is content. The index of an opener
+// that never closes is returned separately, or -1 when every fence closed.
+func fencedRanges(bodies []string) (ranges [][2]int, open int) {
+	open = -1
 	var openMarker byte
 	var openLen int
 	for i, b := range bodies {
@@ -245,7 +252,16 @@ func fencedRanges(bodies []string) [][2]int {
 			open = -1
 		}
 	}
-	return ranges
+	return ranges, open
+}
+
+// trimmedBodies returns lines net of their terminators.
+func trimmedBodies(lines []string) []string {
+	bodies := make([]string, len(lines))
+	for i, ln := range lines {
+		bodies[i] = trimTerminator(ln)
+	}
+	return bodies
 }
 
 // parseFence reports whether body is a fence delimiter and, if so, its marker
