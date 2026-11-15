@@ -7,18 +7,15 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/punt-labs/beadle.svg)](https://pkg.go.dev/github.com/punt-labs/beadle)
 [![Working Backwards](https://img.shields.io/badge/Working_Backwards-hypothesis-lightgrey)](./prfaq.pdf)
 
-beadle-email is an MCP server that gives Claude Code, or any MCP client, a
-real email address --- for developers who want their AI coding assistant to
-receive and send email under cryptographic control. Every message is
-classified into one of four trust levels, from Proton-to-Proton
-end-to-end encryption down to an unverified message with no signature, and
-per-contact `rwx` permissions gate what the agent can read, reply to, and
-act on. It is the first shipping piece of a larger vision for a
-GPG-signed, autonomous agent daemon (`beadle-daemon`). That daemon works —
-GPG-signed command files, trust and permission gates, a pipeline runner, and
-`init`/`sign`/`verify` tooling for an operator to configure `daemon.json` and
-sign command files (shipped in PR #263) — but is not part of this release: it
-ships no binary.
+beadle-email is an MCP (Model Context Protocol) server that connects Claude
+Code, or any other MCP client, to an existing mailbox over IMAP and SMTP, so an
+AI coding assistant can read and send mail from that address. It labels every
+message with one of four [trust levels](#trust-model), from Proton-to-Proton
+end-to-end encryption down to no signature, and per-contact
+[permissions](#contact-permissions) decide which senders the assistant may read
+and which recipients it may write to. Releases also publish `beadle-daemon`
+binaries, a separate background service; the installer does not install them
+and this README does not cover them.
 
 **Platforms:** macOS, Linux
 
@@ -28,9 +25,20 @@ ships no binary.
 curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/355710a/install.sh | sh
 ```
 
-Downloads the `beadle-email` binary, verifies its SHA256 checksum, and attempts to install the Claude Code plugin (MCP tools + slash commands + hooks). If plugin installation fails, the script falls back to registering the standalone MCP server (no slash commands or hooks). Runs `doctor` to check your setup. Restart Claude Code after install. If you previously registered `beadle-email` as a standalone MCP server via `claude mcp add`, remove it first with `claude mcp remove beadle-email` to avoid duplicate registrations.
+The installer downloads the `beadle-email` binary to `~/.local/bin`, checks
+its SHA256 checksum, installs the beadle Claude Code plugin, and runs
+`beadle-email doctor`. The plugin provides the MCP tools, the slash commands
+(`/inbox`, `/mail`, `/send`, `/contacts`, `/beadle`), and hooks. If the plugin
+install fails, the installer registers `beadle-email` as a standalone MCP
+server instead, which provides the MCP tools only. Restart Claude Code
+afterwards.
 
-**Plugin install** provides MCP tools, slash commands (`/inbox`, `/mail`, `/send`, `/contacts`, `/beadle`), and hooks (two-channel display, automatic session setup). **Standalone MCP** provides only MCP tools --- no slash commands or hooks.
+If you registered `beadle-email` yourself earlier with `claude mcp add`, remove
+that entry so the tools are not registered twice:
+
+```bash
+claude mcp remove beadle-email
+```
 
 <details>
 <summary>Inspect before running</summary>
@@ -65,40 +73,41 @@ chmod +x ~/.local/bin/beadle-email
 ```
 
 Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
-Ensure `~/.local/bin` is on your `PATH`. Configure your MCP client to run `beadle-email serve`.
+Make sure `~/.local/bin` is on your `PATH`, then configure your MCP client to run `beadle-email serve`.
 
 </details>
 
 <details>
 <summary>Prerequisites</summary>
 
-- An IMAP server for reading (Proton Bridge on localhost, Fastmail, Gmail IMAP, etc.)
-- An SMTP server for sending (Proton Bridge, or any SMTP with STARTTLS support, or implicit TLS/SMTPS on port 465)
+- An IMAP server for reading (Proton Bridge on localhost, Fastmail, Gmail IMAP, and others)
+- An SMTP server for sending, using STARTTLS or implicit TLS on port 465 (Proton Bridge or any other SMTP server)
 - [GPG](https://gnupg.org/) for signature verification
-- (Optional) [Resend](https://resend.com) API key for fallback sending
+- (Optional) a [Resend](https://resend.com) API key for fallback sending
 
 </details>
 
 ## Features
 
-- **23 MCP tools** (21 always-on + 2 poll tools gated on config) --- list, search, read, reply, send, mark read/unread (single + batch), move/archive (single + batch), download attachments, verify signatures, inspect MIME, classify trust, list folders, address book (list/find/add/remove contacts), whoami, `switch_identity`, enable/disable repo guidance, inbox polling (set interval, get status)
-- **Multi-identity via ethos** --- identity resolved per-request from ethos sidecar. Repo-local config pins identity. Mid-session switching via `switch_identity` tool. Fallback to `default-identity` file
-- **Two-dimensional trust** --- transport trust (trusted/verified/untrusted/unverified) + identity permissions (rwx per contact per identity). Both must pass before autonomous action
-- **Four-level transport trust** --- trusted (Proton-to-Proton E2E), verified (valid PGP), untrusted (bad PGP), unverified (no signature)
-- **Inline PGP verification** --- `list_messages` runs `gpg --verify` on signed messages automatically
-- **Slash commands** (plugin only) --- `/inbox` (process your inbox), `/mail` (email someone), `/send` (multi-channel outbound), `/contacts` (manage the address book), `/beadle` (enable/disable repo guidance)
-- **Two-channel display** (plugin only) --- compact panel summaries with full data in context, no raw JSON in conversation
-- **Proton Bridge native** --- IMAP STARTTLS for reading, SMTP for sending, Resend API fallback
-- **Credential isolation** --- secrets resolved at runtime from OS keychain, never stored in config files
-- **Health checks** --- `doctor` validates all dependencies; `status` shows active identity and configuration
+- **Email tools for the assistant** --- list, search, read, reply, send, mark read or unread, move, list folders, and download attachments; see [MCP Tools](#mcp-tools)
+- **Trust levels** --- every message is labelled `trusted` (Proton-to-Proton end-to-end encryption), `verified` (valid PGP signature), `untrusted` (invalid PGP signature), or `unverified` (no signature); `list_messages` runs `gpg --verify` on signed messages
+- **Per-contact permissions** --- the address book is an allow list: the MCP tools read only mail from contacts granted `r` and send only to contacts granted `w`
+- **Multiple identities** --- one default address, or several identities through [ethos](https://github.com/punt-labs/ethos) with a fixed identity per repo and the `switch_identity` tool
+- **Slash commands** (plugin only) --- `/inbox`, `/mail`, `/send`, `/contacts`, `/beadle`
+- **Short tool output** (plugin only) --- a hook shows each tool result as a one-line summary in the Claude Code panel; the full result stays available to the assistant
+- **Proton Bridge or any IMAP/SMTP server** --- IMAP STARTTLS for reading, SMTP for sending, with an optional Resend API fallback for unsigned mail
+- **Credentials kept out of config files** --- passwords and keys are read at run time from the OS keychain, `pass`, `secret-tool`, a secret file, or an environment variable
+- **Health checks** --- `doctor` checks dependencies and configuration; `status` shows the active identity and configuration
 
 ## What It Looks Like
+
+Output from the installer's final step (version numbers vary):
 
 ```text
 $ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/355710a/install.sh | sh
 ...
 ▶ Running doctor...
-[+] version          0.17.0
+[+] version          X.Y.Z
 [+] identity         you@example.com (source: ethos)
 [+] secret_backends  pass, secret-tool, file (~/.punt-labs/beadle/secrets/), environment variable
 [+] config           ~/.punt-labs/beadle/identities/you@example.com/email.json
@@ -111,7 +120,7 @@ $ curl -fsSL https://raw.githubusercontent.com/punt-labs/beadle/355710a/install.
 [+] contacts         2 contacts at ~/.punt-labs/beadle/identities/you@example.com/contacts.json
 [+] mcp_registration plugin provides the MCP server (no standalone duplicate)
 
-beadle-email v0.17.0 is ready!
+beadle-email vX.Y.Z is ready!
 ```
 
 ## MCP Tools
@@ -122,10 +131,10 @@ beadle-email v0.17.0 is ready!
 | `search_messages` | Search the mailbox by from / subject / since / text (server-side IMAP SEARCH). Repo-scoped by default; `all_repos` widens. |
 | `read_message` | Read full message body, headers, attachments, and trust classification. Does not mark the message read. |
 | `reply_message` | Reply to a message: threads via In-Reply-To/References, preserves the `Re:` + repo tag, quotes the original. Write-gated like `send_email`. |
-| `send_email` | Send via Proton Bridge SMTP (primary) or Resend API (fallback). Resolves contact names inline. |
-| `mark_message` / `batch_mark_messages` | Mark one or many messages read (or `\Seen` cleared with unread). Reports the count actually changed. |
+| `send_email` | Send via SMTP, falling back to the Resend API if SMTP fails and signing is off. Resolves contact names to addresses. Write-gated. |
+| `mark_message` / `batch_mark_messages` | Mark one or many messages read or unread. Reports the number actually changed. |
 | `move_message` | Move a message to another folder. Defaults to Archive. |
-| `batch_move_messages` | Move multiple messages to another folder in one call. Returns the count actually moved. |
+| `batch_move_messages` | Move multiple messages to another folder in one call. Returns the number actually moved. |
 | `list_folders` | List all IMAP mailbox folders. |
 | `show_mime` | Inspect multipart MIME structure, PGP parts, and attachments. |
 | `verify_signature` | Verify PGP signature on a message. Returns signer info and key ID. |
@@ -137,31 +146,95 @@ beadle-email v0.17.0 is ready!
 | `remove_contact` | Remove a contact by name. |
 | `whoami` | Return the active identity (email, display name, ethos handle). |
 | `switch_identity` | Switch the active identity for this session. Pass an ethos handle or empty to reset. |
-| `enable` | Turn beadle's repo guidance on or off in this repo (`action`: `enable` or `disable`). Deposits the guide + `enabled` marker and adds the `@.punt-labs/beadle/CLAUDE.md` import, or removes them. Same marker as the CLI `enable`/`disable`. |
+| `enable` | Turn beadle's repo guidance on or off in this repo (`action`: `enable` or `disable`). Writes or removes the same files as the CLI `enable`/`disable`. |
 | `set_poll_interval` | Set automatic inbox polling interval (1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h, 2h) or disable (`n`). |
 | `get_poll_status` | Return current polling configuration: interval, active state, last check time, unseen count. |
 
 ## Commands
 
+### Slash Commands
+
 Available when installed as a Claude Code plugin.
 
 | Command | What it does |
 |---------|-------------|
-| `/inbox` | Check beadle's email inbox. Optional natural language filter. |
-| `/inbox 3m` | Set inbox polling interval (1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h, 2h). |
-| `/inbox n` | Disable automatic inbox polling. |
-| `/inbox status` | Show current polling configuration. |
-| `/mail` | Mail something to the owner or a specific recipient. |
-| `/send` | Send via any channel (email today, Signal later). |
-| `/contacts` | Manage address book (list, add with permissions, remove, find). |
-| `/beadle enable` / `/beadle disable` | Turn beadle's repo guidance on or off in this repo (writes the `enabled` marker + `CLAUDE.md` import, and allows the `beadle-email` CLI, beadle's MCP tools and commands in `.claude/settings.json`). Commit the change via a PR. |
+| `/inbox` | Check the inbox. Takes an optional plain-English filter. |
+| `/inbox 3m` | Set the inbox polling interval (1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h, 2h). |
+| `/inbox n` | Turn off automatic inbox polling. |
+| `/inbox status` | Show the current polling configuration. |
+| `/mail` | Mail something to you or to a named recipient. |
+| `/send` | Send something by email. |
+| `/contacts` | Manage the address book (list, add with permissions, remove, find). |
+| `/beadle enable` / `/beadle disable` | Turn beadle's repo guidance on or off in this repo. Same as the CLI `enable` and `disable` below. |
+
+### CLI
+
+The CLI does not check contact permissions; it acts with your authority.
+
+| Command | What it does |
+|---------|-------------|
+| `beadle-email list` | List messages for the current repo. Flags: `--folder`, `--count`, `--offset`, `--unread`, `--all-repos`. |
+| `beadle-email search` | Search the mailbox. Flags: `--from`, `--subject`, `--since`, `--text`, `--folder`, `--count`, `--offset`, `--unread`, `--all-repos`. |
+| `beadle-email read <uid>` | Read a message without marking it read. Flag: `--folder`. |
+| `beadle-email mark [uid]` | Mark one message, or several with `--ids a,b,c`, as read; `--unread` reverses it. Flag: `--folder`. |
+| `beadle-email send` | Send an email. Flags: `--to`, `--subject`, `--body` (required), `--cc`, `--bcc`. |
+| `beadle-email reply <uid>` | Reply in the same thread, quoting the original. Flags: `--body` (required), `--cc`, `--bcc`, `--folder`. |
+| `beadle-email move <uid>` | Move a message (default destination `Archive`). Flags: `--folder`, `--to`. |
+| `beadle-email folders` | List IMAP folders. |
+| `beadle-email contact list` | List contacts. |
+| `beadle-email contact add` | Add a contact. Flags: `--name`, `--email` (required), `--alias`, `--gpg-key-id`, `--notes`. |
+| `beadle-email contact remove <name>` | Remove a contact. |
+| `beadle-email contact find <query>` | Find contacts by name, email, or alias. |
+| `beadle-email identity` | Show the active identity (same as `identity show`). |
+| `beadle-email identity set <handle>` | Set the identity for the current repo. |
+| `beadle-email install` | Set up beadle-email once per machine. `--standalone` registers the MCP server without the plugin. |
+| `beadle-email uninstall` | Remove beadle-email. |
+| `beadle-email enable` | Turn on beadle's repo guidance in the current repo. |
+| `beadle-email disable` | Turn it off. `--purge` also deletes `.punt-labs/beadle/`. |
+| `beadle-email serve` | Start the MCP server on stdio. `--transport ws --port N` serves over WebSocket instead (default port 8420). |
+| `beadle-email health` | Check that a WebSocket server answers on `--port` (default 8420). |
+| `beadle-email doctor` | Check installation health. |
+| `beadle-email status` | Show the active identity and configuration. |
+| `beadle-email version` | Print the version. |
+
+Most commands that read or send mail accept `--config PATH` (`-c`) to use a
+different `email.json`. Global flags `--json` (`-j`), `--verbose` (`-v`), and
+`--quiet` (`-q`) work with every command except `install`, `uninstall`, and
+`version`.
+
+**Repo guidance.** Run `enable` inside a repo to write beadle's agent guide to
+`.punt-labs/beadle/CLAUDE.md`, write an `enabled` marker, add the line
+`@.punt-labs/beadle/CLAUDE.md` to the repo's `CLAUDE.md`, and add beadle's
+permission rules to `.claude/settings.json`. An agent working in that repo then
+reads the guide. `disable` removes the line, the marker, and the permission
+rules, and leaves the guide in place. Commit the result through a pull request.
+This follows the
+[Tool Enable/Disable standard](https://github.com/punt-labs/punt-kit/blob/main/standards/tool-enable-disable.md).
+
+**Repo-scoped mail.** When several repos share one mailbox, `list` and
+`search` show only the current repo's mail by default. A message belongs to a
+repo when its `X-Beadle-Repo` header or its `[owner/repo]` subject tag matches
+the repo's git `origin` remote. `--all-repos` shows the whole mailbox. Outside
+a git repo, all mail is shown. The new-mail poller counts mail the same way.
 
 ## Setup
 
-<details>
-<summary>Credential setup</summary>
+### Credentials
 
-Beadle resolves credentials at runtime through a priority chain: OS keychain → secret file → environment variable. On Linux, the keychain layer tries `pass` first, then `secret-tool` (libsecret / GNOME Keyring). On macOS, it uses the system Keychain.
+beadle-email reads passwords and keys at run time, in this order: the OS
+keychain, a secret file, then an environment variable. On macOS the keychain
+is the system Keychain. On Linux it is `pass`, then `secret-tool` (libsecret /
+GNOME Keyring). Store only the secrets you use:
+
+| Name | Needed for |
+|------|-----------|
+| `imap-password` | Reading mail (also used for SMTP unless `smtp-password` is set) |
+| `smtp-password` | Sending mail, when it differs from the IMAP password |
+| `resend-api-key` | The optional Resend fallback |
+| `gpg-passphrase` | Signing outbound mail with a passphrase-protected key |
+
+<details>
+<summary>Storing a secret with each backend</summary>
 
 **macOS Keychain:**
 
@@ -177,7 +250,7 @@ security add-generic-password -s beadle -a resend-api-key -w 'your-resend-key'
 security add-generic-password -s beadle -a gpg-passphrase -w 'your-gpg-passphrase'
 ```
 
-**pass** (Linux, recommended --- GPG-encrypted at rest with your own key):
+**pass** (Linux, recommended --- encrypted at rest with your own GPG key):
 
 ```bash
 pass insert beadle/imap-password
@@ -219,7 +292,7 @@ printf '%s' 'your-bridge-password' > ~/.punt-labs/beadle/secrets/imap-password
 chmod 600 ~/.punt-labs/beadle/secrets/imap-password
 ```
 
-**Environment variables:**
+**Environment variables** (`BEADLE_` plus the name in upper case, with `_` for `-`):
 
 ```bash
 export BEADLE_IMAP_PASSWORD='your-bridge-password'
@@ -229,16 +302,24 @@ export BEADLE_IMAP_PASSWORD='your-bridge-password'
 export BEADLE_RESEND_API_KEY='your-resend-key'
 ```
 
-Create the configuration file (`~/.punt-labs/beadle/email.json`) with your connection parameters.
+</details>
 
-**Proton Bridge (localhost):**
+### Connection Settings
+
+Connection settings live in `email.json`. Create the directory:
 
 ```bash
 mkdir -p ~/.punt-labs/beadle
 ```
 
-```bash
-cat > ~/.punt-labs/beadle/email.json << 'EOF'
+Then save one of the examples below as `~/.punt-labs/beadle/email.json`,
+replacing the addresses with your own. On first run beadle copies this file
+into the identity directory (see [Identity](#identity)); after that, edit the
+copy there.
+
+**Proton Bridge (localhost):**
+
+```json
 {
   "imap_host": "127.0.0.1",
   "imap_port": 1143,
@@ -249,10 +330,9 @@ cat > ~/.punt-labs/beadle/email.json << 'EOF'
   "from_address": "you@example.com",
   "poll_interval": "3m"
 }
-EOF
 ```
 
-**External IMAP + SMTP (Fastmail, Gmail, etc.):**
+**External IMAP + SMTP (Fastmail, Gmail, and others):**
 
 ```json
 {
@@ -267,101 +347,71 @@ EOF
 }
 ```
 
-</details>
+`poll_interval` sets how often beadle checks for new mail; leave it out, or
+set it to `"n"`, to turn polling off. `/inbox` can change it later. Add `"gpg_signer":
+"<key ID or email>"` to PGP-sign all outbound mail; signed mail is never sent
+through Resend, because Resend cannot sign it. See the
+[setup guide](docs/setup-guide.md) for a full walkthrough, including Proton
+Bridge and GPG keys.
 
 ## Trust Model
 
 | Level | Sender | Detection | What It Means |
 |-------|--------|-----------|---------------|
-| `trusted` | Proton → Proton | `X-Pm-Content-Encryption: end-to-end` + `X-Pm-Origin: internal` | End-to-end encrypted by Proton infrastructure |
-| `verified` | External | `gpg --verify` returns exit 0 | Valid PGP signature from a known key |
-| `untrusted` | External | `gpg --verify` returns non-zero | PGP signature present but invalid or from unknown key |
-| `unverified` | External | No `multipart/signed` | No PGP signature present |
+| `trusted` | Proton → Proton | `X-Pm-Content-Encryption: end-to-end` + `X-Pm-Origin: internal` | End-to-end encrypted by Proton |
+| `verified` | External | `gpg --verify` exits 0 | Valid PGP signature from a known key |
+| `untrusted` | External | `gpg --verify` exits non-zero | PGP signature present but invalid or from an unknown key |
+| `unverified` | External | No `multipart/signed` part | No PGP signature |
 
-PGP verification uses an isolated GNUPGHOME per operation. When no key is attached to the message, keys are bridged from the system keyring (`~/.gnupg/`) into the isolated environment.
+beadle-email shows the trust level on each message so the assistant and you
+can judge it. It does not refuse to read or reply because of a low trust level;
+what it enforces is [contact permissions](#contact-permissions).
 
 ## Identity
 
-The simplest identity setup needs one file:
-`~/.punt-labs/beadle/default-identity`, a plain-text email address. Beadle
-uses that identity for everything --- no other identity configuration
-required (see [Setup](#setup) for the separate IMAP/SMTP config every
-identity still needs).
+The simplest setup needs one file: `~/.punt-labs/beadle/default-identity`,
+containing a single email address. beadle uses that identity for everything.
 
-Beadle works better with [ethos](https://github.com/punt-labs/ethos) (sidecar
-pattern --- file reads, no import dependency) if you want more than one
-identity: per-repo identity pinning, or mid-session `switch_identity`
-switching. When ethos is present, resolution checks, in order:
+For more than one identity --- a fixed identity per repo, or switching
+mid-session with `switch_identity` --- install
+[ethos](https://github.com/punt-labs/ethos). With ethos present, beadle looks
+for an identity handle in this order:
 
-1. **Repo-local config** --- `.punt-labs/ethos.yaml` with `agent: <handle>`
-2. **Global ethos active** --- `~/.punt-labs/ethos/active`
-3. **Handle → ethos identity YAML** --- `~/.punt-labs/ethos/identities/<handle>.yaml` supplies name and email; `~/.punt-labs/ethos/identities/<handle>.ext/beadle.yaml` supplies a GPG key ID that `beadle-email identity` reports (it doesn't drive signing --- that's `email.json`'s `gpg_signer` field either way). Always global, never a repo-local vendored copy.
+1. **Repo config** --- `.punt-labs/ethos.yaml` with `agent: <handle>` (set it with `beadle-email identity set <handle>`)
+2. **Active ethos identity** --- `~/.punt-labs/ethos/active`
 
-If no step resolves a handle --- ethos isn't installed, or nothing pins
-one --- beadle falls back to the plain `default-identity` file above. If a
-handle *is* resolved but its ethos identity file is missing or unreadable,
-beadle fails closed instead of falling back --- operating as the wrong
-identity is worse than failing.
+It then reads the name and email for that handle from
+`~/.punt-labs/ethos/identities/<handle>.yaml`. An optional
+`~/.punt-labs/ethos/identities/<handle>.ext/beadle.yaml` supplies a GPG key ID
+that `beadle-email identity` reports; signing still uses `gpg_signer` in
+`email.json`.
 
-Each identity gets its own directory under `~/.punt-labs/beadle/identities/<email>/` with separate `email.json`, `contacts.json`, and `attachments/`. Root files are auto-migrated on first use.
+If no handle is found --- ethos is not installed, or nothing sets one ---
+beadle uses `default-identity`. If a handle is found but its identity file is
+missing or unreadable, beadle stops with an error instead of falling back, so
+it never sends mail as the wrong identity.
+
+Each identity has its own directory, `~/.punt-labs/beadle/identities/<email>/`,
+holding its `email.json`, `contacts.json`, and downloaded `attachments/`.
 
 ## Contact Permissions
 
-Each contact has an optional `permissions` map keyed by identity email. Permissions use the Unix rwx model:
+Each contact has an optional `permissions` map keyed by identity email, using
+Unix-style `rwx` letters:
 
 | Permission | Meaning |
 |------------|--------|
-| `r` (read) | Beadle reads and surfaces the message. No autonomous action. |
-| `w` (write) | Beadle may compose and send replies to this contact. |
-| `x` (execute) | Beadle may execute instructions from this contact. |
+| `r` (read) | The MCP tools show and read messages from this contact. |
+| `w` (write) | The MCP tools may send mail and replies to this contact. |
+| `x` (execute) | Not used by beadle-email; only `beadle-daemon` checks it. |
 
-All permissions are stored explicitly. There are no implicit overrides. Contacts without explicit permissions default to `---` (no permissions). The address book is a whitelist: messages from unknown senders appear redacted in listings and cannot be read. `r` and `w` are enforced; `x` enforcement is planned. This is orthogonal to transport trust --- both must be sufficient for autonomous action.
-
-## CLI
-
-```bash
-beadle-email list [--folder F] [--count N] [--offset N] [--unread] [--all-repos]  # List (current repo by default)
-beadle-email read <uid> [--folder F]                    # Read a message (leaves it unread)
-beadle-email search [--from A] [--subject S] [--since D] [--text T] [--count N] [--offset N] [--unread] [--all-repos]  # Search the mailbox
-beadle-email mark <uid> [--ids a,b,c] [--unread] [--folder F]  # Mark message(s) read/unread
-beadle-email send --to ADDR --subject S --body B        # Send an email
-beadle-email reply <uid> --body B [--folder F]          # Reply to a message (threaded, quoted)
-beadle-email move <uid> [--folder F] [--to DEST]        # Move a message
-beadle-email folders                                    # List IMAP folders
-beadle-email contact list|add|remove|find               # Manage contacts
-beadle-email install                                    # Set up beadle-email (once per machine)
-beadle-email uninstall                                  # Remove beadle-email
-beadle-email enable                                     # Turn on agent guidance in this repo
-beadle-email disable [--purge]                          # Turn it off (--purge deletes the dir)
-beadle-email serve [--config PATH]                      # Start MCP server
-beadle-email doctor [--config PATH]                     # Check installation health
-beadle-email status [--config PATH]                     # Current state summary
-beadle-email identity                                   # Show active identity
-beadle-email identity set <handle>                      # Set per-repo identity
-beadle-email version                                    # Print version
-
-# Global flags (supported by most subcommands; not: install, uninstall, version)
-beadle-email --json list                                # JSON output
-beadle-email --verbose doctor                           # Debug logging
-beadle-email --quiet send --to ...                      # Errors only
-```
-
-`install` is a once-per-machine step (the binary and the MCP server, which is
-provided by the beadle marketplace plugin). `enable` and `disable` are
-per-repo: `enable`, run inside a repo, deposits beadle's agent user-guide at
-`.punt-labs/beadle/CLAUDE.md`, writes an `enabled` marker, and adds the single
-`@.punt-labs/beadle/CLAUDE.md` import line to the repo's `CLAUDE.md` so an agent
-working there learns how to drive beadle. `disable` removes that line and the
-marker, leaving the guide dormant; `disable --purge` deletes the
-`.punt-labs/beadle/` directory outright. This follows the org
-[Tool Enable/Disable standard](https://github.com/punt-labs/punt-kit/blob/main/standards/tool-enable-disable.md).
-
-When a single mailbox is shared by an agent across repos, `list` shows only the
-current repo's mail by default (matched by the `X-Beadle-Repo` header or the
-`[owner/repo]` subject tag, with the repo taken from the git `origin` remote).
-Pass `--all-repos` to see the whole mailbox. If the current directory has no
-repo, `list` shows everything. The background new-mail poller's count is
-scoped the same way.
+A contact without permissions has `---` (none). The address book is an allow
+list: messages from unknown senders, or from contacts without `r`, appear
+redacted in listings and cannot be read. A contact's email may be a glob
+pattern such as `*@mail.example.com`; pattern contacts may hold only `r--` or
+`---`. Permissions are set per identity, so the same contact can have
+different access for each of your addresses. The CLI does not check
+permissions.
 
 ## Documentation
 

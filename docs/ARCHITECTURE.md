@@ -68,6 +68,36 @@ Four levels based on sender identity and encryption:
 | `untrusted` | External | Invalid PGP | `gpg --verify` returns non-zero |
 | `unverified` | External | None | No `multipart/signed` |
 
+Inbound PGP verification runs in an isolated GNUPGHOME per operation. When
+the message carries no key, public keys are exported from the system keyring
+(`~/.gnupg/`) into the isolated home; this bridge is read-only and never writes
+to the system keyring.
+
+beadle-email computes and shows the trust level (`list_messages`,
+`read_message`, `check_trust`) but does not block reading or replying on it;
+those tools enforce only per-contact `rwx` permissions
+(`internal/contacts.CheckPermission`). The trust level is a hard requirement
+only in `beadle-daemon`, where `internal/daemon/handler.go`'s `OnNewMail`
+creates no mission below `verified`.
+
+## Identity Resolution
+
+`internal/identity` resolves the operating identity by reading ethos files
+directly (sidecar pattern: file reads, no import of ethos code and no
+subprocess). The chain is: repo-local `.punt-labs/ethos.yaml` `agent:` handle,
+then the global `~/.punt-labs/ethos/active` handle, then the handle's identity
+YAML, then the optional `<handle>.ext/beadle.yaml` extension, and finally the
+plain `~/.punt-labs/beadle/default-identity` file. The identity YAML is always
+read from the global `~/.punt-labs/ethos/identities/`, never from a repo-local
+vendored copy; the repo supplies only the handle. A resolved handle whose
+identity file is missing or corrupt is an error, not a fallback.
+
+`EnsureIdentityDir` (`internal/identity/migrate.go`) creates
+`~/.punt-labs/beadle/identities/<email>/` on startup and copies a root
+`email.json` and `contacts.json` into it when the identity directory lacks
+them. It copies rather than moves, so after the first run the identity-scoped
+copy is the one in use.
+
 ## Credentials
 
 Resolved at runtime by name through a priority chain:
