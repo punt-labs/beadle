@@ -139,6 +139,7 @@ func TestPresentFenceSemantics(t *testing.T) {
 		{"indented fences are inert, import top-level", "    ```\n" + line + "\n    ```\n", true},
 		{"backtick cannot close a tilde block, opener dangles", "~~~\n" + line + "\n```\n", false},
 		{"shorter run cannot close, longer opener dangles", "````\n" + line + "\n```\n", false},
+		{"inline triple-backtick span is not a fence", "```example``` inline\n" + line + "\n", true},
 		{"inner tilde does not toggle a backtick block", "```\n~~~\n" + line + "\n```\n", false},
 	}
 	for _, tt := range tests {

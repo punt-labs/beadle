@@ -285,7 +285,9 @@ func parseFence(body string) (marker byte, run int, ok bool) {
 	for run < len(stripped) && stripped[run] == marker {
 		run++
 	}
-	if run < 3 {
+	// A backtick fence's info string cannot contain a backtick (CommonMark), so
+	// such a line is an inline code span, not a fence.
+	if run < 3 || (marker == '`' && strings.ContainsRune(stripped[run:], '`')) {
 		return 0, 0, false
 	}
 	return marker, run, true
