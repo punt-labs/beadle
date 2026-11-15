@@ -161,6 +161,19 @@ func TestRefusedSettingsFailEnableAndDisableWithNothingChanged(t *testing.T) {
 	assert.False(t, exists(t, filepath.Join(fresh, "CLAUDE.md")), "a refused grant writes nothing else")
 }
 
+func TestEnableRefusesAnUnclosedFenceBeforeGranting(t *testing.T) {
+	root := t.TempDir()
+	host := filepath.Join(root, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(host, []byte("```text\nnever closed\n"), 0o600))
+
+	require.ErrorIs(t, Enable(root, nil), claudemd.ErrUnclosedFence)
+	assert.Empty(t, allowRules(t, root), "no rule is granted for an import that would be inert")
+	assert.False(t, exists(t, markerPath(root)))
+	data, err := os.ReadFile(host)
+	require.NoError(t, err)
+	assert.Equal(t, "```text\nnever closed\n", string(data))
+}
+
 func allowRules(t *testing.T, root string) []any {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
