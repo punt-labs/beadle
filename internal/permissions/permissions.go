@@ -122,8 +122,8 @@ func Grant(root string) ([]string, error) {
 
 // Revoke removes the rules a previous Grant recorded from
 // <root>/.claude/settings.json and returns the rules removed. A repo with no
-// settings file is left untouched. It also returns the members of Rules that
-// are allowed in settings.json when no record exists: they are left in
+// settings file is left untouched. It also returns the members of Rules and
+// Legacy present in settings.json when no record exists: they are left in
 // place because nothing shows beadle granted them, and the caller should say so.
 func Revoke(root string) (removed, unrecorded []string, err error) {
 	return run(root, request{})
@@ -290,7 +290,7 @@ func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 	}
 	if q.rules == nil && len(granted) == 0 {
 		// No record: rules in allow stay put, but the operator is told.
-		stray := slices.DeleteFunc(slices.Clone(Rules), func(s string) bool { return slices.Contains(granted, s) })
+		stray := slices.DeleteFunc(slices.Concat(Rules, Legacy), func(s string) bool { return slices.Contains(granted, s) })
 		if unrecorded, _, err = plan(data, false, stray); err != nil {
 			return nil, nil, handEdit(err)
 		}

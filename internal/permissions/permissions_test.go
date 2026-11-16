@@ -434,3 +434,13 @@ func TestRevokeRemovesRecordedLegacyAskRule(t *testing.T) {
 	assert.Equal(t, []string{"Bash(beadle-email identity -*)"}, removed)
 	assert.Equal(t, asAny("Bash(ls:*)"), tierList(t, root, "ask"))
 }
+
+func TestRevokeWithoutRecordReportsALeftoverLegacyRule(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"ask":["Bash(beadle-email contact -*)"]}}`)
+	removed, unrecorded, err := Revoke(root)
+	require.NoError(t, err)
+	assert.Empty(t, removed)
+	assert.Equal(t, []string{"Bash(beadle-email contact -*)"}, unrecorded)
+	assert.Equal(t, asAny("Bash(beadle-email contact -*)"), tierList(t, root, "ask"))
+}
