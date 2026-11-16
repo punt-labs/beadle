@@ -91,8 +91,9 @@ func TestEachSurfaceIsAllowedBroadly(t *testing.T) {
 }
 
 func TestUnsafeOperationsAsk(t *testing.T) {
-	for _, prefix := range []string{"", " identity", " contact"} {
-		assert.Contains(t, Ask, "Bash(beadle-email"+prefix+" -*)", "a flag before the verb still asks")
+	for _, rule := range Legacy {
+		assert.NotContains(t, Ask, rule, "no -* catch-all: --version must not prompt")
+		assert.Equal(t, "ask", tierOf(rule))
 	}
 	for _, verb := range []string{"serve", "install", "uninstall", "enable", "disable", "identity set", "contact add", "contact remove"} {
 		assert.Contains(t, Ask, "Bash(beadle-email "+verb+":*)")
@@ -401,4 +402,45 @@ func TestRevokeRemovesRecordedRuleRetiredFromRules(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"Bash(beadle-email:*)"}, removed)
 	assert.Equal(t, asAny("Read"), allowList(t, root))
+}
+
+func TestGrantStripsLegacyFlagRules(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"ask":["Bash(ls:*)","Bash(beadle-email -*)","Bash(beadle-email contact -*)"]}}`)
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", grantedName), []byte(`["Bash(beadle-email -*)","Bash(beadle-email contact -*)"]`), 0o600))
+	_, err := Grant(root)
+	require.NoError(t, err)
+	ask := tierList(t, root, "ask")
+	assert.Contains(t, ask, "Bash(ls:*)")
+	for _, rule := range Legacy {
+		assert.NotContains(t, ask, rule)
+	}
+}
+
+func TestGrantKeepsAnUnrecordedLegacyRule(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"ask":["Bash(beadle-email -*)"]}}`)
+	_, err := Grant(root)
+	require.NoError(t, err)
+	assert.Contains(t, tierList(t, root, "ask"), "Bash(beadle-email -*)", "a hand-written rule is the operator's")
+}
+
+func TestRevokeRemovesRecordedLegacyAskRule(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"ask":["Bash(ls:*)","Bash(beadle-email identity -*)"]}}`)
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", grantedName), []byte(`["Bash(beadle-email identity -*)"]`), 0o600))
+	removed, _, err := Revoke(root)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Bash(beadle-email identity -*)"}, removed)
+	assert.Equal(t, asAny("Bash(ls:*)"), tierList(t, root, "ask"))
+}
+
+func TestRevokeWithoutRecordReportsALeftoverLegacyRule(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"ask":["Bash(beadle-email contact -*)"]}}`)
+	removed, unrecorded, err := Revoke(root)
+	require.NoError(t, err)
+	assert.Empty(t, removed)
+	assert.Equal(t, []string{"Bash(beadle-email contact -*)"}, unrecorded)
+	assert.Equal(t, asAny("Bash(beadle-email contact -*)"), tierList(t, root, "ask"))
 }

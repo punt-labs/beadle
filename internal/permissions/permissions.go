@@ -43,30 +43,36 @@ import (
 // allow, so the carve-outs still prompt while new safe commands, MCP tools and
 // skills work without a rule update. They cover what installs or serves
 // beadle, changes enablement, or changes who may direct the agent (identity and
-// contacts). Cobra accepts a flag anywhere, and the verb rules only match a
-// verb in place, so Bash(beadle-email -*) and the group-level -* rules ask
-// for a flag before the verb (beadle-email identity --json set). The MCP grant is the plugin namespace:
+// contacts). A flag before the verb (beadle-email identity --json set) runs
+// under the broad allow: the ask tier is a safety net, not a security boundary
+// (punt-kit DES-039). The MCP grant is the plugin namespace:
 // beadle-email install registers a native server only with --standalone.
 var (
 	Allow = []string{"Bash(beadle-email:*)", "mcp__plugin_beadle_email__*", "Skill(beadle:*)"}
 	Ask   = []string{
-		"Bash(beadle-email -*)",
 		"Bash(beadle-email serve:*)",
 		"Bash(beadle-email install:*)",
 		"Bash(beadle-email uninstall:*)",
 		"Bash(beadle-email enable:*)",
 		"Bash(beadle-email disable:*)",
 		"Bash(beadle-email identity set:*)",
-		"Bash(beadle-email identity -*)",
 		"Bash(beadle-email contact add:*)",
 		"Bash(beadle-email contact remove:*)",
-		"Bash(beadle-email contact -*)",
 		"mcp__plugin_beadle_email__enable",
 		"mcp__plugin_beadle_email__switch_identity",
 		"mcp__plugin_beadle_email__add_contact",
 		"mcp__plugin_beadle_email__remove_contact",
 	}
 )
+
+// Legacy lists ask rules an earlier beadle granted and this one does not: the
+// -* catch-alls made beadle-email --version prompt (punt-kit DES-039). Grant
+// strips a recorded one, and tierOf files them under ask so Revoke removes it.
+var Legacy = []string{
+	"Bash(beadle-email -*)",
+	"Bash(beadle-email identity -*)",
+	"Bash(beadle-email contact -*)",
+}
 
 // Rules is every value enable owns. Grant adds each missing member to its tier;
 // Revoke removes every rule the record says a grant added, so a rule retired
@@ -79,7 +85,7 @@ var tiers = []string{"allow", "ask"}
 // tierOf names the permissions key a rule lives in. A recorded rule retired
 // from the set was an allow rule.
 func tierOf(rule string) string {
-	if slices.Contains(Ask, rule) {
+	if slices.Contains(Ask, rule) || slices.Contains(Legacy, rule) {
 		return "ask"
 	}
 	return "allow"
@@ -106,7 +112,9 @@ type request struct {
 }
 
 // Grant appends each missing rule to <root>/.claude/settings.json, creating the
-// file when absent, records the rules it added, and returns them.
+// file when absent, records the rules it added, and returns them. In the same
+// edit it strips each Legacy rule the record lists, so a repo an earlier beadle
+// enabled holds only the current set; those removals are not reported.
 func Grant(root string) ([]string, error) {
 	changed, _, err := run(root, request{add: true})
 	return changed, err
@@ -114,8 +122,8 @@ func Grant(root string) ([]string, error) {
 
 // Revoke removes the rules a previous Grant recorded from
 // <root>/.claude/settings.json and returns the rules removed. A repo with no
-// settings file is left untouched. It also returns the members of Rules that
-// are allowed in settings.json when no record exists: they are left in
+// settings file is left untouched. It also returns the members of Rules and
+// Legacy present in settings.json when no record exists: they are left in
 // place because nothing shows beadle granted them, and the caller should say so.
 func Revoke(root string) (removed, unrecorded []string, err error) {
 	return run(root, request{})
@@ -234,6 +242,19 @@ func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 		rules = granted
 	}
 
+	var retired []string
+	if q.add {
+		// Only a Legacy rule the record says beadle granted is stripped; one the
+		// operator wrote by hand is theirs.
+		recorded := slices.DeleteFunc(slices.Clone(Legacy), func(s string) bool { return !slices.Contains(granted, s) })
+		var stripped []byte
+		if retired, stripped, err = plan(data, false, recorded); err != nil {
+			return nil, nil, handEdit(err)
+		}
+		if len(retired) > 0 {
+			data = stripped
+		}
+	}
 	changed, out, err := plan(data, q.add, rules)
 	if err != nil {
 		return nil, nil, handEdit(err)
@@ -242,9 +263,14 @@ func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 		return nil, nil, nil
 	}
 	if q.add {
-		if len(changed) == 0 {
+		if len(changed) == 0 && len(retired) == 0 {
 			return nil, nil, nil
 		}
+		if out == nil {
+			out = data
+		}
+		// A stripped Legacy rule stays recorded, so a crash before the settings
+		// write still leaves Revoke able to remove it.
 		merged := slices.Clone(granted)
 		for _, rule := range changed {
 			if !slices.Contains(merged, rule) {
@@ -264,7 +290,7 @@ func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 	}
 	if q.rules == nil && len(granted) == 0 {
 		// No record: rules in allow stay put, but the operator is told.
-		stray := slices.DeleteFunc(slices.Clone(Rules), func(s string) bool { return slices.Contains(granted, s) })
+		stray := slices.DeleteFunc(slices.Concat(Rules, Legacy), func(s string) bool { return slices.Contains(granted, s) })
 		if unrecorded, _, err = plan(data, false, stray); err != nil {
 			return nil, nil, handEdit(err)
 		}

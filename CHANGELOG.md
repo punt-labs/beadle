@@ -22,12 +22,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   carve-outs (PL-718, punt-kit#471).** It adds `Bash(beadle-email:*)`,
   `mcp__plugin_beadle_email__*` and `Skill(beadle:*)` to
   `permissions.allow`, and `ask` rules for `serve`, `install`, `uninstall`,
-  `enable`, `disable`, `identity set`, `contact add`/`remove`, any flag
-  before the verb (`Bash(beadle-email -*)`, and `identity -*`/`contact -*`
-  for `beadle-email identity --json set`), and the `enable`,
-  `switch_identity`, `add_contact` and `remove_contact` MCP tools. Those
-  prompt even though the broad allow matches; new safe commands, MCP tools
-  and skills work with no rule update. Only the plugin's MCP namespace is
+  `enable`, `disable`, `identity set`, `contact add`/`remove`, and the
+  `enable`, `switch_identity`, `add_contact` and `remove_contact` MCP tools.
+  Those prompt even though the broad allow matches; new safe commands, MCP
+  tools and skills work with no rule update. There is no `-*` catch-all, so
+  `beadle-email --version` and `--help` do not prompt (punt-kit DES-039);
+  `enable` strips `Bash(beadle-email -*)`, `identity -*` and `contact -*`
+  from a repo an earlier version enabled, and `disable` removes them. Both
+  touch only rules `.beadle-granted.json` records, so a hand-written one
+  stays. Only the plugin's MCP namespace is
   granted, since `install` registers a native server only with
   `--standalone`; `mcp__beadle-email__*` is dropped. `disable` removes every
   rule its record lists, from either tier, including rules retired from the
