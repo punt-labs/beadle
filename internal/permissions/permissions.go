@@ -43,30 +43,36 @@ import (
 // allow, so the carve-outs still prompt while new safe commands, MCP tools and
 // skills work without a rule update. They cover what installs or serves
 // beadle, changes enablement, or changes who may direct the agent (identity and
-// contacts). Cobra accepts a flag anywhere, and the verb rules only match a
-// verb in place, so Bash(beadle-email -*) and the group-level -* rules ask
-// for a flag before the verb (beadle-email identity --json set). The MCP grant is the plugin namespace:
+// contacts). A flag before the verb (beadle-email identity --json set) runs
+// under the broad allow: the ask tier is a safety net, not a security boundary
+// (punt-kit DES-039). The MCP grant is the plugin namespace:
 // beadle-email install registers a native server only with --standalone.
 var (
 	Allow = []string{"Bash(beadle-email:*)", "mcp__plugin_beadle_email__*", "Skill(beadle:*)"}
 	Ask   = []string{
-		"Bash(beadle-email -*)",
 		"Bash(beadle-email serve:*)",
 		"Bash(beadle-email install:*)",
 		"Bash(beadle-email uninstall:*)",
 		"Bash(beadle-email enable:*)",
 		"Bash(beadle-email disable:*)",
 		"Bash(beadle-email identity set:*)",
-		"Bash(beadle-email identity -*)",
 		"Bash(beadle-email contact add:*)",
 		"Bash(beadle-email contact remove:*)",
-		"Bash(beadle-email contact -*)",
 		"mcp__plugin_beadle_email__enable",
 		"mcp__plugin_beadle_email__switch_identity",
 		"mcp__plugin_beadle_email__add_contact",
 		"mcp__plugin_beadle_email__remove_contact",
 	}
 )
+
+// Legacy lists ask rules an earlier beadle granted and this one does not: the
+// -* catch-alls made beadle-email --version prompt (punt-kit DES-039). Grant
+// strips them, and tierOf files them under ask so Revoke removes a recorded one.
+var Legacy = []string{
+	"Bash(beadle-email -*)",
+	"Bash(beadle-email identity -*)",
+	"Bash(beadle-email contact -*)",
+}
 
 // Rules is every value enable owns. Grant adds each missing member to its tier;
 // Revoke removes every rule the record says a grant added, so a rule retired
@@ -79,7 +85,7 @@ var tiers = []string{"allow", "ask"}
 // tierOf names the permissions key a rule lives in. A recorded rule retired
 // from the set was an allow rule.
 func tierOf(rule string) string {
-	if slices.Contains(Ask, rule) {
+	if slices.Contains(Ask, rule) || slices.Contains(Legacy, rule) {
 		return "ask"
 	}
 	return "allow"
@@ -106,7 +112,9 @@ type request struct {
 }
 
 // Grant appends each missing rule to <root>/.claude/settings.json, creating the
-// file when absent, records the rules it added, and returns them.
+// file when absent, records the rules it added, and returns them. In the same
+// edit it strips the Legacy rules, so a repo an earlier beadle enabled holds
+// only the current set; those removals are not reported.
 func Grant(root string) ([]string, error) {
 	changed, _, err := run(root, request{add: true})
 	return changed, err
@@ -234,6 +242,16 @@ func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 		rules = granted
 	}
 
+	var retired []string
+	if q.add {
+		var stripped []byte
+		if retired, stripped, err = plan(data, false, Legacy); err != nil {
+			return nil, nil, handEdit(err)
+		}
+		if len(retired) > 0 {
+			data = stripped
+		}
+	}
 	changed, out, err := plan(data, q.add, rules)
 	if err != nil {
 		return nil, nil, handEdit(err)
@@ -242,10 +260,13 @@ func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 		return nil, nil, nil
 	}
 	if q.add {
-		if len(changed) == 0 {
+		if len(changed) == 0 && len(retired) == 0 {
 			return nil, nil, nil
 		}
-		merged := slices.Clone(granted)
+		if out == nil {
+			out = data
+		}
+		merged := slices.DeleteFunc(slices.Clone(granted), func(s string) bool { return slices.Contains(Legacy, s) })
 		for _, rule := range changed {
 			if !slices.Contains(merged, rule) {
 				merged = append(merged, rule)
