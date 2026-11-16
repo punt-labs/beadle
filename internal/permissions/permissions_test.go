@@ -415,9 +415,14 @@ func TestGrantStripsLegacyFlagRules(t *testing.T) {
 	for _, rule := range Legacy {
 		assert.NotContains(t, ask, rule)
 	}
-	record, err := os.ReadFile(filepath.Join(root, ".claude", grantedName))
+}
+
+func TestGrantKeepsAnUnrecordedLegacyRule(t *testing.T) {
+	root := t.TempDir()
+	writeSettings(t, root, `{"permissions":{"ask":["Bash(beadle-email -*)"]}}`)
+	_, err := Grant(root)
 	require.NoError(t, err)
-	assert.NotContains(t, string(record), " -*)")
+	assert.Contains(t, tierList(t, root, "ask"), "Bash(beadle-email -*)", "a hand-written rule is the operator's")
 }
 
 func TestRevokeRemovesRecordedLegacyAskRule(t *testing.T) {

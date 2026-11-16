@@ -67,7 +67,7 @@ var (
 
 // Legacy lists ask rules an earlier beadle granted and this one does not: the
 // -* catch-alls made beadle-email --version prompt (punt-kit DES-039). Grant
-// strips them, and tierOf files them under ask so Revoke removes a recorded one.
+// strips a recorded one, and tierOf files them under ask so Revoke removes it.
 var Legacy = []string{
 	"Bash(beadle-email -*)",
 	"Bash(beadle-email identity -*)",
@@ -113,8 +113,8 @@ type request struct {
 
 // Grant appends each missing rule to <root>/.claude/settings.json, creating the
 // file when absent, records the rules it added, and returns them. In the same
-// edit it strips the Legacy rules, so a repo an earlier beadle enabled holds
-// only the current set; those removals are not reported.
+// edit it strips each Legacy rule the record lists, so a repo an earlier beadle
+// enabled holds only the current set; those removals are not reported.
 func Grant(root string) ([]string, error) {
 	changed, _, err := run(root, request{add: true})
 	return changed, err
@@ -244,8 +244,11 @@ func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 
 	var retired []string
 	if q.add {
+		// Only a Legacy rule the record says beadle granted is stripped; one the
+		// operator wrote by hand is theirs.
+		recorded := slices.DeleteFunc(slices.Clone(Legacy), func(s string) bool { return !slices.Contains(granted, s) })
 		var stripped []byte
-		if retired, stripped, err = plan(data, false, Legacy); err != nil {
+		if retired, stripped, err = plan(data, false, recorded); err != nil {
 			return nil, nil, handEdit(err)
 		}
 		if len(retired) > 0 {
@@ -266,7 +269,9 @@ func transact(c *os.Root, q request) (changed, unrecorded []string, err error) {
 		if out == nil {
 			out = data
 		}
-		merged := slices.DeleteFunc(slices.Clone(granted), func(s string) bool { return slices.Contains(Legacy, s) })
+		// A stripped Legacy rule stays recorded, so a crash before the settings
+		// write still leaves Revoke able to remove it.
+		merged := slices.Clone(granted)
 		for _, rule := range changed {
 			if !slices.Contains(merged, rule) {
 				merged = append(merged, rule)
