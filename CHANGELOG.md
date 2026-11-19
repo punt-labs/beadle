@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- MCP cancellation requests over stdio now reach queued `beadle-email` tool
+  calls, so they start with a canceled context (mcp-go 1.5.0).
+
 - **An unclosed code fence in `CLAUDE.md` runs to the end of the file
   (PL-1087).** Claude Code's Markdown lexer treats a fence that never closes
   as code through EOF, so an `@`-import after it never loads.
