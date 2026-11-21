@@ -10,7 +10,6 @@
 .env*.local
 !.env.example
 .envrc.local
-.biff.local
 .claude/settings.local.json
 .claude/settings.local.*
 .claude/mcp.local.json
@@ -193,18 +192,6 @@ docs/*.aux
 docs/*.log
 docs/*.fuzz
 docs/*.toc
-
-# Ethos per-session and per-mission local state. Machine-local by
-# construction — one file per session id, written live by the running
-# session's own writer. Tracking it races every git operation that needs a
-# clean tree: the v0.16.2 release preflight and its post-merge checkout both
-# failed on an audit file being appended to while the release ran. The
-# `.punt-labs/` half of this (`.punt-labs/local/`, `.punt-labs/quarry/
-# captures/`) now lives in the canonical block above; `.ethos/` is the
-# repo-root mission log, which is the same live-writer hazard and, being
-# tracked, also shipped 37 internal mission records — handles, tickets, and
-# team email addresses — to every plugin user.
-.ethos/
 
 # The mandated sibling lock every punt CLI takes before mutating a shared
 # host file (tool-enable-disable.md 2.4). Per-machine runtime state, and it
