@@ -128,8 +128,11 @@ prfaq: ## Compile .tex files to .pdf and clean intermediate artifacts
 clean-tex: ## Remove LaTeX intermediate files
 	@rm -f $(LATEX_ARTIFACTS)
 
-tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4 tests)
-	go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
+TEST_ETHOS_BIN := $(CURDIR)/.tmp/bin
+
+tools-ethos: ## Install the pinned test ethos without replacing the user's CLI
+	mkdir -p "$(TEST_ETHOS_BIN)"
+	GOBIN="$(TEST_ETHOS_BIN)" go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
 
 # --force overrides any `biff` binary already in the uv tool bin dir that
 # uv did not install itself (e.g. a distro package or a manual copy); the
@@ -225,37 +228,8 @@ tools-beadle-email: ## Self-build this branch's beadle-email into BEADLE_EMAIL_B
 	mkdir -p "$(BEADLE_EMAIL_BIN)"
 	go build -ldflags="$(LDFLAGS)" -o "$(BEADLE_EMAIL_BIN)/beadle-email" ./cmd/beadle-email/
 
-# go install places a binary in $GOBIN if set, else $GOPATH/bin -- neither is
-# guaranteed to already be on PATH. Without this, `make test` provisions
-# ethos successfully but exec.LookPath("ethos") still fails: tools-ethos
-# ran, the binary exists, and the remedy message points right back at the
-# command that was just run. Computed once, at parse time, so every `test`
-# invocation prepends the same directory `go install` actually used.
-# This directory IS host-global (shared by every checkout on the host),
-# which is safe only because ethos is pinned to the identical
-# $(ETHOS_VERSION) everywhere -- two concurrent `go install`s race to
-# write the same bytes, not different ones. beadle-email's self-build
-# does NOT share this directory (see BEADLE_EMAIL_BIN above): its content
-# is per-branch, so two checkouts building concurrently into one shared
-# directory would let either one silently run its tests against the
-# OTHER checkout's binary. An earlier version of this comment argued for
-# "exactly one PATH prefix" across both tools; that argument held only
-# while both built into the same host-global directory, and no longer
-# applies now that beadle-email has its own per-checkout one.
-#
-# GOPATH may be a colon-separated list (":"-joined on every GOOS, including
-# darwin and linux -- Go never uses the OS path-list separator here). `go
-# install` with no GOBIN always writes to the FIRST entry's bin/, so take
-# only that entry -- appending /bin to the whole list would name a directory
-# nothing was ever installed to, and would also inject a second, wrong
-# directory onto PATH.
-GOINSTALL_BIN := $(shell go env GOBIN)
-ifeq ($(GOINSTALL_BIN),)
-GOINSTALL_BIN := $(shell go env GOPATH | cut -d: -f1)/bin
-endif
-
 # `uv tool install` places a binary in `uv tool dir --bin` -- on this host
-# ~/.local/bin, distinct from GOINSTALL_BIN above -- so biff needs its own
+# ~/.local/bin, distinct from the checkout's test bin -- so biff needs its own
 # PATH prefix rather than reusing the Go one. Resolved HERE, at recipe
 # time, not as a parse-time variable: a parse-time `$(shell ...)` is
 # evaluated once when `make` reads this file, before tools-biff has run
@@ -292,7 +266,7 @@ define TEST_RUN
 		echo "$@: 'uv tool dir --bin' failed (exit $$uvbin_status) or produced no output (stdout: $$uvbin) -- cannot build the PATH that carries biff" >&2; \
 		exit 1; \
 	fi; \
-	PATH="$(BEADLE_EMAIL_BIN):$(GOINSTALL_BIN):$$uvbin:$$PATH" $(1)
+	PATH="$(BEADLE_EMAIL_BIN):$(TEST_ETHOS_BIN):$$uvbin:$$PATH" $(1)
 endef
 
 test: $(TEST_PREREQS) ## Run tests with race detection
