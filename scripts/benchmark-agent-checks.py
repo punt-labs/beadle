@@ -12,8 +12,11 @@ import time
 root = Path(__file__).resolve().parents[1]
 os.chdir(root)
 env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root), GIT_CONFIG_GLOBAL="/dev/null")
+baseline_ref = os.environ.get(
+    "BEADLE_BENCHMARK_BASE", "f2f25e49d5618e5ac6c4be7dd4cc1a0ebc099c6c"
+)
 baseline = subprocess.check_output(
-    ["git", "show", "origin/main:.claude/agents/adb.md"], text=True
+    ["git", "show", f"{baseline_ref}:.claude/agents/adb.md"], text=True
 )
 old = json.loads(next(line.strip().removeprefix("command: ")
                       for line in baseline.splitlines()
