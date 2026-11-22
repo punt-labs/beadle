@@ -16,6 +16,7 @@ import (
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/punt-labs/punt-observe-go/logging"
 
 	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/contacts"
@@ -24,12 +25,18 @@ import (
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/pgp"
+	"github.com/punt-labs/beadle/internal/usage"
 )
 
 const maxAttachmentSize = 25 * 1024 * 1024 // 25 MB
 
 // HandlerOption configures the MCP tool handler.
 type HandlerOption func(*handler)
+
+// WithUsage supplies the process-owned usage client.
+func WithUsage(client *usage.Client) HandlerOption {
+	return func(h *handler) { h.usage = client }
+}
 
 // WithDialer sets the IMAP dialer. Defaults to email.DefaultDialer{}.
 func WithDialer(d email.Dialer) HandlerOption {
@@ -51,11 +58,12 @@ func WithPoller(p *email.Poller) HandlerOption {
 // is configured it returns the UnreadMarker that carries the repo's unread
 // count on get_poll_status's description; otherwise it returns nil.
 func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slog.Logger, opts ...HandlerOption) *UnreadMarker {
-	h := &handler{resolver: resolver, logger: logger, dialer: email.DefaultDialer{}, repoRoot: enable.RepoRoot}
+	h := &handler{resolver: resolver, logger: logger.With("component", "beadle.mcp"), dialer: email.DefaultDialer{}, repoRoot: enable.RepoRoot}
 	for _, o := range opts {
 		o(h)
 	}
 
+	s.Use(h.observeUsage)
 	s.AddTool(listMessagesTool(), h.listMessages)
 	s.AddTool(searchMessagesTool(), h.searchMessages)
 	s.AddTool(readMessageTool(), h.readMessage)
@@ -90,6 +98,7 @@ func RegisterTools(s *server.MCPServer, resolver *identity.Resolver, logger *slo
 }
 
 type handler struct {
+	usage            *usage.Client
 	resolver         *identity.Resolver
 	logger           *slog.Logger
 	dialer           email.Dialer
@@ -579,12 +588,13 @@ func (h *handler) renderMessages(c *email.Client, cfg *email.Config, id *identit
 		}
 		raw, fetchErr := c.FetchRaw(folder, uint32(uid))
 		if fetchErr != nil {
-			h.logger.Warn("pgp: fetch raw failed", "uid", lr.Messages[i].ID, "err", fetchErr)
+			h.logger.Warn("pgp: fetch raw failed", "uid", lr.Messages[i].ID, "error", logging.Escape(fetchErr.Error()))
 			continue
 		}
 		result, verifyErr := pgp.Verify(cfg.GPGBinary, raw)
 		if verifyErr != nil {
-			h.logger.Warn("pgp: verify failed", "uid", lr.Messages[i].ID, "err", verifyErr)
+			// MIME parsing errors can quote arbitrary message headers.
+			h.logger.Warn("pgp: verify failed", "uid", lr.Messages[i].ID, "error_type", fmt.Sprintf("%T", verifyErr))
 			continue
 		}
 		if result.Valid {
@@ -597,6 +607,7 @@ func (h *handler) renderMessages(c *email.Client, cfg *email.Config, id *identit
 	for i := range lr.Messages {
 		perm, _ := senderPermission(store, id, lr.Messages[i].From)
 		if !perm.Read {
+			h.logger.Warn("Read permission denied")
 			lr.Messages[i].Subject = "[redacted — no read permission]"
 		}
 	}
@@ -658,7 +669,7 @@ func (h *handler) searchMessages(ctx context.Context, req mcplib.CallToolRequest
 	})
 }
 
-func (h *handler) readMessage(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) readMessage(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -693,6 +704,8 @@ func (h *handler) readMessage(_ context.Context, req mcplib.CallToolRequest) (*m
 		// Enforce read permission — deny before exposing body to caller
 		perm, senderEmail := senderPermission(store, id, msg.From)
 		if !perm.Read {
+			usage.PermissionDenied(ctx)
+			h.logger.Warn("Read permission denied")
 			if senderEmail == "" {
 				return mcplib.NewToolResultError(
 					fmt.Sprintf("permission denied: unparseable sender %q", msg.From),
@@ -706,11 +719,12 @@ func (h *handler) readMessage(_ context.Context, req mcplib.CallToolRequest) (*m
 		if msg.TrustLevel == channel.Unverified && email.HasPGPSignature(msg.RawHeaders["Content-Type"], nil) {
 			raw, fetchErr := c.FetchRaw(folder, uid)
 			if fetchErr != nil {
-				h.logger.Warn("pgp: fetch raw failed", "uid", msgID, "err", fetchErr)
+				h.logger.Warn("pgp: fetch raw failed", "uid", logging.Escape(msgID), "error", logging.Escape(fetchErr.Error()))
 			} else {
 				result, verifyErr := pgp.Verify(cfg.GPGBinary, raw)
 				if verifyErr != nil {
-					h.logger.Warn("pgp: verify failed", "uid", msgID, "err", verifyErr)
+					// MIME parsing errors can quote arbitrary message headers.
+					h.logger.Warn("pgp: verify failed", "uid", logging.Escape(msgID), "error_type", fmt.Sprintf("%T", verifyErr))
 				} else if result.Valid {
 					msg.TrustLevel = channel.Verified
 				} else {
@@ -795,6 +809,8 @@ func (h *handler) sendEmail(ctx context.Context, req mcplib.CallToolRequest) (*m
 	allRecipients = append(allRecipients, cc...)
 	allRecipients = append(allRecipients, bcc...)
 	if denied := enforceWritePermission(store, id.Email, allRecipients); len(denied) > 0 {
+		usage.PermissionDenied(ctx)
+		h.logger.Warn("Write permission denied", "recipient_count", len(denied))
 		return mcplib.NewToolResultError(
 			fmt.Sprintf("permission denied: no write permission for: %s", strings.Join(denied, ", ")),
 		), nil
@@ -878,6 +894,8 @@ func (h *handler) replyMessage(ctx context.Context, req mcplib.CallToolRequest) 
 		// Reply is a send: enforce the same write-permission gate. A read-only
 		// (r--) sender can be read but not replied to.
 		if denied := enforceWritePermission(store, id.Email, allRecipients); len(denied) > 0 {
+			usage.PermissionDenied(ctx)
+			h.logger.Warn("Write permission denied", "recipient_count", len(denied))
 			return mcplib.NewToolResultError(
 				fmt.Sprintf("permission denied: no write permission for: %s", strings.Join(denied, ", ")),
 			), nil
@@ -897,7 +915,7 @@ func (h *handler) replyMessage(ctx context.Context, req mcplib.CallToolRequest) 
 		if rc.MessageID != "" {
 			threading = email.Threading{InReplyTo: rc.MessageID, References: rc.References}
 		} else {
-			h.logger.Warn("reply threading dropped: original has no Message-ID", "folder", folder, "uid", uid)
+			h.logger.Warn("reply threading dropped: original has no Message-ID", "folder", logging.Escape(folder), "uid", uid)
 			warnings = append(warnings, "reply sent without threading headers: original has no Message-ID")
 		}
 
@@ -905,7 +923,7 @@ func (h *handler) replyMessage(ctx context.Context, req mcplib.CallToolRequest) 
 		if rc.Quotable {
 			body = email.QuoteBody(replyText, rc.From, rc.Date, rc.Body)
 		} else {
-			h.logger.Warn("reply quote omitted: original body could not be extracted", "folder", folder, "uid", uid)
+			h.logger.Warn("reply quote omitted: original body could not be extracted", "folder", logging.Escape(folder), "uid", uid)
 			warnings = append(warnings, "original body could not be extracted; reply sent without a quote")
 		}
 
@@ -1201,7 +1219,7 @@ func (h *handler) batchMarkMessages(_ context.Context, req mcplib.CallToolReques
 	})
 }
 
-func (h *handler) downloadAttachment(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+func (h *handler) downloadAttachment(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 	id, cfg, store, err := h.resolveContext()
 	if err != nil {
 		return mcplib.NewToolResultError(err.Error()), nil
@@ -1229,7 +1247,7 @@ func (h *handler) downloadAttachment(_ context.Context, req mcplib.CallToolReque
 	return h.withClient(cfg, func(c *email.Client) (*mcplib.CallToolResult, error) {
 		raw, err := c.FetchRaw(folder, uid)
 		if err != nil {
-			h.logger.Warn("download_attachment: fetch failed", "uid", msgID, "folder", folder, "err", err)
+			h.logger.Warn("download_attachment: fetch failed", "uid", logging.Escape(msgID), "folder", logging.Escape(folder), "error", logging.Escape(err.Error()))
 			return mcplib.NewToolResultError(fmt.Sprintf("fetch message: %v", err)), nil
 		}
 
@@ -1237,6 +1255,8 @@ func (h *handler) downloadAttachment(_ context.Context, req mcplib.CallToolReque
 		_, _, headers := email.ParseMIME(raw)
 		perm, senderEmail := senderPermission(store, id, headers["From"])
 		if !perm.Read {
+			usage.PermissionDenied(ctx)
+			h.logger.Warn("Read permission denied")
 			if senderEmail == "" {
 				return mcplib.NewToolResultError(
 					fmt.Sprintf("permission denied: unparseable sender %q", headers["From"]),
@@ -1249,7 +1269,8 @@ func (h *handler) downloadAttachment(_ context.Context, req mcplib.CallToolReque
 
 		part, data, err := email.ExtractPart(raw, partIndex)
 		if err != nil {
-			h.logger.Warn("download_attachment: extract failed", "uid", msgID, "part", partIndex, "err", err)
+			// MIME parsing errors can quote arbitrary message headers.
+			h.logger.Warn("download_attachment: extract failed", "uid", logging.Escape(msgID), "part", partIndex, "error_type", fmt.Sprintf("%T", err))
 			return mcplib.NewToolResultError(fmt.Sprintf("extract part: %v", err)), nil
 		}
 

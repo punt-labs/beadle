@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/punt-labs/punt-observe-go/logging"
 	"github.com/spf13/cobra"
 
 	"github.com/punt-labs/beadle/internal/email"
@@ -60,13 +60,13 @@ func newResolver() (*identity.Resolver, error) {
 func resolveConfig(cmd *cobra.Command, explicitPath string) (*email.Config, *identity.Identity, error) {
 	resolver, err := newResolver()
 	if err != nil {
-		slog.Warn("identity resolution unavailable, using explicit config", "error", err, "config", explicitPath)
+		appLogger.Warn("identity resolution unavailable, using explicit config", "error", logging.Escape(err.Error()), "config", logging.Escape(explicitPath))
 		cfg, _, loadErr := email.LoadIdentityConfig(nil, explicitPath)
 		return cfg, nil, loadErr
 	}
 	id, err := resolver.Resolve()
 	if err != nil {
-		slog.Warn("identity resolution failed, using explicit config", "error", err, "config", explicitPath)
+		appLogger.Warn("identity resolution failed, using explicit config", "error", logging.Escape(err.Error()), "config", logging.Escape(explicitPath))
 		cfg, _, loadErr := email.LoadIdentityConfig(nil, explicitPath)
 		return cfg, nil, loadErr
 	}
@@ -76,12 +76,12 @@ func resolveConfig(cmd *cobra.Command, explicitPath string) (*email.Config, *ide
 	}
 	beadleDir, err := paths.DataDir()
 	if err != nil {
-		slog.Warn("data dir unavailable, using explicit config", "error", err, "config", explicitPath)
+		appLogger.Warn("data dir unavailable, using explicit config", "error", logging.Escape(err.Error()), "config", logging.Escape(explicitPath))
 		cfg, _, loadErr := email.LoadIdentityConfig(nil, explicitPath)
 		return cfg, id, loadErr
 	}
 	if _, err := identity.EnsureIdentityDir(beadleDir, id.Email); err != nil {
-		slog.Warn("identity dir unavailable, using explicit config", "error", err, "config", explicitPath)
+		appLogger.Warn("identity dir unavailable, using explicit config", "error", logging.Escape(err.Error()), "config", logging.Escape(explicitPath))
 		cfg, _, loadErr := email.LoadIdentityConfig(nil, explicitPath)
 		return cfg, id, loadErr
 	}
@@ -91,7 +91,7 @@ func resolveConfig(cmd *cobra.Command, explicitPath string) (*email.Config, *ide
 		return nil, id, err
 	}
 	if usedPath == explicitPath {
-		slog.Warn("identity config absent, using explicit config", "identity", id.Email, "config", explicitPath)
+		appLogger.Warn("identity config absent, using explicit config", "config", logging.Escape(explicitPath))
 	}
 	return cfg, id, nil
 }
@@ -100,22 +100,22 @@ func resolveConfig(cmd *cobra.Command, explicitPath string) (*email.Config, *ide
 func resolveContactsPath() string {
 	resolver, err := newResolver()
 	if err != nil {
-		slog.Warn("identity resolution unavailable, using default contacts", "error", err)
+		appLogger.Warn("identity resolution unavailable, using default contacts", "error", logging.Escape(err.Error()))
 		return defaultContactsPath()
 	}
 	id, err := resolver.Resolve()
 	if err != nil {
-		slog.Warn("identity resolution failed, using default contacts", "error", err)
+		appLogger.Warn("identity resolution failed, using default contacts", "error", logging.Escape(err.Error()))
 		return defaultContactsPath()
 	}
 	beadleDir, err := paths.DataDir()
 	if err != nil {
-		slog.Warn("data dir unavailable, using default contacts", "error", err)
+		appLogger.Warn("data dir unavailable, using default contacts", "error", logging.Escape(err.Error()))
 		return defaultContactsPath()
 	}
 	idDir, err := identity.EnsureIdentityDir(beadleDir, id.Email)
 	if err != nil {
-		slog.Warn("identity dir unavailable, using default contacts", "error", err)
+		appLogger.Warn("identity dir unavailable, using default contacts", "error", logging.Escape(err.Error()))
 		return defaultContactsPath()
 	}
 	return filepath.Join(idDir, "contacts.json")
@@ -124,7 +124,7 @@ func resolveContactsPath() string {
 func defaultContactsPath() string {
 	beadleDir, err := paths.DataDir()
 	if err != nil {
-		slog.Error("data dir unavailable for default contacts", "error", err)
+		appLogger.Error("data dir unavailable for default contacts", "error", logging.Escape(err.Error()))
 		return "contacts.json"
 	}
 	return filepath.Join(beadleDir, "contacts.json")
@@ -132,9 +132,8 @@ func defaultContactsPath() string {
 
 // printMessages renders a message listing for the CLI. With --json it writes
 // the message slice as before. Otherwise it prints the degraded notice, then
-// the status line and rows. The degraded notice prints even under --quiet:
-// the notice's stderr warn is suppressed then, and a fallback silently showing
-// unrelated recent mail is the one thing a quiet caller must still see. It
+// the status line and rows. The degraded notice prints even under --quiet so
+// callers can detect a fallback to unrelated recent mail. It
 // returns an error only when JSON marshaling fails, so a --json caller never
 // mistakes empty output for an empty result.
 func (g globalOpts) printMessages(w io.Writer, lr *email.ListResult) error {
@@ -241,7 +240,7 @@ var listCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		logger := appLogger.With("component", "beadle.email")
 		client, err := email.Dial(cfg, logger)
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
@@ -324,7 +323,7 @@ var searchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		logger := appLogger.With("component", "beadle.email")
 		client, err := email.Dial(cfg, logger)
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
@@ -383,7 +382,7 @@ var readCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		logger := appLogger.With("component", "beadle.email")
 		client, err := email.Dial(cfg, logger)
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
@@ -455,7 +454,7 @@ var sendCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		logger := appLogger.With("component", "beadle.email")
 		agent := ""
 		if id != nil {
 			agent = id.Handle
@@ -524,7 +523,7 @@ var replyCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		logger := appLogger.With("component", "beadle.email")
 		client, err := email.Dial(cfg, logger)
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
@@ -605,7 +604,7 @@ var moveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		logger := appLogger.With("component", "beadle.email")
 		client, err := email.Dial(cfg, logger)
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
@@ -674,7 +673,7 @@ var markCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		logger := appLogger.With("component", "beadle.email")
 		client, err := email.Dial(cfg, logger)
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)
@@ -724,7 +723,7 @@ var foldersCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: g.slogLevel()}))
+		logger := appLogger.With("component", "beadle.email")
 		client, err := email.Dial(cfg, logger)
 		if err != nil {
 			return fmt.Errorf("connect: %w", err)

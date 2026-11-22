@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/punt-labs/punt-observe-go/logging"
 )
 
 // PipelineStore persists pipeline state to JSON files for crash recovery.
@@ -34,13 +36,13 @@ type PipelineStore struct {
 	pruneWG   sync.WaitGroup
 }
 
-// logger returns s.Logger, or slog.Default if unset. A store built without
+// logger returns s.Logger, or a disabled logger if unset. A store built without
 // a Logger (as some tests do) must still be safe to call on error paths.
 func (s *PipelineStore) logger() *slog.Logger {
 	if s.Logger != nil {
 		return s.Logger
 	}
-	return slog.Default()
+	return slog.New(slog.DiscardHandler)
 }
 
 // now returns s.Now(), or time.Now if s.Now is unset. Every age
@@ -119,13 +121,14 @@ func (s *PipelineStore) LoadRunning() ([]*Pipeline, error) {
 		path := filepath.Join(s.Dir, e.Name())
 		data, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
-			s.logger().Warn("skip unreadable pipeline file", "path", path, "error", err)
+			s.logger().Warn("skip unreadable pipeline file", "path", logging.Escape(path), "error", logging.Escape(err.Error()))
 			continue
 		}
 
 		var p Pipeline
 		if err := json.Unmarshal(data, &p); err != nil {
-			s.logger().Warn("skip corrupt pipeline file", "path", path, "error", err)
+			// Decode errors can quote email-derived fields in persisted records.
+			s.logger().Warn("skip corrupt pipeline file", "path", logging.Escape(path), "error_type", fmt.Sprintf("%T", err))
 			continue
 		}
 
@@ -219,13 +222,14 @@ func (s *PipelineStore) pruneAgedFile(path string, cutoff time.Time) bool {
 		if os.IsNotExist(err) {
 			return false
 		}
-		s.logger().Warn("skip unreadable pipeline file during prune", "path", path, "error", err)
+		s.logger().Warn("skip unreadable pipeline file during prune", "path", logging.Escape(path), "error", logging.Escape(err.Error()))
 		return false
 	}
 
 	var p Pipeline
 	if err := json.Unmarshal(data, &p); err != nil {
-		s.logger().Warn("skip corrupt pipeline file during prune", "path", path, "error", err)
+		// Decode errors can quote email-derived fields in persisted records.
+		s.logger().Warn("skip corrupt pipeline file during prune", "path", logging.Escape(path), "error_type", fmt.Sprintf("%T", err))
 		return false
 	}
 
@@ -237,7 +241,7 @@ func (s *PipelineStore) pruneAgedFile(path string, cutoff time.Time) bool {
 		if os.IsNotExist(err) {
 			return false
 		}
-		s.logger().Warn("remove aged pipeline file failed", "path", path, "error", err)
+		s.logger().Warn("remove aged pipeline file failed", "path", logging.Escape(path), "error", logging.Escape(err.Error()))
 		return false
 	}
 	return true
@@ -259,7 +263,7 @@ func (s *PipelineStore) pruneOrphanedTemp(path string, now time.Time) bool {
 		if os.IsNotExist(err) {
 			return false
 		}
-		s.logger().Warn("skip unstatable temp file during prune", "path", path, "error", err)
+		s.logger().Warn("skip unstatable temp file during prune", "path", logging.Escape(path), "error", logging.Escape(err.Error()))
 		return false
 	}
 	if now.Sub(info.ModTime()) < tmpFileMaxAge {
@@ -269,7 +273,7 @@ func (s *PipelineStore) pruneOrphanedTemp(path string, now time.Time) bool {
 		if os.IsNotExist(err) {
 			return false
 		}
-		s.logger().Warn("remove orphaned temp file failed", "path", path, "error", err)
+		s.logger().Warn("remove orphaned temp file failed", "path", logging.Escape(path), "error", logging.Escape(err.Error()))
 		return false
 	}
 	return true
@@ -363,7 +367,7 @@ func (s *PipelineStore) StopPruning() {
 func (s *PipelineStore) pruneTick(maxAge time.Duration) {
 	agedRemoved, tempRemoved, err := s.pruneCounts(maxAge)
 	if err != nil {
-		s.logger().Warn("periodic prune failed", "error", err)
+		s.logger().Warn("periodic prune failed", "error", logging.Escape(err.Error()))
 		return
 	}
 	if agedRemoved > 0 {

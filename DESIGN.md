@@ -3,6 +3,24 @@
 Log of architectural decisions, alternatives considered, and outcomes.
 Consult before proposing changes to settled architecture.
 
+## DES-039: Entry-point observability follows Cobra's process lifetime
+
+**Decision:** The command entry points retain process-scoped logger, handler
+and telemetry references alongside their existing singleton Cobra command
+trees. This is an explicit exception to the mutable-global-state rule,
+limited to `cmd/`; internal packages receive their dependencies.
+
+**Why:** Each installed binary executes its command tree once. The entry point
+owns initialization and shutdown, including failures before Cobra's pre-run
+hook. The discard logger lets isolated command-unit tests avoid configuring
+sinks. Tests executing the root hook close telemetry; built-binary tests
+exercise the full process lifecycle.
+
+**Alternative:** Converting the singleton command tree and helpers into
+per-invocation application instances is a separate CLI architecture change.
+Internal code must not use this exception to install sinks, global providers,
+or a default logger.
+
 ## DES-001: Trust model — four levels, not binary
 
 **Decision:** Trust classification uses four discrete levels (trusted, verified,

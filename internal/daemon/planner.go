@@ -2,9 +2,18 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 )
+
+// ErrNoCommand marks a plan with no applicable command.
+var ErrNoCommand = errors.New("no command selected")
+
+type noCommandError string
+
+func (e noCommandError) Error() string      { return string(e) }
+func (noCommandError) Is(target error) bool { return target == ErrNoCommand }
 
 // CommandCall is one step in a planned pipeline.
 type CommandCall struct {
@@ -57,7 +66,7 @@ func (p *RulePlanner) Plan(_ context.Context, meta EmailMeta, body string) ([]Co
 			return r.commands, nil
 		}
 	}
-	return nil, fmt.Errorf("no rule matches this instruction")
+	return nil, noCommandError("no rule matches this instruction")
 }
 
 // LLMPlanner is a stub for future LLM-based planning.

@@ -73,12 +73,7 @@ func TestParseWorkerOutput_EmptyOutput(t *testing.T) {
 // so the caller must also t.Setenv("PATH", dir) (or prepend dir to the
 // real PATH) for it to be found.
 //
-// Length, not the value, is deliberate: WorkerSpawner.Run itself logs the
-// worker's raw stdout for diagnostics (spawner.go), so a stub that echoed
-// the secret verbatim would make it appear in the captured log through
-// that entirely separate, legitimate logging path -- proving delivery by
-// defeating the non-logging assertion it needs to coexist with. A
-// non-empty length that matches the input can only be produced if the
+// A non-empty length that matches the input can only be produced if the
 // value genuinely reached the subprocess's environment; an unset or
 // empty-string var yields length 0, still distinguishable from a real
 // secret's length.
@@ -133,8 +128,7 @@ func (h *capturingHandler) recordsText() string {
 // either. writeEnvEchoingClaudeBinary's stub reads the env var back and
 // embeds its length in its own JSON output, so WorkerResult.Output is the
 // proof of delivery, and the captured log is still the proof of
-// non-logging -- of the value; the env var NAME (fine to log) is expected
-// in both.
+// non-logging. Diagnostics expose the variable count, not names or values.
 func TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged(t *testing.T) {
 	dir := writeEnvEchoingClaudeBinary(t, "CONTEXT7_API_KEY")
 	t.Setenv("PATH", dir)
@@ -159,8 +153,8 @@ func TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged(t *testing.T) {
 		"the env var must actually reach the worker subprocess's environment, at its real length")
 	assert.NotContains(t, h.recordsText(), secretValue,
 		"an envOverrides value must never appear in a log line")
-	assert.Contains(t, h.recordsText(), "CONTEXT7_API_KEY",
-		"the env var NAME is fine to log -- only the value is sensitive")
+	assert.Contains(t, h.recordsText(), "variable_count=6")
+	assert.NotContains(t, h.recordsText(), "CONTEXT7_API_KEY")
 }
 
 // writeArgEchoingClaudeBinary writes a shell script named "claude" that

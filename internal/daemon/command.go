@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/punt-labs/punt-observe-go/logging"
 )
 
 // validArgName is the allowlist for CommandArg.Name.
@@ -143,10 +145,10 @@ func (e *verificationError) Unwrap() error { return e.err }
 // Invalid files are logged and skipped. gpgBinary and ownerKeyID thread
 // through to loadCommand for signature verification (see loadCommand);
 // ownerKeyID == "" disables verification entirely. logger receives every
-// skip/reject log line; a nil logger falls back to slog.Default().
+// skip/reject log line; a nil logger falls back to slog.New(slog.DiscardHandler).
 func LoadCommands(dir, gpgBinary, ownerKeyID string, logger *slog.Logger) (map[string]*Command, error) {
 	if logger == nil {
-		logger = slog.Default()
+		logger = slog.New(slog.DiscardHandler)
 	}
 
 	entries, err := os.ReadDir(dir)
@@ -166,18 +168,19 @@ func LoadCommands(dir, gpgBinary, ownerKeyID string, logger *slog.Logger) (map[s
 			var verErr *verificationError
 			switch {
 			case errors.As(err, &sigErr):
-				logger.Error("reject command file: signature verification failed",
-					"path", path, "reason", sigErr.Reason, "detail", sigErr.Detail)
+				// GPG status details can contain signer display names.
+				logger.Warn("reject command file: signature verification failed",
+					"path", logging.Escape(path), "reason", string(sigErr.Reason), "detail_bytes", len(sigErr.Detail))
 			case errors.As(err, &verErr):
-				logger.Error("signature verification unavailable, skipping command file",
-					"path", path, "error", err)
+				logger.Warn("signature verification unavailable, skipping command file",
+					"path", logging.Escape(path), "error", logging.Escape(err.Error()))
 			default:
-				logger.Warn("skip invalid command file", "path", path, "error", err)
+				logger.Warn("skip invalid command file", "path", logging.Escape(path), "error", logging.Escape(err.Error()))
 			}
 			continue
 		}
 		if _, dup := cmds[cmd.Name]; dup {
-			logger.Warn("skip duplicate command name", "name", cmd.Name, "path", path)
+			logger.Warn("skip duplicate command name", "name", logging.Escape(cmd.Name), "path", logging.Escape(path))
 			continue
 		}
 		cmds[cmd.Name] = cmd

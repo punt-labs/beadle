@@ -3,6 +3,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/contacts"
@@ -18,6 +20,8 @@ import (
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/pgp"
+	"github.com/punt-labs/beadle/internal/usage"
+	"github.com/punt-labs/punt-observe-go/logging"
 )
 
 // MissionCreator creates a mission from email metadata and returns the mission ID.
@@ -38,11 +42,20 @@ type MailHandler struct {
 	commands  map[string]*Command
 	store     *PipelineStore
 	logger    *slog.Logger
+	usage     *usage.Client
 
 	ctx       context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 	workerSem chan struct{} // limits concurrent workers
+}
+
+// MailHandlerOption configures optional handler services.
+type MailHandlerOption func(*MailHandler)
+
+// WithUsage supplies the process-owned usage client.
+func WithUsage(client *usage.Client) MailHandlerOption {
+	return func(h *MailHandler) { h.usage = client }
 }
 
 // NewMailHandler creates a MailHandler. If spawner or templates is nil,
@@ -55,7 +68,7 @@ type MailHandler struct {
 // Executor's save is a no-op without one).
 // The returned context governs worker subprocess lifetimes — call Stop
 // to cancel running workers and wait for them to exit.
-func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner Spawner, templates *MissionTemplate, logger *slog.Logger, maxWorkers int, planner Planner, commands map[string]*Command, store *PipelineStore) *MailHandler {
+func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer email.Dialer, missions MissionCreator, spawner Spawner, templates *MissionTemplate, logger *slog.Logger, maxWorkers int, planner Planner, commands map[string]*Command, store *PipelineStore, opts ...MailHandlerOption) *MailHandler {
 	if maxWorkers <= 0 {
 		maxWorkers = 2
 	}
@@ -65,8 +78,9 @@ func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer ema
 	if commands == nil {
 		commands = make(map[string]*Command)
 	}
+	logger = logger.With("component", "beadle.daemon")
 	ctx, cancel := context.WithCancel(ctx)
-	return &MailHandler{
+	h := &MailHandler{
 		resolver:  resolver,
 		dialer:    dialer,
 		missions:  missions,
@@ -80,6 +94,10 @@ func NewMailHandler(ctx context.Context, resolver *identity.Resolver, dialer ema
 		cancel:    cancel,
 		workerSem: make(chan struct{}, maxWorkers),
 	}
+	for _, option := range opts {
+		option(h)
+	}
+	return h
 }
 
 // Stop cancels all running workers and waits for them to exit.
@@ -91,26 +109,30 @@ func (h *MailHandler) Stop() {
 // OnNewMail is the poller callback. It lists recent unread messages,
 // checks each sender's x-bit, and creates missions for authorized senders.
 func (h *MailHandler) OnNewMail(newCount uint32) {
+	started := time.Now()
 	id, err := h.resolver.Resolve()
 	if err != nil {
-		h.logger.Error("resolve identity", "error", err)
+		h.logger.Error("resolve identity", "error", logging.Escape(err.Error()))
+		h.usage.Mission(usage.Failed, started)
 		return
 	}
 
 	cfg, err := h.loadConfig(id.Email)
 	if err != nil {
-		h.logger.Error("load email config", "error", err)
+		h.logger.Error("load email config", "error", logging.Escape(err.Error()))
+		h.usage.Mission(usage.Failed, started)
 		return
 	}
 
 	client, err := h.dialer.Dial(cfg, h.logger)
 	if err != nil {
-		h.logger.Error("dial imap", "error", err)
+		h.logger.Error("dial imap", "error", logging.Escape(err.Error()))
+		h.usage.Mission(usage.Failed, started)
 		return
 	}
 	defer func() {
 		if err := client.Close(); err != nil {
-			h.logger.Debug("close imap", "error", err)
+			h.logger.Debug("close imap", "error", logging.Escape(err.Error()))
 		}
 	}()
 
@@ -123,33 +145,39 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 	}
 	result, err := client.ListMessages("INBOX", fetchCount, true, "")
 	if err != nil {
-		h.logger.Error("list messages", "error", err)
+		h.logger.Error("list messages", "error", logging.Escape(err.Error()))
+		h.usage.Mission(usage.Failed, started)
 		return
 	}
 
 	store, err := h.loadContacts(id.Email)
 	if err != nil {
-		h.logger.Error("load contacts", "error", err)
+		h.logger.Error("load contacts", "error", logging.Escape(err.Error()))
+		h.usage.Mission(usage.Failed, started)
 		return
 	}
 
 	for _, msg := range result.Messages {
+		started := time.Now()
 		addr := email.ExtractEmailAddress(msg.From)
 		if addr == "" {
+			h.usage.Mission(usage.NoPermission, started)
 			h.logger.Warn("skip message: no sender address", "id", msg.ID)
 			continue
 		}
 
 		contact, found := store.FindByAddress(addr)
 		if !found {
-			h.logger.Info("skip message: unknown sender", "from", addr, "id", msg.ID)
+			h.usage.Mission(usage.NoPermission, started)
+			h.logger.Warn("skip message: unknown sender", "id", msg.ID)
 			continue
 		}
 
 		perm := contacts.CheckPermission(contact, id.Email)
 		if !perm.Execute {
-			h.logger.Info("skip message: sender lacks x permission",
-				"from", addr, "contact", contact.Name, "perm", perm.String(), "id", msg.ID)
+			h.usage.Mission(usage.NoPermission, started)
+			h.logger.Warn("skip message: sender lacks x permission",
+				"perm", perm.String(), "id", msg.ID)
 			continue
 		}
 
@@ -160,8 +188,9 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 		// External SMTP injection of these headers is blocked by Bridge.
 		trust := h.verifyTrust(client, cfg, msg, contact)
 		if trust != channel.Verified && trust != channel.Trusted {
+			h.usage.Mission(usage.BelowTrust, started)
 			h.logger.Warn("skip message: insufficient transport trust",
-				"from", addr, "trust", trust, "id", msg.ID)
+				"trust", string(trust), "id", msg.ID)
 			continue
 		}
 
@@ -178,7 +207,8 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 			// get a turn to use it.
 			body, err := h.fetchBody(client, msg.ID)
 			if err != nil {
-				h.logger.Error("skip message: fetch body failed", "from", addr, "id", msg.ID, "error", err)
+				h.usage.Mission(usage.Failed, started)
+				h.logger.Error("skip message: fetch body failed", "id", msg.ID, "error", logging.Escape(err.Error()))
 				continue
 			}
 			select {
@@ -208,26 +238,36 @@ func (h *MailHandler) OnNewMail(newCount uint32) {
 					}
 					p, err := executor.Run(h.ctx, meta, body)
 					if err != nil {
+						outcome := usage.Failed
+						if errors.Is(err, ErrNoCommand) {
+							outcome = usage.NoCommand
+						}
+						h.usage.Mission(outcome, started)
+						// Pipeline failures can include email bodies and model output.
 						h.logger.Error("pipeline failed",
-							"pipeline", p.ID, "from", addr,
-							"id", msg.ID, "error", err)
+							"pipeline", p.ID,
+							"id", msg.ID, "error_type", fmt.Sprintf("%T", err))
 						return
 					}
+					h.usage.Mission(usage.Created, started)
 					h.logger.Info("pipeline completed",
-						"pipeline", p.ID, "from", addr,
-						"subject", truncateLog(msg.Subject, 200),
+						"pipeline", p.ID,
 						"stages", len(p.Results))
 				}()
 			default:
-				h.logger.Warn("worker capacity full, skipping", "from", addr, "id", msg.ID)
+				h.usage.Mission(usage.Failed, started)
+				h.logger.Warn("worker capacity full, skipping", "id", msg.ID)
 			}
 		} else {
 			missionID, err := h.missions.Create(meta)
 			if err != nil {
-				h.logger.Error("create mission", "from", addr, "id", msg.ID, "error", err)
+				h.usage.Mission(usage.Failed, started)
+				// Mission creation errors embed subprocess stdout, which may echo the contract.
+				h.logger.Error("create mission", "id", msg.ID, "error_type", fmt.Sprintf("%T", err))
 				continue
 			}
-			h.logger.Info("mission created (no spawner)", "mission", missionID, "from", addr)
+			h.usage.Mission(usage.Created, started)
+			h.logger.Info("mission created (no spawner)", "mission", missionID)
 		}
 	}
 }
@@ -265,7 +305,7 @@ func (h *MailHandler) verifyTrust(client *email.Client, cfg *email.Config, msg c
 			return channel.Trusted
 		}
 		h.logger.Warn("trusted classification rejected: IMAP host is not loopback",
-			"host", cfg.IMAPHost)
+			"host", logging.Escape(cfg.IMAPHost))
 		return channel.Unverified
 	}
 	if !msg.HasSig {
@@ -275,17 +315,18 @@ func (h *MailHandler) verifyTrust(client *email.Client, cfg *email.Config, msg c
 	// PGP signature present — fetch raw and verify.
 	uid, err := strconv.ParseUint(msg.ID, 10, 32)
 	if err != nil {
-		h.logger.Error("parse message uid", "id", msg.ID, "error", err)
+		h.logger.Warn("parse message uid", "id", msg.ID, "error", logging.Escape(err.Error()))
 		return channel.Unverified
 	}
 	raw, err := client.FetchRaw("INBOX", uint32(uid))
 	if err != nil {
-		h.logger.Error("fetch raw for pgp verify", "id", msg.ID, "error", err)
+		h.logger.Error("fetch raw for pgp verify", "id", msg.ID, "error", logging.Escape(err.Error()))
 		return channel.Unverified
 	}
 	result, err := pgp.Verify(cfg.GPGBinary, raw)
 	if err != nil {
-		h.logger.Warn("pgp verify failed", "id", msg.ID, "error", err)
+		// MIME parsing errors can quote arbitrary message headers.
+		h.logger.Warn("pgp verify failed", "id", msg.ID, "error_type", fmt.Sprintf("%T", err))
 		return channel.Untrusted
 	}
 	if !result.Valid {
@@ -302,8 +343,7 @@ func (h *MailHandler) verifyTrust(client *email.Client, cfg *email.Config, msg c
 	if contact.GPGKeyID != "" && !strings.HasSuffix(normalizeKeyID(result.KeyID), normalizeKeyID(contact.GPGKeyID)) {
 		h.logger.Warn("pgp key mismatch",
 			"id", msg.ID,
-			"expected", contact.GPGKeyID,
-			"got", result.KeyID)
+			"key_mismatch", true)
 		return channel.Untrusted
 	}
 

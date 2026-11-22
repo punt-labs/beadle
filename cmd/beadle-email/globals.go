@@ -11,16 +11,13 @@ import (
 type globalOpts struct {
 	JSON    bool // --json / -j: output JSON to stdout
 	Verbose bool // --verbose / -v: debug logging
-	Quiet   bool // --quiet / -q: errors only
+	Quiet   bool // --quiet / -q: suppress optional command output
 }
 
 // slogLevel returns the appropriate log level based on flags.
 func (g globalOpts) slogLevel() slog.Level {
 	if g.Verbose {
 		return slog.LevelDebug
-	}
-	if g.Quiet {
-		return slog.LevelError
 	}
 	if os.Getenv("BEADLE_DEBUG") != "" {
 		return slog.LevelDebug

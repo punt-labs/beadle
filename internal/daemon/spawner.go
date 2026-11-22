@@ -54,7 +54,7 @@ func (s *WorkerSpawner) logger() *slog.Logger {
 	if s.Logger != nil {
 		return s.Logger
 	}
-	return slog.Default()
+	return slog.New(slog.DiscardHandler)
 }
 
 // Run executes a Claude Code worker for the given mission.
@@ -133,10 +133,8 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 	// (DES-037).
 	workerPATH := filepath.Dir(claudePath) + ":/usr/bin:/usr/local/bin"
 
-	s.logger().Info("spawner",
-		"claude", claudePath,
+	s.logger().Debug("Worker configuration resolved",
 		"mission", missionID,
-		"home", workerHome,
 		"hasAPIKey", s.APIKey != "")
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 	// Minimal env: only what claude needs. Do not leak daemon credentials
@@ -156,34 +154,28 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 	envMap["ANTHROPIC_API_KEY"] = s.APIKey
 	envMap["HOME"] = workerHome
 	envMap["PATH"] = workerPATH
+	envMap["BEADLE_LOG_MISSION_ID"] = missionID
 
 	cmd.Env = make([]string, 0, len(envMap))
 	for k, v := range envMap {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
-	// Log env keys (not values — API key is secret).
-	envKeys := make([]string, 0, len(envMap))
-	for k := range envMap {
-		envKeys = append(envKeys, k)
-	}
-	s.logger().Info("spawning worker",
-		"mission", missionID,
-		"timeout", timeout,
-		"envKeys", envKeys)
+	s.logger().Debug("Worker environment prepared", "variable_count", len(envMap))
+	s.logger().Info("spawning worker", "mission", missionID, "timeout", timeout)
 
 	out, err := cmd.CombinedOutput()
-	// Always log raw output for diagnostics.
-	s.logger().Info("worker raw output",
+
+	// Worker stdout is email-derived model output, not diagnostic text.
+	s.logger().Info("Worker process completed",
 		"mission", missionID,
-		"outputLen", len(out),
-		"output", truncateLog(string(out), 1000))
+		"output_bytes", len(out), "success", err == nil)
 	exitCode := 0
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
-			s.logger().Warn("worker exited with error",
+			s.logger().Debug("Worker exit status received",
 				"mission", missionID,
 				"exitCode", exitCode)
 		} else {
