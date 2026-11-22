@@ -722,10 +722,7 @@ func (h *capturingHandler) find(level slog.Level, msg string) (attrs map[string]
 
 // installCapturingHandler swaps slog's package-level default for a
 // capturingHandler for the duration of t, restoring the previous default on
-// cleanup. LoadCommands takes an explicit *slog.Logger and falls back to
-// slog.Default() only when that argument is nil -- the case most subtests in
-// this file exercise -- so installCapturingHandler intercepts that fallback
-// path to observe the log lines.
+// cleanup. Explicit logger tests verify that records do not reach this default.
 func installCapturingHandler(t *testing.T) *capturingHandler {
 	t.Helper()
 	h := &capturingHandler{}
@@ -781,7 +778,7 @@ func TestLoadCommands_SignatureEnforcement(t *testing.T) {
 		assert.Contains(t, cmds, "good")
 	})
 
-	t.Run("unsigned is rejected and logged at slog.Error", func(t *testing.T) {
+	t.Run("unsigned is rejected and logged at slog.Warn", func(t *testing.T) {
 		dir := t.TempDir()
 		writeYAML(t, dir, "unsigned.yaml", `name: unsigned
 prompt: hello
@@ -791,13 +788,13 @@ budget:
 `)
 		h := installCapturingHandler(t)
 
-		cmds, err := LoadCommands(dir, gpgBin, ownerFpr, nil)
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr, slog.New(h))
 		require.NoError(t, err)
 		assert.NotContains(t, cmds, "unsigned")
 
-		attrs, ok := h.find(slog.LevelError, "reject command file: signature verification failed")
-		require.True(t, ok, "expected a slog.Error record for the rejected file")
-		assert.Equal(t, ReasonMissing, attrs["reason"])
+		attrs, ok := h.find(slog.LevelWarn, "reject command file: signature verification failed")
+		require.True(t, ok, "expected a slog.Warn record for the rejected file")
+		assert.Equal(t, string(ReasonMissing), attrs["reason"])
 	})
 
 	t.Run("signed by an unrelated keypair is rejected as wrong-key", func(t *testing.T) {
@@ -805,13 +802,13 @@ budget:
 		writeSignedCommand(t, gpgBin, home, dir, "wrongkey.yaml", otherEmail, "wrongkey")
 		h := installCapturingHandler(t)
 
-		cmds, err := LoadCommands(dir, gpgBin, ownerFpr, nil)
+		cmds, err := LoadCommands(dir, gpgBin, ownerFpr, slog.New(h))
 		require.NoError(t, err)
 		assert.NotContains(t, cmds, "wrongkey")
 
-		attrs, ok := h.find(slog.LevelError, "reject command file: signature verification failed")
-		require.True(t, ok, "expected a slog.Error record for the rejected file")
-		assert.Equal(t, ReasonWrongKey, attrs["reason"])
+		attrs, ok := h.find(slog.LevelWarn, "reject command file: signature verification failed")
+		require.True(t, ok, "expected a slog.Warn record for the rejected file")
+		assert.Equal(t, string(ReasonWrongKey), attrs["reason"])
 	})
 
 	t.Run("a rejected file is excluded while a sibling valid file still loads", func(t *testing.T) {
@@ -840,11 +837,11 @@ budget:
 `)
 		h := installCapturingHandler(t)
 
-		cmds, err := LoadCommands(dir, gpgBin, "", nil)
+		cmds, err := LoadCommands(dir, gpgBin, "", slog.New(h))
 		require.NoError(t, err)
 		assert.Contains(t, cmds, "unsigned")
 
-		_, ok := h.find(slog.LevelError, "reject command file: signature verification failed")
+		_, ok := h.find(slog.LevelWarn, "reject command file: signature verification failed")
 		assert.False(t, ok, "no signature rejection must be logged when ownerKeyID is unset")
 	})
 
@@ -869,17 +866,17 @@ budget:
 		// inside VerifySignature (export never runs to completion), not a
 		// signature verdict -- distinct from both the SignatureError path
 		// and an ordinary parse/validation failure.
-		cmds, err := LoadCommands(dir, filepath.Join(t.TempDir(), "no-such-gpg-binary"), ownerFpr, nil)
+		cmds, err := LoadCommands(dir, filepath.Join(t.TempDir(), "no-such-gpg-binary"), ownerFpr, slog.New(h))
 		require.NoError(t, err)
 		assert.NotContains(t, cmds, "unavailable")
 
-		_, rejected := h.find(slog.LevelError, "reject command file: signature verification failed")
+		_, rejected := h.find(slog.LevelWarn, "reject command file: signature verification failed")
 		assert.False(t, rejected, "an operational failure is not a signature verdict")
 		_, skipped := h.find(slog.LevelWarn, "skip invalid command file")
 		assert.False(t, skipped, "an operational failure while enforcement is active must not be logged as a generic skip")
 
-		attrs, ok := h.find(slog.LevelError, "signature verification unavailable, skipping command file")
-		require.True(t, ok, "expected the distinct operational-failure Error record")
+		attrs, ok := h.find(slog.LevelWarn, "signature verification unavailable, skipping command file")
+		require.True(t, ok, "expected the distinct operational-failure Warning record")
 		assert.Contains(t, attrs["path"], "unavailable.yaml")
 	})
 
@@ -902,10 +899,10 @@ budget:
 		require.NoError(t, err)
 		assert.NotContains(t, cmds, "unsigned")
 
-		_, ok := explicit.find(slog.LevelError, "reject command file: signature verification failed")
+		_, ok := explicit.find(slog.LevelWarn, "reject command file: signature verification failed")
 		assert.True(t, ok, "expected the rejection to be logged through the explicitly passed logger")
 
-		_, onDefault := defaultHandler.find(slog.LevelError, "reject command file: signature verification failed")
+		_, onDefault := defaultHandler.find(slog.LevelWarn, "reject command file: signature verification failed")
 		assert.False(t, onDefault, "the rejection must not also land on the package default when an explicit logger is passed")
 	})
 }

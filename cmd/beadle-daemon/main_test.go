@@ -297,6 +297,14 @@ func TestSweepStalePipelines_MarksRunningAsFailed(t *testing.T) {
 
 	sweepStalePipelines(store, logger)
 
+	for _, record := range h.records {
+		assert.NotContains(t, record.Message, p.Email.From)
+		record.Attrs(func(attr slog.Attr) bool {
+			assert.NotContains(t, attr.Value.String(), p.Email.From)
+			return true
+		})
+	}
+
 	data, err := os.ReadFile(filepath.Join(dir, "stale-1.json"))
 	require.NoError(t, err)
 	var got daemon.Pipeline

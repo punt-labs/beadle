@@ -21,8 +21,9 @@ import (
 // why none is usable; nothing about Config's fields should be trusted
 // before that call runs.
 type Config struct {
-	OwnerHandle   string `json:"owner_handle,omitempty"`
-	OwnerGPGKeyID string `json:"owner_gpg_key_id,omitempty"`
+	TelemetryDisabled bool   `json:"telemetry_disabled,omitempty"`
+	OwnerHandle       string `json:"owner_handle,omitempty"`
+	OwnerGPGKeyID     string `json:"owner_gpg_key_id,omitempty"`
 }
 
 // LoadConfig reads daemon configuration from path.

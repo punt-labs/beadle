@@ -396,7 +396,9 @@ func TestRunOutput_LogsStderrOnReadError(t *testing.T) {
 	_, _, err := runOutput(r, func() error { return nil }, stderrBuf, e, cmd, nil, 0)
 	require.Error(t, err)
 
-	line := logLineContaining(t, buf, "boom: disk full")
+	line := logLineContaining(t, buf, "cli command stderr")
+	assert.Contains(t, line, "stderr_bytes=15")
+	assert.Contains(t, line, "boom: disk full")
 	assert.Contains(t, line, "test-stderr-on-read-error")
 }
 
@@ -418,7 +420,9 @@ func TestRunOutput_LogsStderrOnWaitError(t *testing.T) {
 	_, _, err := runOutput(r, func() error { return errors.New("wait boom") }, stderrBuf, e, cmd, nil, 0)
 	require.Error(t, err)
 
-	line := logLineContaining(t, buf, "exit status 1")
+	line := logLineContaining(t, buf, "cli command stderr")
+	assert.Contains(t, line, "stderr_bytes=13")
+	assert.Contains(t, line, "exit status 1")
 	assert.Contains(t, line, "test-stderr-on-wait-error")
 }
 
@@ -441,7 +445,8 @@ func TestRunOutput_StderrLogCarriesPipelineAndStage(t *testing.T) {
 	_, _, err := runOutput(strings.NewReader(""), func() error { return nil }, stderrBuf, e, cmd, p, 2)
 	require.NoError(t, err)
 
-	line := logLineContaining(t, buf, "warning: deprecated flag")
+	line := logLineContaining(t, buf, "cli command stderr")
+	assert.Contains(t, line, "warning: deprecated flag")
 	assert.Contains(t, line, "test-stderr-attributed")
 	assert.Contains(t, line, "pipeline="+p.ID)
 	assert.Contains(t, line, "stage=2")
@@ -494,7 +499,7 @@ func TestCLIRunner_InvalidTimeoutLogged(t *testing.T) {
 	assert.Equal(t, "hi\n", result)
 
 	line := logLineContaining(t, buf, "invalid timeout in command definition")
-	assert.Contains(t, line, "level=ERROR")
+	assert.Contains(t, line, "level=WARN")
 	assert.Contains(t, line, "test-bad-timeout")
 	assert.Contains(t, line, "5min")
 }
@@ -525,7 +530,7 @@ func TestCLIRunner_CompoundInvalidTimeoutLogged(t *testing.T) {
 	assert.Equal(t, "hello", result)
 
 	line := logLineContaining(t, buf, "invalid timeout in command definition")
-	assert.Contains(t, line, "level=ERROR")
+	assert.Contains(t, line, "level=WARN")
 	assert.Contains(t, line, "test-compound-bad-timeout")
 }
 
@@ -1284,6 +1289,8 @@ func TestCLIRunner_CompoundTimeout(t *testing.T) {
 func TestCLIRunner_EnvIsolation(t *testing.T) {
 	// Set a sentinel env var and verify the CLI subprocess does NOT see it.
 	t.Setenv("BEADLE_TEST_SENTINEL", "leaked")
+	t.Setenv("PUNT_TELEMETRY", "off")
+	t.Setenv("BEADLE_TELEMETRY", "off")
 
 	_, wl := setupWhitelist(t, "env")
 	runner := &CLIRunner{Whitelist: wl}
@@ -1306,6 +1313,46 @@ func TestCLIRunner_EnvIsolation(t *testing.T) {
 	assert.Contains(t, result, "PATH=", "subprocess must have PATH")
 	assert.Contains(t, result, "HOME=", "subprocess must have HOME")
 	assert.Contains(t, result, "USER=", "subprocess must have USER")
+	assert.Contains(t, result, "PUNT_TELEMETRY=off")
+	assert.Contains(t, result, "BEADLE_TELEMETRY=off")
+}
+
+func TestMinimalEnvTelemetry(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		values   map[string]string
+		declared []string
+	}{
+		{name: "unset"},
+		{name: "global veto", values: map[string]string{"PUNT_TELEMETRY": "off"}},
+		{name: "tool veto", values: map[string]string{"BEADLE_TELEMETRY": "off"}},
+		{name: "both vetoes", values: map[string]string{"PUNT_TELEMETRY": "off", "BEADLE_TELEMETRY": "off"}},
+		{name: "empty values", values: map[string]string{"PUNT_TELEMETRY": "", "BEADLE_TELEMETRY": ""}},
+		{name: "declared vetoes", values: map[string]string{"PUNT_TELEMETRY": "off", "BEADLE_TELEMETRY": "off"}, declared: []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"}},
+		{name: "enabled values", values: map[string]string{"PUNT_TELEMETRY": "on", "BEADLE_TELEMETRY": "on"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, name := range []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"} {
+				t.Setenv(name, "")
+				require.NoError(t, os.Unsetenv(name))
+			}
+			for name, value := range tc.values {
+				t.Setenv(name, value)
+			}
+			env, missing := minimalEnv([]string{"/usr/bin"}, tc.declared)
+			assert.Empty(t, missing)
+			assert.Len(t, env, 3+len(tc.values))
+			for _, name := range []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"} {
+				if value, ok := tc.values[name]; ok {
+					assert.Contains(t, env, name+"="+value)
+				} else {
+					for _, entry := range env {
+						assert.NotContains(t, entry, name+"=")
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestCLIRunner_EnvDeclaredVars(t *testing.T) {
@@ -1562,8 +1609,33 @@ func TestRunOutput_StderrLogIsCapped(t *testing.T) {
 	require.NoError(t, err)
 
 	line := logLineContaining(t, buf, "cli command stderr")
-	assert.Contains(t, line, strings.Repeat("e", 500)+"...")
+	assert.Contains(t, line, "stderr_bytes=5000")
+	assert.Contains(t, line, strings.Repeat("e", 500))
 	assert.NotContains(t, line, strings.Repeat("e", 501))
+}
+
+func TestRunOutput_EscapesStderrAndOmitsStdout(t *testing.T) {
+	for _, stderr := range []string{"", "disk full\nforged entry\x1b[31m"} {
+		t.Run(fmt.Sprintf("stderr bytes %d", len(stderr)), func(t *testing.T) {
+			logger, buf := testLoggerCapture()
+			stderrBuf := &cappedWriter{max: 1 << 20}
+			_, err := stderrBuf.Write([]byte(stderr))
+			require.NoError(t, err)
+			output, _, err := runOutput(strings.NewReader("private message body"), func() error { return nil },
+				stderrBuf, &Executor{Logger: logger}, &Command{Name: "test", Binary: "true"}, nil, 0)
+			require.NoError(t, err)
+			assert.Equal(t, "private message body", output)
+			assert.NotContains(t, buf.String(), output)
+			if stderr == "" {
+				assert.Empty(t, buf.String())
+			} else {
+				assert.Contains(t, buf.String(), "disk full")
+				assert.Contains(t, buf.String(), `\x0a`)
+				assert.Contains(t, buf.String(), `\x1b`)
+				assert.NotContains(t, buf.String(), "\nforged entry")
+			}
+		})
+	}
 }
 
 func TestClaudeRunner_WorkerErrorOutputIsCapped(t *testing.T) {

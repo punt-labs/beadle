@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/punt-labs/punt-observe-go/logging"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/punt-labs/beadle/internal/email"
@@ -145,7 +146,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 		p.Error = "plan returned empty command list"
 		e.save(p)
 		e.fireElse(p)
-		return p, fmt.Errorf("pipeline %s: empty plan", p.ID)
+		return p, noCommandError(fmt.Sprintf("pipeline %s: empty plan", p.ID))
 	}
 
 	// Validate all commands before execution.
@@ -156,7 +157,7 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			p.Error = fmt.Sprintf("stage %d: unknown command %q", i, call.Command)
 			e.save(p)
 			e.fireElse(p)
-			return p, fmt.Errorf("pipeline %s stage %d: unknown command %q", p.ID, i, call.Command)
+			return p, noCommandError(fmt.Sprintf("pipeline %s stage %d: unknown command %q", p.ID, i, call.Command))
 		}
 		if err := ValidateArgs(cmd, call.Args); err != nil {
 			p.Status = "failed"
@@ -238,16 +239,14 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 
 		if cmd.Mode == "process" {
 			if err := ValidateOutput(schemas[call.Command], result); err != nil {
-				// The validator can quote the offending value, which is stage
-				// output derived from the email: cap it before it is logged or
-				// stored.
+				// The validator can quote email-derived output; keep it out of logs.
 				msg := truncateLog(err.Error(), 200)
 				if resultTruncated {
 					msg = "output truncated at the 1MB cap, then output validation: " + msg
 				}
 				e.Logger.Warn("output schema validation failed",
 					"pipeline", p.ID, "stage", i,
-					"command", call.Command, "error", msg, "truncated", resultTruncated)
+					"command", logging.Escape(call.Command), "error_type", fmt.Sprintf("%T", err), "truncated", resultTruncated)
 				p.Status = "failed"
 				p.Error = fmt.Sprintf("stage %d (%s): output validation: %s", i, call.Command, msg)
 				e.save(p)
@@ -277,11 +276,11 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 		if err := ValidateArgs(replyCmd, replyCall.Args); err != nil {
 			// Permanent misconfiguration: the reply command's signature never
 			// changes, so this fails on every pipeline run, forever.
-			e.Logger.Error("auto-reply args invalid", "pipeline", p.ID, "error", err)
+			e.Logger.Warn("auto-reply args invalid", "pipeline", p.ID, "error", logging.Escape(err.Error()))
 			p.Error = fmt.Sprintf("auto-reply args invalid: %v", err)
 		} else if runner, rok := e.Runners[replyCmd.Runner]; !rok {
 			// Same: a runner registration gap does not clear itself between runs.
-			e.Logger.Error("auto-reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
+			e.Logger.Error("auto-reply runner not registered", "pipeline", p.ID, "runner", logging.Escape(replyCmd.Runner))
 			p.Error = fmt.Sprintf("auto-reply runner not registered: %s", replyCmd.Runner)
 		} else {
 			// The auto-reply reads the FINAL pipe value and its carried
@@ -296,7 +295,8 @@ func (e *Executor) Run(ctx context.Context, meta EmailMeta, body string) (*Pipel
 			}
 			replyResult, _, err := runner.Run(ctx, e, p, len(p.Commands), replyCmd, replyCall, replyPipe, pipeTruncated)
 			if err != nil {
-				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error", err)
+				// Runner failures can quote email-derived model output.
+				e.Logger.Warn("auto-reply failed", "pipeline", p.ID, "error_type", fmt.Sprintf("%T", err))
 				p.Error = fmt.Sprintf("auto-reply failed: %v", err)
 			} else {
 				p.Results = append(p.Results, replyResult)
@@ -578,7 +578,7 @@ func (e *Executor) save(p *Pipeline) {
 		return
 	}
 	if err := e.Store.Save(p); err != nil {
-		e.Logger.Error("persist pipeline state", "pipeline", p.ID, "error", err)
+		e.Logger.Error("persist pipeline state", "pipeline", p.ID, "error", logging.Escape(err.Error()))
 	}
 }
 
@@ -590,16 +590,10 @@ func truncateLog(s string, limit int) string {
 	return s[:limit] + "..."
 }
 
-// fireElse logs the pipeline error and sends a reply to the originator
+// fireElse sends a reply to the originator
 // with a fixed-text error message. If the reply command is not registered
 // or sending fails, the error is logged but does not propagate.
 func (e *Executor) fireElse(p *Pipeline) {
-	e.Logger.Error("pipeline failed, else handler",
-		"pipeline", p.ID,
-		"error", p.Error,
-		"email_from", p.Email.From,
-		"email_subject", truncateLog(p.Email.Subject, 200))
-
 	replyCmd, ok := e.Commands["reply"]
 	if !ok {
 		e.Logger.Warn("reply command not in registry, skipping else reply", "pipeline", p.ID)
@@ -615,13 +609,13 @@ func (e *Executor) fireElse(p *Pipeline) {
 		},
 	}
 	if err := ValidateArgs(replyCmd, replyCall.Args); err != nil {
-		e.Logger.Warn("else reply args invalid", "pipeline", p.ID, "error", err)
+		e.Logger.Warn("else reply args invalid", "pipeline", p.ID, "error", logging.Escape(err.Error()))
 		return
 	}
 
 	runner, ok := e.Runners[replyCmd.Runner]
 	if !ok {
-		e.Logger.Warn("else reply runner not registered", "pipeline", p.ID, "runner", replyCmd.Runner)
+		e.Logger.Warn("else reply runner not registered", "pipeline", p.ID, "runner", logging.Escape(replyCmd.Runner))
 		return
 	}
 
@@ -635,6 +629,7 @@ func (e *Executor) fireElse(p *Pipeline) {
 		// transient hiccup -- so this is logged at the same level as the
 		// sibling permanent-failure lines above ("auto-reply args
 		// invalid", "auto-reply runner not registered"), not Warn.
-		e.Logger.Error("else reply failed", "pipeline", p.ID, "error", err)
+		// Runner failures can quote email-derived model output.
+		e.Logger.Error("else reply failed", "pipeline", p.ID, "error_type", fmt.Sprintf("%T", err))
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/punt-labs/punt-observe-go/logging"
 )
 
 // Repo-tag header names. X-Beadle-Repo carries the owner/repo slug so tools can
@@ -67,14 +69,14 @@ func parseRepoSlug(url string) string {
 // distinct reason; the remote URL is never logged, since it may embed a token.
 func ResolveRepoTag(ctx context.Context, logger *slog.Logger, agent string) RepoTag {
 	if logger == nil {
-		logger = slog.Default()
+		logger = slog.New(slog.DiscardHandler)
 	}
 	ctx, cancel := context.WithTimeout(ctx, gitRemoteTimeout)
 	defer cancel()
 
 	out, err := exec.CommandContext(ctx, "git", "remote", "get-url", "origin").Output()
 	if err != nil {
-		logger.Debug("repo tag skipped: git origin remote unavailable", "err", err)
+		logger.Debug("repo tag skipped: git origin remote unavailable", "error", logging.Escape(err.Error()))
 		return RepoTag{}
 	}
 	slug := parseRepoSlug(string(out))

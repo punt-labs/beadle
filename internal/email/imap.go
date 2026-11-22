@@ -13,6 +13,7 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	"github.com/punt-labs/punt-observe-go/logging"
 
 	"github.com/punt-labs/beadle/internal/channel"
 	"github.com/punt-labs/beadle/internal/pgp"
@@ -28,6 +29,7 @@ type Client struct {
 // Dial connects to the IMAP server. Uses implicit TLS for port 993,
 // STARTTLS otherwise.
 func Dial(cfg *Config, logger *slog.Logger) (*Client, error) {
+	logger = logger.With("component", "beadle.email")
 	addr := net.JoinHostPort(cfg.IMAPHost, strconv.Itoa(cfg.IMAPPort))
 
 	tlsCfg := &tls.Config{
@@ -66,11 +68,12 @@ func Dial(cfg *Config, logger *slog.Logger) (*Client, error) {
 	}
 
 	if err := c.Login(cfg.IMAPUser, password).Wait(); err != nil {
+		logger.Warn("IMAP authentication failed", "error", logging.Escape(err.Error()))
 		_ = c.Close()
 		return nil, fmt.Errorf("login %s: %w", cfg.IMAPUser, err)
 	}
 
-	logger.Debug("imap connected", "host", cfg.IMAPHost, "user", cfg.IMAPUser)
+	logger.Debug("IMAP connection authenticated", "port", cfg.IMAPPort)
 	return &Client{imap: c, cfg: cfg, logger: logger}, nil
 }
 
@@ -107,7 +110,7 @@ func (c *Client) UnreadCount(folder, repoSlug string) (uint32, error) {
 	}
 	searchData, err := c.imap.UIDSearch(repoSearchCriteria(repoSlug, true), nil).Wait()
 	if err != nil {
-		c.logger.Warn("repo unread search failed; counting all repos", "err", err)
+		c.logger.Warn("repo unread search failed; counting all repos", "error", logging.Escape(err.Error()))
 		return c.Status(folder)
 	}
 	n := len(searchData.AllUIDs())
@@ -318,7 +321,7 @@ func (c *Client) searchFallback(numMessages uint32, q SearchQuery, count, offset
 		if q.RepoSlug != "" {
 			wq := q
 			wq.RepoSlug = ""
-			c.logger.Warn("repo unread search failed; retrying unread across all repos", "err", cause)
+			c.logger.Warn("repo unread search failed; retrying unread across all repos", "error", logging.Escape(cause.Error()))
 			if retry, err := c.imap.UIDSearch(searchCriteria(wq), nil).Wait(); err == nil {
 				numSet, total := selectUIDs(retry, count, offset)
 				return numSet, total, "", nil
@@ -328,7 +331,7 @@ func (c *Client) searchFallback(numMessages uint32, q SearchQuery, count, offset
 		return nil, 0, "", fmt.Errorf("search unread mail: %w", cause)
 	}
 
-	c.logger.Warn("search failed; listing recent mail instead", "err", cause)
+	c.logger.Warn("search failed; listing recent mail instead", "error", logging.Escape(cause.Error()))
 	return recencySet(numMessages, clampCount(count, numMessages)), int(numMessages), degradedListing, nil
 }
 

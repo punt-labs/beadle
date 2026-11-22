@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/punt-labs/punt-observe-go/logging"
+
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
 )
@@ -113,6 +115,7 @@ func WithCountObserver(observe func(uint32)) PollerOption {
 // onNewMail is called each time new unseen messages are detected.
 // Pass nil to suppress notifications.
 func NewPoller(onNewMail NewMailFunc, resolver *identity.Resolver, logger *slog.Logger, dialer Dialer, opts ...PollerOption) *Poller {
+	logger = logger.With("component", "beadle.email")
 	p := &Poller{
 		onNewMail: onNewMail,
 		resolver:  resolver,
@@ -234,19 +237,19 @@ func (p *Poller) poll() {
 	cfg, err := p.loadConfig()
 	if err != nil {
 		p.recordFailure(fmt.Sprintf("load config: %v", err))
-		p.logger.Warn("poller: load config", "error", err)
+		p.logger.Warn("poller: load config", "error", logging.Escape(err.Error()))
 		return
 	}
 
 	client, err := p.dialer.Dial(cfg, p.logger)
 	if err != nil {
 		p.recordFailure(fmt.Sprintf("dial: %v", err))
-		p.logger.Warn("poller: dial", "error", err)
+		p.logger.Warn("poller: dial", "error", logging.Escape(err.Error()))
 		return
 	}
 	defer func() {
 		if err := client.Close(); err != nil {
-			p.logger.Debug("poller: close", "error", err)
+			p.logger.Debug("poller: close", "error", logging.Escape(err.Error()))
 		}
 	}()
 
@@ -256,7 +259,7 @@ func (p *Poller) poll() {
 	unseen, err := client.UnreadCount("INBOX", p.repoSlug())
 	if err != nil {
 		p.recordFailure(fmt.Sprintf("unread count: %v", err))
-		p.logger.Warn("poller: unread count", "error", err)
+		p.logger.Warn("poller: unread count", "error", logging.Escape(err.Error()))
 		return
 	}
 
@@ -268,7 +271,7 @@ func (p *Poller) poll() {
 	p.lastError = ""
 	p.mu.Unlock()
 
-	p.logger.Info("poller: tick", "unseen", unseen, "previous", prev, "first", first)
+	p.logger.Debug("poller: tick", "unseen", unseen, "previous", prev, "first", first)
 	p.notify(first, prev, unseen)
 
 	// Publish lastCheck only after the callbacks have run (or been skipped), so
@@ -293,7 +296,7 @@ func (p *Poller) notify(first bool, prev, unseen uint32) {
 		p.onCount(unseen)
 	}
 	if !first && unseen > prev {
-		p.logger.Info("poller: new mail", "unseen", unseen, "previous", prev)
+		p.logger.Debug("poller: new mail", "unseen", unseen, "previous", prev)
 		if p.onNewMail != nil {
 			p.onNewMail(unseen - prev)
 		}

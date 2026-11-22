@@ -3,15 +3,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 
+	"github.com/punt-labs/punt-observe-go/logging"
 	"github.com/spf13/cobra"
 
 	"github.com/punt-labs/beadle/internal/daemon"
@@ -19,9 +20,16 @@ import (
 	"github.com/punt-labs/beadle/internal/identity"
 	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/secret"
+	"github.com/punt-labs/beadle/internal/usage"
 )
 
-var version = "dev"
+var (
+	version    = "dev"
+	verbose    bool
+	logHandler *logging.Handler
+	appUsage   *usage.Client
+	appLogger  = slog.New(slog.DiscardHandler)
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "beadle-daemon",
@@ -32,6 +40,25 @@ var rootCmd = &cobra.Command{
 	// worked and returned a verdict. cmd/beadle-email/main.go already sets
 	// this; beadle-daemon had drifted from its own sibling's pattern.
 	SilenceUsage: true,
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+		level := slog.LevelInfo
+		if verbose || os.Getenv("BEADLE_DEBUG") != "" {
+			level = slog.LevelDebug
+		}
+		var err error
+		logHandler, err = logging.New("beadle", "daemon", logging.WithLevel(level))
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("initialize logging: log lock busy; another beadle process may be holding it; retry: %w", err)
+			}
+			return fmt.Errorf("initialize logging: %w", err)
+		}
+		appLogger = slog.New(logHandler).With("component", "beadle.daemon")
+		appUsage = usage.New(appLogger.With("component", "beadle.usage"))
+		appLogger.Debug("Diagnostic logging configured")
+		appLogger.Info("Command started", "command", cmd.Name())
+		return nil
+	},
 }
 
 var runCmd = &cobra.Command{
@@ -39,18 +66,7 @@ var runCmd = &cobra.Command{
 	Short: "Start the daemon",
 	Long:  "Start the background daemon. Polls for new mail and blocks until SIGTERM or SIGINT.",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		logWriter, logPath, logErr := openDaemonLogFile()
-		var w io.Writer = os.Stderr
-		if logWriter != nil {
-			w = io.MultiWriter(os.Stderr, logWriter)
-			defer func() { _ = logWriter.Close() }() // best-effort; stderr still has the log
-		}
-		logger := slog.New(slog.NewTextHandler(w, nil))
-		if logErr != nil {
-			logger.Warn("file logging disabled", "error", logErr)
-		} else {
-			logger.Info("file logging enabled", "path", logPath)
-		}
+		logger := appLogger
 
 		resolver, err := newResolver()
 		if err != nil {
@@ -99,7 +115,7 @@ var runCmd = &cobra.Command{
 			}
 		} else {
 			// Non-ErrNotFound error (e.g., unsafe file perms) — fail closed.
-			logger.Error("secret backend error for anthropic-api-key, worker spawning disabled", "error", secretErr)
+			logger.Error("secret backend error for anthropic-api-key, worker spawning disabled", "error", logging.Escape(secretErr.Error()))
 		}
 		var spawner *daemon.WorkerSpawner
 		var templates *daemon.MissionTemplate
@@ -131,9 +147,9 @@ var runCmd = &cobra.Command{
 		cmdDir := filepath.Join(dataDir, "commands")
 		commands := loadDaemonCommands(cmdDir, gpgBinary, ownerKeyID, loadCommandsEnabled, logger)
 		if loadCommandsEnabled {
-			logger.Info("commands loaded", "count", len(commands), "dir", cmdDir, "signature_enforcement", true)
+			logger.Info("commands loaded", "count", len(commands), "dir", logging.Escape(cmdDir), "signature_enforcement", true)
 		} else {
-			logger.Info("commands loaded", "count", len(commands), "dir", cmdDir, "command_loading", "disabled")
+			logger.Info("commands loaded", "count", len(commands), "dir", logging.Escape(cmdDir), "command_loading", "disabled")
 		}
 
 		// Configure planner. Use RulePlanner with a "summarize" rule.
@@ -159,20 +175,20 @@ var runCmd = &cobra.Command{
 			}
 			rp, rpErr := daemon.NewRulePlanner(rules)
 			if rpErr != nil {
-				logger.Error("create rule planner", "error", rpErr)
+				logger.Error("create rule planner", "error", logging.Escape(rpErr.Error()))
 			} else {
 				planner = rp
 			}
 		}
 
-		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0, planner, commands, store)
+		handler := daemon.NewMailHandler(cmd.Context(), resolver, email.DefaultDialer{}, missions, spawner, templates, logger, 0, planner, commands, store, daemon.WithUsage(appUsage))
 		defer handler.Stop()
 
 		// The daemon acts on owner commands — untagged and repo-agnostic,
 		// gated by sender-permission and transport-trust — so its poller must
 		// count the whole mailbox, matching handler.go's unscoped fetch. Repo
 		// scoping applies only to the interactive serve/MCP poller (DES-033).
-		poller := email.NewPoller(handler.OnNewMail, resolver, logger, email.DefaultDialer{},
+		poller := email.NewPoller(handler.OnNewMail, resolver, logger.With("component", "beadle.email"), email.DefaultDialer{},
 			email.WithRepoScope(func() string { return "" }))
 		if err := poller.Start(); err != nil {
 			return fmt.Errorf("start poller: %w", err)
@@ -185,17 +201,26 @@ var runCmd = &cobra.Command{
 		signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 		defer signal.Stop(sigCh)
 		sig := <-sigCh
-		logger.Info("shutting down", "signal", sig)
+		logger.Info("shutting down", "signal", sig.String())
 		return nil
 	},
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Debug logging")
 	rootCmd.AddCommand(runCmd)
 }
 
 func main() {
-	if err := rootCmd.Execute(); err != nil {
+	err := rootCmd.Execute()
+	appUsage.Shutdown()
+	if logHandler != nil {
+		appLogger.Info("Command completed", "success", err == nil)
+		if closeErr := logHandler.Close(); closeErr != nil {
+			fmt.Fprintln(os.Stderr, "close logging:", closeErr)
+		}
+	}
+	if err != nil {
 		os.Exit(1)
 	}
 }
@@ -209,15 +234,15 @@ func main() {
 func sweepStalePipelines(store *daemon.PipelineStore, logger *slog.Logger) {
 	stale, err := store.LoadRunning()
 	if err != nil {
-		logger.Warn("load stale pipelines", "error", err)
+		logger.Warn("load stale pipelines", "error", logging.Escape(err.Error()))
 	}
 	for _, p := range stale {
 		logger.Warn("pipeline was running when daemon stopped",
-			"pipeline", p.ID, "from", p.Email.From)
+			"pipeline", p.ID)
 		p.Status = "failed"
 		p.Error = "daemon stopped while pipeline was running"
 		if saveErr := store.Save(p); saveErr != nil {
-			logger.Error("mark stale pipeline failed", "pipeline", p.ID, "error", saveErr)
+			logger.Error("mark stale pipeline failed", "pipeline", p.ID, "error", logging.Escape(saveErr.Error()))
 		}
 	}
 }
@@ -250,12 +275,12 @@ func resolveDaemonOwnerKeyID(configPath string, resolver *identity.Resolver, log
 		if errors.Is(err, os.ErrNotExist) {
 			return "", false
 		}
-		logger.Error("daemon config unreadable, command loading disabled", "error", err)
+		logger.Error("daemon config unreadable, command loading disabled", "error", logging.Escape(err.Error()))
 		return "", false
 	}
 	ownerKeyID, err = cfg.ResolveOwnerKeyID(resolver)
 	if err != nil {
-		logger.Error("signature policy unavailable, command loading disabled", "error", err)
+		logger.Error("signature policy unavailable, command loading disabled", "error", logging.Escape(err.Error()))
 		return "", false // explicit: falls back to disabled, never to "trust anyway"
 	}
 	return ownerKeyID, true
@@ -280,7 +305,7 @@ func loadDaemonCommands(cmdDir, gpgBinary, ownerKeyID string, loadCommandsEnable
 	}
 	commands, err := daemon.LoadCommands(cmdDir, gpgBinary, ownerKeyID, logger)
 	if err != nil {
-		logger.Warn("load commands", "dir", cmdDir, "error", err)
+		logger.Warn("load commands", "dir", logging.Escape(cmdDir), "error", logging.Escape(err.Error()))
 		return make(map[string]*daemon.Command)
 	}
 	return commands
@@ -301,22 +326,4 @@ func newResolver() (*identity.Resolver, error) {
 		return nil, fmt.Errorf("resolve cwd: %w", err)
 	}
 	return identity.NewResolver(ethosDir, beadleDir, cwd), nil
-}
-
-// openDaemonLogFile opens ~/.punt-labs/beadle/logs/beadle-daemon.log for append.
-func openDaemonLogFile() (*os.File, string, error) {
-	dir, err := paths.DataDir()
-	if err != nil {
-		return nil, "", err
-	}
-	logDir := filepath.Join(dir, "logs")
-	if err := os.MkdirAll(logDir, 0o750); err != nil {
-		return nil, "", fmt.Errorf("create log dir %s: %w", logDir, err)
-	}
-	path := filepath.Join(logDir, "beadle-daemon.log")
-	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, "", fmt.Errorf("open %s: %w", path, err)
-	}
-	return f, path, nil
 }

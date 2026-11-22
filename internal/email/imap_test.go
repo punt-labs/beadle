@@ -1,13 +1,40 @@
 package email
 
 import (
+	"errors"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
+	"github.com/punt-labs/punt-observe-go/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSearchFallbackLogsEscapedProviderError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	handler, err := logging.New("beadle", "cli")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, handler.Close()) })
+	c := &Client{logger: slog.New(handler).With("component", "beadle.email")}
+	_, _, reason, err := c.searchFallback(0, SearchQuery{}, 10, 0,
+		errors.New("SEARCH unsupported\nforged entry user@example.com https://example.com /private/mail password=hunter2"))
+	require.NoError(t, err)
+	assert.NotEmpty(t, reason)
+	data, err := os.ReadFile(filepath.Join(home, ".punt-labs", "beadle", "logs", "beadle.log"))
+	require.NoError(t, err)
+	line := string(data)
+	assert.Contains(t, line, "SEARCH unsupported")
+	assert.Contains(t, line, `\x0a`)
+	assert.NotContains(t, line, "\nforged entry")
+	for _, sensitive := range []string{"user@example.com", "https://example.com", "/private/mail", "hunter2"} {
+		assert.NotContains(t, line, sensitive)
+	}
+}
 
 // TestRepoSearchCriteria covers the pure builder that decides whether a listing
 // searches the server and how. It is the core of the repo-scoping filter, so it

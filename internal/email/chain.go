@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/punt-labs/punt-observe-go/logging"
+
 	"github.com/punt-labs/beadle/internal/secret"
 )
 
@@ -97,7 +99,7 @@ func TrySendChain(cfg *Config, logger *slog.Logger, to, cc, bcc []string, subjec
 		}
 
 		if err := SMTPSend(cfg, cfg.FromAddress, allRecipients, raw); err != nil {
-			logger.Warn("smtp send failed, falling back to resend", "err", err)
+			logger.Warn("smtp send failed, falling back to resend", "error", logging.Escape(err.Error()))
 			if signing || encrypting {
 				return nil, fmt.Errorf("smtp send failed: %w; resend fallback blocked for signed mail", err)
 			}
