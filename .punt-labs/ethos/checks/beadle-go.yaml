@@ -1,0 +1,52 @@
+name: beadle-go
+description: Advisory edit feedback and commit formatting, with the full gate at handoff.
+checks:
+  - name: gofmt
+    stage: edit
+    files: ["**/*.go"]
+    run: [gofmt, -l, "{file}"]
+    fail_on_output: true
+    on_fail: advisory
+    timeout: 5s
+  - name: vet
+    stage: edit
+    files: ["**/*.go"]
+    run: [go, vet, "{package_dir}"]
+    on_fail: advisory
+    timeout: 10s
+  - name: shellcheck
+    stage: edit
+    files: ["**/*.sh", "scripts/beadle-sysreport"]
+    run: [shellcheck, "{file}"]
+    on_fail: advisory
+    timeout: 10s
+  - name: gofmt-staged
+    stage: commit
+    files: ["**/*.go"]
+    run: [gofmt, -l, "{files}"]
+    fail_on_output: true
+    on_fail: block
+  - name: full-gate
+    stage: handoff
+    files: all
+    adapter: make
+    target: check
+    on_fail: block
+    timeout: 20m
+  - name: vet-staged
+    stage: commit
+    files: ["**/*.go"]
+    adapter: go
+    go: vet
+    cwd: root
+    on_fail: block
+  - name: vet-module
+    stage: commit
+    files: [go.mod, go.sum, go.work, go.work.sum]
+    run: [go, vet, ./...]
+    on_fail: block
+  - name: shellcheck-staged
+    stage: commit
+    files: ["**/*.sh", "scripts/beadle-sysreport"]
+    run: [shellcheck, "{files}"]
+    on_fail: block
