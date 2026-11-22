@@ -155,6 +155,11 @@ func (s *WorkerSpawner) Run(ctx context.Context, missionID, mcpConfigPath, syste
 	envMap["HOME"] = workerHome
 	envMap["PATH"] = workerPATH
 	envMap["BEADLE_LOG_MISSION_ID"] = missionID
+	for _, name := range []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"} {
+		if value, ok := os.LookupEnv(name); ok {
+			envMap[name] = value
+		}
+	}
 
 	cmd.Env = make([]string, 0, len(envMap))
 	for k, v := range envMap {

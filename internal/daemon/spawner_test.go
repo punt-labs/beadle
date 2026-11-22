@@ -107,6 +107,41 @@ func (h *capturingHandler) recordsText() string {
 	return sb.String()
 }
 
+func TestWorkerSpawner_Run_TelemetryEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		inherited map[string]string
+		overrides map[string]string
+		want      string
+	}{
+		{name: "unset", want: "unset|unset"},
+		{name: "global veto", inherited: map[string]string{"PUNT_TELEMETRY": "off"}, want: "off|unset"},
+		{name: "tool veto", inherited: map[string]string{"BEADLE_TELEMETRY": "off"}, want: "unset|off"},
+		{name: "both vetoes", inherited: map[string]string{"PUNT_TELEMETRY": "off", "BEADLE_TELEMETRY": "off"}, overrides: map[string]string{"PUNT_TELEMETRY": "on", "BEADLE_TELEMETRY": "on"}, want: "off|off"},
+		{name: "empty values", inherited: map[string]string{"PUNT_TELEMETRY": "", "BEADLE_TELEMETRY": ""}, want: "|"},
+		{name: "enabled values", inherited: map[string]string{"PUNT_TELEMETRY": "on", "BEADLE_TELEMETRY": "on"}, want: "on|on"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, name := range []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"} {
+				t.Setenv(name, "")
+				require.NoError(t, os.Unsetenv(name))
+			}
+			for name, value := range tc.inherited {
+				t.Setenv(name, value)
+			}
+			dir := t.TempDir()
+			script := "#!/bin/sh\n" +
+				`printf '{"result":"%s|%s","session_id":"s1","is_error":false}' "${PUNT_TELEMETRY-unset}" "${BEADLE_TELEMETRY-unset}"` + "\n"
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755))
+			t.Setenv("PATH", dir)
+			spawner := &WorkerSpawner{APIKey: "test-api-key", Logger: testLogger()}
+			result, err := spawner.Run(t.Context(), "m-telemetry", filepath.Join(dir, "mcp.json"), filepath.Join(dir, "prompt.txt"), nil, tc.overrides)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, result.Output)
+		})
+	}
+}
+
 // TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged is the
 // regression test for the mission's hard constraint on context7's
 // CONTEXT7_API_KEY: any envOverrides value passed to Run -- the same
@@ -129,6 +164,7 @@ func (h *capturingHandler) recordsText() string {
 // embeds its length in its own JSON output, so WorkerResult.Output is the
 // proof of delivery, and the captured log is still the proof of
 // non-logging. Diagnostics expose the variable count, not names or values.
+
 func TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged(t *testing.T) {
 	dir := writeEnvEchoingClaudeBinary(t, "CONTEXT7_API_KEY")
 	t.Setenv("PATH", dir)

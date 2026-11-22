@@ -50,8 +50,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
-github.com/punt-labs/punt-observe-go v0.0.0-20261122183941-8b005646fab7 h1:w3hGhNC1Kcqp7x+Fu/DxX/Qnx8bAWCvvq8hK4ugur+k=
-github.com/punt-labs/punt-observe-go v0.0.0-20261122183941-8b005646fab7/go.mod h1:UJ8qPb6BgSceMBkHFh2+j+/tukMxbQXZvSr0F/8Yaog=
+github.com/punt-labs/punt-observe-go v0.0.0-20261122192811-90067f488a2a h1:MjG7c0ADT0DtIBj050u6aEtxh6SZcdUkUMPoqyfx6qs=
+github.com/punt-labs/punt-observe-go v0.0.0-20261122192811-90067f488a2a/go.mod h1:UJ8qPb6BgSceMBkHFh2+j+/tukMxbQXZvSr0F/8Yaog=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=

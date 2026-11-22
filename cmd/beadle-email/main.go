@@ -3,6 +3,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -37,6 +39,7 @@ var rootCmd = &cobra.Command{
 }
 
 func configureObservability(cmd *cobra.Command) error {
+	commandStarted = time.Now()
 	cmd.SilenceUsage = true
 	role := "cli"
 	if cmd.Name() == "serve" {
@@ -45,6 +48,9 @@ func configureObservability(cmd *cobra.Command) error {
 	var err error
 	logHandler, err = logging.New("beadle", role, logging.WithLevel(g.slogLevel()))
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("initialize logging: log lock busy; another beadle process may be holding it; retry: %w", err)
+		}
 		return fmt.Errorf("initialize logging: %w", err)
 	}
 	appLogger = slog.New(logHandler).With("component", "beadle."+role)
@@ -54,7 +60,6 @@ func configureObservability(cmd *cobra.Command) error {
 	}
 	appUsage = usage.New(appLogger.With("component", "beadle.usage"))
 	usageCommand = usage.CommandForPath(cmd.CommandPath())
-	commandStarted = time.Now()
 	appLogger.Debug("Diagnostic logging configured")
 	appLogger.Info("Command started", "command", cmd.Name())
 	return nil
@@ -92,7 +97,7 @@ func init() {
 func main() {
 	started := time.Now()
 	cmd, err := rootCmd.ExecuteC()
-	if err != nil && appUsage == nil && cmd != nil && usage.CommandForPath(cmd.CommandPath()) != "" {
+	if err != nil && commandStarted.IsZero() && cmd != nil && usage.CommandForPath(cmd.CommandPath()) != "" {
 		if initErr := configureObservability(cmd); initErr != nil {
 			fmt.Fprintln(os.Stderr, initErr)
 		} else {

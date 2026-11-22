@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -47,6 +48,9 @@ var rootCmd = &cobra.Command{
 		var err error
 		logHandler, err = logging.New("beadle", "daemon", logging.WithLevel(level))
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("initialize logging: log lock busy; another beadle process may be holding it; retry: %w", err)
+			}
 			return fmt.Errorf("initialize logging: %w", err)
 		}
 		appLogger = slog.New(logHandler).With("component", "beadle.daemon")

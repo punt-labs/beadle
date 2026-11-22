@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -659,7 +660,7 @@ func (w *cappedWriter) dropped() int64 {
 
 // minimalEnv builds an explicit environment for subprocess execution and
 // reports which declared env vars had no value to resolve. It includes
-// PATH (from whitelist dirs), HOME, USER, and any declared env vars the
+// PATH (from whitelist dirs), HOME, USER, telemetry controls, and any declared env vars the
 // command definition allows and the daemon's environment actually has.
 func minimalEnv(dirs []string, declaredVars []string) (env []string, missing []string) {
 	env = []string{
@@ -672,6 +673,11 @@ func minimalEnv(dirs []string, declaredVars []string) (env []string, missing []s
 			env = append(env, name+"="+v)
 		} else {
 			missing = append(missing, name)
+		}
+	}
+	for _, name := range []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"} {
+		if value, ok := os.LookupEnv(name); ok && !slices.Contains(declaredVars, name) {
+			env = append(env, name+"="+value)
 		}
 	}
 	return env, missing

@@ -1289,6 +1289,8 @@ func TestCLIRunner_CompoundTimeout(t *testing.T) {
 func TestCLIRunner_EnvIsolation(t *testing.T) {
 	// Set a sentinel env var and verify the CLI subprocess does NOT see it.
 	t.Setenv("BEADLE_TEST_SENTINEL", "leaked")
+	t.Setenv("PUNT_TELEMETRY", "off")
+	t.Setenv("BEADLE_TELEMETRY", "off")
 
 	_, wl := setupWhitelist(t, "env")
 	runner := &CLIRunner{Whitelist: wl}
@@ -1311,6 +1313,46 @@ func TestCLIRunner_EnvIsolation(t *testing.T) {
 	assert.Contains(t, result, "PATH=", "subprocess must have PATH")
 	assert.Contains(t, result, "HOME=", "subprocess must have HOME")
 	assert.Contains(t, result, "USER=", "subprocess must have USER")
+	assert.Contains(t, result, "PUNT_TELEMETRY=off")
+	assert.Contains(t, result, "BEADLE_TELEMETRY=off")
+}
+
+func TestMinimalEnvTelemetry(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		values   map[string]string
+		declared []string
+	}{
+		{name: "unset"},
+		{name: "global veto", values: map[string]string{"PUNT_TELEMETRY": "off"}},
+		{name: "tool veto", values: map[string]string{"BEADLE_TELEMETRY": "off"}},
+		{name: "both vetoes", values: map[string]string{"PUNT_TELEMETRY": "off", "BEADLE_TELEMETRY": "off"}},
+		{name: "empty values", values: map[string]string{"PUNT_TELEMETRY": "", "BEADLE_TELEMETRY": ""}},
+		{name: "declared vetoes", values: map[string]string{"PUNT_TELEMETRY": "off", "BEADLE_TELEMETRY": "off"}, declared: []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"}},
+		{name: "enabled values", values: map[string]string{"PUNT_TELEMETRY": "on", "BEADLE_TELEMETRY": "on"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, name := range []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"} {
+				t.Setenv(name, "")
+				require.NoError(t, os.Unsetenv(name))
+			}
+			for name, value := range tc.values {
+				t.Setenv(name, value)
+			}
+			env, missing := minimalEnv([]string{"/usr/bin"}, tc.declared)
+			assert.Empty(t, missing)
+			assert.Len(t, env, 3+len(tc.values))
+			for _, name := range []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"} {
+				if value, ok := tc.values[name]; ok {
+					assert.Contains(t, env, name+"="+value)
+				} else {
+					for _, entry := range env {
+						assert.NotContains(t, entry, name+"=")
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestCLIRunner_EnvDeclaredVars(t *testing.T) {

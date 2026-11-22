@@ -189,6 +189,41 @@ func TestLoggingEntrypoints(t *testing.T) {
 		assert.NotContains(t, data, "[unsupported value]")
 	})
 
+	for _, tc := range []struct {
+		binary string
+		arg    string
+	}{
+		{binary: "beadle-email", arg: "version"},
+		{binary: "beadle-email", arg: "serve"},
+		{binary: "beadle-daemon", arg: "run"},
+	} {
+		t.Run("busy log lock "+tc.binary+" "+tc.arg, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			dir := filepath.Join(home, ".punt-labs", "beadle", "logs")
+			require.NoError(t, os.MkdirAll(dir, 0o700))
+			lock, err := os.OpenFile(filepath.Join(dir, "beadle.log.rotate.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, lock.Close()) })
+			require.NoError(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, filepath.Join(binDir, tc.binary), tc.arg)
+			var stderr, stdout bytes.Buffer
+			cmd.Stderr, cmd.Stdout = &stderr, &stdout
+			err = cmd.Run()
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, 1, exitErr.ExitCode())
+			require.NoError(t, ctx.Err())
+			assert.Empty(t, stdout.String())
+			assert.Contains(t, stderr.String(), "another beadle process may be holding it; retry")
+			assert.Equal(t, 1, strings.Count(stderr.String(), "log lock busy"))
+			_, err = os.Stat(filepath.Join(dir, "beadle.log"))
+			assert.ErrorIs(t, err, os.ErrNotExist)
+		})
+	}
+
 	t.Run("initialization failure surfaces independently", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
