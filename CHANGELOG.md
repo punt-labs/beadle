@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Beadle's test setup keeps the existing `biff` CLI on `PATH` instead of
+  replacing it with the fallback version.
+
 - MCP cancellation requests over stdio now reach queued `beadle-email` tool
   calls, so they start with a canceled context (mcp-go 1.5.0).
 
