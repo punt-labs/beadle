@@ -1,3 +1,4 @@
 agent: claude
 team: beadle
 resolution: repo-only
+checks: beadle-go
