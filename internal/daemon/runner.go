@@ -9,10 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/punt-labs/punt-observe-go/logging"
 )
 
 // Runner executes a single pipeline command and returns its output.
@@ -94,7 +97,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 	}
 	defer func() {
 		if rmErr := os.Remove(mcpPath); rmErr != nil {
-			e.Logger.Warn("remove mcp config temp file", "path", mcpPath, "error", rmErr)
+			e.Logger.Warn("remove mcp config temp file", "path", logging.Escape(mcpPath), "error", logging.Escape(rmErr.Error()))
 		}
 	}()
 
@@ -107,7 +110,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 
 	e.Logger.Info("stage mission created",
 		"pipeline", p.ID, "stage", idx,
-		"command", call.Command, "mission", missionID)
+		"command", logging.Escape(call.Command), "mission", missionID)
 
 	// The fence shows sanitized text; the pipe itself stays raw. Decided here,
 	// at the one place the pipe is rendered.
@@ -135,7 +138,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 		// the path so an operator can clean it up, not a silently
 		// swallowed error.
 		if rmErr := os.Remove(promptPath); rmErr != nil {
-			e.Logger.Warn("remove system prompt temp file", "path", promptPath, "error", rmErr)
+			e.Logger.Warn("remove system prompt temp file", "path", logging.Escape(promptPath), "error", logging.Escape(rmErr.Error()))
 		}
 	}()
 
@@ -149,14 +152,15 @@ func (r *ClaudeRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx in
 		return "", false, fmt.Errorf("worker error (exit %d): %s", wr.ExitCode, truncateLog(wr.Output, 500))
 	}
 
+	// Combined output may quote mission content; retain only its byte count.
 	closeOut, closeErr := exec.CommandContext(ctx, "ethos", "mission", "close", missionID).CombinedOutput()
 	if closeErr != nil {
-		e.Logger.Warn("close stage mission", "mission", missionID, "error", closeErr, "output", string(closeOut))
+		e.Logger.Warn("close stage mission", "mission", missionID, "error", logging.Escape(closeErr.Error()), "output_bytes", len(closeOut))
 	}
 
 	e.Logger.Info("stage completed",
 		"pipeline", p.ID, "stage", idx,
-		"command", call.Command, "mission", missionID)
+		"command", logging.Escape(call.Command), "mission", missionID)
 
 	return wr.Output, false, nil
 }
@@ -199,8 +203,8 @@ func buildStageArgs(e *Executor, p *Pipeline, idx int, cmdName string, args map[
 
 	if len(truncatedNames) > 0 || len(sanitizedNames) > 0 {
 		e.Logger.Warn("stage arg sanitized or truncated before stage input",
-			append(pipelineLogArgs(p, idx), "command", cmdName,
-				"truncated_args", truncatedNames, "sanitized_args", sanitizedNames)...)
+			append(pipelineLogArgs(p, idx), "command", logging.Escape(cmdName),
+				"truncated_args", len(truncatedNames), "sanitized_args", len(sanitizedNames))...)
 	}
 
 	return out
@@ -299,7 +303,7 @@ func (r *CLIRunner) Run(ctx context.Context, e *Executor, p *Pipeline, idx int, 
 			// pipe value that fails to parse as JSON is attributed to the
 			// cap, not read as unrelated malformed JSON.
 			e.Logger.Warn("pipe value looked like JSON but failed to parse, args will not be filled from it",
-				append(pipelineLogArgs(p, idx), "command", cmd.Name, "error", err, "pipe_truncated", pipeTruncated)...)
+				append(pipelineLogArgs(p, idx), "command", logging.Escape(cmd.Name), "error", logging.Escape(err.Error()), "pipe_truncated", pipeTruncated)...)
 			pipeFields = nil
 		}
 	}
@@ -393,7 +397,7 @@ func runOutput(stdoutPipe io.Reader, wait func() error, stderrBuf *cappedWriter,
 
 	if stderrBuf.buf.Len() > 0 {
 		e.Logger.Info("cli command stderr",
-			append(pipelineLogArgs(p, idx), "command", cmd.Name, "stderr", truncateLog(stderrBuf.buf.String(), 500))...)
+			append(pipelineLogArgs(p, idx), "command", logging.Escape(cmd.Name), "stderr", logging.Escape(truncateLog(stderrBuf.buf.String(), 500)), "stderr_bytes", stderrBuf.buf.Len())...)
 	}
 
 	if waitErr != nil {
@@ -405,7 +409,7 @@ func runOutput(stdoutPipe io.Reader, wait func() error, stderrBuf *cappedWriter,
 
 	if extra > 0 {
 		e.Logger.Warn("cli command stdout truncated at cap",
-			append(pipelineLogArgs(p, idx), "command", cmd.Name, "captured_bytes", len(data), "discarded_bytes", extra)...)
+			append(pipelineLogArgs(p, idx), "command", logging.Escape(cmd.Name), "captured_bytes", len(data), "discarded_bytes", extra)...)
 		truncated = true
 	}
 
@@ -452,8 +456,8 @@ func parseTimeout(e *Executor, cmd *Command) time.Duration {
 	}
 	d, err := time.ParseDuration(cmd.Timeout)
 	if err != nil {
-		e.Logger.Error("invalid timeout in command definition, using default",
-			"command", cmd.Name, "timeout", cmd.Timeout, "default", def, "error", err)
+		e.Logger.Warn("invalid timeout in command definition, using default",
+			"command", logging.Escape(cmd.Name), "timeout", logging.Escape(cmd.Timeout), "default", def, "error", logging.Escape(err.Error()))
 		return def
 	}
 	return d
@@ -590,15 +594,16 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, p *Pipeline, i
 	for i, buf := range stderrBufs {
 		if dropped := buf.dropped(); dropped > 0 {
 			e.Logger.Warn("compound step stderr truncated at cap",
-				"command", cmd.Name, "step", i, "binary", cmd.Steps[i].Binary,
+				"command", logging.Escape(cmd.Name), "step", i, "binary", logging.Escape(cmd.Steps[i].Binary),
 				"captured_bytes", buf.buf.Len(), "discarded_bytes", dropped)
 		}
 		if buf.buf.Len() > 0 {
 			e.Logger.Info("compound step stderr",
-				"command", cmd.Name,
+				"command", logging.Escape(cmd.Name),
 				"step", i,
-				"binary", cmd.Steps[i].Binary,
-				"stderr", truncateLog(buf.buf.String(), 500))
+				"binary", logging.Escape(cmd.Steps[i].Binary),
+				"stderr", logging.Escape(truncateLog(buf.buf.String(), 500)),
+				"stderr_bytes", buf.buf.Len())
 		}
 	}
 
@@ -610,7 +615,7 @@ func (r *CLIRunner) runCompound(ctx context.Context, e *Executor, p *Pipeline, i
 	truncated := false
 	if dropped := lastStdout.dropped(); dropped > 0 {
 		e.Logger.Warn("compound command stdout truncated at cap",
-			append(pipelineLogArgs(p, idx), "command", cmd.Name, "captured_bytes", len(result), "discarded_bytes", dropped)...)
+			append(pipelineLogArgs(p, idx), "command", logging.Escape(cmd.Name), "captured_bytes", len(result), "discarded_bytes", dropped)...)
 		truncated = true
 	}
 	return result, truncated, nil
@@ -655,7 +660,7 @@ func (w *cappedWriter) dropped() int64 {
 
 // minimalEnv builds an explicit environment for subprocess execution and
 // reports which declared env vars had no value to resolve. It includes
-// PATH (from whitelist dirs), HOME, USER, and any declared env vars the
+// PATH (from whitelist dirs), HOME, USER, telemetry controls, and any declared env vars the
 // command definition allows and the daemon's environment actually has.
 func minimalEnv(dirs []string, declaredVars []string) (env []string, missing []string) {
 	env = []string{
@@ -668,6 +673,11 @@ func minimalEnv(dirs []string, declaredVars []string) (env []string, missing []s
 			env = append(env, name+"="+v)
 		} else {
 			missing = append(missing, name)
+		}
+	}
+	for _, name := range []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"} {
+		if value, ok := os.LookupEnv(name); ok && !slices.Contains(declaredVars, name) {
+			env = append(env, name+"="+value)
 		}
 	}
 	return env, missing

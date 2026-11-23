@@ -19,6 +19,39 @@ and this README does not cover them.
 
 **Platforms:** macOS, Linux
 
+## Diagnostic Logging
+
+All beadle processes share `~/.punt-labs/beadle/logs/beadle.log`, using the
+private rotating handler from `punt-observe-go`. The directory is mode `0700`;
+log files are mode `0600`. Rotation keeps five backups, each bounded to 5 MiB.
+Logs contain operation metadata and byte counts, not email content, addresses,
+credentials, or worker stdout. Provider errors and bounded subprocess stderr
+are escaped; the shared handler redacts recognizable sensitive metadata.
+Failures that can quote email-derived content retain safe summaries instead.
+
+The durable level defaults to Info. `-v`/`--verbose` or `BEADLE_DEBUG=1` enables
+Debug; `-q` controls command output, not durable logging. Diagnostics are not
+teed to stderr. Logging initialization failures are reported on stderr and stop
+the command. MCP stdout remains JSON-RPC only, including when stderr is discarded.
+
+## Usage Telemetry
+
+Beadle records private, local usage spans in
+`~/.punt-labs/beadle/telemetry.db` (mode `0600`, 90-day retention).
+Records contain only schema version, timestamps, elapsed milliseconds, a
+closed-set command/tool name, and an outcome. No arguments, email content,
+addresses, paths, identifiers, errors, or results are recorded. Telemetry is
+independent of diagnostic logs; Beadle does not enable network export.
+
+Set either `PUNT_TELEMETRY=off` or `BEADLE_TELEMETRY=off` to disable capture.
+Alternatively, add `"telemetry_disabled": true` to either tool-wide
+`~/.punt-labs/beadle/email.json` or `~/.punt-labs/beadle/daemon.json`.
+Either file vetoes capture for all Beadle processes; identity-scoped files and
+explicit mailbox `--config` files do not control this machine-wide setting.
+Missing files are allowed; unreadable or malformed files disable capture.
+Disabled capture creates no telemetry database. Recording is non-blocking,
+and exit allows at most one second for a best-effort flush.
+
 ## Quick Start
 
 ```bash

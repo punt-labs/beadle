@@ -204,6 +204,7 @@ func runRootCmd(t *testing.T, args ...string) (string, error) {
 	var err error
 	out := captureStdout(t, func() {
 		err = rootCmd.Execute() // doctor/status may legitimately return a non-nil error (FAIL checks)
+		appUsage.Shutdown()
 	})
 	return out, err
 }

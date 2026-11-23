@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+	"github.com/punt-labs/punt-observe-go/logging"
 
 	"github.com/punt-labs/beadle/internal/contacts"
 	"github.com/punt-labs/beadle/internal/identity"
@@ -63,12 +65,12 @@ func (h *handler) switchIdentity(_ context.Context, req mcplib.CallToolRequest) 
 	msg := fmt.Sprintf("switched to %s (%s)", id.Handle, id.Email)
 	configPath, pathErr := paths.IdentityConfigPath(id.Email)
 	if pathErr != nil {
-		h.logger.Warn("switch_identity preflight: resolve identity config path", "error", pathErr)
+		h.logger.Warn("switch_identity preflight: resolve identity config path", "error", logging.Escape(pathErr.Error()))
 	} else if _, statErr := os.Stat(configPath); statErr != nil {
 		if os.IsNotExist(statErr) {
 			msg += fmt.Sprintf("\n\nWARNING: no email config at %s — email operations will use fallback config.", configPath)
 		} else {
-			h.logger.Warn("switch_identity preflight: stat identity config", "path", configPath, "error", statErr)
+			h.logger.Warn("switch_identity preflight: stat identity config", "path", logging.Escape(filepath.Base(configPath)), "error", logging.Escape(statErr.Error()))
 		}
 	}
 	return textResult(msg)
@@ -141,7 +143,7 @@ func (h *handler) whoami(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.C
 	if h.ethosDir != "" {
 		roster, rosterErr := session.ReadRoster(h.ethosDir)
 		if rosterErr != nil {
-			h.logger.Error("read session roster", "error", rosterErr)
+			h.logger.Error("read session roster", "error", logging.Escape(rosterErr.Error()))
 			lines = append(lines, "", fmt.Sprintf("   session roster:  error: %v", rosterErr))
 		} else if roster != nil && len(roster.Participants) > 0 {
 			lines = append(lines, "", "   session participants:")

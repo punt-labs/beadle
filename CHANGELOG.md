@@ -21,6 +21,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Add private local usage telemetry through `punt-observe-go` (PL-1317):
+  versioned, closed-set CLI, MCP and daemon decision spans with outcomes and
+  elapsed duration. Store at `~/.punt-labs/beadle/telemetry.db`; honor both
+  environment off switches and tool-wide JSON configuration vetoes.
+  Capture is independent of logs, excludes content and identifiers, and
+  never changes command or tool results.
+
+- Adopt shared `punt-observe-go` diagnostics (PL-1317): CLI, MCP and daemon
+  processes write private, rotating `~/.punt-labs/beadle/logs/beadle.log` files.
+  Remove per-binary sinks and stderr tees; enable durable Debug with verbose
+  mode or `BEADLE_DEBUG`. Replace content-bearing diagnostic fields with safe
+  metadata and byte counts; escape diagnostic errors and subprocess stderr,
+  retain summaries for content-bearing failures, and log security rejections
+  at Warning.
+
 - **`beadle-email enable` allows each surface broadly with exact `ask`
   carve-outs (PL-718, punt-kit#471).** It adds `Bash(beadle-email:*)`,
   `mcp__plugin_beadle_email__*` and `Skill(beadle:*)` to

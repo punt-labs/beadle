@@ -700,9 +700,10 @@ func TestExecutor_AutoReplyArgs(t *testing.T) {
 // persist.go's only consumer of Status checks for "running"); p.Error now
 // carries the auto-reply failure so the record is honest about it.
 func TestExecutor_AutoReplyFailureRecorded(t *testing.T) {
+	logger, buf := testLoggerCapture()
 	runner := &mockClaudeRunner{
 		results: []WorkerResult{{Output: "done"}},
-		errs:    []error{nil, fmt.Errorf("smtp connection refused")},
+		errs:    []error{nil, fmt.Errorf("smtp connection refused: confidential email body")},
 	}
 
 	exec := &Executor{
@@ -711,7 +712,7 @@ func TestExecutor_AutoReplyFailureRecorded(t *testing.T) {
 		},
 		Commands: testCommands(),
 		Runners:  testRunners(runner),
-		Logger:   testLogger(),
+		Logger:   logger,
 	}
 
 	meta := EmailMeta{MessageID: "23", From: "jim@test.com", Subject: "Reply fails"}
@@ -722,6 +723,8 @@ func TestExecutor_AutoReplyFailureRecorded(t *testing.T) {
 	assert.Len(t, p.Results, 1) // auto-reply's own result never appended
 	assert.Contains(t, p.Error, "auto-reply failed")
 	assert.Contains(t, p.Error, "smtp connection refused")
+	assert.NotContains(t, buf.String(), "confidential email body")
+	assert.Contains(t, buf.String(), "*errors.errorString")
 }
 
 func TestExecutor_NoReplyCommand(t *testing.T) {
@@ -784,9 +787,7 @@ func TestExecutor_ElseReply(t *testing.T) {
 // beadle-5k5's first guard: an invalid auto-reply arg set used to be
 // swallowed silently. reply here requires an "extra" arg the auto-reply
 // call never supplies, so ValidateArgs fails and the failure must be
-// logged with the pipeline ID and the underlying error, at Error level
-// since a signed reply command's argument shape never changes between
-// runs -- this is permanent misconfiguration, not a transient failure.
+// logged with the pipeline ID and the underlying error at Warning level.
 func TestExecutor_AutoReplyInvalidArgsLogged(t *testing.T) {
 	runner := &mockClaudeRunner{
 		results: []WorkerResult{{Output: "Hello, Jim!"}},
@@ -817,9 +818,10 @@ func TestExecutor_AutoReplyInvalidArgsLogged(t *testing.T) {
 	assert.Contains(t, p.Error, "auto-reply args invalid")
 	assert.Contains(t, p.Error, "missing required arg")
 
-	line := logLineContaining(t, buf, "missing required arg")
+	line := logLineContaining(t, buf, "auto-reply args invalid")
 	assert.Contains(t, line, p.ID)
-	assert.Contains(t, line, "level=ERROR")
+	assert.Contains(t, line, "level=WARN")
+	assert.Contains(t, line, "missing required arg")
 }
 
 // TestExecutor_AutoReplyRunnerNotRegisteredRecorded is the regression test
@@ -888,8 +890,9 @@ func TestExecutor_FireElseInvalidArgsLogged(t *testing.T) {
 	assert.Equal(t, "failed", p.Status)
 	assert.Len(t, runner.calls, 0) // else reply never ran: args invalid
 
-	line := logLineContaining(t, buf, "missing required arg")
+	line := logLineContaining(t, buf, "else reply args invalid")
 	assert.Contains(t, line, p.ID)
+	assert.Contains(t, line, "missing required arg")
 }
 
 // TestExecutor_FireElseRunnerNotRegisteredLogged is the regression test for

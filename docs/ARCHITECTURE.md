@@ -98,6 +98,72 @@ identity file is missing or corrupt is an error, not a fallback.
 them. It copies rather than moves, so after the first run the identity-scoped
 copy is the one in use.
 
+## Diagnostic Logging
+
+Each Go entry point opens `logging.New("beadle", role)` from
+`github.com/punt-labs/punt-observe-go` and closes the handler after its work ends.
+The email CLI selects `cli`; both `serve` transports select `mcp`; every daemon
+command selects `daemon`. Hook-invoked CLI commands and worker-spawned
+`beadle-email serve` processes initialize the same way, independently of their
+standard streams. There are no separate Go hook or detached-worker binaries.
+The current installer does not configure launchd or systemd stderr redirects.
+
+All processes append to `~/.punt-labs/beadle/logs/beadle.log`. The shared package
+owns private modes, cross-process locking, redaction, bounded records and
+rotation (5 MiB, five backups). Internal packages receive component-bound
+`slog.Logger` instances and never configure sinks or a global default logger.
+Info is the durable default; verbose mode or `BEADLE_DEBUG` enables Debug.
+There is no stderr tee. Startup errors use stderr independently and fail closed.
+MCP dependency error output is suppressed, never written to transport stdout.
+
+Log calls omit email addresses, subjects, bodies, notification text and raw
+worker stdout. Content-bearing errors and output retain error types and byte
+counts; provider errors, bounded subprocess stderr and untrusted metadata are
+escaped with `logging.Escape` before final-record redaction. Permission
+rejections, signature failures and authentication failures are warnings.
+Diagnostics remain separate from mission state, usage telemetry and the
+planned audit trail.
+
+## Usage Telemetry
+
+`internal/usage` is the only package importing `punt-observe-go/telemetry`.
+It owns the client and v1 span schemas; call sites use typed helpers, not
+attribute maps, raw OTel or exporters. All fields below are required:
+
+| Schema | Fields |
+| ------ | ------ |
+| `beadle.cli.command` | `command`: closed enum of CLI commands (nested paths use underscores); `outcome`: `ok` / `error`; `elapsed_ms`: duration |
+| `beadle.mcp.tool` | `tool`: closed enum of the 23 registered tool names; `outcome`: `ok` / `error` / `denied`; `elapsed_ms`: duration |
+| `beadle.daemon.mission` | `outcome`: `created` / `below_trust` / `no_permission` / `no_command` / `failed`; `elapsed_ms`: duration |
+
+The shared package also stores span timestamps and schema version. No
+identifiers, content or counts are currently needed. Unknown enum values,
+fields and versions are rejected before enqueueing.
+
+The CLI records completion independently of command output. `serve` initializes
+the same client but records tool calls instead of a long-lived CLI command.
+MCP middleware covers both transports and dynamically re-registered poll tools.
+Permission gates mark the call context directly; neither log messages nor
+tool-response text are inspected to classify a denial.
+
+The daemon records each message's permission/trust/mission decision. In the
+pipeline path, duration runs through the pipeline outcome; absent or unknown
+commands are distinguished using a typed error without changing error text.
+Capacity exhaustion and creation/execution failures are `failed`; setup
+failures before individual messages are available record one failed decision.
+
+All entry points initialize capture and allow a one-second bounded shutdown
+before closing diagnostic logging. The shared package owns the bounded queue,
+asynchronous startup, private SQLite database, 90-day retention, and
+rate-limited metadata-only degradation diagnostics. Beadle configures no
+network exporter. Recording never changes an operation's result.
+
+Either environment veto (`PUNT_TELEMETRY=off`, `BEADLE_TELEMETRY=off`) or
+`telemetry_disabled: true` in either tool-wide `email.json` or `daemon.json`
+sets capture off before store initialization. These JSON files live in
+`~/.punt-labs/beadle/`; mailbox overrides are not telemetry configuration.
+Unreadable or malformed configuration fails closed for telemetry only.
+
 ## Credentials
 
 Resolved at runtime by name through a priority chain:

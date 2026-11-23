@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/punt-labs/punt-observe-go/logging"
 	"github.com/spf13/cobra"
 
 	"github.com/punt-labs/beadle/internal/contacts"
@@ -38,20 +38,7 @@ var serveCmd = &cobra.Command{
 	Long:  "Start the beadle-email MCP server. Transport: stdio (default) or ws (WebSocket).",
 	Args:  cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		logWriter, logPath, logErr := openServeLogFile()
-		var w io.Writer = os.Stderr
-		if logWriter != nil {
-			w = io.MultiWriter(os.Stderr, logWriter)
-			defer func() { _ = logWriter.Close() }() // best-effort; stderr still has the log
-		}
-		logger := slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
-			Level: g.slogLevel(),
-		}))
-		if logErr != nil {
-			logger.Warn("file logging disabled", "error", logErr)
-		} else {
-			logger.Info("file logging enabled", "path", logPath)
-		}
+		logger := appLogger.With("component", "beadle.mcp")
 		resolver, err := newResolver()
 		if err != nil {
 			return err
@@ -71,7 +58,6 @@ var serveCmd = &cobra.Command{
 		var marker *mcptools.UnreadMarker
 		onNewMail := func(newCount uint32) {
 			s.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
-			logger.Info("poller: sent tools/list_changed notification")
 			channelParams := map[string]any{
 				"content": fmt.Sprintf("%d new message(s) in inbox. Check with /inbox.", newCount),
 				"meta": map[string]string{
@@ -79,9 +65,8 @@ var serveCmd = &cobra.Command{
 					"type":   "inbox_alert",
 				},
 			}
-			logger.Info("poller: sending channel notification", "content", channelParams["content"])
 			s.SendNotificationToAllClients("notifications/claude/channel", channelParams)
-			logger.Info("poller: channel notification sent")
+			logger.Debug("Inbox notifications sent", "count", newCount)
 		}
 		// observeCount tracks every count change, including drops, so the unread
 		// marker clears when the inbox is read down. onNewMail prompts only on an
@@ -91,17 +76,17 @@ var serveCmd = &cobra.Command{
 				marker.Update(unseen)
 			}
 		}
-		poller := email.NewPoller(onNewMail, resolver, logger, email.DefaultDialer{}, email.WithCountObserver(observeCount))
-		marker = mcptools.RegisterTools(s, resolver, logger, mcptools.WithEthosDir(ethosDir), mcptools.WithPoller(poller))
+		poller := email.NewPoller(onNewMail, resolver, logger.With("component", "beadle.email"), email.DefaultDialer{}, email.WithCountObserver(observeCount))
+		marker = mcptools.RegisterTools(s, resolver, logger, mcptools.WithEthosDir(ethosDir), mcptools.WithPoller(poller), mcptools.WithUsage(appUsage))
 		if err := poller.Start(); err != nil {
-			logger.Error("background polling failed to start", "error", err)
+			logger.Error("background polling failed to start", "error", logging.Escape(err.Error()))
 		}
 		defer poller.Stop()
-		logger.Info("starting beadle-email MCP server", "version", version, "transport", serveTransport)
+		logger.Info("starting beadle-email MCP server", "version", version, "transport", logging.Escape(serveTransport))
 
 		switch serveTransport {
 		case "stdio":
-			return server.ServeStdio(s)
+			return server.ServeStdio(s, server.WithErrorLogger(log.New(io.Discard, "", 0)))
 		case "ws":
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -392,24 +377,4 @@ var statusCmd = &cobra.Command{
 
 func init() {
 	statusCmd.Flags().StringVarP(&statusConfig, "config", "c", email.DefaultConfigPath(), "Config file path")
-}
-
-// openServeLogFile opens ~/.punt-labs/beadle/logs/beadle-email.log for append.
-// Returns the file, its path, and any error. On error, caller should fall back
-// to stderr-only logging.
-func openServeLogFile() (*os.File, string, error) {
-	dir, err := paths.DataDir()
-	if err != nil {
-		return nil, "", err
-	}
-	logDir := filepath.Join(dir, "logs")
-	if err := os.MkdirAll(logDir, 0o750); err != nil {
-		return nil, "", fmt.Errorf("create log dir %s: %w", logDir, err)
-	}
-	path := filepath.Join(logDir, "beadle-email.log")
-	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, "", fmt.Errorf("open %s: %w", path, err)
-	}
-	return f, path, nil
 }

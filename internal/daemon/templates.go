@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+
+	"github.com/punt-labs/punt-observe-go/logging"
 )
 
 // MCPServerConfig defines how to invoke an MCP server -- either a local
@@ -106,7 +108,7 @@ func (t *MissionTemplate) logger() *slog.Logger {
 	if t.Logger != nil {
 		return t.Logger
 	}
-	return slog.Default()
+	return slog.New(slog.DiscardHandler)
 }
 
 // BuildMCPConfig writes a temporary MCP server configuration file containing
@@ -161,7 +163,7 @@ func (t *MissionTemplate) BuildMCPConfig(servers []string, registry map[string]M
 					name, cfg.Command, resolved)
 			}
 			t.logger().Info("resolved mcp server command",
-				"server", name, "command", cfg.Command, "resolved", resolved)
+				"server", logging.Escape(name), "command", logging.Escape(cfg.Command), "resolved", logging.Escape(resolved))
 			cfg.Command = resolved
 		}
 		selected[name] = cfg

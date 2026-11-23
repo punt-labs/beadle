@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/punt-labs/punt-observe-go/logging"
 )
 
 const (
@@ -51,7 +52,7 @@ func NewWSServer(s *server.MCPServer, version string, logger *slog.Logger) *WSSe
 	return &WSServer{
 		mcp:     s,
 		version: version,
-		logger:  logger,
+		logger:  logger.With("component", "beadle.mcp"),
 		token:   generateToken(),
 	}
 }
@@ -97,7 +98,7 @@ func (ws *WSServer) ListenAndServe(ctx context.Context, port int) error {
 		errCh <- srv.ListenAndServe()
 	}()
 
-	ws.logger.Info("websocket transport listening", "addr", addr)
+	ws.logger.Info("websocket transport listening", "addr", logging.Escape(addr))
 
 	select {
 	case err := <-errCh:
@@ -114,7 +115,7 @@ func (ws *WSServer) HandleHealth(w http.ResponseWriter, _ *http.Request) {
 		"status":  "ok",
 		"version": ws.version,
 	}); err != nil {
-		ws.logger.Warn("health response write failed", "error", err)
+		ws.logger.Warn("health response write failed", "error", logging.Escape(err.Error()))
 	}
 }
 
@@ -134,7 +135,7 @@ func (ws *WSServer) authorized(r *http.Request) bool {
 	}
 	ok := subtle.ConstantTimeCompare([]byte(presented), []byte(ws.token)) == 1
 	if ok && fromQuery {
-		ws.logger.Warn("token presented via query parameter; prefer Authorization header to avoid log exposure", "remote", r.RemoteAddr)
+		ws.logger.Warn("token presented via query parameter; prefer Authorization header to avoid log exposure", "remote", logging.Escape(r.RemoteAddr))
 	}
 	return ok
 }
@@ -146,20 +147,20 @@ func (ws *WSServer) authorized(r *http.Request) bool {
 // and a bare WebSocket dialer can authenticate.
 func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	if !ws.authorized(r) {
-		ws.logger.Warn("unauthorized mcp connection attempt", "remote", r.RemoteAddr)
+		ws.logger.Warn("unauthorized mcp connection attempt", "remote", logging.Escape(r.RemoteAddr))
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	conn, err := ws.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		ws.logger.Error("websocket upgrade failed", "error", err)
+		ws.logger.Error("websocket upgrade failed", "error", logging.Escape(err.Error()))
 		return
 	}
 	conn.SetReadLimit(wsReadLimit)
 	defer func() { _ = conn.Close() }()
 
-	ws.logger.Info("websocket session started", "remote", conn.RemoteAddr())
+	ws.logger.Debug("websocket session started", "remote", logging.Escape(conn.RemoteAddr().String()))
 
 	// Create pipes to bridge WebSocket <-> StdioServer.
 	// clientReader/clientWriter: MCP server reads requests from here.
@@ -222,7 +223,7 @@ func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 
 	// Run the MCP session. Listen blocks until EOF or context cancel.
 	if err := stdio.Listen(ctx, clientReader, serverWriter); err != nil {
-		ws.logger.Debug("mcp session ended", "error", err)
+		ws.logger.Debug("mcp session ended", "error", logging.Escape(err.Error()))
 	}
 
 	// Close the server writer so goroutine 2 sees EOF.
@@ -230,5 +231,5 @@ func (ws *WSServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	cancel()
 	wg.Wait()
 
-	ws.logger.Info("websocket session ended", "remote", conn.RemoteAddr())
+	ws.logger.Debug("websocket session ended", "remote", logging.Escape(conn.RemoteAddr().String()))
 }

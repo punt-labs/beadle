@@ -73,12 +73,7 @@ func TestParseWorkerOutput_EmptyOutput(t *testing.T) {
 // so the caller must also t.Setenv("PATH", dir) (or prepend dir to the
 // real PATH) for it to be found.
 //
-// Length, not the value, is deliberate: WorkerSpawner.Run itself logs the
-// worker's raw stdout for diagnostics (spawner.go), so a stub that echoed
-// the secret verbatim would make it appear in the captured log through
-// that entirely separate, legitimate logging path -- proving delivery by
-// defeating the non-logging assertion it needs to coexist with. A
-// non-empty length that matches the input can only be produced if the
+// A non-empty length that matches the input can only be produced if the
 // value genuinely reached the subprocess's environment; an unset or
 // empty-string var yields length 0, still distinguishable from a real
 // secret's length.
@@ -112,6 +107,41 @@ func (h *capturingHandler) recordsText() string {
 	return sb.String()
 }
 
+func TestWorkerSpawner_Run_TelemetryEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		inherited map[string]string
+		overrides map[string]string
+		want      string
+	}{
+		{name: "unset", want: "unset|unset"},
+		{name: "global veto", inherited: map[string]string{"PUNT_TELEMETRY": "off"}, want: "off|unset"},
+		{name: "tool veto", inherited: map[string]string{"BEADLE_TELEMETRY": "off"}, want: "unset|off"},
+		{name: "both vetoes", inherited: map[string]string{"PUNT_TELEMETRY": "off", "BEADLE_TELEMETRY": "off"}, overrides: map[string]string{"PUNT_TELEMETRY": "on", "BEADLE_TELEMETRY": "on"}, want: "off|off"},
+		{name: "empty values", inherited: map[string]string{"PUNT_TELEMETRY": "", "BEADLE_TELEMETRY": ""}, want: "|"},
+		{name: "enabled values", inherited: map[string]string{"PUNT_TELEMETRY": "on", "BEADLE_TELEMETRY": "on"}, want: "on|on"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, name := range []string{"PUNT_TELEMETRY", "BEADLE_TELEMETRY"} {
+				t.Setenv(name, "")
+				require.NoError(t, os.Unsetenv(name))
+			}
+			for name, value := range tc.inherited {
+				t.Setenv(name, value)
+			}
+			dir := t.TempDir()
+			script := "#!/bin/sh\n" +
+				`printf '{"result":"%s|%s","session_id":"s1","is_error":false}' "${PUNT_TELEMETRY-unset}" "${BEADLE_TELEMETRY-unset}"` + "\n"
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755))
+			t.Setenv("PATH", dir)
+			spawner := &WorkerSpawner{APIKey: "test-api-key", Logger: testLogger()}
+			result, err := spawner.Run(t.Context(), "m-telemetry", filepath.Join(dir, "mcp.json"), filepath.Join(dir, "prompt.txt"), nil, tc.overrides)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, result.Output)
+		})
+	}
+}
+
 // TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged is the
 // regression test for the mission's hard constraint on context7's
 // CONTEXT7_API_KEY: any envOverrides value passed to Run -- the same
@@ -133,8 +163,8 @@ func (h *capturingHandler) recordsText() string {
 // either. writeEnvEchoingClaudeBinary's stub reads the env var back and
 // embeds its length in its own JSON output, so WorkerResult.Output is the
 // proof of delivery, and the captured log is still the proof of
-// non-logging -- of the value; the env var NAME (fine to log) is expected
-// in both.
+// non-logging. Diagnostics expose the variable count, not names or values.
+
 func TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged(t *testing.T) {
 	dir := writeEnvEchoingClaudeBinary(t, "CONTEXT7_API_KEY")
 	t.Setenv("PATH", dir)
@@ -159,8 +189,8 @@ func TestWorkerSpawner_Run_EnvOverrideDeliveredAndNeverLogged(t *testing.T) {
 		"the env var must actually reach the worker subprocess's environment, at its real length")
 	assert.NotContains(t, h.recordsText(), secretValue,
 		"an envOverrides value must never appear in a log line")
-	assert.Contains(t, h.recordsText(), "CONTEXT7_API_KEY",
-		"the env var NAME is fine to log -- only the value is sensitive")
+	assert.Contains(t, h.recordsText(), "variable_count=6")
+	assert.NotContains(t, h.recordsText(), "CONTEXT7_API_KEY")
 }
 
 // writeArgEchoingClaudeBinary writes a shell script named "claude" that
