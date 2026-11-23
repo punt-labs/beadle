@@ -95,7 +95,14 @@ test-tools-biff: ## Regression test: reuse biff on PATH and install the pin only
 	make=$$(command -v "$(MAKE_COMMAND)"); \
 	mkdir -p "$(CURDIR)/.tmp"; \
 	tmp=$$(mktemp -d "$(CURDIR)/.tmp/test-tools-biff.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
-	for tool in sed xargs sh grep; do ln -s "$$(command -v "$$tool")" "$$tmp/$$tool"; done; \
+	for tool in sed xargs sh grep printenv; do ln -s "$$(command -v "$$tool")" "$$tmp/$$tool"; done; \
+	test_path_for() { \
+		PATH="$$1" MAKEFLAGS= "$$make" --no-print-directory \
+		  --eval='probe-test-path: ; @$$(call TEST_RUN,printenv PATH)' \
+		  BEADLE_EMAIL_BIN="$$tmp/beadle-bin" TEST_ETHOS_BIN="$$tmp/ethos-bin" probe-test-path; \
+	}; \
+	mkdir "$$tmp/nonexec"; \
+	printf '#!/bin/sh\nexit 0\n' > "$$tmp/nonexec/biff"; \
 	printf '#!/bin/sh\nexit 0\n' > "$$tmp/biff"; \
 	printf '%s\n' '#!/bin/sh' \
 	  'printf "%s\n" "$$*" >> "$${0%/*}/calls"' \
@@ -104,15 +111,23 @@ test-tools-biff: ## Regression test: reuse biff on PATH and install the pin only
 	  '  "tool list") printf "punt-biff v%s\n" "$(BIFF_VERSION)" ;;' \
 	  '  *) printf "%s\n" "$$*" ;;' 'esac' > "$$tmp/uv"; \
 	chmod +x "$$tmp/biff" "$$tmp/uv"; \
-	PATH="$$tmp" MAKEFLAGS= "$$make" --no-print-directory BIFF_VERSION="$(BIFF_VERSION)" tools-biff; \
-	test ! -e "$$tmp/calls" || { echo "test-tools-biff: unexpectedly ran uv with biff on PATH" >&2; exit 1; }; \
+	PATH="$$tmp/nonexec:$$tmp" MAKEFLAGS= "$$make" --no-print-directory BIFF_VERSION="$(BIFF_VERSION)" tools-biff; \
+	selected=$$(test_path_for "$$tmp/nonexec:$$tmp"); \
+	test "$$selected" = "$$tmp/beadle-bin:$$tmp/ethos-bin:$$tmp/nonexec:$$tmp" || { echo "test-tools-biff: unexpectedly changed PATH with executable biff present: $$selected" >&2; exit 1; }; \
+	test ! -e "$$tmp/calls" || { echo "test-tools-biff: unexpectedly ran uv with executable biff on PATH" >&2; exit 1; }; \
 	rm "$$tmp/biff"; \
 	calls=$$(PATH="$$tmp" MAKEFLAGS= "$$make" --no-print-directory BIFF_VERSION="$(BIFF_VERSION)" tools-biff); \
 	test "$$calls" = "tool install --force punt-biff==$(BIFF_VERSION)" || { echo "test-tools-biff: unexpected fallback command: $$calls" >&2; exit 1; }; \
 	mkdir "$$tmp/cached"; \
 	printf '#!/bin/sh\nexit 0\n' > "$$tmp/cached/biff"; chmod +x "$$tmp/cached/biff"; \
-	calls=$$(PATH="$$tmp" MAKEFLAGS= "$$make" --no-print-directory BIFF_VERSION="$(BIFF_VERSION)" tools-biff); \
+	selected=$$(test_path_for "$$tmp"); \
+	test "$$selected" = "$$tmp/beadle-bin:$$tmp/ethos-bin:$$tmp:$$tmp/cached" || { echo "test-tools-biff: did not append the fallback directory without biff on PATH: $$selected" >&2; exit 1; }; \
+	rm "$$tmp/calls"; \
+	calls=$$(PATH="$$tmp/nonexec:$$tmp" MAKEFLAGS= "$$make" --no-print-directory BIFF_VERSION="$(BIFF_VERSION)" tools-biff); \
+	test -s "$$tmp/calls" || { echo "test-tools-biff: treated a non-executable biff as installed" >&2; exit 1; }; \
 	test -z "$$calls" || { echo "test-tools-biff: unexpectedly reinstalled the cached fallback: $$calls" >&2; exit 1; }; \
+	selected=$$(test_path_for "$$tmp/nonexec:$$tmp"); \
+	test "$$selected" = "$$tmp/beadle-bin:$$tmp/ethos-bin:$$tmp/nonexec:$$tmp:$$tmp/cached" || { echo "test-tools-biff: did not append the fallback directory with non-executable biff on PATH: $$selected" >&2; exit 1; }; \
 	echo "test-tools-biff: PASS"
 
 docs: ## Lint markdown
@@ -159,8 +174,23 @@ tools-ethos: ## Install the pinned test ethos without replacing the user's CLI
 	mkdir -p "$(TEST_ETHOS_BIN)"
 	GOBIN="$(TEST_ETHOS_BIN)" go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
 
+define BIFF_ON_PATH
+	biff_on_path() ( \
+		path=$$PATH; \
+		while :; do \
+			dir=$${path%%:*}; dir=$${dir:-.}; \
+			if [ -f "$$dir/biff" ] && [ -x "$$dir/biff" ]; then return 0; fi; \
+			case "$$path" in \
+				*:*) path=$${path#*:} ;; \
+				*) return 1 ;; \
+			esac; \
+		done \
+	)
+endef
+
 tools-biff: ## Reuse biff on PATH or install the pinned fallback for tests
-	@if command -v biff >/dev/null 2>&1; then \
+	@$(BIFF_ON_PATH); \
+	if biff_on_path; then \
 		echo "tools-biff: biff already on PATH, skipping" >&2; \
 	else \
 		command -v uv >/dev/null 2>&1 || { echo "tools-biff: uv not found on PATH -- install uv (https://docs.astral.sh/uv/) to provision biff" >&2; exit 1; }; \
@@ -169,7 +199,7 @@ tools-biff: ## Reuse biff on PATH or install the pinned fallback for tests
 			echo "tools-biff: 'uv tool dir --bin' failed (exit $$uvbin_status) or produced no output (stdout: $$uvbin)" >&2; \
 			exit 1; \
 		fi; \
-		if [ -x "$$uvbin/biff" ] && listing=$$(uv tool list) && printf '%s\n' "$$listing" | grep -qFx "punt-biff v$(BIFF_VERSION)"; then \
+		if [ -f "$$uvbin/biff" ] && [ -x "$$uvbin/biff" ] && listing=$$(uv tool list) && printf '%s\n' "$$listing" | grep -qFx "punt-biff v$(BIFF_VERSION)"; then \
 			echo "tools-biff: pinned fallback already installed, skipping" >&2; \
 		else \
 			uv tool install --force punt-biff==$(BIFF_VERSION); \
@@ -195,8 +225,9 @@ tools-beadle-email: ## Self-build this branch's beadle-email into BEADLE_EMAIL_B
 TEST_PREREQS := tools-ethos tools-biff tools-beadle-email
 
 define TEST_RUN
+	$(BIFF_ON_PATH); \
 	test_path="$(BEADLE_EMAIL_BIN):$(TEST_ETHOS_BIN):$$PATH"; \
-	if ! command -v biff >/dev/null 2>&1; then \
+	if ! biff_on_path; then \
 		uvbin=$$(uv tool dir --bin); uvbin_status=$$?; \
 		if [ $$uvbin_status -ne 0 ] || [ -z "$$uvbin" ]; then \
 			echo "$@: 'uv tool dir --bin' failed (exit $$uvbin_status) or produced no output (stdout: $$uvbin) -- cannot build the PATH that carries biff" >&2; \
