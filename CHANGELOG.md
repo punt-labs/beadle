@@ -114,6 +114,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- Clear 3 open Dependabot alerts (1 high): `google.golang.org/grpc`
+  1.83.1 → 1.83.2 (GHSA-2v4p-qf9q-27wj) and the `go.opentelemetry.io/otel`
+  modules 1.45.0 → 1.47.0 (GHSA-q7gw-24fr-5p69).
+
 - Go toolchain pinned to go1.26.11 for GO-2026-6859 (HTTP/1 server crash
   from a `MaxBytesReader` header race in `net/http`). `make vulncheck`
   reported the vulnerability on go1.26.10 and failed every PR's test job.
