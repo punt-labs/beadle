@@ -124,6 +124,7 @@ test-tools-biff: ## Regression test: reuse biff on PATH and install the pin only
 	rm "$$tmp/calls"; \
 	calls=$$(PATH="$$tmp/nonexec:$$tmp" MAKEFLAGS= "$$make" --no-print-directory BIFF_VERSION="$(BIFF_VERSION)" tools-biff); \
 	test -s "$$tmp/calls" || { echo "test-tools-biff: treated a non-executable biff as installed" >&2; exit 1; }; \
+	grep -qFx 'tool list' "$$tmp/calls" || { echo "test-tools-biff: reused the cached fallback without checking its version" >&2; exit 1; }; \
 	test -z "$$calls" || { echo "test-tools-biff: unexpectedly reinstalled the cached fallback: $$calls" >&2; exit 1; }; \
 	selected=$$(test_path_for "$$tmp/nonexec:$$tmp"); \
 	test "$$selected" = "$$tmp/beadle-bin:$$tmp/ethos-bin:$$tmp/nonexec:$$tmp:$$tmp/cached" || { echo "test-tools-biff: did not append the fallback directory with non-executable biff on PATH: $$selected" >&2; exit 1; }; \
