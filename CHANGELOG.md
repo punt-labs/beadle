@@ -100,6 +100,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- Three unused test helpers: no-expiry GPG key creation, unsigned
+  trusted-message construction, and manual SMTP fixture shutdown.
+
 - `.punt-labs/ethos/missions-closed/` (66 files, 408 KB of exported
   contracts and results) is no longer tracked; the mission store is
   `.punt-labs/local/ethos/`, and no sibling repo tracks exports.

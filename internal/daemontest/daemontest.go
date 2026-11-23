@@ -14,7 +14,7 @@
 // other file in internal/daemon uses.
 //
 // Fixtures that need no daemon type at all -- GenOwnerKey,
-// BuildPGPSignedMessage, BuildTrustedMessage, EthosOrFatal -- live in
+// BuildPGPSignedMessage, EthosOrFatal -- live in
 // internal/testenv instead, where package daemon's own white-box tests can
 // reach them too. Only SignCommand and FakeSpawner genuinely require this
 // package: they build a *daemon.Command and implement daemon.Spawner.
@@ -37,7 +37,7 @@ import (
 // using signerEmail's key in the gpg homedir home, and returns a copy of cmd
 // with Signature set to the resulting armored signature. It never mutates
 // cmd. home must already hold signerEmail's keypair (see
-// testenv.GenKey/GenKeyNoExpiry).
+// testenv.GenKey).
 func SignCommand(t testing.TB, gpgBin, home, signerEmail string, cmd *daemon.Command) *daemon.Command {
 	t.Helper()
 

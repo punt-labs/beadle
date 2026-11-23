@@ -217,7 +217,7 @@ entry point, the way a live message actually would.
 |---|------|-----------|----------------|----------------|------------|
 | 1 | Trust classification | `internal/daemon/handler.go:150-161` (`verifyTrust`, called from `OnNewMail`) | PGP-signed or Proton-trusted message from a granted sender creates a pipeline | Unsigned message from the same sender creates nothing | `testserver.AddRawMessage` with a signed/trusted/bare RFC822 body (three builders above) |
 | 2 | Per-contact `x` permission | `internal/contacts/permissions.go:75-89` (`CheckPermission`), gated at `internal/daemon/handler.go:143-148` | `rwx` or `r-x` sender's verified message creates a pipeline | `rw-` sender's verified message creates nothing, and an unknown sender (no contact record) is skipped before permission is even checked (`handler.go:137-141`) | `testenv.AddContact(name, addr, "rw-")` vs `"rwx"`; simply never adding a contact for the unknown-sender case |
-| 3 | Command-file signature | `internal/daemon/signature.go:133-167` (`VerifySignature`), gated at `internal/daemon/command.go:142-150` (`loadCommand`) | A command file signed by the configured owner key loads | An unsigned file, a file signed by a different key, and a file signed by an *expired* owner key are all rejected by `VerifySignature` when a real owner key is configured | `CanonicalCommandBytes` (`signature.go:100-116`) + an ephemeral GPG key (`testenv.GenKey`/`GenKeyNoExpiry`, `internal/testenv/gpg.go:44-80`) to sign; a second, unrelated key to produce a wrong-key rejection |
+| 3 | Command-file signature | `internal/daemon/signature.go:133-167` (`VerifySignature`), gated at `internal/daemon/command.go:142-150` (`loadCommand`) | A command file signed by the configured owner key loads | An unsigned file, a file signed by a different key, and a file signed by an *expired* owner key are all rejected by `VerifySignature` when a real owner key is configured | `CanonicalCommandBytes` (`signature.go:100-116`) + an ephemeral GPG key (`testenv.GenKey`, `internal/testenv/gpg.go`) to sign; a second, unrelated key to produce a wrong-key rejection |
 | 4 | Contract validity against the real ethos CLI | `internal/daemon/pipeline.go`'s `buildStageContract` validated by the real `ethos mission create` binary | A generated stage contract is accepted | A contract missing a required field is rejected — see "Gate 4's existing test" below for the negative control this design adds | `isolatedEthosEnv`-equivalent (ported into `testenv`, see below) + the real `ethos` binary, pinned per §"Pinning ethos" |
 
 **Gate 3's scope, and a sub-case this design does not need to add.** The
@@ -756,7 +756,7 @@ transcription of this design, not a new negotiation:
   convert the four `t.Skip("gpg not installed")` sites to `t.Fatalf` with the
   install remedy.
 - `internal/daemontest/` (new package) — `SignCommand` (gate-3 signing
-  helper built on `CanonicalCommandBytes` + `testenv.GenKey`/`GenKeyNoExpiry`)
+  helper built on `CanonicalCommandBytes` + `testenv.GenKey`)
   and `FakeSpawner` (implements `daemon.Spawner`, records calls, returns a
   canned `WorkerResult`).
 - `internal/daemon/e2e_test.go` (new file) — `TestOnNewMail_EndToEnd` and its

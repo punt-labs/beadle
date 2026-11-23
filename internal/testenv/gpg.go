@@ -62,25 +62,6 @@ Expire-Date: 1y
 	require.NoError(t, cmd.Run(), "gpg key generation failed")
 }
 
-// GenKeyNoExpiry creates an ephemeral GPG keypair without an expiration date.
-func GenKeyNoExpiry(t testing.TB, gpgBin, home, name, email string) {
-	t.Helper()
-	base := []string{"--homedir", home, "--batch", "--no-tty"}
-	script := fmt.Sprintf(`%%no-protection
-Key-Type: RSA
-Key-Length: 2048
-Name-Real: %s
-Name-Email: %s
-Expire-Date: 0
-%%commit
-`, name, email)
-
-	cmd := exec.Command(gpgBin, append(base, "--gen-key")...)
-	cmd.Stdin = bytes.NewBufferString(script)
-	cmd.Stderr = os.Stderr
-	require.NoError(t, cmd.Run(), "gpg key generation failed")
-}
-
 // GenKeyWithPassphrase creates an ephemeral GPG keypair with a passphrase and 1-year expiry.
 func GenKeyWithPassphrase(t testing.TB, gpgBin, home, name, email, passphrase string) {
 	t.Helper()
@@ -189,17 +170,4 @@ func BuildPGPSignedMessage(t testing.TB, gpgBin, from, subject, body string) (ra
 	fmt.Fprintf(&msg, "\r\n--%s--\r\n", boundary)
 
 	return msg.Bytes(), keyID
-}
-
-// BuildTrustedMessage returns raw RFC822 bytes carrying Proton E2E trust
-// headers but no PGP signature -- SMTP-injectable, so never sufficient on
-// its own for x-bit execution (see internal/daemon/handler.go's
-// verifyTrust).
-func BuildTrustedMessage(from, subject, body string) []byte {
-	return []byte(fmt.Sprintf(
-		"From: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: <%d@test>\r\n"+
-			"X-Pm-Content-Encryption: end-to-end\r\nX-Pm-Origin: internal\r\n"+
-			"Content-Type: text/plain\r\n\r\n%s",
-		from, subject, time.Now().Format(time.RFC1123Z), time.Now().UnixNano(), body,
-	))
 }
