@@ -55,7 +55,7 @@ endef
 
 SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard -z 2>/dev/null | $(DISCOVER_SHELL_SCRIPTS))
 
-.PHONY: help lint lint-strict lint-shell test-shell-discovery test-tools-biff vet staticcheck vulncheck docs tools-ethos tools-biff tools-beadle-email test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
+.PHONY: help lint lint-strict lint-shell test-shell-discovery test-tools-biff probe-test-path vet staticcheck vulncheck docs tools-ethos tools-biff tools-beadle-email test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -98,7 +98,6 @@ test-tools-biff: ## Regression test: reuse biff on PATH and install the pin only
 	for tool in sed xargs sh grep printenv; do ln -s "$$(command -v "$$tool")" "$$tmp/$$tool"; done; \
 	test_path_for() { \
 		PATH="$$1" MAKEFLAGS= "$$make" --no-print-directory \
-		  --eval='probe-test-path: ; @$$(call TEST_RUN,printenv PATH)' \
 		  BEADLE_EMAIL_BIN="$$tmp/beadle-bin" TEST_ETHOS_BIN="$$tmp/ethos-bin" probe-test-path; \
 	}; \
 	mkdir "$$tmp/nonexec"; \
@@ -237,6 +236,9 @@ define TEST_RUN
 	fi; \
 	PATH="$$test_path" $(1)
 endef
+
+probe-test-path:
+	@$(call TEST_RUN,printenv PATH)
 
 test: $(TEST_PREREQS) ## Run tests with race detection
 	$(call TEST_RUN,go test -race -count=1 ./...)
