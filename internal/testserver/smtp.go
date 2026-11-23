@@ -13,7 +13,6 @@ import (
 
 // SMTPServer is an in-process SMTP server that captures sent messages.
 type SMTPServer struct {
-	server  *gosmtp.Server
 	backend *memSMTPBackend
 }
 
@@ -42,7 +41,7 @@ func NewSMTPServer(t testing.TB) (*SMTPServer, string) {
 	serveUntilCleanup(t, ln, srv.Serve, srv.Close)
 
 	addr := ln.Addr().String()
-	return &SMTPServer{server: srv, backend: backend}, addr
+	return &SMTPServer{backend: backend}, addr
 }
 
 // SentMessages returns all messages captured by the server.
@@ -52,11 +51,6 @@ func (s *SMTPServer) SentMessages() []SentMessage {
 	out := make([]SentMessage, len(s.backend.messages))
 	copy(out, s.backend.messages)
 	return out
-}
-
-// Close shuts down the server.
-func (s *SMTPServer) Close() error {
-	return s.server.Close()
 }
 
 // --- SMTP Backend ---
