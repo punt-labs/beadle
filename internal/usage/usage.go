@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/punt-observe-go/telemetry"
 )
 
@@ -179,27 +180,29 @@ type Client struct {
 // New reads tool-wide configuration before starting asynchronous capture.
 // Either configuration file can veto telemetry; unreadable settings fail closed.
 func New(logger *slog.Logger) *Client {
-	disabled := false
-	home, err := os.UserHomeDir()
+	return &Client{client: telemetry.New(paths.Namespace, telemetry.Config{Disabled: disabledBySettings(), Diagnostics: logger}, schemas...)}
+}
+
+func disabledBySettings() bool {
+	dir, err := paths.DataDir()
 	if err != nil {
-		disabled = true
-	} else {
-		for _, name := range []string{"email.json", "daemon.json"} {
-			data, err := os.ReadFile(filepath.Clean(filepath.Join(home, ".punt-labs", "beadle", name)))
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			var settings struct {
-				Disabled bool `json:"telemetry_disabled"`
-			}
-			if err != nil || json.Unmarshal(data, &settings) != nil {
-				disabled = true
-			} else {
-				disabled = disabled || settings.Disabled
-			}
-		}
+		return true
 	}
-	return &Client{client: telemetry.New("beadle", telemetry.Config{Disabled: disabled, Diagnostics: logger}, schemas...)}
+	disabled := false
+	for _, name := range []string{"email.json", "daemon.json"} {
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(dir, name)))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		var settings struct {
+			Disabled bool `json:"telemetry_disabled"`
+		}
+		if err != nil || json.Unmarshal(data, &settings) != nil {
+			return true
+		}
+		disabled = disabled || settings.Disabled
+	}
+	return disabled
 }
 
 // Shutdown permits a short best-effort flush, independent of operation results.

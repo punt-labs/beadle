@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -334,6 +335,20 @@ func TestCanonicalKeySameForSpellings(t *testing.T) {
 	viaDeep, err := canonicalKey(deep)
 	require.NoError(t, err)
 	assert.Equal(t, deep, viaDeep, "an unresolvable path keys on its cleaned absolute form")
+}
+
+func TestCheckoutRemainsLockedAfterOperationLockIsRemoved(t *testing.T) {
+	root := t.TempDir()
+	probe, err := os.Open(root)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, probe.Close()) })
+
+	require.NoError(t, WithLock(root, func() error {
+		require.NoError(t, os.Remove(filepath.Join(root, ".punt-labs", "local", "beadle", "enable-disable.lock")))
+		assert.ErrorIs(t, syscall.Flock(int(probe.Fd()), syscall.LOCK_EX|syscall.LOCK_NB), syscall.EWOULDBLOCK)
+		return nil
+	}))
+	require.NoError(t, syscall.Flock(int(probe.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
 }
 
 func TestSiblingLockPath(t *testing.T) {

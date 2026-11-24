@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Resolve telemetry settings from the declared `~/.punt-labs/beadle/` home
+  directory, and keep enable/disable serialized even when callers use
+  different temporary directories. When upgrading, let any in-flight
+  enable/disable command finish before running either command with the new
+  binary: older versions do not use the checkout lock.
+
 - Beadle's test setup keeps the existing `biff` CLI on `PATH` instead of
   replacing it with the fallback version.
 

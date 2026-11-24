@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -136,6 +137,52 @@ func TestConcurrentEnableDisableReachConsistentState(t *testing.T) {
 	} else {
 		assert.Equal(t, "# Rules\n", host, "dormant end state: no marker and no import")
 	}
+}
+
+func TestOperationLockBelongsToTheCheckout(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "main")
+	linked := filepath.Join(parent, "linked")
+	out, err := exec.Command("git", "init", "--quiet", root).CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	out, err = exec.Command("git", "-C", root, "-c", "user.name=Test", "-c", "user.email=test@example.test",
+		"commit", "--allow-empty", "--no-gpg-sign", "-m", "Initial commit").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	out, err = exec.Command("git", "-C", root, "worktree", "add", "--quiet", "--detach", linked).CombinedOutput()
+	require.NoError(t, err, "%s", out)
+
+	lockPath := filepath.Join(root, ".punt-labs", "local", "beadle", "enable-disable.lock")
+	t.Setenv("TMPDIR", filepath.Join(parent, "missing-first"))
+	require.NoError(t, Enable(root, nil))
+	enabledLock, err := os.Stat(lockPath)
+	require.NoError(t, err)
+
+	t.Setenv("TMPDIR", filepath.Join(parent, "missing-second"))
+	require.NoError(t, Disable(root, true, nil))
+	disabledLock, err := os.Stat(lockPath)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(enabledLock, disabledLock))
+
+	require.NoError(t, Enable(linked, nil))
+	linkedLock, err := os.Stat(filepath.Join(linked, ".punt-labs", "local", "beadle", "enable-disable.lock"))
+	require.NoError(t, err)
+	assert.False(t, os.SameFile(enabledLock, linkedLock))
+}
+
+func TestRefusesOperationLockOutsideCheckout(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, ".punt-labs")))
+	require.Error(t, Enable(root, nil))
+	assert.NoDirExists(t, filepath.Join(outside, "local"))
+	assert.NoFileExists(t, hostPath(root))
+}
+
+func TestHomeCheckoutRefusalCreatesNoLock(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.ErrorIs(t, Enable(home, nil), permissions.ErrRefused)
+	require.ErrorIs(t, Disable(home, false, nil), permissions.ErrRefused)
+	assert.NoDirExists(t, filepath.Join(home, ".punt-labs"))
 }
 
 func TestProgressfNilIsSafe(t *testing.T) {

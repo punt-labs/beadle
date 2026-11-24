@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 )
 
+// Namespace is the declared filesystem namespace for beadle-email and beadle-daemon (FS-2).
+const Namespace = "beadle"
+
 // DataDir returns ~/.punt-labs/beadle/.
 // This is the single root for all beadle runtime data:
 // config, secrets, contacts, attachments, logs.
@@ -17,7 +20,7 @@ func DataDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
-	return filepath.Join(home, ".punt-labs", "beadle"), nil
+	return filepath.Join(home, ".punt-labs", Namespace), nil
 }
 
 // MustDataDir returns DataDir or panics. Use only in contexts where
