@@ -351,40 +351,31 @@ func TestCheckoutRemainsLockedAfterOperationLockIsRemoved(t *testing.T) {
 	require.NoError(t, syscall.Flock(int(probe.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
 }
 
-func TestOperationIgnoreAcceptsGitLineEndings(t *testing.T) {
+func TestOperationIgnoreFile(t *testing.T) {
+	const rules = "/.gitignore\n/enable-disable.lock"
+	const crlfRules = "# existing comment\r\n/.gitignore\r\n/enable-disable.lock\r\n"
 	for _, tc := range []struct {
-		name, contents string
+		name, contents, want string
 	}{
-		{"CRLF", "# existing comment\r\n/.gitignore\r\n/enable-disable.lock\r\n"},
-		{"no final newline", "/.gitignore\n/enable-disable.lock"},
+		{"CRLF", crlfRules, crlfRules},
+		{"no final newline", rules, rules},
+		{"empty file", "", rules + "\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			require.NoError(t, WithLock(root, func() error { return nil }))
-			ignore := filepath.Join(root, ".punt-labs", "local", "beadle", ".gitignore")
+			dir := filepath.Join(root, ".punt-labs", "local", "beadle")
+			require.NoError(t, os.MkdirAll(dir, 0o700))
+			ignore := filepath.Join(dir, ".gitignore")
 			require.NoError(t, os.WriteFile(ignore, []byte(tc.contents), 0o600))
 
-			require.NoError(t, WithLock(root, func() error { return nil }))
-			data, err := os.ReadFile(ignore)
-			require.NoError(t, err)
-			assert.Equal(t, tc.contents, string(data))
+			require.NoError(t, WithLock(root, func() error {
+				data, err := os.ReadFile(ignore)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, string(data))
+				return nil
+			}))
 		})
 	}
-}
-
-func TestOperationIgnoreRepairsEmptyFile(t *testing.T) {
-	root := t.TempDir()
-	dir := filepath.Join(root, ".punt-labs", "local", "beadle")
-	require.NoError(t, os.MkdirAll(dir, 0o700))
-	ignore := filepath.Join(dir, ".gitignore")
-	require.NoError(t, os.WriteFile(ignore, nil, 0o600))
-
-	require.NoError(t, WithLock(root, func() error {
-		data, err := os.ReadFile(ignore)
-		require.NoError(t, err)
-		assert.Equal(t, "/.gitignore\n/enable-disable.lock\n", string(data))
-		return nil
-	}))
 }
 
 func TestSiblingLockPath(t *testing.T) {
