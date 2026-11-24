@@ -351,6 +351,27 @@ func TestCheckoutRemainsLockedAfterOperationLockIsRemoved(t *testing.T) {
 	require.NoError(t, syscall.Flock(int(probe.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
 }
 
+func TestOperationIgnoreAcceptsGitLineEndings(t *testing.T) {
+	for _, tc := range []struct {
+		name, contents string
+	}{
+		{"CRLF", "# existing comment\r\n/.gitignore\r\n/enable-disable.lock\r\n"},
+		{"no final newline", "/.gitignore\n/enable-disable.lock"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			require.NoError(t, WithLock(root, func() error { return nil }))
+			ignore := filepath.Join(root, ".punt-labs", "local", "beadle", ".gitignore")
+			require.NoError(t, os.WriteFile(ignore, []byte(tc.contents), 0o600))
+
+			require.NoError(t, WithLock(root, func() error { return nil }))
+			data, err := os.ReadFile(ignore)
+			require.NoError(t, err)
+			assert.Equal(t, tc.contents, string(data))
+		})
+	}
+}
+
 func TestSiblingLockPath(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "CLAUDE.md")

@@ -526,7 +526,9 @@ func ensureOperationLockIgnore(repo *os.Root, path string) error {
 		if err != nil {
 			return fmt.Errorf("reading operation lock ignore file %q: %w", path, err)
 		}
-		if strings.TrimSpace(string(data)) == "*" || strings.HasSuffix("\n"+string(data), "\n"+string(operationLockIgnore)) {
+		rules := strings.TrimRight(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+		required := strings.TrimRight(string(operationLockIgnore), "\n")
+		if strings.TrimSpace(rules) == "*" || strings.HasSuffix("\n"+rules, "\n"+required) {
 			return nil
 		}
 		return fmt.Errorf("operation lock ignore file %q has custom rules; add /.gitignore and /enable-disable.lock at the end", path)
