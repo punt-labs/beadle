@@ -372,6 +372,21 @@ func TestOperationIgnoreAcceptsGitLineEndings(t *testing.T) {
 	}
 }
 
+func TestOperationIgnoreRepairsEmptyFile(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".punt-labs", "local", "beadle")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	ignore := filepath.Join(dir, ".gitignore")
+	require.NoError(t, os.WriteFile(ignore, nil, 0o600))
+
+	require.NoError(t, WithLock(root, func() error {
+		data, err := os.ReadFile(ignore)
+		require.NoError(t, err)
+		assert.Equal(t, "/.gitignore\n/enable-disable.lock\n", string(data))
+		return nil
+	}))
+}
+
 func TestSiblingLockPath(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "CLAUDE.md")

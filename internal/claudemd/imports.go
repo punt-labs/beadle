@@ -515,26 +515,29 @@ func withOperationLock(repo *os.Root, fn func() error) error {
 func ensureOperationLockIgnore(repo *os.Root, path string) error {
 	file, err := repo.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if errors.Is(err, os.ErrExist) {
-		info, err := repo.Lstat(path)
-		if err != nil {
-			return fmt.Errorf("inspecting operation lock ignore file %q: %w", path, err)
+		info, statErr := repo.Lstat(path)
+		if statErr != nil {
+			return fmt.Errorf("inspecting operation lock ignore file %q: %w", path, statErr)
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("operation lock ignore file %q is not a regular file", path)
 		}
-		data, err := repo.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("reading operation lock ignore file %q: %w", path, err)
+		data, readErr := repo.ReadFile(path)
+		if readErr != nil {
+			return fmt.Errorf("reading operation lock ignore file %q: %w", path, readErr)
 		}
 		rules := strings.TrimRight(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 		required := strings.TrimRight(string(operationLockIgnore), "\n")
 		if strings.TrimSpace(rules) == "*" || strings.HasSuffix("\n"+rules, "\n"+required) {
 			return nil
 		}
-		return fmt.Errorf("operation lock ignore file %q has custom rules; add /.gitignore and /enable-disable.lock at the end", path)
+		if len(data) != 0 {
+			return fmt.Errorf("operation lock ignore file %q has custom rules; add /.gitignore and /enable-disable.lock at the end", path)
+		}
+		file, err = repo.OpenFile(path, os.O_WRONLY|syscall.O_NOFOLLOW, 0)
 	}
 	if err != nil {
-		return fmt.Errorf("creating operation lock ignore file %q: %w", path, err)
+		return fmt.Errorf("opening operation lock ignore file %q for writing: %w", path, err)
 	}
 	if _, err := file.Write(operationLockIgnore); err != nil {
 		return errors.Join(fmt.Errorf("writing operation lock ignore file %q: %w", path, err), file.Close(), repo.Remove(path))
