@@ -123,6 +123,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- Update Gorilla WebSocket to `v1.5.4-0.20240701034025-d67f41855da4`
+  to fix weak WebSocket masking randomness (GO-2026-6278).
+
 - Clear 3 open Dependabot alerts (1 high): `google.golang.org/grpc`
   1.83.1 → 1.83.2 (GHSA-2v4p-qf9q-27wj) and the `go.opentelemetry.io/otel`
   modules 1.45.0 → 1.47.0 (GHSA-q7gw-24fr-5p69).
