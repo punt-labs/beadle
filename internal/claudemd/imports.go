@@ -35,6 +35,9 @@ import (
 //go:embed guide.md
 var Guide []byte
 
+//go:embed operation-lock.gitignore
+var operationLockIgnore []byte
+
 // ErrUnclosedFence is Register's refusal to append an import that a code fence
 // left open at the end of the file would make inert.
 var ErrUnclosedFence = errors.New("CLAUDE.md ends inside an unclosed code fence; close it first")
@@ -503,7 +506,41 @@ func withOperationLock(repo *os.Root, fn func() error) error {
 	if err := repo.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating operation lock directory %q: %w", dir, err)
 	}
+	if err := ensureOperationLockIgnore(repo, filepath.Join(dir, ".gitignore")); err != nil {
+		return err
+	}
 	return flockFile(repo.OpenFile, filepath.Join(dir, "enable-disable.lock"), fn)
+}
+
+func ensureOperationLockIgnore(repo *os.Root, path string) error {
+	file, err := repo.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		info, err := repo.Lstat(path)
+		if err != nil {
+			return fmt.Errorf("inspecting operation lock ignore file %q: %w", path, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("operation lock ignore file %q is not a regular file", path)
+		}
+		data, err := repo.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading operation lock ignore file %q: %w", path, err)
+		}
+		if strings.TrimSpace(string(data)) == "*" || strings.HasSuffix("\n"+string(data), "\n"+string(operationLockIgnore)) {
+			return nil
+		}
+		return fmt.Errorf("operation lock ignore file %q has custom rules; add /.gitignore and /enable-disable.lock at the end", path)
+	}
+	if err != nil {
+		return fmt.Errorf("creating operation lock ignore file %q: %w", path, err)
+	}
+	if _, err := file.Write(operationLockIgnore); err != nil {
+		return errors.Join(fmt.Errorf("writing operation lock ignore file %q: %w", path, err), file.Close(), repo.Remove(path))
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("closing operation lock ignore file %q: %w", path, err)
+	}
+	return nil
 }
 
 // siblingLockPath returns Lock B for the host CLAUDE.md: the sibling

@@ -177,6 +177,22 @@ func TestRefusesOperationLockOutsideCheckout(t *testing.T) {
 	assert.NoFileExists(t, hostPath(root))
 }
 
+func TestConsumerCheckoutDoesNotStageOperationLock(t *testing.T) {
+	root := t.TempDir()
+	out, err := exec.Command("git", "init", "--quiet", root).CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	require.NoError(t, Enable(root, nil))
+	assert.FileExists(t, filepath.Join(root, ".punt-labs", "local", "beadle", "enable-disable.lock"))
+	assert.NoFileExists(t, filepath.Join(root, ".gitignore"))
+
+	out, err = exec.Command("git", "-C", root, "add", "-A").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	out, err = exec.Command("git", "-C", root, "ls-files").CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	assert.Contains(t, string(out), ".punt-labs/beadle/enabled\n")
+	assert.NotContains(t, string(out), ".punt-labs/local/")
+}
+
 func TestHomeCheckoutRefusalCreatesNoLock(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

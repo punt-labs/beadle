@@ -244,8 +244,8 @@ different `email.json`. Global flags `--json` (`-j`), `--verbose` (`-v`), and
 permission rules to `.claude/settings.json`. An agent working in that repo then
 reads the guide. `disable` removes the line, the marker, and the permission
 rules, and leaves the guide in place. Commit the result through a pull request.
-Keep `.punt-labs/local/` gitignored; enable and disable use it for a private
-operation lock, not for anything you should commit.
+Enable and disable keep their private operation lock under
+`.punt-labs/local/beadle/` and ignore it even in repos without a root ignore rule.
 This follows the
 [Tool Enable/Disable standard](https://github.com/punt-labs/punt-kit/blob/main/standards/tool-enable-disable.md).
 
