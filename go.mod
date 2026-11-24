@@ -10,7 +10,7 @@ require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.26.0
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.3
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
 	github.com/mark3labs/mcp-go v1.5.0
 	github.com/punt-labs/punt-observe-go v0.0.0-20261122192811-90067f488a2a
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3

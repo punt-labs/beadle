@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -334,6 +335,47 @@ func TestCanonicalKeySameForSpellings(t *testing.T) {
 	viaDeep, err := canonicalKey(deep)
 	require.NoError(t, err)
 	assert.Equal(t, deep, viaDeep, "an unresolvable path keys on its cleaned absolute form")
+}
+
+func TestCheckoutRemainsLockedAfterOperationLockIsRemoved(t *testing.T) {
+	root := t.TempDir()
+	probe, err := os.Open(root)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, probe.Close()) })
+
+	require.NoError(t, WithLock(root, func() error {
+		require.NoError(t, os.Remove(filepath.Join(root, ".punt-labs", "local", "beadle", "enable-disable.lock")))
+		assert.ErrorIs(t, syscall.Flock(int(probe.Fd()), syscall.LOCK_EX|syscall.LOCK_NB), syscall.EWOULDBLOCK)
+		return nil
+	}))
+	require.NoError(t, syscall.Flock(int(probe.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
+}
+
+func TestOperationIgnoreFile(t *testing.T) {
+	const rules = "/.gitignore\n/enable-disable.lock"
+	const crlfRules = "# existing comment\r\n/.gitignore\r\n/enable-disable.lock\r\n"
+	for _, tc := range []struct {
+		name, contents, want string
+	}{
+		{"CRLF", crlfRules, crlfRules},
+		{"no final newline", rules, rules},
+		{"empty file", "", rules + "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, ".punt-labs", "local", "beadle")
+			require.NoError(t, os.MkdirAll(dir, 0o700))
+			ignore := filepath.Join(dir, ".gitignore")
+			require.NoError(t, os.WriteFile(ignore, []byte(tc.contents), 0o600))
+
+			require.NoError(t, WithLock(root, func() error {
+				data, err := os.ReadFile(ignore)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, string(data))
+				return nil
+			}))
+		})
+	}
 }
 
 func TestSiblingLockPath(t *testing.T) {

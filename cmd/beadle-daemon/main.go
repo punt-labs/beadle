@@ -46,7 +46,7 @@ var rootCmd = &cobra.Command{
 			level = slog.LevelDebug
 		}
 		var err error
-		logHandler, err = logging.New("beadle", "daemon", logging.WithLevel(level))
+		logHandler, err = logging.New(paths.Namespace, "daemon", logging.WithLevel(level))
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return fmt.Errorf("initialize logging: log lock busy; another beadle process may be holding it; retry: %w", err)

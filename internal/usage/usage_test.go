@@ -171,6 +171,11 @@ func TestUnavailableStoreDoesNotChangeOperation(t *testing.T) {
 	disabled.Shutdown()
 }
 
+func TestMissingHomeDisablesTelemetry(t *testing.T) {
+	t.Setenv("HOME", "")
+	assert.True(t, disabledBySettings())
+}
+
 func TestImportBoundary(t *testing.T) {
 	root := filepath.Clean("../..")
 	require.NoError(t, filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {

@@ -66,9 +66,8 @@ func Enable(root string, progress Progressf) error {
 
 func enableLocked(root string, progress Progressf) error {
 	dir := filepath.Join(root, ".punt-labs", "beadle")
-	// Read-only preflight: a refusal (malformed or symlinked settings, a
-	// home-directory repo) fails enable with nothing changed. The rules
-	// themselves are granted only after the import registers, below.
+	// Refuse malformed or symlinked settings before touching tracked files.
+	// The rules themselves are granted only after the import registers, below.
 	if err := permissions.Preflight(root); err != nil {
 		return fmt.Errorf("checking .claude/settings.json: %w", err)
 	}
@@ -205,6 +204,9 @@ func canonicalRoot(root string) (string, error) {
 	canon, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", fmt.Errorf("resolving repo root %q: %w", root, err)
+	}
+	if err := permissions.ValidateRepoRoot(canon); err != nil {
+		return "", err
 	}
 	return canon, nil
 }

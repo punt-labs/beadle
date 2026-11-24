@@ -18,15 +18,15 @@
 package claudemd
 
 import (
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/punt-labs/beadle/internal/paths"
 )
 
 // Guide is the agent-facing user guide that enable deposits into
@@ -34,6 +34,9 @@ import (
 //
 //go:embed guide.md
 var Guide []byte
+
+//go:embed operation-lock.gitignore
+var operationLockIgnore []byte
 
 // ErrUnclosedFence is Register's refusal to append an import that a code fence
 // left open at the end of the file would make inert.
@@ -452,15 +455,14 @@ func withLock(path string, fn func(target string) error) error {
 	if err != nil {
 		return err
 	}
-	return flockFile(lockPath, func() error { return fn(target) })
+	return flockFile(os.OpenFile, lockPath, func() error { return fn(target) })
 }
 
 // The enable/disable guidance layer uses two nested locks:
 //
 //   - Lock A — the per-repo OPERATION lock. It serializes beadle's own enable
-//     against disable so the two never interleave. Key: the canonical repo root,
-//     hashed into a lock file in the OS temp dir. It is beadle-internal —
-//     enable/disable acquire it through WithLock for the whole operation.
+//     against disable in the same checkout so the two never interleave.
+//     Enable/disable acquire it through WithLock for the whole operation.
 //   - Lock B — the per-CLAUDE.md-path flock. It serializes the CLAUDE.md
 //     read-modify-write across ALL tools, not just beadle, so §2.4 mandates it
 //     be the sibling ".<basename>.punt-import.lock" in the host file's own
@@ -473,24 +475,77 @@ func withLock(path string, fn func(target string) error) error {
 // decision (PruneAndDiscardEmpty) — happens while holding Lock B. Nothing
 // touches CLAUDE.md state outside B.
 //
-// Deadlock freedom: Lock A nests Lock B (never the reverse). Lock A is a temp-dir
-// hash lock and Lock B is a sibling file next to the CLAUDE.md, so their paths
-// never coincide and a fixed acquire order over distinct locks cannot cycle.
+// Deadlock freedom: Lock A nests Lock B (never the reverse). Lock A is in the
+// checkout's private zone and Lock B is a sibling file next to CLAUDE.md.
 
-// WithLock runs fn while holding Lock A — the per-repo OPERATION lock (see the
-// note above). The lock file lives in the OS temp dir, named by the SHA-256 of
-// key's canonical path, so two callers naming the same repo by different
-// spellings (a symlinked parent, "./x", "a/../x") take the SAME lock, while
-// distinct repos never contend. This is beadle-internal; the cross-tool
-// CLAUDE.md lock is Lock B, the sibling file taken by withLock.
-func WithLock(key string, fn func() error) error {
-	canon, err := canonicalKey(key)
+// WithLock runs fn while holding the checkout's enable/disable lock (PLD-2).
+func WithLock(root string, fn func() error) (err error) {
+	repo, err := os.OpenRoot(root)
 	if err != nil {
+		return fmt.Errorf("opening repo root %q: %w", root, err)
+	}
+	defer func() {
+		if cerr := repo.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("closing repo root %q: %w", root, cerr)
+		}
+	}()
+	checkout, err := repo.Open(".")
+	if err != nil {
+		return fmt.Errorf("opening checkout directory %q: %w", root, err)
+	}
+	// Keep the checkout inode locked too: git clean can unlink the ignored
+	// lock file while an operation still holds that file's inode.
+	return flock(checkout, func() error { return withOperationLock(repo, fn) })
+}
+
+func withOperationLock(repo *os.Root, fn func() error) error {
+	if err := repo.MkdirAll(".punt-labs", 0o750); err != nil {
+		return fmt.Errorf("creating repo state directory: %w", err)
+	}
+	dir := filepath.Join(".punt-labs", "local", paths.Namespace)
+	if err := repo.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("creating operation lock directory %q: %w", dir, err)
+	}
+	if err := ensureOperationLockIgnore(repo, filepath.Join(dir, ".gitignore")); err != nil {
 		return err
 	}
-	sum := sha256.Sum256([]byte(canon))
-	lockPath := filepath.Join(os.TempDir(), "beadle-claudemd-"+hex.EncodeToString(sum[:])+".lock")
-	return flockFile(lockPath, fn)
+	return flockFile(repo.OpenFile, filepath.Join(dir, "enable-disable.lock"), fn)
+}
+
+func ensureOperationLockIgnore(repo *os.Root, path string) error {
+	file, err := repo.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		info, statErr := repo.Lstat(path)
+		if statErr != nil {
+			return fmt.Errorf("inspecting operation lock ignore file %q: %w", path, statErr)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("operation lock ignore file %q is not a regular file", path)
+		}
+		data, readErr := repo.ReadFile(path)
+		if readErr != nil {
+			return fmt.Errorf("reading operation lock ignore file %q: %w", path, readErr)
+		}
+		rules := strings.TrimRight(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+		required := strings.TrimRight(string(operationLockIgnore), "\n")
+		if strings.TrimSpace(rules) == "*" || strings.HasSuffix("\n"+rules, "\n"+required) {
+			return nil
+		}
+		if len(data) != 0 {
+			return fmt.Errorf("operation lock ignore file %q has custom rules; add /.gitignore and /enable-disable.lock at the end", path)
+		}
+		file, err = repo.OpenFile(path, os.O_WRONLY|syscall.O_NOFOLLOW, 0)
+	}
+	if err != nil {
+		return fmt.Errorf("opening operation lock ignore file %q for writing: %w", path, err)
+	}
+	if _, err := file.Write(operationLockIgnore); err != nil {
+		return errors.Join(fmt.Errorf("writing operation lock ignore file %q: %w", path, err), file.Close(), repo.Remove(path))
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("closing operation lock ignore file %q: %w", path, err)
+	}
+	return nil
 }
 
 // siblingLockPath returns Lock B for the host CLAUDE.md: the sibling
@@ -510,21 +565,24 @@ func siblingLockPath(host string) (string, error) {
 	return filepath.Join(dir, "."+base+".punt-import.lock"), nil
 }
 
-// flockFile runs fn while holding an exclusive flock on lockPath, creating the
-// lock file if it does not exist. Closing the file releases the flock; its
-// close failure surfaces only when fn itself succeeded.
-func flockFile(lockPath string, fn func() error) (err error) {
-	lock, err := os.OpenFile(filepath.Clean(lockPath), os.O_CREATE|os.O_RDWR, 0o600)
+// flockFile opens (or creates) an operation or import lock file.
+func flockFile(openFile func(string, int, os.FileMode) (*os.File, error), lockPath string, fn func() error) error {
+	lock, err := openFile(filepath.Clean(lockPath), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening lock %q: %w", lockPath, err)
 	}
+	return flock(lock, fn)
+}
+
+// flock runs fn with an exclusive lock, then closes lock to release it.
+func flock(lock *os.File, fn func() error) (err error) {
 	defer func() {
 		if cerr := lock.Close(); cerr != nil && err == nil {
-			err = fmt.Errorf("closing lock %q: %w", lockPath, cerr)
+			err = fmt.Errorf("closing lock %q: %w", lock.Name(), cerr)
 		}
 	}()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("locking %q: %w", lockPath, err)
+		return fmt.Errorf("locking %q: %w", lock.Name(), err)
 	}
 	return fn()
 }

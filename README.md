@@ -21,6 +21,9 @@ and this README does not cover them.
 
 ## Diagnostic Logging
 
+The filesystem namespace for `beadle-email` and `beadle-daemon` is `beadle`:
+both use `~/.punt-labs/beadle/` for their machine-local state.
+
 All beadle processes share `~/.punt-labs/beadle/logs/beadle.log`, using the
 private rotating handler from `punt-observe-go`. The directory is mode `0700`;
 log files are mode `0600`. Rotation keeps five backups, each bounded to 5 MiB.
@@ -241,6 +244,8 @@ different `email.json`. Global flags `--json` (`-j`), `--verbose` (`-v`), and
 permission rules to `.claude/settings.json`. An agent working in that repo then
 reads the guide. `disable` removes the line, the marker, and the permission
 rules, and leaves the guide in place. Commit the result through a pull request.
+Enable and disable keep their private operation lock under
+`.punt-labs/local/beadle/` and ignore it even in repos without a root ignore rule.
 This follows the
 [Tool Enable/Disable standard](https://github.com/punt-labs/punt-kit/blob/main/standards/tool-enable-disable.md).
 

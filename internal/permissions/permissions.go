@@ -145,14 +145,22 @@ func Preflight(root string) error {
 	return err
 }
 
-func run(root string, q request) (changed, unrecorded []string, err error) {
+// ValidateRepoRoot refuses to operate on the home directory as a checkout.
+func ValidateRepoRoot(root string) error {
 	// Fail closed: a home directory that cannot be found cannot be ruled out.
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: cannot determine the home directory, so cannot prove the repo is not it: %w", ErrRefused, err)
+		return fmt.Errorf("%w: cannot determine the home directory, so cannot prove the repo is not it: %w", ErrRefused, err)
 	}
 	if sameDir(root, home) {
-		return nil, nil, fmt.Errorf("%w: the repo is the home directory, whose .claude/settings.json is user-global", ErrRefused)
+		return fmt.Errorf("%w: the repo is the home directory, whose .claude/settings.json is user-global", ErrRefused)
+	}
+	return nil
+}
+
+func run(root string, q request) (changed, unrecorded []string, err error) {
+	if err := ValidateRepoRoot(root); err != nil {
+		return nil, nil, err
 	}
 	dir := filepath.Join(root, claudeDir)
 	// A fast preflight; the confined handle below is what holds the line.

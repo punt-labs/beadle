@@ -14,6 +14,7 @@ import (
 	"github.com/punt-labs/punt-observe-go/logging"
 	"github.com/spf13/cobra"
 
+	"github.com/punt-labs/beadle/internal/paths"
 	"github.com/punt-labs/beadle/internal/usage"
 )
 
@@ -46,7 +47,7 @@ func configureObservability(cmd *cobra.Command) error {
 		role = "mcp"
 	}
 	var err error
-	logHandler, err = logging.New("beadle", role, logging.WithLevel(g.slogLevel()))
+	logHandler, err = logging.New(paths.Namespace, role, logging.WithLevel(g.slogLevel()))
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("initialize logging: log lock busy; another beadle process may be holding it; retry: %w", err)
