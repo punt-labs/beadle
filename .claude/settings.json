@@ -109,7 +109,9 @@
       "Skill(z-spec:doctor)",
       "Skill(z-spec:help)",
       "Skill(z-spec:cleanup)",
-      "Bash(vox:*)"
+      "Bash(vox:*)",
+      "Bash(biff:*)",
+      "Skill(biff:*)"
     ],
     "deny": [
       "Bash(rm -rf /:*)",
@@ -133,6 +135,18 @@
       "Read(.envrc)",
       "Edit(.envrc)",
       "Bash(direnv allow:*)"
+    ],
+    "ask": [
+      "Bash(biff -*)",
+      "Bash(biff install:*)",
+      "Bash(biff uninstall:*)",
+      "Bash(biff install-statusline:*)",
+      "Bash(biff uninstall-statusline:*)",
+      "Bash(biff enable:*)",
+      "Bash(biff disable:*)",
+      "Bash(biff serve:*)",
+      "Bash(biff mcp:*)",
+      "Bash(biff hook:*)"
     ]
   },
   "hooks": {

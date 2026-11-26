@@ -121,3 +121,4 @@ this repo loads on demand:
 @.punt-labs/beadle/CLAUDE.md
 @.punt-labs/z-spec/CLAUDE.md
 @.punt-labs/punt/CLAUDE.md
+@.punt-labs/biff/CLAUDE.md
