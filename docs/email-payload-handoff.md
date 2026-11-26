@@ -17,8 +17,9 @@ repo's own `.gitignore` keeps untracked today
 `ethos mission show <id>` prints, and the one a future export
 (`ethos mission export`, already used for `missions-closed/`) commits.
 
-On the ethos pinned by `ETHOS_VERSION`, `ethos mission show`
-and `ethos mission create` round-trip that YAML byte-for-byte: a worker
+On ethos v4.16.0, the release `ETHOS_VERSION` pinned when this design was
+written, `ethos mission show` and `ethos mission create` round-trip that
+YAML byte-for-byte: a worker
 reading its own contract sees exactly what `buildStageContract` wrote,
 including the real email body, the real sender address, and any stage arg
 the planner derived from the email.
@@ -78,7 +79,7 @@ would have caught it: `TestBuildStageContract` and its siblings
 create` CLI accepts, never against what a *later* `ethos mission show`
 returns — the redaction a mission-record *reader* sees is invisible to a
 test that only exercises the *writer*. This design fixes the hand-off
-so it holds on both the current pin and a post-#539 pin, per this
+so it holds on both v4.16.0 and a post-#539 pin, per this
 mission's contract, without bumping the pin in this unit.
 
 ## How this leaves the system better
@@ -109,7 +110,7 @@ asked about it. Routing the payload there means:
 
 - The pipeline's actual behavior (what text the worker sees) stops
   depending on which ethos version happens to be installed. It is
-  identical on the current pin and on a post-#539 pin, because neither
+  identical on v4.16.0 and on a post-#539 pin, because neither
   version's redaction code path is ever reached by this file.
 - The tracked contract becomes safe to export, to `ethos mission show`,
   and eventually to commit under `missions-closed/` without separately
