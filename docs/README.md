@@ -17,7 +17,7 @@ session.
 
 | Doc | What it is |
 |-----|-----------|
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Package map, four-level trust model, credential resolution, design invariants. Source of truth for structure. |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Package map, four-level trust model, [planned shared trust model](ARCHITECTURE.md#planned-shared-trust-model), credential resolution, design invariants. Source of truth for structure. |
 | [`WORKFLOW.md`](WORKFLOW.md) | The three nested loops (backlog → PR → mission), the merge gate, the verification gate, z-spec classes. Source of truth for process. |
 | [`TESTING.md`](TESTING.md) | Test pyramid, GPG ephemeral-keyring rules, Fastmail signing-test config. |
 
