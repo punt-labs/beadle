@@ -66,6 +66,13 @@ repository under `punt-labs/`:
   commands. `ethos` writes them.
 - Deposited guides and markers under `.punt-labs/<tool>/`, and the
   `@`-import lines for them in `CLAUDE.md`.
+- Workflow files a tool writes, such as
+  `.github/workflows/biff-notify.yml` from `biff enable`, including
+  whether the tool pins its own version there.
+
+These files are committed exactly as the tool wrote them. A problem with
+one is a bug for the tool. It does not block this repository from using
+the tool.
 
 beadle's own rules, written by `beadle-email enable`, are the one exception:
 this is the repository that owns them.
