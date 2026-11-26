@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Upgrading in place no longer leaves a `beadle-email` that macOS kills on
+  launch.** `make install` and `install.sh` copied the new binary over the
+  installed one, reusing its file; macOS then killed every launch (exit 137)
+  because the cached code signature no longer matched. Both now write a new
+  file and rename it onto the installed name. `make install` honors
+  `INSTALL_DIR` (default `~/.local/bin`).
+
+- `make check` no longer fails in one checkout on lint findings recorded in
+  another: the strict lint step keeps its cache per checkout, under `.tmp/`.
+
 - Resolve telemetry settings from the declared `~/.punt-labs/beadle/` home
   directory, and keep enable/disable serialized even when callers use
   different temporary directories. When upgrading, let any in-flight
