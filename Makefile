@@ -282,23 +282,37 @@ build-daemon: ## Build beadle-daemon binary
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o beadle-daemon ./cmd/beadle-daemon/
 
 install: build ## Build and install to ~/.local/bin
-	mkdir -p $(INSTALL_DIR)
+	mkdir -p "$(INSTALL_DIR)"
 	@$(call install_bin,beadle-email,$(INSTALL_DIR)/beadle-email)
 
-test-install: ## Regression test: install replaces the binary by rename, not in place
+# Runs both installers -- this Makefile's install_bin macro and install.sh's own
+# install_binary (via --install-local, no download) -- twice each, into a plain
+# directory and one whose name contains a space.
+test-install: ## Regression test: install and install.sh replace the binary by rename, not in place
 	@set -e; \
 	mkdir -p "$(CURDIR)/.tmp"; \
 	tmp=$$(mktemp -d "$(CURDIR)/.tmp/test-install.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
-	printf 'one' > "$$tmp/src"; \
-	$(call install_bin,$$tmp/src,$$tmp/dest); \
-	before=$$(ls -i "$$tmp/dest" | awk '{print $$1}'); \
-	printf 'two' > "$$tmp/src"; \
-	$(call install_bin,$$tmp/src,$$tmp/dest); \
-	after=$$(ls -i "$$tmp/dest" | awk '{print $$1}'); \
-	test "$$before" != "$$after" || { echo "test-install: FAIL -- second install reused inode $$before (written in place)"; exit 1; }; \
-	test "$$(cat "$$tmp/dest")" = "two" || { echo "test-install: FAIL -- destination content not replaced"; exit 1; }; \
-	test -x "$$tmp/dest" || { echo "test-install: FAIL -- destination not executable"; exit 1; }; \
-	test "$$(ls "$$tmp" | wc -l | tr -d ' ')" = "2" || { echo "test-install: FAIL -- temp file left behind: $$(ls "$$tmp")"; exit 1; }; \
+	via_make() { $(call install_bin,$$1,$$2); }; \
+	via_script() { sh "$(CURDIR)/install.sh" --install-local "$$1" "$$2"; }; \
+	check() { \
+		installer=$$1; dir="$$tmp/$$2"; label="$$1 into '$$2'"; \
+		mkdir -p "$$dir"; \
+		printf 'one' > "$$dir/src"; \
+		$$installer "$$dir/src" "$$dir/dest"; \
+		before=$$(ls -i "$$dir/dest" | awk '{print $$1}'); \
+		printf 'two' > "$$dir/src"; \
+		$$installer "$$dir/src" "$$dir/dest"; \
+		after=$$(ls -i "$$dir/dest" | awk '{print $$1}'); \
+		test "$$before" != "$$after" || { echo "test-install: FAIL ($$label) -- second install reused inode $$before (written in place)"; exit 1; }; \
+		test "$$(cat "$$dir/dest")" = "two" || { echo "test-install: FAIL ($$label) -- destination content not replaced"; exit 1; }; \
+		test -x "$$dir/dest" || { echo "test-install: FAIL ($$label) -- destination not executable"; exit 1; }; \
+		test "$$(ls "$$dir" | wc -l | tr -d ' ')" = "2" || { echo "test-install: FAIL ($$label) -- temp file left behind: $$(ls "$$dir")"; exit 1; }; \
+		echo "test-install: ok ($$label)"; \
+	}; \
+	check via_make plain; \
+	check via_make "sp ace"; \
+	check via_script plain; \
+	check via_script "sp ace"; \
 	echo "test-install: PASS"
 
 deploy-commands: ## Deploy commands to ~/.claude/commands/

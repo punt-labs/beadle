@@ -22,6 +22,27 @@ INSTALL_DIR="$HOME/.local/bin"
 MARKETPLACE_REPO="punt-labs/claude-plugins"
 MARKETPLACE_NAME="punt-labs"
 
+# install_binary SRC DEST: replace DEST by rename, never by writing into an
+# existing file. SRC is usually on another filesystem (a mktemp dir), where a
+# bare mv falls back to copying over DEST in place; on macOS that leaves a
+# binary the kernel SIGKILLs on launch (stale cached code signature for the
+# reused inode). Stage in DEST's directory (same filesystem), then rename.
+install_binary() {
+  _ib_staged=$(mktemp "$2.XXXXXX") || fail "Failed to create a temp file next to $2"
+  if ! { cp "$1" "$_ib_staged" && chmod 755 "$_ib_staged" && mv -f "$_ib_staged" "$2"; }; then
+    rm -f "$_ib_staged"
+    fail "Failed to install binary to $2"
+  fi
+}
+
+# `install.sh --install-local SRC DEST` runs only the install step, so the
+# Makefile's test-install target can exercise it without a download.
+if [ "${1:-}" = "--install-local" ]; then
+  [ "$#" -eq 3 ] || fail "usage: install.sh --install-local SRC DEST"
+  install_binary "$2" "$3"
+  exit 0
+fi
+
 # --- Step 1: Prerequisites ---
 
 info "Checking prerequisites..."
@@ -110,16 +131,7 @@ ok "SHA256 verified"
 info "Installing to $INSTALL_DIR..."
 
 mkdir -p "$INSTALL_DIR" || fail "Failed to create $INSTALL_DIR"
-# Replace by rename, never by writing into an existing file. $TMPDIR_DL is
-# usually on another filesystem, where mv falls back to copying over the
-# destination in place; on macOS that leaves a binary the kernel SIGKILLs on
-# launch (stale cached code signature for the reused inode). Stage in
-# $INSTALL_DIR (same filesystem), then rename onto the final name.
-STAGED=$(mktemp "$INSTALL_DIR/$BINARY.XXXXXX") || fail "Failed to create a temp file in $INSTALL_DIR"
-if ! { cp "$TMPDIR_DL/$ASSET" "$STAGED" && chmod 755 "$STAGED" && mv -f "$STAGED" "$INSTALL_DIR/$BINARY"; }; then
-  rm -f "$STAGED"
-  fail "Failed to install binary to $INSTALL_DIR"
-fi
+install_binary "$TMPDIR_DL/$ASSET" "$INSTALL_DIR/$BINARY"
 ok "$INSTALL_DIR/$BINARY"
 
 if ! command -v "$BINARY" >/dev/null 2>&1; then
