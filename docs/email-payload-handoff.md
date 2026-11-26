@@ -17,7 +17,7 @@ repo's own `.gitignore` keeps untracked today
 `ethos mission show <id>` prints, and the one a future export
 (`ethos mission export`, already used for `missions-closed/`) commits.
 
-On ethos v4.16.0 (this repo's pinned `ETHOS_VERSION`), `ethos mission show`
+On the ethos pinned by `ETHOS_VERSION`, `ethos mission show`
 and `ethos mission create` round-trip that YAML byte-for-byte: a worker
 reading its own contract sees exactly what `buildStageContract` wrote,
 including the real email body, the real sender address, and any stage arg
@@ -68,11 +68,11 @@ exception. The fix is on beadle's side: stop putting the payload
 somewhere ethos redacts, because ethos redacting it is correct, not a bug
 to route around.
 
-Beadle's own Makefile pins `ETHOS_VERSION := v4.16.0`
-(`Makefile:11`), which predates #539, so `buildStageContract`'s current
-behavior does not regress *today*. It regresses silently the day someone
-bumps that pin, because nothing in beadle's own test suite would catch
-it: `TestBuildStageContract` and its siblings
+Beadle's own Makefile pins `ETHOS_VERSION`
+(`Makefile`), now an ethos release that includes #539's redaction. Passing
+the payload through the tracked contract would therefore have regressed
+silently the day that pin moved, because nothing in beadle's own test suite
+would have caught it: `TestBuildStageContract` and its siblings
 (`pipeline_test.go:836-1078`) assert against the Go string
 `buildStageContract` returns and against what the real `ethos mission
 create` CLI accepts, never against what a *later* `ethos mission show`
@@ -109,7 +109,7 @@ asked about it. Routing the payload there means:
 
 - The pipeline's actual behavior (what text the worker sees) stops
   depending on which ethos version happens to be installed. It is
-  identical on v4.16.0 today and on a post-#539 pin, because neither
+  identical on the current pin and on a post-#539 pin, because neither
   version's redaction code path is ever reached by this file.
 - The tracked contract becomes safe to export, to `ethos mission show`,
   and eventually to commit under `missions-closed/` without separately

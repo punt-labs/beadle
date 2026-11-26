@@ -38,8 +38,8 @@ func New(t testing.TB, emailAddr string) *Env {
 
 	// IsolateEthos redirects $HOME (among other things) before any other
 	// code touches it, so it must run first: it captures the real, ambient
-	// $HOME to source its read-only symlinks from, and calling it after
-	// $HOME has already been redirected would symlink from the wrong tree.
+	// $HOME to source its read-only copies from, and calling it after
+	// $HOME has already been redirected would copy from the wrong tree.
 	// paths.DataDir() and paths.EthosDir() resolve through this same $HOME
 	// (they use os.UserHomeDir), so New builds its own scratch layout under
 	// the directory IsolateEthos returns rather than creating a second,

@@ -442,7 +442,7 @@ prerequisite of `test` (not a standalone target a developer must remember to
 invoke):
 
 ```makefile
-ETHOS_VERSION := v4.16.0
+ETHOS_VERSION := v4.22.2-0.20261125225541-235729d48cf9
 
 tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4 tests)
     go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
@@ -463,6 +463,16 @@ pinned version — re-running it on every `make test` is the same shape as
 `staticcheck`'s existing `go run pkg@version` re-invocation on every `make
 staticcheck`, just installing to `PATH` instead of the module cache's
 `go run` binary cache).
+
+The pin is a pseudo-version, not a tag: ethos releases are tagged `v5.x`
+but its module path is still `github.com/punt-labs/ethos/v4`, so Go rejects
+`@v5.2.3` ("module path includes a major version suffix, so major version
+must match"). `v4.22.2-0.20261125225541-235729d48cf9` is ethos release 5.2.3
+(commit `235729d48cf9`). To bump: `go list -m
+github.com/punt-labs/ethos/v4@<release-commit-sha>` prints the pseudo-version
+to paste into `ETHOS_VERSION` and `testenv.EthosVersion`. ethos 5.x refuses a
+symlinked identity store, so `testenv.IsolateEthos` copies the repo-local
+identity subtrees into the scratch repo rather than symlinking them.
 
 Every file that must reference `ETHOS_VERSION`, so a version bump is one
 edit:

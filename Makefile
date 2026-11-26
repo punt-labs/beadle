@@ -8,7 +8,10 @@ LDFLAGS := -X main.version=$(VERSION)
 STATICCHECK_VERSION := v0.8.1
 GOLANGCI_LINT_VERSION := v2.12.2
 GOVULNCHECK_VERSION := v1.7.0
-ETHOS_VERSION := v4.16.0
+# ethos release 5.2.3 (commit 235729d48cf9), pinned by pseudo-version because
+# ethos's module path is still github.com/punt-labs/ethos/v4 while its tags are
+# v5.x, so `@v5.2.3` is rejected by the Go module resolver.
+ETHOS_VERSION := v4.22.2-0.20261125225541-235729d48cf9
 BIFF_VERSION := 1.24.2
 
 # Pin the Go toolchain to the go.mod `toolchain` line for every `go`

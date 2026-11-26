@@ -867,7 +867,7 @@ func TestClaudeRunner_ContractCarriesNoPayload(t *testing.T) {
 	// round trip, not just that some string happens to equal meta.From.
 	//
 	// Two forms are accepted because the store is written by the real ethos
-	// on PATH: ethos v4.16.0 keeps the address verbatim, while a build with
+	// on PATH: ethos builds before DES-080 keep the address verbatim, while a build with
 	// DES-080 redaction stores "[redacted-email]". inputs.trigger.from is
 	// provenance, not payload, and DES-038 (docs/email-payload-handoff.md)
 	// allows either. Everything outside inputs.trigger stays strict below.
