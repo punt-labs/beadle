@@ -871,6 +871,12 @@ func TestClaudeRunner_ContractCarriesNoPayload(t *testing.T) {
 	// DES-080 redaction stores "[redacted-email]". inputs.trigger.from is
 	// provenance, not payload, and DES-038 (docs/email-payload-handoff.md)
 	// allows either. Everything outside inputs.trigger stays strict below.
+	//
+	// This test reads back what ethos STORED, so a redacting ethos can
+	// rewrite a payload beadle wrongly submitted before it is read here; it
+	// proves the stored record is clean, not that beadle's submission was.
+	// The submission itself is asserted by
+	// TestClaudeRunner_SubmittedContractCarriesNoPayload.
 	assert.Contains(t, []any{meta.From, "[redacted-email]"}, trigger["from"],
 		"inputs.trigger.from must be meta.From (round-tripped through YAML) or ethos's DES-080 redaction -- DES-038, success criterion 1")
 	delete(doc, "inputs")
@@ -907,6 +913,122 @@ func TestClaudeRunner_ContractCarriesNoPayload(t *testing.T) {
 
 	assert.Equal(t, stageContextReference(p.ID, 0), doc["context"],
 		"context must equal the fixed reference string")
+}
+
+// TestClaudeRunner_SubmittedContractCarriesNoPayload asserts DES-038's
+// invariant on the bytes beadle SUBMITS to `ethos mission create --file`,
+// before any ethos version can touch them. The stored-contract test above
+// reads back what ethos persisted; a redacting ethos (DES-080 rewrites
+// email addresses to [redacted-email] and token-shaped secrets to
+// [redacted-secret]) could mask a payload that beadle wrongly wrote into a
+// field. Here a fake `ethos` on PATH copies the submitted file verbatim, so
+// nothing between beadle and the assertion can rewrite it. The path under
+// test is the real one: ClaudeRunner.Run -> buildStageContract ->
+// createMissionFromContract, with a body, call args and prior pipeline
+// output that each carry distinctive markers.
+//
+// Every field is covered: the top-level key set and the inputs.trigger key
+// set are pinned exactly (so a new field carrying payload cannot appear
+// unnoticed), no marker appears anywhere in the raw file, and the only
+// email-derived values present are the documented provenance fields
+// message_id, from and subject.
+func TestClaudeRunner_SubmittedContractCarriesNoPayload(t *testing.T) {
+	shimDir := t.TempDir()
+	captured := filepath.Join(t.TempDir(), "submitted-contract.yaml")
+	script := `#!/bin/sh
+if [ "$1" = "mission" ] && [ "$2" = "create" ] && [ "$3" = "--file" ]; then
+  cp "$4" "$BEADLE_TEST_CAPTURE" || exit 1
+  echo "created: m-submitted-1"
+fi
+exit 0
+`
+	require.NoError(t, os.WriteFile(filepath.Join(shimDir, "ethos"), []byte(script), 0o700))
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BEADLE_TEST_CAPTURE", captured)
+
+	const (
+		embeddedAddress = "attacker@example.com"
+		secretToken     = "sk-live-abcdefghijklmnopqrstuvwxyz123456"
+		bodyMarker      = "BODY-MARKER-7f3a9c"
+		argValue        = "ARG-MARKER-5d21e8"
+		pipeMarker      = "PIPE-MARKER-c04b77"
+	)
+	body := fmt.Sprintf("%s: contact %s, token=%s.\nsecond line %s\n", bodyMarker, embeddedAddress, secretToken, bodyMarker)
+	pipeValue := fmt.Sprintf(`{"out":"%s %s %s"}`, pipeMarker, embeddedAddress, secretToken)
+
+	cmd := &Command{
+		Name:       "test-submitted-no-payload",
+		Runner:     "claude",
+		MCPServers: []string{},
+		Prompt:     "Handle this",
+		WriteSet:   []string{"internal/daemon/testdata/submitted-contract-fixture.txt"},
+		Budget: struct {
+			Rounds              int  `yaml:"rounds" json:"rounds"`
+			ReflectionAfterEach bool `yaml:"reflection_after_each" json:"reflection_after_each"`
+		}{Rounds: 1, ReflectionAfterEach: false},
+	}
+	call := CommandCall{Command: cmd.Name, Args: map[string]any{
+		"note":   argValue,
+		"leaked": embeddedAddress + " " + secretToken,
+	}}
+	meta := EmailMeta{MessageID: "88", From: "alice@example.com", Subject: "Quarterly report"}
+	p := &Pipeline{ID: "test-pipe-submitted", Email: meta, Body: body}
+
+	spawner := &capturingSpawner{result: WorkerResult{Output: "done"}}
+	runner := &ClaudeRunner{Templates: &MissionTemplate{TmpDir: t.TempDir()}, Spawner: spawner}
+	logger, _ := testLoggerCapture()
+
+	_, _, err := runner.Run(context.Background(), &Executor{Logger: logger}, p, 0, cmd, call, pipeValue, false)
+	require.NoError(t, err)
+	require.Equal(t, "m-submitted-1", spawner.missionID, "the fake ethos must have been the one that created the mission")
+
+	raw, err := os.ReadFile(captured)
+	require.NoError(t, err, "the fake ethos must have captured the submitted contract")
+	submitted := string(raw)
+
+	// The payload does reach the worker, so the markers are live and the
+	// absence assertions below are not vacuous.
+	require.Contains(t, string(spawner.systemPromptContent), bodyMarker)
+	require.Contains(t, string(spawner.systemPromptContent), argValue)
+	require.Contains(t, string(spawner.systemPromptContent), pipeMarker)
+
+	for _, marker := range []string{embeddedAddress, secretToken, bodyMarker, argValue, pipeMarker, "second line"} {
+		assert.NotContains(t, submitted, marker,
+			"the submitted contract must not carry payload marker %q in any field", marker)
+	}
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &doc))
+
+	topKeys := make([]string, 0, len(doc))
+	for k := range doc {
+		topKeys = append(topKeys, k)
+	}
+	assert.ElementsMatch(t,
+		[]string{"leader", "worker", "evaluator", "inputs", "context", "write_set", "success_criteria", "budget"},
+		topKeys, "a new top-level contract field needs a DES-038 review: it must not carry payload")
+
+	inputs, ok := doc["inputs"].(map[string]any)
+	require.True(t, ok, "inputs must be a map")
+	assert.Equal(t, []string{"trigger"}, mapKeys(inputs), "inputs holds only the trigger provenance")
+	trigger, ok := inputs["trigger"].(map[string]any)
+	require.True(t, ok, "inputs.trigger must be a map")
+	assert.ElementsMatch(t, []string{"type", "message_id", "from", "subject"}, mapKeys(trigger))
+	assert.Equal(t, map[string]any{
+		"type": "email", "message_id": meta.MessageID, "from": meta.From, "subject": meta.Subject,
+	}, trigger, "the trigger carries exactly the documented provenance, unredacted as submitted")
+
+	assert.Equal(t, stageContextReference(p.ID, 0), doc["context"])
+	assert.Equal(t, []any{"Handle this"}, doc["success_criteria"])
+	assert.Equal(t, []any{"internal/daemon/testdata/submitted-contract-fixture.txt"}, doc["write_set"])
+}
+
+func mapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // TestExecutor_TruncatedPipeReachesClaudeStagePayload is round 4's
