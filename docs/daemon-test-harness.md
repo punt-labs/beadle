@@ -126,9 +126,9 @@ burn real per-date mission-ID counter slots. It works by redirecting **both**
 roots ethos resolves from — `$HOME` (global session bindings, mission-ID
 counters, delegations, locks) and `$ETHOS_REPO_ROOT` (repo-local mission
 storage, identity/personality/role/team resolution) — to fresh scratch
-directories, then symlinking only the read-only subtrees (`archetypes`
-globally; `identities`, `personalities`, `roles`, `teams`, `talents`,
-`writing-styles` under the repo root) back to the real, current data so
+directories, then providing only the read-only subtrees there — the global
+`archetypes` tree written fresh, and `identities`, `personalities`, `roles`,
+`teams`, `talents`, `writing-styles` copied from the repo root — so
 contract validation exercises the genuine schema and identity graph, while
 every subtree ethos might *write* to is left absent and created fresh and
 empty. `TestBuildStageContract_ValidatesAgainstRealEthosCLI` uses it by
@@ -442,10 +442,13 @@ prerequisite of `test` (not a standalone target a developer must remember to
 invoke):
 
 ```makefile
-ETHOS_VERSION := v4.16.0
+ETHOS_VERSION := v4.22.2-0.20261125225541-235729d48cf9
 
-tools-ethos: ## Install the pinned ethos CLI (needed by internal/daemon's gate-4 tests)
-    go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
+TEST_ETHOS_BIN := $(CURDIR)/.tmp/bin
+
+tools-ethos: ## Install the pinned test ethos without replacing the user's CLI
+    mkdir -p "$(TEST_ETHOS_BIN)"
+    GOBIN="$(TEST_ETHOS_BIN)" go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
 
 test: tools-ethos ## Run tests with race detection
     go test -race -count=1 ./...
@@ -458,11 +461,22 @@ already depends on `test`, so this one edge — `test: tools-ethos` — is
 sufficient to make `tools-ethos` a real prerequisite of both `make test` and
 `make check`, matching the prose below: a developer never runs
 `make tools-ethos` by hand except the very first time (`go install` is a
-few-hundred-millisecond no-op once the binary is already on `PATH` at the
-pinned version — re-running it on every `make test` is the same shape as
-`staticcheck`'s existing `go run pkg@version` re-invocation on every `make
-staticcheck`, just installing to `PATH` instead of the module cache's
-`go run` binary cache).
+few-hundred-millisecond no-op once the binary is already in the checkout's
+`.tmp/bin` at the pinned version — re-running it on every `make test` is the
+same shape as `staticcheck`'s existing `go run pkg@version` re-invocation on
+every `make staticcheck`, just installing to `.tmp/bin`, which the `test`
+recipe puts first on `PATH`, instead of the module cache's `go run` binary
+cache).
+
+The pin is a pseudo-version, not a tag: ethos releases are tagged `v5.x`
+but its module path is still `github.com/punt-labs/ethos/v4`, so Go rejects
+`@v5.2.3` ("module path includes a major version suffix, so major version
+must match"). `v4.22.2-0.20261125225541-235729d48cf9` is ethos release 5.2.3
+(commit `235729d48cf9`). To bump: `go list -m
+github.com/punt-labs/ethos/v4@<release-commit-sha>` prints the pseudo-version
+to paste into `ETHOS_VERSION` and `testenv.EthosVersion`. ethos 5.x refuses a
+symlinked identity store, so `testenv.IsolateEthos` copies the repo-local
+identity subtrees into the scratch repo rather than symlinking them.
 
 Every file that must reference `ETHOS_VERSION`, so a version bump is one
 edit:
@@ -595,9 +609,9 @@ call site. The one piece `testenv.New` is missing is `$ETHOS_REPO_ROOT`.
 `testenv.New` (so every `testenv.Env` gets it automatically, since any test
 that creates ethos identities is a candidate for eventually driving a real
 `ethos mission create`), that ports `isolatedEthosEnv`'s directory layout —
-global scratch dir with `archetypes` symlinked, repo scratch dir with
+global scratch dir with `archetypes` written fresh, repo scratch dir with
 `identities`/`personalities`/`roles`/`teams`/`talents`/`writing-styles`
-symlinked — but calls `t.Setenv("ETHOS_REPO_ROOT", scratchRepo)` instead of
+copied in — but calls `t.Setenv("ETHOS_REPO_ROOT", scratchRepo)` instead of
 returning an `[]string` env slice. `isolatedEthosEnv` itself is then
 redundant with `testenv.IsolateEthos` and should be deleted in the same
 change that introduces it, with `TestBuildStageContract_ValidatesAgainstRealEthosCLI`
@@ -626,43 +640,24 @@ design's own "zero dependence on ambient developer state" hard constraint.
 (zero `ETHOS_*` ambient leakage into any `exec.Command("ethos", ...)` this
 design's tests spawn), not a re-derivation of the filter's own diff.
 
-### Live-data symlinks: a stated determinism tradeoff, not a silent one
+### Identity data is a snapshot taken when `IsolateEthos` runs
 
-`isolatedEthosEnv`'s read-only subtrees (`archetypes` globally;
-`identities`/`personalities`/`roles`/`teams`/`talents`/`writing-styles`
-under the repo root) are symlinked to the real, *live*, mutable files on
-disk — not a snapshot taken at test-start. `testenv.IsolateEthos` inherits
-that exact mechanism, so it inherits the same property: two calls to
-`ethos mission create` inside one test run, or two separate test runs
-started moments apart, can observe different identity/role/team data if
-another session in this repo's shared, multi-agent environment
-(`docs/ARCHITECTURE.md`'s own working assumption for this codebase) edits
-one of those files mid-run, and a developer's dirty working tree (staged or
-unstaged edits under `.punt-labs/ethos/`) validates against that dirty
-state rather than the last-committed one a clean CI checkout would see.
+`testenv.IsolateEthos` copies the repo-local read-only subtrees
+(`identities`/`personalities`/`roles`/`teams`/`talents`/`writing-styles`)
+into the scratch repo with `os.CopyFS`, and writes the global `archetypes`
+tree fresh. It does not symlink them: ethos 5.x refuses a symlinked identity
+store ("symlink; refusing redirected identity storage").
 
-**Decision: accept this explicitly as a stated tradeoff, not a gap to close
-in this design.** Three reasons: (1) it is not a new risk this design
-introduces — `isolatedEthosEnv` already carries it today, unstated, in the
-gate-4 test this design keeps "exactly as written"; naming it here is a
-correction of an existing silence, not new exposure. (2) It does not touch
-CI's actual failure mode: a GitHub Actions runner checks out one immutable
-commit for the whole job, so no concurrent writer can touch those subtrees
-during a CI run — the race is real only on a developer's own machine,
-during local `make test`, which is exactly the environment where a human
-can `/who`-check for other active sessions before running tests, per this
-repo's own git-safety convention. (3) A dirty working tree validating
-against its own uncommitted edits to `.punt-labs/ethos/` is arguably
-*correct* behavior for a local run — the test is checking what is actually
-on disk, not a stale committed snapshot — and only becomes a genuine
-divergence from CI in the narrow case where those particular files are the
-ones dirty. Snapshotting those subtrees into the scratch tree at test start
-(copy instead of symlink) would remove the residual local-only race at the
-cost of a copy step on every test run and a second code path that could
-itself drift from what `isolatedEthosEnv` proved out; this design does not
-propose it. If the concurrent-edit race is ever observed to actually flip a
-test's outcome, that observation — not speculation — is the trigger for a
-follow-up bead to add snapshotting.
+Two properties follow from copying:
+
+- Every `ethos` call inside one test sees the same identity, role and team
+  data, whatever another session edits under `.punt-labs/ethos/` while the
+  test runs.
+- The copy is taken from the working tree, not from the last commit. A
+  developer's uncommitted edits under `.punt-labs/ethos/` are what a local
+  run validates against; CI checks out one commit and sees that commit's
+  files. Two tests started moments apart can still see different data if a
+  file changes between their `IsolateEthos` calls.
 
 ### `gpg`: the same defect, smaller blast radius
 
