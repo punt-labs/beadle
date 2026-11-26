@@ -1,0 +1,44 @@
+checks:
+  full-gate:
+    profile: linux-worktree-v1
+    epoch: beadle-v1
+    sources:
+      mode: worktree
+    runtime:
+      platforms:
+        linux-amd64:
+          bundle: beadle-handoff-linux-amd64.tar.gz
+          sha256: 677e1edea1c29631f3576ca912368054f2e9cd118baaa57ec6e95b6ccdc51503
+          url: https://github.com/punt-labs/beadle/releases/download/handoff-runtime-v2/beadle-handoff-linux-amd64.tar.gz
+          path: ["{runtime}/go/bin", "{runtime}/bin", "{runtime}/node/bin"]
+          env:
+            CGO_ENABLED: "1"
+            GOCACHE: "{scratch}/go-build"
+            GOENV: "off"
+            GOMODCACHE: "{scratch}/modules"
+            GOPATH: "{scratch}/gopath"
+            GOPROXY: "off"
+            GOTELEMETRY: "off"
+            GOLANGCI_LINT_CACHE: "{scratch}/golangci"
+            LANG: C.UTF-8
+            PYTHONDONTWRITEBYTECODE: "1"
+            npm_config_cache: "{scratch}/npm"
+            npm_config_offline: "true"
+            npm_config_update_notifier: "false"
+    system:
+      tools: [as, awk, bash, cat, chmod, cmp, cp, dd, dirmngr, echo, env, "false", gcc, getopt, git, gpg,
+              gpg-agent, gpgconf, grep, head, install, ld, ln, ls, make, mkdir, mktemp, mv, pass, printenv,
+              printf, ps, rm, secret-tool, sed, sh, sha256sum, shellcheck, sleep, tr, tty, wc, which, xargs]
+    scratch:
+      checkout: [.tmp]
+      seed:
+        "{scratch}/modules/cache/download": "{runtime}/cache/go-download"
+        "{scratch}/npm": "{runtime}/cache/npm"
+    git:
+      base_ref: refs/remotes/origin/main
+    network: loopback
+    data:
+      - name: govulndb
+        url: https://vuln.go.dev
+        mount: govulndb
+        max_age_hours: 24

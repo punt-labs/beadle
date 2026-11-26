@@ -1,4 +1,4 @@
-VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
+VERSION := $(or $(shell git describe --tags --always --match 'v[0-9]*' 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
 
 # Pinned once here. CI invokes these via `make vet`, `make staticcheck`,
@@ -8,6 +8,7 @@ LDFLAGS := -X main.version=$(VERSION)
 STATICCHECK_VERSION := v0.8.1
 GOLANGCI_LINT_VERSION := v2.12.2
 GOVULNCHECK_VERSION := v1.7.0
+MARKDOWNLINT_VERSION := 0.24.2
 # ethos release 5.2.3 (commit 235729d48cf9), pinned by pseudo-version because
 # ethos's module path is still github.com/punt-labs/ethos/v4 while its tags are
 # v5.x, so `@v5.2.3` is rejected by the Go module resolver.
@@ -78,7 +79,7 @@ endef
 
 SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard -z 2>/dev/null | $(DISCOVER_SHELL_SCRIPTS))
 
-.PHONY: help lint lint-strict lint-shell test-shell-discovery test-tools-biff test-install probe-test-path vet staticcheck vulncheck docs tools-ethos tools-biff tools-beadle-email test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
+.PHONY: help lint lint-strict lint-shell test-shell-discovery test-tools-biff test-install probe-test-path vet staticcheck vulncheck docs tools-ethos tools-biff tools-beadle-email test test-integration check handoff-runtime-bundle handoff-runtime-inputs handoff-runtime-verify format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -89,14 +90,19 @@ lint: lint-shell vet staticcheck ## Lint (gofmt + go vet + staticcheck + shellch
 vet: ## Run go vet
 	go vet ./...
 
+# Offline snapshots use the same versioned commands, built and verified when
+# packaging the runtime. A missing version must fail, not fall back to PATH.
+go-tool = $(if $(ETHOS_HANDOFF_RUNTIME),"$(ETHOS_HANDOFF_RUNTIME)/go-tools/$(notdir $(1))",go run $(1))
+
 staticcheck: ## Run staticcheck alone (also part of `lint`)
-	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) ./...
+	$(call go-tool,honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)) ./...
 
 lint-strict: ## Lint (golangci-lint: errcheck, gosec, revive, gofumpt, ...)
-	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
+	$(call go-tool,github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)) run ./...
 
 vulncheck: ## Scan imports + call graph for known Go vulnerabilities
-	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
+	$(call go-tool,golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)) \
+	  $(if $(ETHOS_HANDOFF_RUNTIME),-db "file://$(ETHOS_HANDOFF_RUNTIME)/data/govulndb") ./...
 
 lint-shell: test-shell-discovery test-tools-biff test-install ## Lint every shell script in the repo (shellcheck)
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found — install it (apt install shellcheck / brew install shellcheck)"; exit 1; }
@@ -154,7 +160,7 @@ test-tools-biff: ## Regression test: reuse biff on PATH and install the pin only
 	echo "test-tools-biff: PASS"
 
 docs: ## Lint markdown
-	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"
+	npx --yes markdownlint-cli2@$(MARKDOWNLINT_VERSION) "**/*.md" "#node_modules"
 
 # LaTeX intermediate files to remove after compilation. prfaq.pdf itself is
 # tracked (README's Working Backwards badge links to it); everything else
@@ -195,7 +201,14 @@ TEST_ETHOS_BIN := $(CURDIR)/.tmp/bin
 
 tools-ethos: ## Install the pinned test ethos without replacing the user's CLI
 	mkdir -p "$(TEST_ETHOS_BIN)"
+ifneq ($(ETHOS_HANDOFF_RUNTIME),)
+	@tmp=$$(mktemp "$(TEST_ETHOS_BIN)/ethos.XXXXXX") && \
+	  trap 'rm -f -- "$$tmp"' EXIT && \
+	  install -m 0755 "$(ETHOS_HANDOFF_RUNTIME)/go-tools/ethos@$(ETHOS_VERSION)" "$$tmp" && \
+	  mv -fT -- "$$tmp" "$(TEST_ETHOS_BIN)/ethos"
+else
 	GOBIN="$(TEST_ETHOS_BIN)" go install github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
+endif
 
 define BIFF_ON_PATH
 	biff_on_path() ( \
@@ -270,7 +283,27 @@ test: $(TEST_PREREQS) ## Run tests with race detection
 test-integration: $(TEST_PREREQS) ## Run integration tests (in-process IMAP/SMTP)
 	$(call TEST_RUN,go test -race -count=1 -tags=integration ./...)
 
-check: lint lint-strict vulncheck docs test ## Run all quality gates
+check: handoff-runtime-verify lint lint-strict vulncheck docs test ## Run all quality gates
+
+handoff-runtime-inputs:
+	@sha256sum go.mod go.sum && printf '%s\n' \
+	  "$(GOTOOLCHAIN) $(STATICCHECK_VERSION) $(GOLANGCI_LINT_VERSION) $(GOVULNCHECK_VERSION) $(MARKDOWNLINT_VERSION) $(ETHOS_VERSION) $(BIFF_VERSION)"
+
+handoff-runtime-verify:
+ifneq ($(ETHOS_HANDOFF_RUNTIME),)
+	@inputs=$$($(MAKE) --no-print-directory --silent handoff-runtime-inputs) && \
+	  printf '%s\n' "$$inputs" | cmp -s - "$(ETHOS_HANDOFF_RUNTIME)/inputs" || { \
+	  echo 'Handoff runtime does not match go.mod, go.sum, or Makefile tool pins; build and pin a new bundle.' >&2; exit 1; }
+endif
+
+handoff-runtime-bundle: ## Build an Ethos offline runtime archive in .tmp/
+	mkdir -p .tmp
+	inputs=$$($(MAKE) --no-print-directory --silent handoff-runtime-inputs) && printf '%s\n' "$$inputs" | \
+	  bash scripts/build-handoff-runtime.sh .tmp "$(MARKDOWNLINT_VERSION)" "$(BIFF_VERSION)" \
+	  honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) \
+	  github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) \
+	  golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) \
+	  github.com/punt-labs/ethos/v4/cmd/ethos@$(ETHOS_VERSION)
 
 format: ## Format code (golangci-lint fmt: gofumpt + goimports, matching lint-strict)
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) fmt ./...
