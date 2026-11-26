@@ -16,7 +16,7 @@ import (
 // kept in sync by hand with Makefile's ETHOS_VERSION (see
 // docs/daemon-test-harness.md's "Pinning ethos"). It appears only in
 // EthosOrFatal's human-facing failure message, never in an assertion.
-const EthosVersion = "v4.16.0"
+const EthosVersion = "v4.22.2-0.20261125225541-235729d48cf9"
 
 // EthosOrFatal returns the ethos binary's path, or fails t naming the
 // install remedy. Per this test tier's hard constraint, a missing
@@ -74,7 +74,7 @@ write_set_constraints: []
 
 // IsolateEthos redirects $HOME and $ETHOS_REPO_ROOT to fresh scratch
 // directories for the remainder of t. The repo-local subtrees a real
-// `ethos` CLI invocation reads (never writes) are symlinked back so
+// `ethos` CLI invocation reads (never writes) are copied in so
 // contract validation exercises the genuine identity graph; the global
 // archetypes tree is materialized instead (see implementArchetype) since
 // it isn't guaranteed to exist at all outside a developer's own machine.
@@ -85,8 +85,8 @@ write_set_constraints: []
 // does not have to create a second, unrelated fake HOME.
 //
 // Call it before any other code touches $HOME: it captures the real repo
-// root to source the identity-graph symlinks from, and calling it after
-// $HOME has already been redirected would symlink from the wrong tree.
+// root to source the identity-graph copies from, and calling it after
+// $HOME has already been redirected would copy from the wrong tree.
 // New calls it first for exactly this reason.
 //
 // Every ETHOS_* environment variable already set in this process is
@@ -126,9 +126,9 @@ func IsolateEthos(t testing.TB) string {
 	realRepoEthos := filepath.Join(realRepoRoot, ".punt-labs", "ethos")
 	for _, sub := range []string{"identities", "personalities", "roles", "teams", "talents", "writing-styles"} {
 		target := filepath.Join(realRepoEthos, sub)
-		// os.Symlink succeeds even when target doesn't exist -- a dangling
-		// symlink here would surface as a confusing failure deep inside
-		// ethos's own identity resolution rather than a clear one at setup.
+		// Check the source explicitly -- a missing subtree would otherwise
+		// surface as a confusing failure deep inside ethos's own identity
+		// resolution rather than a clear one at setup.
 		// Unlike the global archetypes tree these are committed repo
 		// content (this exact checkout, in dev and CI alike), so a missing
 		// one means the subtree was renamed or removed, not that a
@@ -136,7 +136,10 @@ func IsolateEthos(t testing.TB) string {
 		if _, statErr := os.Stat(target); statErr != nil {
 			t.Fatalf("testenv.IsolateEthos: repo-local ethos subtree %s: %v", target, statErr)
 		}
-		require.NoError(t, os.Symlink(target, filepath.Join(scratchRepoEthos, sub)))
+		// Copied, not symlinked: ethos 5.x refuses a symlinked identity
+		// store ("symlink; refusing redirected identity storage"), and the
+		// subtrees are small, read-only committed content.
+		require.NoError(t, os.CopyFS(filepath.Join(scratchRepoEthos, sub), os.DirFS(target)))
 	}
 	t.Setenv("ETHOS_REPO_ROOT", scratchRepo)
 

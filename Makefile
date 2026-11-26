@@ -9,8 +9,31 @@ STATICCHECK_VERSION := v0.8.1
 GOLANGCI_LINT_VERSION := v2.12.2
 GOVULNCHECK_VERSION := v1.7.0
 MARKDOWNLINT_VERSION := 0.24.2
-ETHOS_VERSION := v4.16.0
+# ethos release 5.2.3 (commit 235729d48cf9), pinned by pseudo-version because
+# ethos's module path is still github.com/punt-labs/ethos/v4 while its tags are
+# v5.x, so `@v5.2.3` is rejected by the Go module resolver.
+ETHOS_VERSION := v4.22.2-0.20261125225541-235729d48cf9
 BIFF_VERSION := 1.24.2
+
+# Where `make install` puts beadle-email. Overridable so the install recipe can
+# be tested against a scratch directory instead of the real ~/.local/bin.
+INSTALL_DIR ?= $(HOME)/.local/bin
+
+# install_bin SRC DEST: replace DEST by rename, never by writing into it.
+# `cp` over an existing binary rewrites its inode, and on macOS the kernel's
+# cached code signature for that inode then no longer matches, so the next
+# launch is SIGKILLed (exit 137). Copy to a temp name in DEST's directory (same
+# filesystem, so the rename is atomic), then mv -f onto DEST. No GNU-only flags:
+# this runs on macOS and Linux.
+define install_bin
+staged=$$(mktemp "$(2).XXXXXX") && { cp "$(1)" "$$staged" && chmod 755 "$$staged" && mv -f "$$staged" "$(2)"; } || { rm -f "$$staged"; exit 1; }
+endef
+
+# golangci-lint's machine-wide cache replays results recorded at another
+# worktree's paths (here, deleted worktrees), where path-based exclusions do not
+# match, so lint-strict fails on findings this checkout does not have. Keep the
+# cache per checkout; a caller-supplied GOLANGCI_LINT_CACHE still wins.
+export GOLANGCI_LINT_CACHE ?= $(CURDIR)/.tmp/golangci-cache
 
 # Pin the Go toolchain to the go.mod `toolchain` line for every `go`
 # invocation. GOTOOLCHAIN=auto uses the NEWER of (host Go, go.mod directive),
@@ -56,7 +79,7 @@ endef
 
 SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard -z 2>/dev/null | $(DISCOVER_SHELL_SCRIPTS))
 
-.PHONY: help lint lint-strict lint-shell test-shell-discovery test-tools-biff probe-test-path vet staticcheck vulncheck docs tools-ethos tools-biff tools-beadle-email test test-integration check handoff-runtime-bundle handoff-runtime-inputs handoff-runtime-verify format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
+.PHONY: help lint lint-strict lint-shell test-shell-discovery test-tools-biff test-install probe-test-path vet staticcheck vulncheck docs tools-ethos tools-biff tools-beadle-email test test-integration check handoff-runtime-bundle handoff-runtime-inputs handoff-runtime-verify format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -81,7 +104,7 @@ vulncheck: ## Scan imports + call graph for known Go vulnerabilities
 	$(call go-tool,golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)) \
 	  $(if $(ETHOS_HANDOFF_RUNTIME),-db "file://$(ETHOS_HANDOFF_RUNTIME)/data/govulndb") ./...
 
-lint-shell: test-shell-discovery test-tools-biff ## Lint every shell script in the repo (shellcheck)
+lint-shell: test-shell-discovery test-tools-biff test-install ## Lint every shell script in the repo (shellcheck)
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found — install it (apt install shellcheck / brew install shellcheck)"; exit 1; }
 	@test -n "$(SHELL_SCRIPTS)" || { echo "lint-shell: discovered no shell scripts (by shebang) — 'git ls-files' returned nothing (not a git checkout?)"; exit 1; }
 	shellcheck $(SHELL_SCRIPTS)
@@ -292,8 +315,38 @@ build-daemon: ## Build beadle-daemon binary
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o beadle-daemon ./cmd/beadle-daemon/
 
 install: build ## Build and install to ~/.local/bin
-	mkdir -p $(HOME)/.local/bin
-	cp beadle-email $(HOME)/.local/bin/beadle-email
+	mkdir -p "$(INSTALL_DIR)"
+	@$(call install_bin,beadle-email,$(INSTALL_DIR)/beadle-email)
+
+# Runs both installers -- this Makefile's install_bin macro and install.sh's own
+# install_binary (via --install-local, no download) -- twice each, into a plain
+# directory and one whose name contains a space.
+test-install: ## Regression test: install and install.sh replace the binary by rename, not in place
+	@set -e; \
+	mkdir -p "$(CURDIR)/.tmp"; \
+	tmp=$$(mktemp -d "$(CURDIR)/.tmp/test-install.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+	via_make() { $(call install_bin,$$1,$$2); }; \
+	via_script() { sh "$(CURDIR)/install.sh" --install-local "$$1" "$$2"; }; \
+	check() { \
+		installer=$$1; dir="$$tmp/$$2"; label="$$1 into '$$2'"; \
+		mkdir -p "$$dir"; \
+		printf 'one' > "$$dir/src"; \
+		$$installer "$$dir/src" "$$dir/dest"; \
+		before=$$(ls -i "$$dir/dest" | awk '{print $$1}'); \
+		printf 'two' > "$$dir/src"; \
+		$$installer "$$dir/src" "$$dir/dest"; \
+		after=$$(ls -i "$$dir/dest" | awk '{print $$1}'); \
+		test "$$before" != "$$after" || { echo "test-install: FAIL ($$label) -- second install reused inode $$before (written in place)"; exit 1; }; \
+		test "$$(cat "$$dir/dest")" = "two" || { echo "test-install: FAIL ($$label) -- destination content not replaced"; exit 1; }; \
+		test -x "$$dir/dest" || { echo "test-install: FAIL ($$label) -- destination not executable"; exit 1; }; \
+		test "$$(ls "$$dir" | wc -l | tr -d ' ')" = "2" || { echo "test-install: FAIL ($$label) -- temp file left behind: $$(ls "$$dir")"; exit 1; }; \
+		echo "test-install: ok ($$label)"; \
+	}; \
+	check via_make plain; \
+	check via_make "sp ace"; \
+	check via_script plain; \
+	check via_script "sp ace"; \
+	echo "test-install: PASS"
 
 deploy-commands: ## Deploy commands to ~/.claude/commands/
 	mkdir -p $(HOME)/.claude/commands
