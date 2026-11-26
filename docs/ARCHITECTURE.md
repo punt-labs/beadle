@@ -80,6 +80,18 @@ those tools enforce only per-contact `rwx` permissions
 only in `beadle-daemon`, where `internal/daemon/handler.go`'s `OnNewMail`
 creates no mission below `verified`.
 
+### Planned shared trust model
+
+Biff's [shared identity and trust model (DES-094)][shared-trust-model]
+plans to bring beadle onto the shared Nostr identity keys and owner-signed
+`ext/trust` address book in wave (d). Beadle keeps GPG for email signatures.
+The signature-checking fixes (PL-1663, PL-1664, PL-1665, PL-1666) follow
+wave (a). The address-book move follows wave (c), using
+`biff grant --import-beadle` to carry over per-mailbox grants and denies.
+This is planned, not shipped; the trust model above still applies.
+
+[shared-trust-model]: https://github.com/punt-labs/biff/blob/main/docs/design/trust-model.md
+
 ## Identity Resolution
 
 `internal/identity` resolves the operating identity by reading ethos files
