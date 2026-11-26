@@ -31,6 +31,7 @@ checks:
     files: all
     adapter: make
     target: check
+    cwd: root
     on_fail: block
     timeout: 20m
   - name: vet-staged

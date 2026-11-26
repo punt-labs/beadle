@@ -26,7 +26,7 @@ checks:
             npm_config_offline: "true"
             npm_config_update_notifier: "false"
     system:
-      tools: [as, bash, cat, chmod, cmp, cp, dd, dirmngr, echo, env, false, gcc, getopt, git, gpg,
+      tools: [as, bash, cat, chmod, cmp, cp, dd, dirmngr, echo, env, "false", gcc, getopt, git, gpg,
               gpg-agent, gpgconf, grep, head, install, ld, ln, make, mkdir, mktemp, mv, pass, printenv,
               printf, ps, rm, secret-tool, sed, sh, sha256sum, shellcheck, sleep, tr, tty, which, xargs]
     scratch:
