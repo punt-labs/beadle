@@ -203,7 +203,7 @@ func TestDefaultMCPRegistry(t *testing.T) {
 // cmd plus every element of args, space-joined -- there is no flag to
 // stop at, because the check above guarantees none can reach it.
 //
-// A command that blocks past the 5s deadline is reported as a timeout,
+// A command that blocks past the 30s deadline is reported as a timeout,
 // not misread as a crash via *exec.ExitError's -1 "signal: killed" exit
 // code -- ctx.Err() is checked first, since the same CombinedOutput error
 // wraps both cases and only ctx.Err() tells them apart. The child's Cmd
@@ -270,14 +270,18 @@ func TestDefaultMCPRegistry_StdioCommandsAreReal(t *testing.T) {
 			}
 
 			args := append(append([]string{}, cfg.Args...), "--help")
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			// 30s, not less: `biff mcp --help` is a Python cold start that takes
+			// ~4s on an idle machine and exceeds 5s while the other packages'
+			// tests run in parallel. The deadline only has to tell "prints usage
+			// and exits" from "started a server that never exits".
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
 			cmd := exec.CommandContext(ctx, resolved, args...)
 			cmd.WaitDelay = time.Second
 			out, err := cmd.CombinedOutput()
 			if ctx.Err() != nil {
-				t.Fatalf("registry entry %q: %s %s did not exit within the 5s deadline -- --help may have started the server instead of printing usage and exiting:\n%s",
+				t.Fatalf("registry entry %q: %s %s did not exit within the 30s deadline -- --help may have started the server instead of printing usage and exiting:\n%s",
 					name, cfg.Command, strings.Join(args, " "), out)
 			}
 			if err != nil {

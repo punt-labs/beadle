@@ -14,6 +14,12 @@ GOVULNCHECK_VERSION := v1.7.0
 ETHOS_VERSION := v4.22.2-0.20261125225541-235729d48cf9
 BIFF_VERSION := 1.24.2
 
+# golangci-lint's machine-wide cache replays results recorded at another
+# worktree's paths (here, deleted worktrees), where path-based exclusions do not
+# match, so lint-strict fails on findings this checkout does not have. Keep the
+# cache per checkout; a caller-supplied GOLANGCI_LINT_CACHE still wins.
+export GOLANGCI_LINT_CACHE ?= $(CURDIR)/.tmp/golangci-cache
+
 # Pin the Go toolchain to the go.mod `toolchain` line for every `go`
 # invocation. GOTOOLCHAIN=auto uses the NEWER of (host Go, go.mod directive),
 # so a host running a Go release ahead of the pin (e.g. 1.27) would run the
