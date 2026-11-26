@@ -1,7 +1,8 @@
 # REVIEW.md
 
-Instructions for code reviewers of this repository: Qodo, Devin Review,
-Bugbot, and the local review agents. Read this before raising a finding.
+Instructions for code reviewers of this repository. Qodo loads this file
+on every review. Any other reviewer, human or automated, that reads the
+repository should read this before raising a finding.
 
 beadle gives an AI agent its own mailbox. `beadle-email` reads, sends and
 classifies mail; `beadle-daemon` turns verified mail into pre-signed
