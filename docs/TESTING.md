@@ -167,10 +167,10 @@ mkdir -p .tmp "$store" &&
   ethos handoff refresh-data
 ```
 
-Ethos mounts a separate, read-only Go vulnerability database refreshed
-within 24 hours. Missing or stale data defers the check rather than passing
-it; run `ethos handoff refresh-data` or the explicit live `make check`.
-The live gate and CI still query the upstream database.
+Ethos mounts a separate, read-only Go vulnerability database. Snapshot data
+can lag upstream by up to 24 hours; the live gate and CI still query upstream.
+Missing or stale data defers the snapshot rather than passing it; run
+`ethos handoff refresh-data` or the explicit live `make check`.
 
 To package a new runtime, use `make handoff-runtime-bundle` on Linux amd64
 with the official Node distribution and uv versions pinned by the
