@@ -1,4 +1,4 @@
-VERSION := $(or $(shell git describe --tags --always 2>/dev/null | sed 's/^v//'),dev)
+VERSION := $(or $(shell git describe --tags --always --match 'v[0-9]*' 2>/dev/null | sed 's/^v//'),dev)
 LDFLAGS := -X main.version=$(VERSION)
 
 # Pinned once here. CI invokes these via `make vet`, `make staticcheck`,
