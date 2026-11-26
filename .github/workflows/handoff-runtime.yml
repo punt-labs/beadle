@@ -66,6 +66,24 @@ jobs:
           mv "$archive" "runtime-assets/$asset"
           cd runtime-assets
           sha256sum "$asset" | tee "$asset.sha256"
+      - name: Smoke-test the extracted runtime offline
+        run: |
+          scratch=$(mktemp -d "$RUNNER_TEMP/beadle-smoke.XXXXXX")
+          trap 'chmod -R u+w "$scratch"; rm -rf "$scratch"' EXIT
+          runtime=$scratch/runtime
+          mkdir -p "$runtime" "$scratch"/{home,tmp,modules/cache}
+          tar -xzf runtime-assets/beadle-handoff-linux-amd64.tar.gz -C "$runtime"
+          cp -R "$runtime/cache/go-download" "$scratch/modules/cache/download"
+          cp -R "$runtime/cache/npm" "$scratch/npm"
+          sudo unshare --net --setuid "$(id -u)" --setgid "$(id -g)" -- env -i \
+            HOME="$scratch/home" TMPDIR="$scratch/tmp" LANG=C.UTF-8 \
+            PATH="$runtime/go/bin:$runtime/bin:$runtime/node/bin:/usr/bin:/bin" \
+            ETHOS_HANDOFF_RUNTIME="$runtime" GIT_CONFIG_GLOBAL=/dev/null \
+            CGO_ENABLED=1 GOENV=off GOPROXY=off GOTOOLCHAIN=local GOTELEMETRY=off \
+            GOCACHE="$scratch/go-build" GOMODCACHE="$scratch/modules" GOPATH="$scratch/gopath" \
+            PYTHONDONTWRITEBYTECODE=1 npm_config_cache="$scratch/npm" \
+            npm_config_offline=true npm_config_update_notifier=false \
+            bash -e -c 'go list -deps -test ./... >/dev/null; make handoff-runtime-verify docs tools-ethos; biff --help >/dev/null'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: handoff-runtime
