@@ -28,12 +28,13 @@ cp -R -L "$go_root/." "$runtime/go"
 (
     export GOTOOLCHAIN=local GOPATH=$work/gopath GOMODCACHE=$work/mod GOCACHE=$work/go-build GOBIN=$work/tools
     "$runtime/go/bin/go" mod download
-    mv "$GOMODCACHE/cache/download" "$runtime/cache/go-download"
     for tool in "$@"; do
         "$runtime/go/bin/go" install -trimpath "$tool"
         versioned=${tool##*/}
         mv "$GOBIN/${versioned%@*}" "$runtime/go-tools/$versioned"
     done
+    # Ship the source and license notices for the Go tools and their dependencies.
+    mv "$GOMODCACHE/cache/download" "$runtime/cache/go-download"
     mkdir -p "$work/offline-mod/cache"
     cp -R "$runtime/cache/go-download" "$work/offline-mod/cache/download"
     GOPROXY=off GOMODCACHE="$work/offline-mod" "$runtime/go/bin/go" list -deps -test ./... > /dev/null

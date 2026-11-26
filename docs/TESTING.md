@@ -177,9 +177,11 @@ with the official Node distribution and uv versions pinned by the
 [Handoff runtime workflow](../.github/workflows/handoff-runtime.yml), or
 dispatch that workflow on `main` with the next `handoff-runtime-vN` tag.
 Publish the archive and verify its digest before updating the profile's URL
-and digest together. A snapshot rejects a bundle made for different Go
-modules or Makefile tool pins. A rebuild can resolve different transitive npm and
-Python packages; the published archive's digest pins the exact result.
+and digest together. The archive's `cache/go-download` contains the Go tool
+and dependency sources and their license notices. A snapshot rejects a bundle
+made for different Go modules or Makefile tool pins. A rebuild can resolve
+different transitive npm and Python packages; the published archive's digest
+pins the exact result.
 Runtime prereleases have no changelog; they are not product updates.
 
 ## Fastmail Test Config
