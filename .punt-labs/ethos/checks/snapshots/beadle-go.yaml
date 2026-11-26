@@ -8,8 +8,8 @@ checks:
       platforms:
         linux-amd64:
           bundle: beadle-handoff-linux-amd64.tar.gz
-          sha256: f723e2a6f5195a6c13055e87f7d364884e921c569b98d6cf0f0a19e0785786df
-          url: https://github.com/punt-labs/beadle/releases/download/handoff-runtime-v1/beadle-handoff-linux-amd64.tar.gz
+          sha256: 677e1edea1c29631f3576ca912368054f2e9cd118baaa57ec6e95b6ccdc51503
+          url: https://github.com/punt-labs/beadle/releases/download/handoff-runtime-v2/beadle-handoff-linux-amd64.tar.gz
           path: ["{runtime}/go/bin", "{runtime}/bin", "{runtime}/node/bin"]
           env:
             CGO_ENABLED: "1"
