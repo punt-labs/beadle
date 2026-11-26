@@ -53,10 +53,7 @@ jobs:
           BIFF_RELAY_URL: ${{ vars.BIFF_RELAY_URL }}
           BIFF_RELAY_TOKEN: ${{ secrets.BIFF_RELAY_TOKEN }}
           BIFF_RELAY_TLS_HANDSHAKE_FIRST: ${{ vars.BIFF_RELAY_TLS_HANDSHAKE_FIRST }}
-        # Pinned to the Makefile's BIFF_VERSION: this step holds
-        # BIFF_RELAY_TOKEN, so it never runs a release nobody has reviewed.
-        # `biff enable` rewrites this line without a pin; restore the pin.
         run: >-
-          uvx --from punt-biff==1.24.2 biff --user github-actions wall
+          uvx --from punt-biff biff --user github-actions wall
           "CI failed: ${WORKFLOW_NAME} on ${BRANCH} — ${RUN_URL}"
           --duration 2h
