@@ -139,6 +139,49 @@ including the real `ethos` CLI, runs for real inside a
   ethos and beadle-email's per-checkout directory is immune to this by
   construction, since nothing else on the host ever writes there.
 
+## Ethos handoff snapshot
+
+With a compatible Ethos release, the Linux amd64 profile runs the blocking
+`make check` in a snapshot. It supplies Go, analyzers, test Ethos, biff,
+and Node tools from a pinned archive. It still builds the checkout's own
+`beadle-email` and runs the full race-enabled suite. Ethos verifies the host
+tools declared in the profile, including Git, make, GCC, GnuPG, ShellCheck,
+`pass`, and `secret-tool` (Ubuntu package `libsecret-tools`). Only loopback
+is available to the tests.
+
+Use an Ethos CLI with verified worktree snapshots and `handoff refresh-data`
+support. This is separate from the older test binary installed by
+`make tools-ethos`. Install the release archive before running the handoff gate.
+Copy the URL and SHA-256 from the
+[snapshot profile](../.punt-labs/ethos/checks/snapshots/beadle-go.yaml).
+
+```bash
+url='<profile URL>'
+sha='<profile SHA-256>'
+archive=".tmp/$sha.tar.gz"
+store="$HOME/.punt-labs/ethos/runtimes"
+mkdir -p .tmp "$store" &&
+  curl --fail --location --proto '=https' --proto-redir '=https' "$url" -o "$archive" &&
+  printf '%s  %s\n' "$sha" "$archive" | sha256sum --check &&
+  install -m 0644 "$archive" "$store/$sha.tar.gz" &&
+  ethos handoff refresh-data
+```
+
+Ethos mounts a separate, read-only Go vulnerability database refreshed
+within 24 hours. Missing or stale data defers the check rather than passing
+it; run `ethos handoff refresh-data` or the explicit live `make check`.
+The live gate and CI still query the upstream database.
+
+To package a new runtime, use `make handoff-runtime-bundle` on Linux amd64
+with the official Node distribution and uv versions pinned by the
+[Handoff runtime workflow](../.github/workflows/handoff-runtime.yml), or
+dispatch that workflow on `main` with the next `handoff-runtime-vN` tag.
+Publish the archive and verify its digest before updating the profile's URL
+and digest together. A snapshot rejects a bundle made for different Go
+modules or Makefile tool pins. A rebuild can resolve different transitive npm and
+Python packages; the published archive's digest pins the exact result.
+Runtime prereleases have no changelog; they are not product updates.
+
 ## Fastmail Test Config
 
 Fastmail SMTP preserves `multipart/signed` envelopes (verified 2026-04-11). Proton Bridge and Resend/SES do not. For PGP signing tests, switch to Fastmail SMTP:
