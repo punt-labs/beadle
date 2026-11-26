@@ -110,8 +110,16 @@ ok "SHA256 verified"
 info "Installing to $INSTALL_DIR..."
 
 mkdir -p "$INSTALL_DIR" || fail "Failed to create $INSTALL_DIR"
-mv "$TMPDIR_DL/$ASSET" "$INSTALL_DIR/$BINARY" || fail "Failed to move binary to $INSTALL_DIR"
-chmod +x "$INSTALL_DIR/$BINARY" || fail "Failed to make $BINARY executable"
+# Replace by rename, never by writing into an existing file. $TMPDIR_DL is
+# usually on another filesystem, where mv falls back to copying over the
+# destination in place; on macOS that leaves a binary the kernel SIGKILLs on
+# launch (stale cached code signature for the reused inode). Stage in
+# $INSTALL_DIR (same filesystem), then rename onto the final name.
+STAGED=$(mktemp "$INSTALL_DIR/$BINARY.XXXXXX") || fail "Failed to create a temp file in $INSTALL_DIR"
+if ! { cp "$TMPDIR_DL/$ASSET" "$STAGED" && chmod 755 "$STAGED" && mv -f "$STAGED" "$INSTALL_DIR/$BINARY"; }; then
+  rm -f "$STAGED"
+  fail "Failed to install binary to $INSTALL_DIR"
+fi
 ok "$INSTALL_DIR/$BINARY"
 
 if ! command -v "$BINARY" >/dev/null 2>&1; then

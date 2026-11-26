@@ -14,6 +14,20 @@ GOVULNCHECK_VERSION := v1.7.0
 ETHOS_VERSION := v4.22.2-0.20261125225541-235729d48cf9
 BIFF_VERSION := 1.24.2
 
+# Where `make install` puts beadle-email. Overridable so the install recipe can
+# be tested against a scratch directory instead of the real ~/.local/bin.
+INSTALL_DIR ?= $(HOME)/.local/bin
+
+# install_bin SRC DEST: replace DEST by rename, never by writing into it.
+# `cp` over an existing binary rewrites its inode, and on macOS the kernel's
+# cached code signature for that inode then no longer matches, so the next
+# launch is SIGKILLed (exit 137). Copy to a temp name in DEST's directory (same
+# filesystem, so the rename is atomic), then mv -f onto DEST. No GNU-only flags:
+# this runs on macOS and Linux.
+define install_bin
+staged=$$(mktemp "$(2).XXXXXX") && { cp "$(1)" "$$staged" && chmod 755 "$$staged" && mv -f "$$staged" "$(2)"; } || { rm -f "$$staged"; exit 1; }
+endef
+
 # golangci-lint's machine-wide cache replays results recorded at another
 # worktree's paths (here, deleted worktrees), where path-based exclusions do not
 # match, so lint-strict fails on findings this checkout does not have. Keep the
@@ -64,7 +78,7 @@ endef
 
 SHELL_SCRIPTS := $(shell git ls-files --cached --others --exclude-standard -z 2>/dev/null | $(DISCOVER_SHELL_SCRIPTS))
 
-.PHONY: help lint lint-strict lint-shell test-shell-discovery test-tools-biff probe-test-path vet staticcheck vulncheck docs tools-ethos tools-biff tools-beadle-email test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
+.PHONY: help lint lint-strict lint-shell test-shell-discovery test-tools-biff test-install probe-test-path vet staticcheck vulncheck docs tools-ethos tools-biff tools-beadle-email test test-integration check format build build-daemon install deploy-commands clean dist docker docker-push cover doctor prfaq clean-tex
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -84,7 +98,7 @@ lint-strict: ## Lint (golangci-lint: errcheck, gosec, revive, gofumpt, ...)
 vulncheck: ## Scan imports + call graph for known Go vulnerabilities
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
-lint-shell: test-shell-discovery test-tools-biff ## Lint every shell script in the repo (shellcheck)
+lint-shell: test-shell-discovery test-tools-biff test-install ## Lint every shell script in the repo (shellcheck)
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found — install it (apt install shellcheck / brew install shellcheck)"; exit 1; }
 	@test -n "$(SHELL_SCRIPTS)" || { echo "lint-shell: discovered no shell scripts (by shebang) — 'git ls-files' returned nothing (not a git checkout?)"; exit 1; }
 	shellcheck $(SHELL_SCRIPTS)
@@ -268,8 +282,24 @@ build-daemon: ## Build beadle-daemon binary
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o beadle-daemon ./cmd/beadle-daemon/
 
 install: build ## Build and install to ~/.local/bin
-	mkdir -p $(HOME)/.local/bin
-	cp beadle-email $(HOME)/.local/bin/beadle-email
+	mkdir -p $(INSTALL_DIR)
+	@$(call install_bin,beadle-email,$(INSTALL_DIR)/beadle-email)
+
+test-install: ## Regression test: install replaces the binary by rename, not in place
+	@set -e; \
+	mkdir -p "$(CURDIR)/.tmp"; \
+	tmp=$$(mktemp -d "$(CURDIR)/.tmp/test-install.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT; \
+	printf 'one' > "$$tmp/src"; \
+	$(call install_bin,$$tmp/src,$$tmp/dest); \
+	before=$$(ls -i "$$tmp/dest" | awk '{print $$1}'); \
+	printf 'two' > "$$tmp/src"; \
+	$(call install_bin,$$tmp/src,$$tmp/dest); \
+	after=$$(ls -i "$$tmp/dest" | awk '{print $$1}'); \
+	test "$$before" != "$$after" || { echo "test-install: FAIL -- second install reused inode $$before (written in place)"; exit 1; }; \
+	test "$$(cat "$$tmp/dest")" = "two" || { echo "test-install: FAIL -- destination content not replaced"; exit 1; }; \
+	test -x "$$tmp/dest" || { echo "test-install: FAIL -- destination not executable"; exit 1; }; \
+	test "$$(ls "$$tmp" | wc -l | tr -d ' ')" = "2" || { echo "test-install: FAIL -- temp file left behind: $$(ls "$$tmp")"; exit 1; }; \
+	echo "test-install: PASS"
 
 deploy-commands: ## Deploy commands to ~/.claude/commands/
 	mkdir -p $(HOME)/.claude/commands
