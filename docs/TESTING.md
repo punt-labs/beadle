@@ -149,23 +149,18 @@ tools declared in the profile, including Git, make, GCC, GnuPG, ShellCheck,
 `pass`, and `secret-tool` (Ubuntu package `libsecret-tools`). Only loopback
 is available to the tests.
 
-Use an Ethos CLI with verified worktree snapshots and `handoff refresh-data`
-support. This is separate from the older test binary installed by
-`make tools-ethos`. Install the release archive before running the handoff gate.
-Copy the URL and SHA-256 from the
-[snapshot profile](../.punt-labs/ethos/checks/snapshots/beadle-go.yaml).
+Use an Ethos CLI with verified worktree snapshots, `handoff fetch-runtime`,
+and `handoff refresh-data` support. This is separate from the test binary
+installed by `make tools-ethos`. From the checkout, fetch the runtime and
+advisory data before running the handoff gate:
 
 ```bash
-url='<profile URL>'
-sha='<profile SHA-256>'
-archive=".tmp/$sha.tar.gz"
-store="$HOME/.punt-labs/ethos/runtimes"
-mkdir -p .tmp "$store" &&
-  curl --fail --location --proto '=https' --proto-redir '=https' "$url" -o "$archive" &&
-  printf '%s  %s\n' "$sha" "$archive" | sha256sum --check &&
-  install -m 0644 "$archive" "$store/$sha.tar.gz" &&
-  ethos handoff refresh-data
+ethos handoff fetch-runtime && ethos handoff refresh-data
 ```
+
+The fetch verifies the published archive against the SHA-256 in the
+[snapshot profile](../.punt-labs/ethos/checks/snapshots/beadle-go.yaml) before
+installing it. The gate itself never downloads a runtime.
 
 Ethos mounts a separate, read-only Go vulnerability database. Snapshot data
 can lag upstream by up to 24 hours; the live gate and CI still query upstream.
